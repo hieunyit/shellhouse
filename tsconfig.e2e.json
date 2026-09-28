@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.node.json",
+  "include": [
+    "test/e2e/**/*",
+    "test/bench/**/*",
+    "src/preload/*.d.ts",
+    "src/shared/**/*",
+    "test/integration/ssh-test-server.ts",
+    "src/node-shared/**/*",
+    "test/soak/**/*",
+    "test/package/**/*",
+    "test/integration/chaos-proxy.ts"
+  ],
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  }
+}

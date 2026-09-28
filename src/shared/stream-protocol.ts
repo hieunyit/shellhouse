@@ -1,0 +1,214 @@
+import { z } from 'zod'
+import { Hostname, Username } from './hosts'
+import { ForwardSpec, type ForwardStatus } from './forwards'
+import { SftpOp, type TransferStatus } from './sftp'
+
+/**
+ * Giao thức trên MessagePort nối thẳng renderer ↔ Session Host, mỗi session một port.
+ * Chi tiết và lý do: docs/adr/0003-stream-protocol.md
+ */
+
+export const STREAM_LIMITS = {
+  // Giá trị chọn theo benchmark `cat` 100 MB (ADR-003): 64 KB/1 MB → 8,0 s; 256 KB/4 MB → 5,5 s;
+  // 512 KB/8 MB → 5,2 s nhưng Ctrl+C phải chờ vẽ hết gấp đôi lượng output đang xếp hàng.
+  /** Gửi ngay khi gom đủ số byte này. */
+  maxBatchBytes: 256 * 1024,
+  /** Hoặc sau khoảng thời gian này kể từ byte đầu tiên của batch. */
+  flushIntervalMs: 8,
+  /** Byte đã gửi mà renderer chưa ack vượt mức này → tạm dừng nguồn. */
+  highWatermarkBytes: 4 * 1024 * 1024,
+  /** Giảm xuống dưới mức này → chạy lại nguồn. */
+  lowWatermarkBytes: 1024 * 1024,
+  maxCols: 1000,
+  maxRows: 500
+} as const
+
+/** Renderer → Session Host. Tần suất thấp nên validate đầy đủ bằng zod. */
+export const ClientMessage = z.discriminatedUnion('t', [
+  z.object({ t: z.literal('input'), d: z.string().max(1024 * 1024) }),
+  z.object({
+    t: z.literal('resize'),
+    cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
+    rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows)
+  }),
+  z.object({ t: z.literal('ack'), n: z.number().int().nonnegative() }),
+  /** Trả lời prompt. `ok: false` = huỷ / từ chối. */
+  z.object({ t: z.literal('sftp'), id: z.number().int(), op: SftpOp }),
+  /** Thêm public key vào ~/.ssh/authorized_keys của server (như ssh-copy-id). */
+  z.object({
+    t: z.literal('deploy-key'),
+    id: z.number().int(),
+    publicKey: z
+      .string()
+      .min(20)
+      .max(16 * 1024)
+      .refine((k) => !/[\r\n]/.test(k), 'Must be a single line')
+  }),
+  z.object({ t: z.literal('forward-start'), spec: ForwardSpec }),
+  z.object({ t: z.literal('forward-stop'), id: z.string().max(64) }),
+  z.object({ t: z.literal('forward-remove'), id: z.string().max(64) }),
+  z.object({
+    t: z.literal('prompt-reply'),
+    id: z.number().int(),
+    ok: z.boolean(),
+    answers: z.array(z.string().max(4096)).max(32)
+  })
+])
+export type ClientMessage = z.infer<typeof ClientMessage>
+
+export type ConnectionPhase = 'connecting' | 'authenticating' | 'connected'
+
+/**
+ * Vì sao session kết thúc — renderer dựa vào đây để quyết định có tự kết nối lại không.
+ * - normal: shell thoát bình thường
+ * - network: mất kết nối / không tới được server → tự nối lại nếu trước đó đã kết nối được
+ * - auth: xác thực thất bại hoặc người dùng huỷ → không tự thử lại
+ * - hostkey: host key bị từ chối → không bao giờ tự thử lại
+ * - failed: lỗi khác
+ */
+export type ExitReason = 'normal' | 'network' | 'auth' | 'hostkey' | 'failed'
+const EXIT_REASONS: readonly string[] = ['normal', 'network', 'auth', 'hostkey', 'failed']
+
+export interface HostKeyInfo {
+  host: string
+  port: number
+  keyType: string
+  /** "SHA256:..." như OpenSSH. */
+  fingerprint: string
+  randomart: string
+}
+
+/** Session Host cần người dùng trả lời. */
+export type PromptRequest =
+  | { kind: 'password'; username: string; host: string }
+  | { kind: 'passphrase'; keyPath: string }
+  | {
+      kind: 'keyboard-interactive'
+      name: string
+      instructions: string
+      fields: { prompt: string; echo: boolean }[]
+    }
+  | {
+      kind: 'hostkey'
+      key: HostKeyInfo
+      /** null = host mới; có giá trị = KEY ĐÃ ĐỔI (có thể bị tấn công MITM). */
+      changedFrom: { keyType: string; fingerprint: string }[] | null
+    }
+
+/** Session Host → renderer. `data` là đường nóng nên chỉ kiểm tra kiểu thủ công. */
+export type ServerMessage =
+  | { t: 'data'; d: Uint8Array }
+  | { t: 'exit'; code: number | null; signal: number | null; reason: ExitReason }
+  | { t: 'error'; message: string }
+  | { t: 'status'; phase: ConnectionPhase; detail: string }
+  | { t: 'prompt'; id: number; prompt: PromptRequest }
+  | { t: 'prompt-cancel'; id: number }
+  | { t: 'forwards'; list: ForwardStatus[] }
+  | { t: 'sftp-result'; id: number; ok: true; result: unknown }
+  | { t: 'sftp-result'; id: number; ok: false; error: string }
+  | { t: 'transfers'; list: TransferStatus[] }
+  | {
+      t: 'deploy-key-result'
+      id: number
+      status: 'added' | 'exists' | 'error'
+      message: string | null
+    }
+
+export function isServerMessage(value: unknown): value is ServerMessage {
+  if (typeof value !== 'object' || value === null) return false
+  const m = value as Record<string, unknown>
+  switch (m['t']) {
+    case 'data':
+      return m['d'] instanceof Uint8Array
+    case 'exit':
+      return (
+        (typeof m['code'] === 'number' || m['code'] === null) &&
+        (typeof m['signal'] === 'number' || m['signal'] === null) &&
+        typeof m['reason'] === 'string' &&
+        EXIT_REASONS.includes(m['reason'])
+      )
+    case 'error':
+      return typeof m['message'] === 'string'
+    case 'status':
+      return typeof m['phase'] === 'string' && typeof m['detail'] === 'string'
+    case 'prompt':
+      return typeof m['id'] === 'number' && typeof m['prompt'] === 'object' && m['prompt'] !== null
+    case 'prompt-cancel':
+      return typeof m['id'] === 'number'
+    case 'forwards':
+    case 'transfers':
+      return Array.isArray(m['list'])
+    case 'deploy-key-result':
+      return typeof m['id'] === 'number' && typeof m['status'] === 'string'
+    case 'sftp-result':
+      return typeof m['id'] === 'number' && typeof m['ok'] === 'boolean'
+    default:
+      return false
+  }
+}
+
+export const LocalSessionSpec = z.object({
+  kind: z.literal('local'),
+  cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
+  rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows)
+})
+export type LocalSessionSpec = z.infer<typeof LocalSessionSpec>
+
+/** Kết nối SSH tới một đích (kết nối nhanh). Host đã lưu dùng `hostId` (tuần 6). */
+export const SshSessionSpec = z.object({
+  kind: z.literal('ssh'),
+  cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
+  rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows),
+  target: z.object({
+    host: Hostname,
+    port: z.number().int().min(1).max(65535),
+    username: Username
+  })
+})
+export type SshSessionSpec = z.infer<typeof SshSessionSpec>
+
+/** Host đã lưu — main tra DB, giải mã thông tin xác thực rồi chuyển thành SshSessionSpec. */
+export const SavedHostSessionSpec = z.object({
+  kind: z.literal('host'),
+  cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
+  rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows),
+  hostId: z.string().min(1).max(64)
+})
+export type SavedHostSessionSpec = z.infer<typeof SavedHostSessionSpec>
+
+export const SessionSpec = z.discriminatedUnion('kind', [
+  LocalSessionSpec,
+  SshSessionSpec,
+  SavedHostSessionSpec
+])
+
+const SshTargetSchema = z.object({
+  host: Hostname,
+  port: z.number().int().min(1).max(65535),
+  username: Username
+})
+
+/**
+ * Chế độ tương thích: chạy `ssh` của hệ thống trong PTY. Host key, xác thực do OpenSSH lo
+ * (dùng ~/.ssh/known_hosts, agent, ssh_config); không có SFTP/forwarding tích hợp.
+ */
+export const SystemSshSessionSpec = z.object({
+  kind: z.literal('system-ssh'),
+  cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
+  rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows),
+  target: SshTargetSchema,
+  jumps: z.array(SshTargetSchema).max(8),
+  keyFile: z.string().max(4096).nullable(),
+  /** Chỉ main gán, chỉ khi chạy test (ví dụ UserKnownHostsFile tạm). */
+  testOptions: z.array(z.string().max(1024)).max(8).optional()
+})
+export type SystemSshSessionSpec = z.infer<typeof SystemSshSessionSpec>
+
+/** Spec Session Host thực sự nhận (host đã lưu đã được main phân giải). */
+export const ResolvedSessionSpec = z.discriminatedUnion('kind', [
+  LocalSessionSpec,
+  SshSessionSpec,
+  SystemSshSessionSpec
+])
+export type ResolvedSessionSpec = z.infer<typeof ResolvedSessionSpec>
+export type SessionSpec = z.infer<typeof SessionSpec>

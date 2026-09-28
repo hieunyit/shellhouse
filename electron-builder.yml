@@ -1,0 +1,53 @@
+appId: dev.shellhouse.app
+productName: Shellhouse
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+  # Chỉ giữ prebuild native của nền tảng đang build (bớt ~30 MB). Smoke test gói kiểm tra
+  # native module vẫn nạp được: pnpm test:package.
+  - '!**/node_modules/*/prebuilds/**'
+  - '**/node_modules/*/prebuilds/${platform}-${arch}/**'
+  - '**/node_modules/*/prebuilds/${platform}-${arch}.node'
+asar: true
+asarUnpack:
+  - '**/*.node'
+  - '**/node_modules/node-pty/**'
+  - '**/node_modules/sodium-native/**'
+# Native modules được rebuild tường minh (`pnpm rebuild:native`) trước khi đóng gói.
+npmRebuild: false
+
+# Electron Fuses — tắt các đường chạy code tuỳ ý trên bản phát hành.
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: true
+
+win:
+  target: [nsis, zip]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+mac:
+  # Mỗi arch build trên runner riêng (native module khớp arch); zip cần cho auto-update trên macOS.
+  target: [dmg, zip]
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  notarize: false # CI bật bằng -c.mac.notarize=true khi có secret Apple (docs/RELEASING.md)
+linux:
+  target: [AppImage, deb, rpm]
+  category: Development
+  maintainer: hieuny
+  executableName: shellhouse
+  syncDesktopName: true
+  icon: build/icon.png
+rpm:
+  # Cần rpmbuild — chỉ build trên CI (xem .github/workflows/release.yml).
+  fpm: ['--rpm-rpmbuild-define=_build_id_links none']

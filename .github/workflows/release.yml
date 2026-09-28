@@ -1,0 +1,199 @@
+name: Release
+
+# Đẩy tag vX.Y.Z → build + ký trên từng OS → smoke test bản đóng gói → tải lên một GitHub Release
+# NHÁP. Người phát hành kiểm tra rồi bấm Publish (docs/RELEASING.md). Không bao giờ tự publish.
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: linux-x64, os: ubuntu-22.04, target: --linux AppImage deb rpm }
+          - { name: windows-x64, os: windows-latest, target: --win --x64 }
+          - { name: macos-arm64, os: macos-latest, target: --mac --arm64 }
+          - { name: macos-x64, os: macos-15-intel, target: --mac --x64 }
+    env:
+      # Kênh cập nhật lấy theo chính repo đang chạy workflow — không cần sửa file cấu hình.
+      PUBLISH_FLAGS: >-
+        -c.publish.provider=github
+        -c.publish.owner=${{ github.repository_owner }}
+        -c.publish.repo=${{ github.event.repository.name }}
+        -c.extraMetadata.homepage=https://github.com/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Tag must match package.json version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          v=$(node -p "require('./package.json').version")
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != package.json $v"; exit 1; }
+
+      - run: pnpm lint && pnpm typecheck && pnpm test
+
+      - run: sudo apt-get update && sudo apt-get install -y rpm
+        if: runner.os == 'Linux'
+
+      - run: pnpm rebuild:native
+
+      - run: pnpm build
+
+      # ---- Ký code (docs/RELEASING.md). Bản stable BẮT BUỘC ký — thiếu secret thì dừng.
+      # Bản beta (tag có "-", ví dụ v0.2.0-beta.1) được phép chưa ký để thử nghiệm sớm: Windows
+      # hiện cảnh báo SmartScreen, macOS chỉ ký ad-hoc (không notarize, không tự cập nhật được).
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if [ -z "$CSC_LINK" ]; then
+            case "${GITHUB_REF_NAME}" in
+              *-*) echo "::warning::Beta build: Windows installer is NOT signed" ;;
+              *) echo "::error::WIN_CSC_LINK missing — stable releases must be signed"; exit 1 ;;
+            esac
+            unset CSC_LINK CSC_KEY_PASSWORD
+          fi
+          pnpm exec electron-builder ${{ matrix.target }} --publish never $PUBLISH_FLAGS
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$CSC_LINK" ] && [ -n "$APPLE_ID" ]; then
+            pnpm exec electron-builder ${{ matrix.target }} --publish never $PUBLISH_FLAGS -c.mac.notarize=true
+          else
+            case "${GITHUB_REF_NAME}" in
+              *-*) echo "::warning::Beta build: macOS app is ad-hoc signed only (not notarized)" ;;
+              *) echo "::error::Apple signing secrets missing — stable releases must be notarized"; exit 1 ;;
+            esac
+            unset CSC_LINK CSC_KEY_PASSWORD
+            CSC_IDENTITY_AUTO_DISCOVERY=false pnpm exec electron-builder ${{ matrix.target }} \
+              --publish never $PUBLISH_FLAGS -c.mac.identity=- -c.mac.hardenedRuntime=false
+          fi
+
+      - name: Keep per-arch macOS channel file
+        if: runner.os == 'macOS'
+        run: mv dist/latest-mac.yml dist/latest-mac-${{ matrix.name }}.yml
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: pnpm exec electron-builder ${{ matrix.target }} --publish never $PUBLISH_FLAGS
+
+      - name: Sign Linux update channel (ed25519)
+        if: runner.os == 'Linux'
+        env:
+          SHELLHOUSE_UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          [ -n "$SHELLHOUSE_UPDATE_SIGNING_KEY" ] || { echo "::error::UPDATE_SIGNING_KEY missing"; exit 1; }
+          node scripts/sign-update.mjs dist/latest-linux.yml
+
+      # Bản đóng gói thật phải khởi động được, nạp được native module (bắt lỗi asar/unpack/fuses).
+      - name: Smoke test packaged app (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum pnpm test:package
+      - name: Smoke test packaged app
+        if: runner.os != 'Linux'
+        run: pnpm test:package
+
+      - name: Checksums
+        shell: bash
+        run: |
+          cd dist
+          find . -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.exe' -o -name '*.dmg' -o -name '*.zip' \) \
+            -exec sha256sum {} + | sed 's| \./| |' > SHA256SUMS-${{ matrix.name }}.txt
+          cat SHA256SUMS-${{ matrix.name }}.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ matrix.name }}
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest*.yml
+            dist/SHA256SUMS-*.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: failure-${{ matrix.name }}
+          path: |
+            test-results
+            dist/builder-debug.yml
+          retention-days: 7
+
+  draft-release:
+    name: Draft GitHub release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Merge macOS channel files
+        # Hai job macOS mỗi job ghi latest-mac.yml riêng (arm64 / x64); electron-updater cần một
+        # file liệt kê cả hai.
+        run: node scripts/merge-mac-channel.mjs artifacts
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat artifacts/SHA256SUMS-*.txt > artifacts/SHA256SUMS.txt
+          rm artifacts/SHA256SUMS-*.txt
+          prerelease=""
+          node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > notes.md
+          case "${GITHUB_REF_NAME}" in
+            *-*)
+              prerelease="--prerelease"
+              cat >> notes.md <<'NOTE'
+
+          > **Beta build.** Windows and macOS installers in a beta may be unsigned:
+          > Windows shows a SmartScreen warning ("More info" → "Run anyway"); on macOS right-click
+          > the app → Open the first time. Auto-update on macOS needs a signed build.
+          > Linux update metadata is always signed. Verify downloads with `SHA256SUMS.txt`.
+          NOTE
+              ;;
+          esac
+          gh release create "${GITHUB_REF_NAME}" --draft $prerelease \
+            --title "Shellhouse ${GITHUB_REF_NAME#v}" \
+            --notes-file notes.md \
+            artifacts/*

@@ -1,0 +1,16 @@
+# Electron + electron-builder ổn định nhất với node_modules phẳng.
+nodeLinker: hoisted
+
+# Script cài đặt của dependency bị chặn mặc định. Chỉ cho phép thứ thật sự cần.
+# - node-pty: KHÔNG build lúc install; build riêng cho ABI của Electron bằng `pnpm rebuild:native`.
+# - better-sqlite3, sodium-native: dùng bản build N-API có sẵn (prebuilds/), không cần build.
+# ssh2/cpu-features: binding tăng tốc tuỳ chọn, bỏ để giảm phụ thuộc native.
+allowBuilds:
+  electron: true
+  esbuild: true
+  better-sqlite3: false
+  cpu-features: false
+  node-pty: false
+  ssh2: false
+  electron-winstaller: false
+  unrs-resolver: false

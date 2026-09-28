@@ -1,0 +1,42 @@
+name: Nightly soak
+
+# Tải hỗn hợp liên tục (terminal, SSH flood, SFTP, port forward, mở/đóng tab) qua proxy có trễ,
+# đo PSS / heap / fd của Session Host. Fail nếu tăng quá ngưỡng (test/soak/soak.spec.ts).
+on:
+  schedule:
+    - cron: '17 19 * * *' # 02:17 giờ Việt Nam
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: Soak duration (minutes)
+        default: '60'
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm rebuild:native
+      - run: pnpm build
+      - name: Soak
+        env:
+          SOAK_MINUTES: ${{ inputs.minutes || '60' }}
+          SOAK_SAMPLE_MS: '60000'
+        run: xvfb-run --auto-servernum pnpm soak
+      - name: Fuzz (long)
+        run: pnpm fuzz
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: soak-${{ github.run_id }}
+          path: |
+            soak-results
+            test-results
+          retention-days: 30

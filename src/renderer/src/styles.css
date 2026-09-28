@@ -1,0 +1,196 @@
+@import 'tailwindcss';
+
+/* Dark variant đi theo data-theme trên <html> (do cài đặt Appearance quyết định), không theo media query. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/*
+ * Design tokens. Component chỉ dùng các tên ngữ nghĩa này (bg-surface, text-muted, border-line...),
+ * không dùng màu cụ thể — đổi sáng/tối chỉ là đổi giá trị biến.
+ */
+@theme inline {
+  --color-canvas: var(--sh-canvas);
+  --color-surface: var(--sh-surface);
+  --color-elevated: var(--sh-elevated);
+  --color-subtle: var(--sh-subtle);
+  --color-hover: var(--sh-hover);
+  --color-line: var(--sh-line);
+  --color-line-strong: var(--sh-line-strong);
+  --color-fg: var(--sh-fg);
+  --color-muted: var(--sh-muted);
+  --color-faint: var(--sh-faint);
+  --color-accent: var(--sh-accent);
+  --color-accent-hover: var(--sh-accent-hover);
+  --color-accent-fg: var(--sh-accent-fg);
+  --color-accent-soft: var(--sh-accent-soft);
+  --color-danger: var(--sh-danger);
+  --color-danger-soft: var(--sh-danger-soft);
+  --color-warning: var(--sh-warning);
+  --color-warning-soft: var(--sh-warning-soft);
+  --color-success: var(--sh-success);
+  --color-success-soft: var(--sh-success-soft);
+  --color-terminal: var(--sh-terminal);
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+  --sh-canvas: #f4f5f7;
+  --sh-surface: #ffffff;
+  --sh-elevated: #ffffff;
+  --sh-subtle: #f0f2f5;
+  --sh-hover: #e9ecf0;
+  --sh-line: #e2e5ea;
+  --sh-line-strong: #cdd2d9;
+  --sh-fg: #1a1d21;
+  --sh-muted: #59616c;
+  --sh-faint: #8a929c;
+  --sh-accent: #2563eb;
+  --sh-accent-hover: #1d4fd7;
+  --sh-accent-fg: #ffffff;
+  --sh-accent-soft: #e0eaff;
+  --sh-danger: #d4351c;
+  --sh-danger-soft: #fdecea;
+  --sh-warning: #a15c07;
+  --sh-warning-soft: #fdf3e2;
+  --sh-success: #137a3f;
+  --sh-success-soft: #e5f5ec;
+  /* Nền quanh terminal: được TerminalView ghi đè bằng màu nền của theme terminal. */
+  --sh-terminal: #fbfbfc;
+  --sh-shadow: 0 12px 32px rgb(16 24 40 / 0.14), 0 2px 6px rgb(16 24 40 / 0.08);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --sh-canvas: #0d0f12;
+  --sh-surface: #14171b;
+  --sh-elevated: #1a1d22;
+  --sh-subtle: #1c2026;
+  --sh-hover: #232830;
+  --sh-line: #262b33;
+  --sh-line-strong: #353b45;
+  --sh-fg: #e7e9ec;
+  --sh-muted: #9ba3ad;
+  --sh-faint: #6c7480;
+  --sh-accent: #4c8dff;
+  --sh-accent-hover: #6aa0ff;
+  --sh-accent-fg: #0b1220;
+  --sh-accent-soft: #1a2a47;
+  --sh-danger: #ff7a6e;
+  --sh-danger-soft: #3a1d1a;
+  --sh-warning: #f5b544;
+  --sh-warning-soft: #33280f;
+  --sh-success: #4cd38a;
+  --sh-success-soft: #13301f;
+  --sh-terminal: #0f1115;
+  --sh-shadow: 0 16px 40px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.35);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+#root {
+  position: relative;
+}
+
+body {
+  margin: 0;
+  background: var(--sh-canvas);
+  color: var(--sh-fg);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thanh cuộn mảnh, theo theme. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sh-line-strong) transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--sh-accent);
+  outline-offset: 1px;
+}
+
+.shadow-elevated {
+  box-shadow: var(--sh-shadow);
+}
+
+/* Dockview: mọi màu lấy từ token → tự đổi theo sáng/tối. */
+.dockview-theme-shellhouse {
+  --dv-paneview-active-outline-color: var(--sh-accent);
+  --dv-tabs-and-actions-container-font-size: 12px;
+  --dv-tabs-and-actions-container-height: 34px;
+  --dv-drag-over-background-color: color-mix(in srgb, var(--sh-accent) 18%, transparent);
+  --dv-drag-over-border-color: var(--sh-accent);
+  --dv-edge-dock-indicator-color: var(--sh-accent);
+  --dv-tabs-container-scrollbar-color: var(--sh-line-strong);
+  --dv-icon-hover-background-color: var(--sh-hover);
+  --dv-floating-box-shadow: var(--sh-shadow);
+  --dv-floating-border: 1px solid var(--sh-line);
+  --dv-overlay-z-index: 999;
+  --dv-tab-font-size: inherit;
+  --dv-border-radius: 0px;
+  --dv-tab-margin: 0;
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--sh-accent);
+  --dv-active-sash-transition-duration: 0.1s;
+  --dv-active-sash-transition-delay: 0.3s;
+  --dv-spacing-padding: 0px;
+  --dv-tab-border-radius: 0px;
+  --dv-sash-border-radius: 0px;
+  --dv-dropdown-border-radius: 6px;
+  --dv-tab-close-icon-size: inherit;
+  --dv-floating-group-border: none;
+  --dv-drag-over-border: none;
+  --dv-floating-group-dragging-opacity: 0.5;
+  --dv-floating-titlebar-height: 22px;
+  --dv-floating-titlebar-background-color: var(--sh-surface);
+  --dv-floating-titlebar-border-bottom: 1px solid var(--sh-line);
+  --dv-tab-group-chip-padding: 4px 8px;
+  --dv-tab-group-chip-border-radius: 6px;
+  --dv-tab-group-chip-font-size: 11px;
+  --dv-tab-group-line-height: 2px;
+  --dv-tab-group-line-opacity: 0.6;
+
+  --dv-group-view-background-color: var(--sh-terminal);
+  --dv-tabs-and-actions-container-background-color: var(--sh-surface);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--sh-terminal);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--sh-surface);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--sh-subtle);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--sh-surface);
+  --dv-tab-divider-color: var(--sh-line);
+  --dv-activegroup-visiblepanel-tab-color: var(--sh-fg);
+  --dv-activegroup-hiddenpanel-tab-color: var(--sh-muted);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--sh-muted);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--sh-faint);
+  --dv-separator-border: var(--sh-line);
+  --dv-paneview-header-border-color: var(--sh-line);
+}
+
+.dockview-theme-shellhouse .dv-tabs-and-actions-container {
+  border-bottom: 1px solid var(--sh-line);
+}
+
+/* Tab đang active: vạch nhấn accent (pane đang focus) hoặc xám (pane khác). */
+.dockview-theme-shellhouse .dv-tab {
+  position: relative;
+}
+.dockview-theme-shellhouse .dv-groupview.dv-active-group .dv-tab.dv-active-tab::after,
+.dockview-theme-shellhouse .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+}
+.dockview-theme-shellhouse .dv-groupview.dv-active-group .dv-tab.dv-active-tab::after {
+  background: var(--sh-accent);
+}
+.dockview-theme-shellhouse .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab::after {
+  background: var(--sh-line-strong);
+}
