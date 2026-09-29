@@ -368,9 +368,16 @@ export class TerminalController {
     const wanted = this.visibleInPanel || this.inMultiExec
     if (wanted && !this.webgl && !this.webglUnavailable) this.loadWebgl()
     else if (!wanted && this.webgl) {
+      // xterm không tự giải phóng WebGL context khi dispose → GPU giữ bộ nhớ tới lúc GC dọn canvas.
+      // Chủ động "lose context" để trả bộ nhớ GPU ngay.
+      const canvases = [...(this.term.element?.querySelectorAll('canvas') ?? [])]
       this.webgl.dispose()
       this.webgl = null
       this.rendererKind = 'dom'
+      for (const canvas of canvases) {
+        const gl = canvas.getContext('webgl2')
+        gl?.getExtension('WEBGL_lose_context')?.loseContext()
+      }
     }
   }
 
