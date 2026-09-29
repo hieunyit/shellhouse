@@ -143,9 +143,9 @@ test('chọn nhiều (Ctrl / Shift): chuyển nhóm, gắn tag, xoá hàng loạ
   await hostRow(page, 'alpha').click()
   await hostRow(page, 'charlie').click({ modifiers: ['Shift'] }) // dải alpha → charlie
   await expect(page.getByTestId('selection-bar')).toContainText('3 selected')
-  await hostRow(page, 'bravo').click({ modifiers: ['Control'] }) // bỏ chọn một mục
+  await hostRow(page, 'bravo').click({ modifiers: ['ControlOrMeta'] }) // bỏ chọn một mục
   await expect(page.getByTestId('selection-bar')).toContainText('2 selected')
-  await hostRow(page, 'bravo').click({ modifiers: ['Control'] })
+  await hostRow(page, 'bravo').click({ modifiers: ['ControlOrMeta'] })
   await expect(page.getByTestId('selection-bar')).toContainText('3 selected')
 
   await page.getByTestId('selection-tags').click()

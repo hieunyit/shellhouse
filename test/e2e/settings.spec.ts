@@ -5,7 +5,6 @@ import type { Page } from '@playwright/test'
 import { startTestSshServer, type TestSshServer } from '../integration/ssh-test-server'
 import { activeTab, E2E_PASSWORD, expect, isWindows, test, waitForText } from './fixtures'
 
-const mod = process.platform === 'darwin' ? 'Meta' : 'Control+Shift'
 let server: TestSshServer | null = null
 const dirs: string[] = []
 test.afterEach(async () => {
@@ -58,7 +57,7 @@ test('phím tắt tuỳ chỉnh + bảng lệnh', async ({ page }) => {
   await expect(page.getByTestId('tab')).toHaveCount(2)
 
   // Bảng lệnh: tìm mờ "split rig" → "Split right".
-  await page.keyboard.press(`${mod}+P`)
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+P' : 'Control+Shift+P')
   await page.getByTestId('palette-input').fill('split rig')
   await page.getByTestId('palette-input').press('Enter')
   await expect(page.getByTestId('tab')).toHaveCount(3)

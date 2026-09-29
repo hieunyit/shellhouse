@@ -87,6 +87,8 @@ test('snippet có biến: tạo, điền biến, chèn và chạy trong terminal
 
 test('snippet nhiều dòng được dán (bracketed paste), không tự chạy từng dòng', async ({ page }) => {
   test.skip(isWindows, 'Cần bash (bracketed paste của PSReadLine khác)')
+  // Runner macOS dùng /bin/bash 3.2 (2007) — chưa có bracketed paste; máy Mac thật mặc định zsh.
+  test.skip(process.platform === 'darwin', 'bash 3.2 của macOS không có bracketed paste')
   const tab = await activeTab(page)
   // Bật bracketed paste như bash/zsh hiện đại.
   await sendLine(page, tab, "bind 'set enable-bracketed-paste on' 2>/dev/null; echo san-sang")

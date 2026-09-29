@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -41,7 +41,8 @@ test('SFTP qua giao diện: tải lên, tạo thư mục, tải về, xoá', asy
 
   await page.getByTestId('toggle-sftp').last().click()
   const panel = page.getByTestId('sftp-panel')
-  await expect(panel.getByTestId('sftp-path')).toHaveValue(remote)
+  // macOS: /var là symlink tới /private/var — server trả đường dẫn thật.
+  await expect(panel.getByTestId('sftp-path')).toHaveValue(realpathSync(remote))
   await expect(panel.locator('[data-testid="sftp-entry"][data-name="co-san.txt"]')).toBeVisible()
 
   // Tải lên (hộp thoại chọn file được thay bằng đường dẫn cố định).

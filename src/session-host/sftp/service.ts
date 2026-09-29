@@ -195,15 +195,35 @@ export class SftpService implements LossGuard {
 
   async remove(path: string, recursive: boolean): Promise<void> {
     const s = await this.channel()
-    const stats = await this.guarded<Stats>((cb) => {
-      s.lstat(path, cb)
-    })
-    if (!stats.isDirectory()) {
-      await this.guarded<undefined>((cb) => {
-        s.unlink(path, (err) => {
+    const lstat = (p: string): Promise<Stats> =>
+      this.guarded<Stats>((cb) => {
+        s.lstat(p, cb)
+      })
+    const rmdir = (p: string): Promise<undefined> =>
+      this.guarded<undefined>((cb) => {
+        s.rmdir(p, (err) => {
           cb(err, undefined)
         })
       })
+    /** Xoá file hoặc link. Link tới thư mục trên server Windows phải xoá bằng rmdir (chỉ xoá link). */
+    const removeEntry = async (p: string, isLink: boolean): Promise<void> => {
+      try {
+        await this.guarded<undefined>((cb) => {
+          s.unlink(p, (err) => {
+            cb(err, undefined)
+          })
+        })
+      } catch (error) {
+        if (!isLink) throw error
+        await rmdir(p).catch(() => {
+          throw error
+        })
+      }
+    }
+
+    const stats = await lstat(path)
+    if (!stats.isDirectory()) {
+      await removeEntry(path, stats.isSymbolicLink())
       return
     }
     if (recursive) {
@@ -219,31 +239,19 @@ export class SftpService implements LossGuard {
               `Folder is too large to delete recursively (> ${MAX_RECURSIVE_DELETE} entries)`
             )
           const child = joinRemote(dir, e.filename)
-          // Không đi theo symlink: chỉ xoá chính link.
-          if (e.attrs.isDirectory() && !e.attrs.isSymbolicLink()) {
-            await walk(child)
-          } else {
-            await this.guarded<undefined>((cb) => {
-              s.unlink(child, (err) => {
-                cb(err, undefined)
-              })
-            })
-          }
+          // KHÔNG đi theo symlink ra ngoài. Thuộc tính của readdir có thể là của đích (một số server,
+          // ví dụ Windows OpenSSH, báo link tới thư mục như thư mục) → lstat lại trước khi đi vào.
+          const own =
+            e.attrs.isDirectory() || e.attrs.isSymbolicLink() ? await lstat(child) : e.attrs
+          if (own.isDirectory() && !own.isSymbolicLink()) await walk(child)
+          else await removeEntry(child, own.isSymbolicLink())
         }
-        await this.guarded<undefined>((cb) => {
-          s.rmdir(dir, (err) => {
-            cb(err, undefined)
-          })
-        })
+        await rmdir(dir)
       }
       await walk(path)
       return
     }
-    await this.guarded<undefined>((cb) => {
-      s.rmdir(path, (err) => {
-        cb(err, undefined)
-      })
-    })
+    await rmdir(path)
   }
 
   async unlinkIfExists(path: string): Promise<void> {
