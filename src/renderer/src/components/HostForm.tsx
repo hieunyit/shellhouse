@@ -1,15 +1,10 @@
-import { useState, type SyntheticEvent } from 'react'
+import { useMemo, useState, type SyntheticEvent } from 'react'
+import { inheritedDefaults } from '@shared/inherit'
 import { KeyRound, X } from 'lucide-react'
-import {
-  HOST_COLORS,
-  HostInput,
-  MAX_JUMPS,
-  type AuthKind,
-  type HostMode,
-  type HostSummary
-} from '@shared/hosts'
+import { HostInput, MAX_JUMPS, type AuthKind, type HostMode, type HostSummary } from '@shared/hosts'
 import { useHosts } from '../stores/hosts'
-import { hostColorClass } from './hostColors'
+import { ColorPicker } from './ColorPicker'
+import { GroupSelect } from './GroupSelect'
 import {
   Button,
   Checkbox,
@@ -32,10 +27,11 @@ export function HostForm({
   defaultGroupId: string | null
   onClose: () => void
 }): React.JSX.Element {
-  const { groups, keys, hosts } = useHosts((s) => s.tree)
+  const { keys, hosts } = useHosts((s) => s.tree)
   const [label, setLabel] = useState(host?.label ?? '')
   const [hostname, setHostname] = useState(host?.hostname ?? '')
-  const [port, setPort] = useState(String(host?.port ?? 22))
+  // '' = kế thừa từ nhóm (hoặc 22).
+  const [port, setPort] = useState(host ? (host.port === null ? '' : String(host.port)) : '')
   const [username, setUsername] = useState(host?.username ?? '')
   const [auth, setAuth] = useState<AuthKind>(host?.auth ?? 'auto')
   const [password, setPassword] = useState('')
@@ -47,6 +43,10 @@ export function HostForm({
   const [color, setColor] = useState<HostSummary['color']>(host?.color ?? null)
   const [jumpHostIds, setJumpHostIds] = useState<string[]>(host?.jumpHostIds ?? [])
   const [mode, setMode] = useState<HostMode>(host?.mode ?? 'builtin')
+  const [direct, setDirect] = useState(host?.direct ?? false)
+  const groupTree = useHosts((s) => s.groupTree)
+  const inherited = useMemo(() => inheritedDefaults(groupTree, groupId), [groupTree, groupId])
+  const from = (g: { groupName: string } | undefined): string => (g ? ` (from ${g.groupName})` : '')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -73,7 +73,7 @@ export function HostForm({
       groupId,
       label: label || hostname,
       hostname: hostname.trim(),
-      port: Number(port),
+      port: port.trim() === '' ? null : Number(port),
       username: username.trim(),
       auth,
       ...(auth === 'password' && !keepPassword ? { password } : {}),
@@ -83,11 +83,16 @@ export function HostForm({
       proxyJump: host?.proxyJump ?? null,
       jumpHostIds,
       mode,
+      ...(direct ? { direct: true } : {}),
       tags: tags
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean),
       color
+    }
+    if (!draft.username && !inherited.username) {
+      setError('Enter a username')
+      return
     }
     const parsed = HostInput.safeParse(draft)
     if (!parsed.success) {
@@ -154,6 +159,8 @@ export function HostForm({
               mono
               inputMode="numeric"
               data-testid="host-port"
+              placeholder={inherited.port ? String(inherited.port.value) : '22'}
+              title={inherited.port ? `From group ${inherited.port.groupName}` : undefined}
               value={port}
               onChange={(e) => {
                 setPort(e.target.value)
@@ -162,11 +169,18 @@ export function HostForm({
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Username">
+          <Field
+            label="Username"
+            hint={
+              inherited.username && !username
+                ? `Using “${inherited.username.value}”${from(inherited.username)}`
+                : undefined
+            }
+          >
             <Input
               mono
               spellCheck={false}
-              placeholder="root"
+              placeholder={inherited.username ? inherited.username.value : 'root'}
               data-testid="host-username"
               value={username}
               onChange={(e) => {
@@ -200,7 +214,9 @@ export function HostForm({
           />
           {auth === 'auto' && (
             <p className="text-xs text-faint">
-              Tries your SSH agent and default keys (~/.ssh/id_*), then asks for a password.
+              {inherited.keyId
+                ? `Tries the group key “${keys.find((k) => k.id === inherited.keyId?.value)?.name ?? '?'}”${from(inherited.keyId)}, your SSH agent and default keys, then asks for a password.`
+                : 'Tries your SSH agent and default keys (~/.ssh/id_*), then asks for a password.'}
             </p>
           )}
           {auth === 'password' && (
@@ -291,12 +307,27 @@ export function HostForm({
               ))}
               <li className="px-2 text-xs text-faint">→ {label || hostname || 'this host'}</li>
             </ol>
-          ) : (
+          ) : host?.proxyJump ? (
             <p className="text-xs text-faint">
-              {host?.proxyJump
-                ? `Using ProxyJump from ~/.ssh/config: ${host.proxyJump}`
-                : 'Direct connection.'}
+              Using ProxyJump from ~/.ssh/config: {host.proxyJump}
             </p>
+          ) : inherited.jumpHostIds ? (
+            <div className="flex flex-col gap-1.5" data-testid="jump-inherited">
+              <p className={cx('text-xs', direct ? 'text-faint line-through' : 'text-muted')}>
+                Through {inherited.jumpHostIds.value.map(hostLabel).join(' → ')}
+                {from(inherited.jumpHostIds)}
+              </p>
+              <Checkbox
+                label="Connect directly (ignore the group's jump hosts)"
+                data-testid="host-direct"
+                checked={direct}
+                onChange={(e) => {
+                  setDirect(e.target.checked)
+                }}
+              />
+            </div>
+          ) : (
+            <p className="text-xs text-faint">Direct connection.</p>
           )}
           {jumpHostIds.length < MAX_JUMPS && jumpChoices.length > 0 && (
             <Select
@@ -309,7 +340,7 @@ export function HostForm({
               <option value="">Add a jump host…</option>
               {jumpChoices.map((h) => (
                 <option key={h.id} value={h.id}>
-                  {h.label} ({h.username}@{h.hostname})
+                  {h.label} ({h.hostname})
                 </option>
               ))}
             </Select>
@@ -318,20 +349,12 @@ export function HostForm({
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="Group">
-            <Select
-              data-testid="host-group"
-              value={groupId ?? ''}
-              onChange={(e) => {
-                setGroupId(e.target.value || null)
-              }}
-            >
-              <option value="">No group</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.name}
-                </option>
-              ))}
-            </Select>
+            <GroupSelect
+              testId="host-group"
+              value={groupId}
+              onChange={setGroupId}
+              noneLabel="No group"
+            />
           </Field>
           <Field label="Tags" hint="Comma separated">
             <Input
@@ -346,32 +369,20 @@ export function HostForm({
 
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-muted">Color</span>
-          <button
-            type="button"
-            aria-label="No color"
-            className={cx(
-              'size-5 rounded-full border-2 border-dashed',
-              color === null ? 'border-accent' : 'border-line-strong'
-            )}
-            onClick={() => {
-              setColor(null)
-            }}
+          <ColorPicker
+            value={color}
+            onChange={setColor}
+            noneLabel={
+              inherited.color ? `Use the group color (${inherited.color.value})` : 'No color'
+            }
+            testIdPrefix="host-color"
           />
-          {HOST_COLORS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              aria-label={c}
-              className={cx(
-                'size-5 rounded-full',
-                hostColorClass[c],
-                color === c && 'ring-2 ring-accent ring-offset-2 ring-offset-elevated'
-              )}
-              onClick={() => {
-                setColor(c)
-              }}
-            />
-          ))}
+          {!color && inherited.color && (
+            <span className="text-xs text-muted">
+              Using {inherited.color.value}
+              {from(inherited.color)}
+            </span>
+          )}
         </div>
 
         <Checkbox

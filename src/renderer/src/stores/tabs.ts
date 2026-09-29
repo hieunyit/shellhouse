@@ -11,6 +11,14 @@ export interface Tab {
   target: TabTarget
   /** Tab sinh ra từ lệnh chia màn hình: đặt cạnh tab nguồn theo hướng này. */
   splitFrom?: { tabId: string; direction: 'right' | 'below' }
+  /** Panel mở sẵn khi tab vừa tạo (ví dụ "Open SFTP" từ menu chuột phải). */
+  initialPanel?: 'sftp'
+}
+
+export interface OpenHostOptions {
+  /** Mở cạnh tab đang active thay vì thành tab mới. */
+  split?: 'right' | 'below'
+  panel?: 'sftp'
 }
 
 interface TabsState {
@@ -18,7 +26,9 @@ interface TabsState {
   activeId: string | null
   addLocal: () => string
   addSsh: (target: { host: string; port: number; username: string }) => string
-  addHost: (host: { id: string; label: string }) => string
+  addHost: (host: { id: string; label: string }, options?: OpenHostOptions) => string
+  /** Mở nhiều host: thành các tab, hoặc xếp lưới (chia màn hình) trong một khung. */
+  openHosts: (hosts: readonly { id: string; label: string }[], layout: 'tabs' | 'grid') => string[]
   /** Mở một phiên mới cùng đích với tab hiện tại, đặt cạnh nó. */
   split: (direction: 'right' | 'below') => string | null
   close: (id: string) => void
@@ -30,10 +40,24 @@ interface TabsState {
 let localCounter = 0
 
 export const useTabs = create<TabsState>((set, get) => {
-  const add = (title: string, target: TabTarget, splitFrom?: Tab['splitFrom']): string => {
+  const add = (
+    title: string,
+    target: TabTarget,
+    splitFrom?: Tab['splitFrom'],
+    initialPanel?: Tab['initialPanel']
+  ): string => {
     const id = crypto.randomUUID()
     set((s) => ({
-      tabs: [...s.tabs, { id, title, target, ...(splitFrom ? { splitFrom } : {}) }],
+      tabs: [
+        ...s.tabs,
+        {
+          id,
+          title,
+          target,
+          ...(splitFrom ? { splitFrom } : {}),
+          ...(initialPanel ? { initialPanel } : {})
+        }
+      ],
       activeId: id
     }))
     return id
@@ -44,7 +68,32 @@ export const useTabs = create<TabsState>((set, get) => {
     addLocal: () => add(`Local ${++localCounter}`, { kind: 'local' }),
     addSsh: (t) =>
       add(`${t.username}@${t.host}${t.port === 22 ? '' : `:${t.port}`}`, { kind: 'ssh', ...t }),
-    addHost: (host) => add(host.label, { kind: 'host', hostId: host.id }),
+    addHost: (host, options) => {
+      const active = get().activeId
+      const splitFrom =
+        options?.split && active ? { tabId: active, direction: options.split } : undefined
+      return add(host.label, { kind: 'host', hostId: host.id }, splitFrom, options?.panel)
+    },
+    openHosts: (hosts, layout) => {
+      const ids: string[] = []
+      // Lưới gần vuông: 4 host → 2×2, 6 → 3×2. Hàng đầu chia phải, các hàng sau chia xuống từ ô phía trên.
+      const cols = Math.ceil(Math.sqrt(hosts.length))
+      const active = get().activeId
+      hosts.forEach((host, i) => {
+        let splitFrom: Tab['splitFrom']
+        // Ô đầu tiên của lưới mở trong khung mới bên phải (không lẫn vào các tab đang mở).
+        if (layout === 'grid' && i === 0 && active)
+          splitFrom = { tabId: active, direction: 'right' }
+        if (layout === 'grid' && i > 0) {
+          splitFrom =
+            i < cols
+              ? { tabId: ids[i - 1] ?? '', direction: 'right' }
+              : { tabId: ids[i - cols] ?? '', direction: 'below' }
+        }
+        ids.push(add(host.label, { kind: 'host', hostId: host.id }, splitFrom))
+      })
+      return ids
+    },
     split: (direction) => {
       const { tabs, activeId } = get()
       const source = tabs.find((t) => t.id === activeId)

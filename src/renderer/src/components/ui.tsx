@@ -21,10 +21,11 @@ type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-ghost'
 type Size = 'sm' | 'md'
 
 const variants: Record<Variant, string> = {
-  primary: 'bg-accent text-accent-fg hover:bg-accent-hover',
-  secondary: 'border border-line bg-surface text-fg hover:bg-hover',
+  primary: 'bg-accent-solid text-accent-fg shadow-sm hover:bg-accent-solid-hover',
+  secondary:
+    'border border-line bg-surface text-fg shadow-xs hover:border-line-strong hover:bg-hover',
   ghost: 'text-muted hover:bg-hover hover:text-fg',
-  danger: 'bg-danger text-white hover:opacity-90',
+  danger: 'bg-danger-solid text-white shadow-sm hover:brightness-110',
   'danger-ghost': 'text-danger hover:bg-danger-soft'
 }
 const sizes: Record<Size, string> = {
@@ -44,7 +45,7 @@ export const Button = forwardRef<
       ref={ref}
       type={type ?? 'button'}
       className={cx(
-        'inline-flex shrink-0 items-center justify-center rounded-md font-medium whitespace-nowrap transition-colors disabled:pointer-events-none disabled:opacity-45',
+        'inline-flex shrink-0 items-center justify-center rounded-md font-medium whitespace-nowrap transition-[background-color,border-color,color,box-shadow,transform] duration-150 select-none active:translate-y-px disabled:pointer-events-none disabled:opacity-45',
         variants[variant],
         sizes[size],
         className
@@ -68,7 +69,7 @@ export const IconButton = forwardRef<
       aria-label={label}
       title={label}
       className={cx(
-        'inline-flex shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-fg disabled:pointer-events-none disabled:opacity-40',
+        'inline-flex shrink-0 items-center justify-center rounded-md text-muted transition-colors duration-150 hover:bg-hover hover:text-fg active:bg-line disabled:pointer-events-none disabled:opacity-40',
         size === 'sm' ? 'size-6' : 'size-8',
         active && 'bg-hover text-fg',
         className
@@ -83,7 +84,7 @@ export const IconButton = forwardRef<
 // ---------- Inputs ----------
 
 const control =
-  'w-full rounded-md border border-line bg-surface px-2.5 text-[13px] text-fg placeholder:text-faint outline-none transition-colors focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-50'
+  'w-full rounded-md border border-line bg-surface px-2.5 text-[13px] text-fg shadow-xs placeholder:text-faint outline-none transition-[border-color,box-shadow] duration-150 hover:border-line-strong focus:border-accent focus:ring-3 focus:ring-accent/20 focus-visible:outline-none disabled:opacity-50'
 
 export const Input = forwardRef<
   HTMLInputElement,
@@ -101,7 +102,11 @@ export const Input = forwardRef<
 export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSelectElement>>(
   function Select({ className, children, ...rest }, ref) {
     return (
-      <select ref={ref} className={cx(control, 'h-8 pr-7', className)} {...rest}>
+      <select
+        ref={ref}
+        className={cx(control, 'sh-select h-8 cursor-pointer pr-8', className)}
+        {...rest}
+      >
         {children}
       </select>
     )
@@ -205,6 +210,42 @@ export function Segmented<T extends string>({
 
 // ---------- Feedback ----------
 
+export type ConnectionState =
+  'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'exited'
+
+export const connectionLabel: Record<ConnectionState, string> = {
+  idle: 'Not connected',
+  connecting: 'Connecting…',
+  connected: 'Connected',
+  reconnecting: 'Reconnecting…',
+  disconnected: 'Disconnected',
+  exited: 'Session ended'
+}
+
+/** Chấm trạng thái kết nối; đang kết nối thì nhấp nháy nhẹ. */
+export function StatusDot({
+  state,
+  className
+}: {
+  state: ConnectionState
+  className?: string
+}): React.JSX.Element {
+  const tone: Record<ConnectionState, string> = {
+    idle: 'bg-faint',
+    connecting: 'bg-warning animate-pulse',
+    connected: 'bg-success',
+    reconnecting: 'bg-warning animate-pulse',
+    disconnected: 'bg-danger',
+    exited: 'bg-faint'
+  }
+  return (
+    <span
+      aria-hidden
+      className={cx('inline-block size-1.5 shrink-0 rounded-full', tone[state], className)}
+    />
+  )
+}
+
 export function Notice({
   tone = 'info',
   children,
@@ -224,7 +265,10 @@ export function Notice({
     <div
       role={tone === 'danger' ? 'alert' : 'status'}
       data-testid={testId}
-      className={cx('rounded-md border px-3 py-2 text-xs', tones[tone])}
+      className={cx(
+        'sh-selectable animate-fade-in rounded-md border px-3 py-2 text-xs',
+        tones[tone]
+      )}
     >
       {children}
     </div>
@@ -359,7 +403,7 @@ export function Modal({
   useFocusTrap(dialogRef)
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[1px] dark:bg-black/60"
+      className="bg-overlay animate-fade-in fixed inset-0 z-40 flex items-center justify-center p-4 backdrop-blur-[2px]"
       onMouseDown={(e) => {
         // Bấm ra nền không làm mất focus khỏi hộp thoại.
         if (e.target === e.currentTarget) e.preventDefault()
@@ -373,7 +417,7 @@ export function Modal({
         aria-label={title}
         data-testid={testId}
         className={cx(
-          'shadow-elevated flex max-h-full w-full flex-col rounded-xl border border-line bg-elevated outline-none',
+          'shadow-elevated animate-dialog-in flex max-h-full w-full flex-col rounded-xl border border-line bg-elevated outline-none',
           width
         )}
       >

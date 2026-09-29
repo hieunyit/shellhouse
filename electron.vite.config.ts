@@ -57,6 +57,13 @@ export default defineConfig({
     resolve: {
       alias: { ...alias, '@renderer': resolve('src/renderer/src') }
     },
-    plugins: [react(), tailwindcss(), injectCsp()]
+    plugins: [react(), tailwindcss(), injectCsp()],
+    build: {
+      // electron-vite mặc định không minify → bundle 2,5 MB mang cả nhánh development của React.
+      // Minify loại nhánh chết (process.env.NODE_ENV), giảm thời gian parse lúc mở app.
+      minify: 'esbuild',
+      // Chromium của Electron luôn mới — không cần hạ cú pháp.
+      target: 'esnext'
+    }
   }
 })

@@ -85,8 +85,40 @@ export const invokeContract = {
     args: z.tuple([z.string().max(64), z.string().max(64).nullable()]),
     result: z.void()
   },
+  'hosts:moveMany': {
+    args: z.tuple([z.array(z.string().max(64)).max(1000), z.string().max(64).nullable()]),
+    result: MutationResult
+  },
+  'hosts:deleteMany': { args: z.tuple([z.array(z.string().max(64)).max(1000)]), result: z.void() },
+  'hosts:setFavorite': {
+    args: z.tuple([z.array(z.string().max(64)).max(1000), z.boolean()]),
+    result: z.void()
+  },
+  'hosts:tag': {
+    args: z.tuple([
+      z.array(z.string().max(64)).max(1000),
+      z.array(z.string().trim().min(1).max(40)).max(20),
+      z.array(z.string().max(40)).max(100)
+    ]),
+    result: MutationResult
+  },
+  /** Thứ tự mới của host trong một nhóm (host từ nhóm khác được chuyển vào). */
+  'hosts:reorder': {
+    args: z.tuple([z.string().max(64).nullable(), z.array(z.string().max(64)).max(1000)]),
+    result: MutationResult
+  },
+  'hosts:duplicate': { args: z.tuple([z.string().max(64)]), result: MutationResult },
+  'groups:reorder': {
+    args: z.tuple([z.string().max(64).nullable(), z.array(z.string().max(64)).max(1000)]),
+    result: MutationResult
+  },
   'groups:save': { args: z.tuple([GroupInput]), result: MutationResult },
   'groups:delete': { args: z.tuple([z.string().max(64)]), result: z.void() },
+  /** Chuyển nhóm vào nhóm khác (null = cấp cao nhất). */
+  'groups:move': {
+    args: z.tuple([z.string().max(64), z.string().max(64).nullable()]),
+    result: MutationResult
+  },
   /** Main mở hộp thoại chọn file (renderer không đọc được file). */
   'keys:importFromFile': { args: z.tuple([]), result: MutationResult.nullable() },
   'keys:delete': { args: z.tuple([z.string().max(64)]), result: MutationResult },
@@ -174,6 +206,14 @@ export interface ShellhouseApi {
   moveHost(id: string, groupId: string | null): Promise<void>
   saveGroup(input: GroupInput): Promise<MutationResult>
   deleteGroup(id: string): Promise<void>
+  moveGroup(id: string, parentId: string | null): Promise<MutationResult>
+  moveHosts(ids: string[], groupId: string | null): Promise<MutationResult>
+  deleteHosts(ids: string[]): Promise<void>
+  setFavorite(ids: string[], favorite: boolean): Promise<void>
+  tagHosts(ids: string[], add: string[], remove: string[]): Promise<MutationResult>
+  reorderHosts(groupId: string | null, orderedIds: string[]): Promise<MutationResult>
+  duplicateHost(id: string): Promise<MutationResult>
+  reorderGroups(parentId: string | null, orderedIds: string[]): Promise<MutationResult>
   importKeyFromFile(): Promise<MutationResult | null>
   deleteKey(id: string): Promise<MutationResult>
   scanSshConfig(): Promise<ImportCandidate[]>

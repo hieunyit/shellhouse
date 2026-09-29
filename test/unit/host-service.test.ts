@@ -13,6 +13,7 @@ import { MIGRATIONS } from '../../src/main/store/migrations'
 import { TEST_KDF } from '../../src/main/vault/crypto'
 import { Vault } from '../../src/main/vault/vault'
 import { generateTestKey } from '../integration/ssh-test-server'
+import { MAX_GROUP_DEPTH } from '../../src/shared/group-tree'
 import { tempDir } from './helpers'
 
 async function setup(path = ':memory:') {
@@ -44,7 +45,7 @@ const base: HostInput = {
 describe('HostService', () => {
   it('schema đã lên bản mới nhất', async () => {
     const { db } = await setup()
-    expect(schemaVersion(db)).toBe(3)
+    expect(schemaVersion(db)).toBe(MIGRATIONS.length)
   })
 
   it('tạo host auto; tree không chứa secret', async () => {
@@ -109,18 +110,70 @@ describe('HostService', () => {
     expect(identity.secret_enc).toBeNull()
   })
 
-  it('nhóm: tạo lồng nhau, chặn vòng lặp, xoá nhóm thì host chuyển ra ngoài', async () => {
+  it('nhóm: tạo lồng nhau, chặn vòng lặp, chặn trùng tên cùng cấp', async () => {
     const { service } = await setup()
     const parent = service.saveGroup({ parentId: null, name: 'Prod' })
     const child = service.saveGroup({ parentId: parent, name: 'DB' })
-    const host = service.saveHost({ ...base, groupId: child })
     expect(() => service.saveGroup({ id: parent, parentId: child, name: 'Prod' })).toThrow(
-      /own subgroup/
+      /itself or one of its subgroups/
     )
-    service.deleteGroup(parent) // xoá cả nhóm con
+    expect(() => {
+      service.moveGroup(parent, child)
+    }).toThrow(/itself/)
+    // Trùng tên (không phân biệt hoa thường) chỉ bị chặn trong cùng một nhóm cha.
+    expect(() => service.saveGroup({ parentId: parent, name: 'db' })).toThrow(/already a group/)
+    expect(service.saveGroup({ parentId: null, name: 'DB' })).toBeTruthy()
+    // Đổi tên chính nó (giữ nguyên tên) không tính là trùng.
+    expect(service.saveGroup({ id: child, parentId: parent, name: 'DB' })).toBe(child)
+  })
+
+  it('nhóm: di chuyển cả cây con; giới hạn độ sâu', async () => {
+    const { service } = await setup()
+    const a = service.saveGroup({ parentId: null, name: 'A' })
+    const b = service.saveGroup({ parentId: a, name: 'B' })
+    const host = service.saveHost({ ...base, groupId: b })
+    const other = service.saveGroup({ parentId: null, name: 'Other' })
+    service.moveGroup(a, other)
     const tree = service.tree()
-    expect(tree.groups).toHaveLength(0)
-    expect(tree.hosts.find((h) => h.id === host)?.groupId).toBeNull()
+    expect(tree.groups.find((g) => g.id === a)?.parentId).toBe(other)
+    expect(tree.groups.find((g) => g.id === b)?.parentId).toBe(a)
+    expect(tree.hosts.find((h) => h.id === host)?.groupId).toBe(b)
+    service.moveGroup(a, null)
+    expect(service.tree().groups.find((g) => g.id === a)?.parentId).toBeNull()
+
+    let parent: string | null = null
+    for (let i = 0; i < MAX_GROUP_DEPTH; i++)
+      parent = service.saveGroup({ parentId: parent, name: `L${i}` })
+    expect(() => service.saveGroup({ parentId: parent, name: 'too deep' })).toThrow(/at most/)
+  })
+
+  it('xoá nhóm không mất gì: host và nhóm con dời lên nhóm cha, tên trùng được đổi', async () => {
+    const { service } = await setup()
+    const prod = service.saveGroup({ parentId: null, name: 'Prod' })
+    const eu = service.saveGroup({ parentId: prod, name: 'EU' })
+    const db = service.saveGroup({ parentId: eu, name: 'DB' })
+    service.saveGroup({ parentId: prod, name: 'DB' }) // trùng tên với nhóm con của EU
+    const inEu = service.saveHost({ ...base, label: 'eu-1', groupId: eu })
+    const inDb = service.saveHost({ ...base, label: 'db-1', groupId: db })
+
+    service.deleteGroup(eu)
+    const tree = service.tree()
+    expect(tree.groups.some((g) => g.id === eu)).toBe(false)
+    expect(tree.hosts.find((h) => h.id === inEu)?.groupId).toBe(prod)
+    expect(tree.hosts.find((h) => h.id === inDb)?.groupId).toBe(db) // vẫn ở nhóm cũ
+    const moved = tree.groups.find((g) => g.id === db)
+    expect(moved?.parentId).toBe(prod)
+    expect(moved?.name).toBe('DB (2)')
+
+    service.deleteGroup(prod) // cấp cao nhất → mọi thứ ra ngoài cùng
+    const after = service.tree()
+    expect(after.hosts.find((h) => h.id === inEu)?.groupId).toBeNull()
+    expect(
+      after.groups
+        .filter((g) => g.parentId === null)
+        .map((g) => g.name)
+        .sort()
+    ).toEqual(['DB', 'DB (2)'])
   })
 
   it('key không passphrase: nhập, gắn vào host, giải mã khi kết nối', async () => {

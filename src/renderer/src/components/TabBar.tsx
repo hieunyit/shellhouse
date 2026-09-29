@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Columns2, Info, Lock, Plus, Rows2, ScrollText, Settings, Zap } from 'lucide-react'
+import { Columns2, Info, Lock, Plus, Radio, Rows2, ScrollText, Settings, Zap } from 'lucide-react'
 import { parseQuickConnect } from '@shared/quick-connect'
 import { useTabs } from '../stores/tabs'
+import { useBroadcast } from '../terminal/broadcast'
 import { cx, IconButton } from './ui'
 
 function QuickConnect(): React.JSX.Element {
@@ -24,8 +25,10 @@ function QuickConnect(): React.JSX.Element {
     >
       <div
         className={cx(
-          'flex h-7 items-center gap-1.5 rounded-md border bg-subtle px-2',
-          invalid ? 'border-danger' : 'border-line focus-within:border-accent'
+          'flex h-7 items-center gap-1.5 rounded-md border bg-subtle px-2 transition-[border-color,box-shadow] duration-150',
+          invalid
+            ? 'border-danger ring-3 ring-danger/15'
+            : 'border-line focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/20'
         )}
       >
         <Zap size={13} className="text-faint" />
@@ -61,6 +64,8 @@ export function TabBar({
   const addLocal = useTabs((s) => s.addLocal)
   const split = useTabs((s) => s.split)
   const hasTab = useTabs((s) => s.activeId !== null)
+  const tabCount = useTabs((s) => s.tabs.length)
+  const broadcasting = useBroadcast((s) => s.enabled)
 
   return (
     <nav className="flex h-11 shrink-0 items-center gap-1 border-b border-line bg-surface px-2">
@@ -69,7 +74,7 @@ export function TabBar({
         aria-label="New terminal"
         title="New terminal"
         data-testid="new-tab"
-        className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted hover:bg-hover hover:text-fg"
+        className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted transition-colors duration-150 hover:bg-hover hover:text-fg"
         onClick={() => addLocal()}
       >
         <Plus size={14} /> Terminal
@@ -93,6 +98,21 @@ export function TabBar({
       </IconButton>
       <IconButton label="Snippets" data-testid="open-snippets" onClick={onOpenSnippets}>
         <ScrollText size={15} />
+      </IconButton>
+      <IconButton
+        label={broadcasting ? 'Stop typing into all terminals' : 'Type into all open terminals'}
+        data-testid="toggle-broadcast"
+        active={broadcasting}
+        aria-pressed={broadcasting}
+        disabled={tabCount < 2 && !broadcasting}
+        className={broadcasting ? 'text-warning' : ''}
+        onClick={() => {
+          const b = useBroadcast.getState()
+          if (b.enabled) b.stop()
+          else b.start(useTabs.getState().tabs.map((t) => t.id))
+        }}
+      >
+        <Radio size={15} />
       </IconButton>
       <div className="flex-1" />
       <QuickConnect />

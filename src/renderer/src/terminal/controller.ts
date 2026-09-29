@@ -18,6 +18,7 @@ import { isMac, matchCommand } from '../lib/keybindings'
 import type { ITerminalOptions } from '@xterm/xterm'
 import { useHostStatus } from '../stores/host-status'
 import { SessionClient } from './session-client'
+import { broadcastInput } from './broadcast'
 
 export interface ActivePrompt {
   id: number
@@ -33,6 +34,8 @@ export interface ControllerEvents {
   onTransfers(list: TransferStatus[]): void
   /** Đã/không còn kết nối SSH tích hợp (bật/tắt các tính năng cần SSH). */
   onConnectedChange(connected: boolean): void
+  /** Trạng thái kết nối đổi (hiện chấm trạng thái trên tab / sidebar). */
+  onStateChange?(state: TerminalState): void
   /** Shell thoát bình thường (code 0) → tab nên đóng. */
   onCleanExit(): void
 }
@@ -47,8 +50,9 @@ const YELLOW = '\x1b[33m'
 const DIM = '\x1b[2m'
 const RESET = '\x1b[0m'
 
+/** JetBrains Mono được nhúng sẵn (styles.css) → terminal trông giống nhau trên mọi OS. */
 const DEFAULT_FONT =
-  'ui-monospace, "Cascadia Mono", "Cascadia Code", Menlo, "DejaVu Sans Mono", "Ubuntu Mono", monospace'
+  '"JetBrains Mono Variable", ui-monospace, "Cascadia Mono", Menlo, "DejaVu Sans Mono", monospace'
 
 /** Cài đặt của app → tuỳ chọn xterm.js. */
 export function terminalOptions(settings: AppSettings, dark: boolean): ITerminalOptions {
@@ -107,6 +111,12 @@ export class TerminalController {
 
   get renderer(): 'webgl' | 'dom' {
     return this.rendererKind
+  }
+
+  private setState(state: TerminalState): void {
+    if (this.state === state) return
+    this.state = state
+    this.events.onStateChange?.(state)
   }
 
   get connectionState(): TerminalState {
@@ -285,11 +295,11 @@ export class TerminalController {
     this.cancelReconnect()
     const host = useHostStatus.getState().status
     if (host?.state !== 'running') {
-      this.state = 'disconnected'
+      this.setState('disconnected')
       return
     }
     const generation = ++this.generation
-    this.state = 'connecting'
+    this.setState('connecting')
     try {
       const { sessionId, port } = await openSession(this.specFor())
       if (this.isDisposed() || generation !== this.generation) {
@@ -319,7 +329,7 @@ export class TerminalController {
           if (phase === 'connected') {
             this.everConnected = true
             this.reconnectAttempt = 0
-            if (this.state === 'connecting') this.state = 'connected'
+            if (this.state === 'connecting') this.setState('connected')
             this.events.onConnectedChange(true)
           }
         },
@@ -339,12 +349,12 @@ export class TerminalController {
         }
       })
       // Local: có shell ngay. SSH: chờ status 'connected' (đã xác thực) mới coi là kết nối.
-      if (this.target.kind === 'local') this.state = 'connected'
+      if (this.target.kind === 'local') this.setState('connected')
     } catch (error) {
       if (this.isDisposed() || generation !== this.generation) return
       const message = error instanceof Error ? error.message : String(error)
       this.term.write(`\r\n${YELLOW}Could not open the session: ${message}${RESET}\r\n`)
-      this.state = 'disconnected'
+      this.setState('disconnected')
     }
   }
 
@@ -373,7 +383,7 @@ export class TerminalController {
     this.client?.close()
     this.client = null
     if (reason === 'normal' && code === 0) {
-      this.state = 'exited'
+      this.setState('exited')
       this.events.onCleanExit()
       return
     }
@@ -383,7 +393,7 @@ export class TerminalController {
       return
     }
     this.everConnected = false
-    this.state = 'exited'
+    this.setState('exited')
     this.term.write(
       this.target.kind !== 'local'
         ? `\r\n${YELLOW}[Disconnected — press Enter to reconnect]${RESET}\r\n`
@@ -403,7 +413,7 @@ export class TerminalController {
       this.events.onConnectedChange(false)
       this.events.onForwards([])
       this.hostEpoch = null
-      this.state = 'disconnected'
+      this.setState('disconnected')
       this.term.write(`\r\n${YELLOW}— session host is restarting —${RESET}\r\n`)
     }
     if (host.state === 'running' && this.state === 'disconnected') void this.connect()
@@ -413,7 +423,7 @@ export class TerminalController {
     const delay =
       RECONNECT_DELAYS_MS[Math.min(this.reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)] ?? 30_000
     this.reconnectAttempt++
-    this.state = 'reconnecting'
+    this.setState('reconnecting')
     this.term.write(
       `\r\n${YELLOW}[Connection lost — reconnecting in ${Math.round(delay / 1000)} s ` +
         `(attempt ${this.reconnectAttempt}); press Enter to retry now]${RESET}\r\n`
@@ -421,7 +431,7 @@ export class TerminalController {
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null
       if (this.state === 'reconnecting') {
-        this.state = 'exited'
+        this.setState('exited')
         void this.connect()
       }
     }, delay)
@@ -434,10 +444,11 @@ export class TerminalController {
 
   private handleInput(data: string): void {
     if ((this.state === 'exited' || this.state === 'reconnecting') && data === '\r') {
-      this.state = 'exited'
+      this.setState('exited')
       void this.connect()
       return
     }
+    if (broadcastInput(this.tabId, data)) return
     this.client?.input(data)
   }
 

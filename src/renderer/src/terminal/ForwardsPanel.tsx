@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type SyntheticEvent } from 'react'
-import { Play, Square, Trash2, TriangleAlert } from 'lucide-react'
+import { ArrowLeftRight, Play, Square, Trash2, TriangleAlert } from 'lucide-react'
 import {
   describeForward,
   ForwardSpec,
@@ -134,21 +134,29 @@ export function ForwardsPanel({
 
   return (
     <aside
-      className="flex w-80 shrink-0 flex-col border-l border-line bg-surface"
+      className="animate-slide-in-right flex w-80 shrink-0 flex-col border-l border-line bg-surface"
       data-testid="forwards-panel"
     >
       <h3 className="flex h-10 items-center border-b border-line px-4 text-[13px] font-semibold">
         Port forwarding
       </h3>
       <div className="min-h-0 flex-1 overflow-auto p-3">
-        {rows.length === 0 && <p className="px-1 py-2 text-xs text-faint">No forwards yet.</p>}
+        {rows.length === 0 && (
+          <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+            <ArrowLeftRight size={20} className="text-faint" />
+            <p className="text-xs text-muted">No forwards yet.</p>
+            <p className="text-xs text-faint">
+              Add one below to tunnel a port through this connection.
+            </p>
+          </div>
+        )}
         {rows.map((row) => {
           const state = row.status?.state ?? 'stopped'
           const running = state === 'active' || state === 'starting'
           return (
             <div
               key={row.spec.id}
-              className="mb-2 rounded-lg border border-line p-2.5"
+              className="animate-pop-in mb-2 rounded-lg border border-line bg-elevated p-2.5 shadow-xs"
               data-testid="forward-row"
               data-forward-state={state}
               data-forward-port={row.status?.actualPort ?? ''}
@@ -225,7 +233,7 @@ export function ForwardsPanel({
       </div>
 
       <form
-        className="flex flex-col gap-2.5 border-t border-line p-3"
+        className="flex flex-col gap-2.5 border-t border-line bg-subtle/40 p-3"
         onSubmit={(e) => void add(e)}
       >
         <Segmented
@@ -238,6 +246,13 @@ export function ForwardsPanel({
             { value: 'D', label: 'SOCKS' }
           ]}
         />
+        <span className="-mb-1 text-xs font-medium text-muted">
+          {kind === 'L'
+            ? 'Listen on this machine'
+            : kind === 'R'
+              ? 'Listen on the server'
+              : 'SOCKS proxy on this machine'}
+        </span>
         <div className="grid grid-cols-[1fr_5rem] gap-2">
           <Input
             mono
@@ -258,6 +273,13 @@ export function ForwardsPanel({
             }}
           />
         </div>
+        {kind !== 'D' && (
+          <span className="-mb-1 text-xs font-medium text-muted">
+            {kind === 'L'
+              ? 'Destination (as seen from the server)'
+              : 'Destination (as seen from this machine)'}
+          </span>
+        )}
         {kind !== 'D' && (
           <div className="grid grid-cols-[1fr_5rem] gap-2">
             <Input

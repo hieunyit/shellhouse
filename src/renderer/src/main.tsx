@@ -10,7 +10,24 @@ import './stores/appearance'
 const root = document.getElementById('root')
 if (!root) throw new Error('Missing #root')
 
-void window.shellhouse.getInfo().then((info) => {
+/**
+ * Nạp font nhúng trước khi vẽ: xterm.js đo kích thước ô chữ một lần lúc mở terminal, nếu font chưa
+ * sẵn sàng thì lưới chữ bị lệch. Font nằm trong app nên thường xong trong vài ms; tối đa chờ 1,5 s.
+ */
+function loadFonts(): Promise<unknown> {
+  const fonts = [
+    '400 13px "Inter Variable"',
+    '600 13px "Inter Variable"',
+    '400 14px "JetBrains Mono Variable"',
+    '700 14px "JetBrains Mono Variable"'
+  ]
+  return Promise.race([
+    Promise.all(fonts.map((f) => document.fonts.load(f).catch(() => undefined))),
+    new Promise((resolve) => setTimeout(resolve, 1500))
+  ])
+}
+
+void Promise.all([window.shellhouse.getInfo(), loadFonts()]).then(([info]) => {
   if (info.testHooks) installTestHooks()
   createRoot(root).render(
     <StrictMode>

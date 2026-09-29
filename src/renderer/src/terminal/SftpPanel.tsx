@@ -2,8 +2,11 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import {
   ArrowUp,
   Download,
+  Eye,
+  EyeOff,
   File,
   Folder,
+  FolderOpen,
   FolderPlus,
   Link2,
   Pencil,
@@ -24,7 +27,7 @@ import {
   type SftpOp,
   type TransferStatus
 } from '@shared/sftp'
-import { Button, Checkbox, cx, IconButton, Input, Modal, Notice, Select } from '../components/ui'
+import { Button, cx, IconButton, Input, Modal, Notice, Select } from '../components/ui'
 
 function formatSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -163,7 +166,7 @@ export function SftpPanel({
   return (
     <aside
       className={cx(
-        'flex w-96 shrink-0 flex-col border-l border-line bg-surface',
+        'animate-slide-in-right flex w-96 shrink-0 flex-col border-l border-line bg-surface',
         dragOver && 'ring-2 ring-accent ring-inset'
       )}
       data-testid="sftp-panel"
@@ -232,15 +235,21 @@ export function SftpPanel({
           New folder
         </Button>
         <div className="flex-1" />
-        <Checkbox
-          label={<span className="text-xs text-muted">Hidden</span>}
-          checked={showHidden}
-          onChange={(e) => {
-            setShowHidden(e.target.checked)
+        <IconButton
+          label={showHidden ? 'Hide hidden files' : 'Show hidden files'}
+          size="sm"
+          active={showHidden}
+          aria-pressed={showHidden}
+          data-testid="sftp-toggle-hidden"
+          className="size-7"
+          onClick={() => {
+            setShowHidden(!showHidden)
           }}
-        />
+        >
+          {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+        </IconButton>
         <Select
-          className="h-7 w-24 text-xs"
+          className="h-7 w-28 text-xs"
           value={sort}
           onChange={(e) => {
             setSort(e.target.value as Sort)
@@ -262,8 +271,28 @@ export function SftpPanel({
       )}
 
       <div className="min-h-0 flex-1 overflow-auto" role="listbox" aria-label="Files">
-        {!connected && <p className="p-3 text-xs text-faint">Not connected.</p>}
-        {loading && !listing && <p className="p-3 text-xs text-faint">Loading…</p>}
+        {!connected && (
+          <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+            <FolderOpen size={20} className="text-faint" />
+            <p className="text-xs text-muted">Waiting for the connection…</p>
+          </div>
+        )}
+        {connected && loading && !listing && (
+          <div aria-label="Loading" className="space-y-1 p-3">
+            {Array.from({ length: 8 }, (_, i) => (
+              <div key={i} className="flex animate-pulse items-center gap-2.5 py-1">
+                <span className="size-4 rounded bg-subtle" />
+                <span
+                  className="h-3 rounded bg-subtle"
+                  style={{ width: `${40 + ((i * 37) % 45)}%` }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+        {connected && listing && entries.length === 0 && (
+          <p className="px-4 py-10 text-center text-xs text-faint">This folder is empty.</p>
+        )}
         {entries.map((entry) => (
           <div
             key={entry.name}
@@ -272,7 +301,7 @@ export function SftpPanel({
             data-testid="sftp-entry"
             data-name={entry.name}
             className={cx(
-              'flex cursor-default items-center gap-2.5 px-3 py-1.5 text-[13px]',
+              'flex h-8 cursor-default items-center gap-2.5 px-3 text-[13px] transition-colors duration-75',
               selected === entry.name ? 'bg-accent-soft' : 'hover:bg-hover'
             )}
             onClick={() => {
@@ -293,7 +322,7 @@ export function SftpPanel({
               )}
             </span>
             <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            <span className="w-16 text-right text-xs text-faint">
+            <span className="w-16 text-right text-xs text-faint tabular-nums">
               {entry.isDirLike ? '' : formatSize(entry.size)}
             </span>
             <span className="hidden w-20 font-mono text-[11px] text-faint lg:inline">

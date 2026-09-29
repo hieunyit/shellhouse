@@ -1,4 +1,7 @@
 @import 'tailwindcss';
+/* Font tự host (CSP chỉ cho phép 'self'); variable font: một file cho mọi độ đậm. */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
 
 /* Dark variant đi theo data-theme trên <html> (do cài đặt Appearance quyết định), không theo media query. */
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
@@ -21,16 +24,24 @@
   --color-accent: var(--sh-accent);
   --color-accent-hover: var(--sh-accent-hover);
   --color-accent-fg: var(--sh-accent-fg);
+  --color-accent-solid: var(--sh-accent-solid);
+  --color-accent-solid-hover: var(--sh-accent-solid-hover);
   --color-accent-soft: var(--sh-accent-soft);
   --color-danger: var(--sh-danger);
   --color-danger-soft: var(--sh-danger-soft);
+  --color-danger-solid: var(--sh-danger-solid);
   --color-warning: var(--sh-warning);
   --color-warning-soft: var(--sh-warning-soft);
   --color-success: var(--sh-success);
   --color-success-soft: var(--sh-success-soft);
   --color-terminal: var(--sh-terminal);
-  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: ui-monospace, 'Cascadia Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  --animate-fade-in: sh-fade-in 140ms ease-out;
+  --animate-dialog-in: sh-dialog-in 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-slide-in-right: sh-slide-in-right 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-pop-in: sh-pop-in 120ms ease-out;
+  --animate-shake: sh-shake 320ms ease-in-out;
 }
 
 :root,
@@ -49,8 +60,12 @@
   --sh-accent: #2563eb;
   --sh-accent-hover: #1d4fd7;
   --sh-accent-fg: #ffffff;
+  /* Nền nút chính (chữ trắng, tương phản ≥ 4.5:1). */
+  --sh-accent-solid: #2563eb;
+  --sh-accent-solid-hover: #1d4fd7;
   --sh-accent-soft: #e0eaff;
   --sh-danger: #d4351c;
+  --sh-danger-solid: #c9311a;
   --sh-danger-soft: #fdecea;
   --sh-warning: #a15c07;
   --sh-warning-soft: #fdf3e2;
@@ -59,6 +74,8 @@
   /* Nền quanh terminal: được TerminalView ghi đè bằng màu nền của theme terminal. */
   --sh-terminal: #fbfbfc;
   --sh-shadow: 0 12px 32px rgb(16 24 40 / 0.14), 0 2px 6px rgb(16 24 40 / 0.08);
+  --sh-overlay: rgb(15 20 30 / 0.2);
+  --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2359616c' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 [data-theme='dark'] {
@@ -75,9 +92,13 @@
   --sh-faint: #6c7480;
   --sh-accent: #4c8dff;
   --sh-accent-hover: #6aa0ff;
-  --sh-accent-fg: #0b1220;
+  --sh-accent-fg: #ffffff;
+  --sh-accent-solid: #2f6fe0;
+  --sh-accent-solid-hover: #3b7cf5;
   --sh-accent-soft: #1a2a47;
   --sh-danger: #ff7a6e;
+  /* Nền nút nguy hiểm (chữ trắng, tương phản ≥ 4.5:1). */
+  --sh-danger-solid: #c4382b;
   --sh-danger-soft: #3a1d1a;
   --sh-warning: #f5b544;
   --sh-warning-soft: #33280f;
@@ -85,6 +106,8 @@
   --sh-success-soft: #13301f;
   --sh-terminal: #0f1115;
   --sh-shadow: 0 16px 40px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.35);
+  --sh-overlay: rgb(0 0 0 / 0.45);
+  --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ba3ad' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 html,
@@ -103,18 +126,122 @@ body {
   color: var(--sh-fg);
   font-family: var(--font-sans);
   font-size: 13px;
+  /* Inter: số đều chiều rộng (bảng, kích thước file), chữ l có đuôi dễ phân biệt với I. */
+  font-feature-settings: 'cv11', 'tnum';
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* Ứng dụng desktop: không bôi đen chữ giao diện khi kéo chuột; ô nhập / terminal vẫn chọn được. */
+  user-select: none;
+}
+input,
+textarea,
+[contenteditable='true'],
+.xterm,
+.sh-selectable {
+  user-select: text;
 }
 
-/* Thanh cuộn mảnh, theo theme. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--sh-line-strong) transparent;
+/*
+ * Thanh cuộn mảnh bo tròn. Dùng ::-webkit-scrollbar (không dùng scrollbar-width/scrollbar-color:
+ * Chromium thấy hai thuộc tính chuẩn đó sẽ bỏ qua pseudo-element và vẽ nút mũi tên trên Linux).
+ */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--sh-line-strong) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--sh-faint) padding-box;
+}
+::-webkit-scrollbar-button {
+  display: none;
 }
 
-:focus-visible {
-  outline: 2px solid var(--sh-accent);
-  outline-offset: 1px;
+/* Select tự vẽ mũi tên → giống nhau trên mọi OS và theo theme. */
+select.sh-select {
+  appearance: none;
+  background-image: var(--sh-select-chevron);
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 12px;
+}
+select.sh-select option {
+  background: var(--sh-elevated);
+  color: var(--sh-fg);
+}
+
+.bg-overlay {
+  background: var(--sh-overlay);
+}
+
+@keyframes sh-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes sh-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+@keyframes sh-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+@keyframes sh-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes sh-shake {
+  20%,
+  60% {
+    transform: translateX(-4px);
+  }
+  40%,
+  80% {
+    transform: translateX(4px);
+  }
+}
+
+/* Nền màn khoá: quầng accent rất nhạt phía trên, không phẳng lì. */
+.sh-gate-bg {
+  background:
+    radial-gradient(
+      60rem 30rem at 50% -10%,
+      color-mix(in srgb, var(--sh-accent) 10%, transparent),
+      transparent 70%
+    ),
+    var(--sh-canvas);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* Trong @layer base để utility `outline-none` của component ghi đè được (ô nhập tự vẽ viền focus). */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--sh-accent);
+    outline-offset: 1px;
+  }
 }
 
 .shadow-elevated {

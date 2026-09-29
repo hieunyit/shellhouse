@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CommandPalette } from './components/CommandPalette'
-import { SettingsDialog, type SettingsSectionId } from './components/settings/SettingsDialog'
+import type { SettingsSectionId } from './components/settings/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
-import { SnippetsDialog } from './components/SnippetsDialog'
 import { TabBar } from './components/TabBar'
 import { Workspace } from './components/Workspace'
+import { preloadLazyParts, SettingsDialog, SnippetsDialog } from './lazy'
 import { matchCommand } from './lib/keybindings'
 import { useHosts } from './stores/hosts'
 import { useTabs } from './stores/tabs'
@@ -26,6 +26,10 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     void useHosts.getState().reload()
+  }, [])
+
+  useEffect(() => {
+    void preloadLazyParts()
   }, [])
 
   // Mở sẵn một tab khi khởi động.

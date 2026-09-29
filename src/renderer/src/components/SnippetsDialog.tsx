@@ -50,7 +50,7 @@ export function SnippetsDialog({
     <Modal title="Snippets" onClose={onClose} width="max-w-3xl" testId="snippets-dialog">
       <div className="flex h-[26rem] gap-4">
         <div className="flex w-64 shrink-0 flex-col gap-2">
-          <div className="flex h-8 items-center gap-2 rounded-md border border-line bg-subtle px-2 focus-within:border-accent">
+          <div className="flex h-8 items-center gap-2 rounded-md border border-line bg-subtle px-2 transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/20">
             <Search size={14} className="text-faint" />
             <input
               autoFocus

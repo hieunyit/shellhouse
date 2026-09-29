@@ -67,6 +67,60 @@ export function registerHostIpc(
       service.deleteGroup(id)
     })
   })
+  const done = (fn: () => void): MutationResult =>
+    mutation(() => {
+      fn()
+      return ''
+    })
+  handle('hosts:moveMany', isTrustedSender, (ids, groupId) =>
+    changing(() =>
+      done(() => {
+        service.moveHosts(ids, groupId)
+      })
+    )
+  )
+  handle('hosts:deleteMany', isTrustedSender, (ids) => {
+    changing(() => {
+      service.deleteHosts(ids)
+    })
+  })
+  handle('hosts:setFavorite', isTrustedSender, (ids, favorite) => {
+    changing(() => {
+      service.setFavorite(ids, favorite)
+    })
+  })
+  handle('hosts:tag', isTrustedSender, (ids, add, remove) =>
+    changing(() =>
+      done(() => {
+        service.tagHosts(ids, add, remove)
+      })
+    )
+  )
+  handle('hosts:reorder', isTrustedSender, (groupId, ids) =>
+    changing(() =>
+      done(() => {
+        service.reorderHosts(groupId, ids)
+      })
+    )
+  )
+  handle('hosts:duplicate', isTrustedSender, (id) =>
+    changing(() => mutation(() => service.duplicateHost(id)))
+  )
+  handle('groups:reorder', isTrustedSender, (parentId, ids) =>
+    changing(() =>
+      done(() => {
+        service.reorderGroups(parentId, ids)
+      })
+    )
+  )
+  handle('groups:move', isTrustedSender, (id, parentId) =>
+    changing(() =>
+      mutation(() => {
+        service.moveGroup(id, parentId)
+        return id
+      })
+    )
+  )
 
   handle('forwards:list', isTrustedSender, (hostId) => service.listForwards(hostId))
   handle('forwards:save', isTrustedSender, (input) => mutation(() => service.saveForward(input)))

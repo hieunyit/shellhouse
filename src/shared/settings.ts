@@ -38,7 +38,8 @@ const TerminalSettings = z.object({
   lightThemeId: z.string().max(64).catch('shellhouse-light'),
   fontFamily: z.string().min(1).max(200).catch(''),
   fontSize: z.number().int().min(8).max(32).catch(14),
-  lineHeight: z.number().min(1).max(2).catch(1),
+  /** 1.15: dễ đọc hơn 1.0 với JetBrains Mono mà vẫn gọn (VS Code dùng ~1.2). */
+  lineHeight: z.number().min(1).max(2).catch(1.15),
   cursorStyle: z.enum(['block', 'bar', 'underline']).catch('block'),
   cursorBlink: z.boolean().catch(true),
   scrollback: z.number().int().min(1000).max(100_000).catch(10_000),

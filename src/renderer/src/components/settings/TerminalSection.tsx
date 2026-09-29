@@ -104,7 +104,7 @@ export function TerminalSection(): React.JSX.Element {
         <SectionTitle>Text</SectionTitle>
         <Field label="Font family">
           <Input
-            placeholder="Default (Cascadia Mono, Menlo, …)"
+            placeholder="Default (JetBrains Mono)"
             value={t.fontFamily}
             onChange={(e) => void update({ terminal: { fontFamily: e.target.value } })}
           />
@@ -125,7 +125,7 @@ export function TerminalSection(): React.JSX.Element {
               type="number"
               min={1}
               max={2}
-              step={0.1}
+              step={0.05}
               value={t.lineHeight}
               onChange={(e) => void update({ terminal: { lineHeight: Number(e.target.value) } })}
             />

@@ -89,6 +89,10 @@ test('khoá khi máy khoá màn hình; "nhớ trên máy" chỉ bật được k
   await openSettings(page, 'security')
   const unavailable = page.getByTestId('remember-unavailable')
   const remember = page.getByTestId('setting-remember')
+  // Trạng thái keychain được tải bất đồng bộ — chờ tới khi biết chắc (count() không chờ).
+  await expect
+    .poll(async () => (await unavailable.count()) > 0 || (await remember.isEnabled()))
+    .toBe(true)
   if (await unavailable.count()) {
     await expect(remember).toBeDisabled() // ví dụ Linux không có Secret Service
   } else {

@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
-import { ArrowLeftRight, FolderOpen, KeyRound } from 'lucide-react'
-import { cx } from '../components/ui'
+import { ArrowLeftRight, FolderOpen, KeyRound, Radio } from 'lucide-react'
+import { connectionLabel, cx, StatusDot } from '../components/ui'
 import type { ForwardStatus } from '@shared/forwards'
+import { hostBorderClass, hostTileClass } from '../components/hostColors'
+import { useHosts } from '../stores/hosts'
+import { useTabStatus } from '../stores/tab-status'
+import { useBroadcast } from './broadcast'
 import { useTabs, type TabTarget } from '../stores/tabs'
 import { TerminalController, type ActivePrompt } from './controller'
-import { ForwardsPanel } from './ForwardsPanel'
-import { SftpPanel } from './SftpPanel'
-import { DeployKeyDialog } from './DeployKeyDialog'
+import { DeployKeyDialog, ForwardsPanel, SftpPanel } from '../lazy'
 import type { SftpOp, TransferStatus } from '@shared/sftp'
 import { PromptDialog } from './PromptDialog'
 import { controllers } from './registry'
@@ -28,9 +30,22 @@ export function TerminalView({
   const [forwards, setForwards] = useState<ForwardStatus[]>([])
   const [transfers, setTransfers] = useState<TransferStatus[]>([])
   const [connected, setConnected] = useState(false)
-  const [panel, setPanel] = useState<Panel>(null)
+  const [panel, setPanel] = useState<Panel>(
+    () => useTabs.getState().tabs.find((t) => t.id === tabId)?.initialPanel ?? null
+  )
+  const broadcasting = useBroadcast((s) => s.enabled && s.tabIds.includes(tabId))
+  const broadcastCount = useBroadcast((s) => s.tabIds.length)
+  // Màu môi trường + đường dẫn nhóm (host đã lưu): nhắc người dùng đang ở server nào.
+  const hostId = target.kind === 'host' ? target.hostId : null
+  const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
+  const envPath = useHosts((s) => {
+    const groupId = hostId ? s.tree.hosts.find((h) => h.id === hostId)?.groupId : null
+    return groupId ? s.groupTree.path(groupId).join(' / ') : ''
+  })
+  const env = hostId ? { color: envColor, path: envPath } : null
   const [deploying, setDeploying] = useState(false)
   const isRemote = target.kind !== 'local'
+  const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
   const runSftp = useCallback(
     (op: SftpOp) =>
       controllers.get(tabId)?.sftp(op) ?? Promise.reject(new Error('The tab was closed')),
@@ -48,6 +63,9 @@ export function TerminalView({
       onForwards: setForwards,
       onTransfers: setTransfers,
       onConnectedChange: setConnected,
+      onStateChange: (state) => {
+        useTabStatus.getState().set(tabId, state)
+      },
       onCleanExit: () => {
         useTabs.getState().close(tabId)
       }
@@ -57,6 +75,8 @@ export function TerminalView({
     return () => {
       controllers.delete(tabId)
       controller.dispose()
+      useBroadcast.getState().forget(tabId)
+      useTabStatus.getState().remove(tabId)
     }
     // target không đổi trong suốt vòng đời một tab.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -71,9 +91,31 @@ export function TerminalView({
   return (
     <div className="flex h-full flex-col">
       {isRemote && (
-        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-line bg-surface px-2 text-xs">
-          <span className={cx('size-1.5 rounded-full', connected ? 'bg-success' : 'bg-faint')} />
-          <span className="text-muted">{connected ? 'Connected' : 'Not connected'}</span>
+        <div
+          className={cx(
+            // @container: ô hẹp (lưới, chia màn hình) → chỉ còn icon, không vỡ dòng.
+            '@container flex h-8 shrink-0 items-center gap-1 overflow-hidden border-b border-line bg-surface px-2 text-xs whitespace-nowrap',
+            env?.color && 'border-t-2',
+            env?.color && hostBorderClass[env.color]
+          )}
+          data-env-color={env?.color ?? ''}
+        >
+          <span className="flex items-center gap-2 pl-1" data-testid="session-state">
+            <StatusDot state={state} />
+            <span className="hidden text-muted @xs:inline">{connectionLabel[state]}</span>
+          </span>
+          {env?.path && (
+            <span
+              className={cx(
+                'ml-2 hidden min-w-0 truncate rounded px-1.5 py-px text-[11px] font-medium @md:inline',
+                env.color ? hostTileClass[env.color] : 'bg-subtle text-muted'
+              )}
+              data-testid="session-group-path"
+              title="Group"
+            >
+              {env.path}
+            </span>
+          )}
           <div className="flex-1" />
           <ToolbarButton
             testId="open-deploy-key"
@@ -108,8 +150,34 @@ export function TerminalView({
         </div>
       )}
       <div className="relative flex min-h-0 flex-1">
-        <div className="relative min-w-0 flex-1 bg-terminal">
-          <div ref={ref} data-testid={`terminal-${tabId}`} className="absolute inset-0 px-2 pt-1" />
+        <div
+          className={cx(
+            'relative min-w-0 flex-1 bg-terminal',
+            broadcasting && 'ring-2 ring-warning ring-inset'
+          )}
+          data-broadcasting={broadcasting}
+        >
+          {broadcasting && (
+            <div className="animate-fade-in absolute top-1.5 right-3 z-10 flex items-center gap-2 rounded-md bg-warning px-2 py-1 text-[11px] font-semibold text-canvas shadow-md">
+              <Radio size={12} />
+              Typing into {broadcastCount} terminals
+              <button
+                type="button"
+                className="rounded bg-canvas/20 px-1.5 hover:bg-canvas/35"
+                data-testid="broadcast-stop"
+                onClick={() => {
+                  useBroadcast.getState().stop()
+                }}
+              >
+                Stop
+              </button>
+            </div>
+          )}
+          <div
+            ref={ref}
+            data-testid={`terminal-${tabId}`}
+            className="absolute inset-0 pt-2 pr-1 pb-1 pl-3"
+          />
           {prompt && (
             <PromptDialog
               prompt={prompt}
@@ -169,16 +237,19 @@ function ToolbarButton({
     <button
       type="button"
       data-testid={testId}
+      // Nhãn có thể bị ẩn khi ô hẹp → vẫn giữ tên cho trình đọc màn hình và tooltip.
+      aria-label={typeof children === 'string' ? children : undefined}
+      title={typeof children === 'string' ? children : undefined}
       aria-pressed={pressed}
       disabled={disabled}
       className={cx(
-        'inline-flex h-6 items-center gap-1.5 rounded-md px-2 font-medium disabled:opacity-40',
+        'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium transition-colors duration-150 disabled:opacity-40',
         pressed ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-hover hover:text-fg'
       )}
       onClick={onClick}
     >
       {icon}
-      {children}
+      <span className="hidden @lg:inline">{children}</span>
     </button>
   )
 }

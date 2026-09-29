@@ -9,6 +9,7 @@
     "src/node-shared/**/*",
     "test/soak/**/*",
     "test/package/**/*",
+    "test/screens/**/*",
     "test/integration/chaos-proxy.ts"
   ],
   "compilerOptions": {

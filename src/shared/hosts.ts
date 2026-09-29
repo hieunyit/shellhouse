@@ -4,14 +4,14 @@ import { z } from 'zod'
 
 export const Hostname = z
   .string()
-  .min(1)
-  .max(255)
+  .min(1, 'Enter a hostname or IP address')
+  .max(255, 'The hostname is too long')
   .regex(/^[A-Za-z0-9._:[\]%-]+$/, 'Invalid hostname')
   .refine((v) => !v.startsWith('-'), 'Hostname must not start with "-"')
 export const Username = z
   .string()
-  .min(1)
-  .max(128)
+  .min(1, 'Enter a username')
+  .max(128, 'The username is too long')
   .regex(/^[^\s@:/\\]+$/, 'Invalid username')
   .refine((v) => !v.startsWith('-'), 'Username must not start with "-"')
 
@@ -41,13 +41,39 @@ export type HostMode = z.infer<typeof HostMode>
 
 export const MAX_JUMPS = 8
 
+export const Port = z
+  .number({ error: 'The port must be a number' })
+  .int('The port must be a whole number')
+  .min(1, 'The port must be between 1 and 65535')
+  .max(65535, 'The port must be between 1 and 65535')
+
+export const HostColor = z.enum(HOST_COLORS)
+export type HostColor = z.infer<typeof HostColor>
+
+/**
+ * Giá trị mặc định của một nhóm cho mọi host bên trong (kể cả nhóm con cháu). Host kế thừa từ nhóm
+ * GẦN NHẤT có đặt giá trị đó, trừ khi host tự ghi đè (ADR-010).
+ * - keyId: key được thử khi host dùng xác thực Automatic
+ * - color: màu môi trường (tab + viền terminal), ví dụ Production = đỏ
+ */
+export const GroupDefaults = z.object({
+  username: Username.optional(),
+  port: Port.optional(),
+  keyId: z.string().max(64).optional(),
+  jumpHostIds: z.array(z.string().max(64)).min(1).max(MAX_JUMPS).optional(),
+  color: HostColor.optional()
+})
+export type GroupDefaults = z.infer<typeof GroupDefaults>
+
 /** Thông tin host gửi cho renderer — KHÔNG có secret. */
 export const HostSummary = z.object({
   id: z.string(),
   groupId: z.string().nullable(),
   label: z.string(),
   hostname: z.string(),
-  port: z.number().int(),
+  /** null = kế thừa từ nhóm (không có thì 22). */
+  port: z.number().int().nullable(),
+  /** '' = kế thừa từ nhóm. */
   username: z.string(),
   auth: AuthKind,
   hasPassword: z.boolean(),
@@ -57,9 +83,14 @@ export const HostSummary = z.object({
   proxyJump: z.string().nullable(),
   jumpHostIds: z.array(z.string()),
   mode: HostMode,
+  /** true = kết nối thẳng, bỏ qua jump host của nhóm. */
+  direct: z.boolean(),
   tags: z.array(z.string()),
   color: z.enum(HOST_COLORS).nullable(),
-  lastUsedAt: z.number().nullable()
+  lastUsedAt: z.number().nullable(),
+  favorite: z.boolean(),
+  /** Thứ tự thủ công trong nhóm; 0 = chưa sắp (theo tên). */
+  sort: z.number().int()
 })
 export type HostSummary = z.infer<typeof HostSummary>
 
@@ -67,10 +98,16 @@ export const HostInput = z.object({
   /** Không có = tạo mới. */
   id: z.string().optional(),
   groupId: z.string().nullable(),
-  label: z.string().trim().min(1, 'A label is required').max(100),
+  label: z
+    .string()
+    .trim()
+    .min(1, 'A label is required')
+    .max(100, 'The label is too long (max 100)'),
   hostname: Hostname,
-  port: z.number().int().min(1).max(65535),
-  username: Username,
+  /** null = kế thừa từ nhóm. */
+  port: Port.nullable(),
+  /** '' = kế thừa từ nhóm. */
+  username: Username.or(z.literal('')),
   auth: AuthKind,
   /** undefined = giữ mật khẩu đã lưu; '' = xoá. */
   password: z.string().max(1024).optional(),
@@ -82,7 +119,11 @@ export const HostInput = z.object({
   /** Jump host (host đã lưu) theo thứ tự; ưu tiên hơn `proxyJump`. */
   jumpHostIds: z.array(z.string().max(64)).max(MAX_JUMPS),
   mode: HostMode,
-  tags: z.array(z.string().trim().min(1).max(40)).max(20),
+  /** true = bỏ qua jump host kế thừa từ nhóm. */
+  direct: z.boolean().optional(),
+  tags: z
+    .array(z.string().trim().min(1).max(40, 'Each tag can be at most 40 characters'))
+    .max(20, 'At most 20 tags'),
   color: z.enum(HOST_COLORS).nullable()
 })
 export type HostInput = z.infer<typeof HostInput>
@@ -91,14 +132,21 @@ export const GroupSummary = z.object({
   id: z.string(),
   parentId: z.string().nullable(),
   name: z.string(),
-  sort: z.number().int()
+  sort: z.number().int(),
+  defaults: GroupDefaults
 })
 export type GroupSummary = z.infer<typeof GroupSummary>
 
 export const GroupInput = z.object({
   id: z.string().optional(),
   parentId: z.string().nullable(),
-  name: z.string().trim().min(1).max(100)
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Enter a group name')
+    .max(100, 'The group name is too long (max 100)'),
+  /** undefined = giữ nguyên. */
+  defaults: GroupDefaults.optional()
 })
 export type GroupInput = z.infer<typeof GroupInput>
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import {
   DockviewReact,
   type DockviewApi,
@@ -7,7 +7,15 @@ import {
   type IDockviewPanelProps
 } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
-import { TerminalSquare, X } from 'lucide-react'
+import { Radio, Server, SquareTerminal, TerminalSquare, X } from 'lucide-react'
+import { useTabStatus } from '../stores/tab-status'
+import { useHosts } from '../stores/hosts'
+import { useBroadcast } from '../terminal/broadcast'
+import { hostColorClass } from './hostColors'
+import { keybindingFor } from '@shared/commands'
+import { displayKeybinding, isMac } from '../lib/keybindings'
+import { useSettings } from '../stores/settings'
+import { Button, connectionLabel, cx, Kbd, StatusDot } from './ui'
 import { useTabs } from '../stores/tabs'
 import { TerminalView } from '../terminal/TerminalView'
 
@@ -50,13 +58,27 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
       b.dispose()
     }
   }, [props.api])
+  const tabId = props.params.tabId
+  const kind = useTabs((s) => s.tabs.find((t) => t.id === tabId)?.target.kind ?? 'local')
+  const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
+  const hostId = useTabs((s) => {
+    const t = s.tabs.find((x) => x.id === tabId)?.target
+    return t?.kind === 'host' ? t.hostId : null
+  })
+  const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
+  const broadcastOn = useBroadcast((s) => s.enabled)
+  const inBroadcast = useBroadcast((s) => s.tabIds.includes(tabId))
+  const Icon = kind === 'local' ? SquareTerminal : Server
   return (
     <div
       role="tab"
       aria-selected={active}
       data-testid="tab"
-      data-tab-id={props.params.tabId}
-      className="group flex h-full max-w-56 min-w-24 items-center gap-2 px-3 text-xs"
+      data-tab-id={tabId}
+      data-tab-state={state}
+      title={`${title} — ${connectionLabel[state]}`}
+      data-env-color={envColor ?? ''}
+      className="group relative flex h-full max-w-60 min-w-28 items-center gap-2 pr-1.5 pl-3 text-xs"
       onMouseDown={(e) => {
         // Chuột giữa = đóng tab, như trình duyệt.
         if (e.button === 1) {
@@ -65,12 +87,55 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         }
       }}
     >
-      <span className="truncate">{title}</span>
+      {envColor && (
+        <span
+          aria-hidden
+          className={cx('absolute inset-x-0 top-0 h-0.5', hostColorClass[envColor])}
+        />
+      )}
+      {broadcastOn && (
+        <button
+          type="button"
+          aria-pressed={inBroadcast}
+          aria-label={inBroadcast ? 'Stop typing into this tab' : 'Also type into this tab'}
+          title={inBroadcast ? 'Receiving broadcast input' : 'Not receiving broadcast input'}
+          data-testid="tab-broadcast"
+          className={cx(
+            'flex size-5 shrink-0 items-center justify-center rounded',
+            inBroadcast ? 'text-warning' : 'text-faint opacity-60 hover:opacity-100'
+          )}
+          onMouseDown={(e) => {
+            e.stopPropagation()
+          }}
+          onClick={() => {
+            useBroadcast.getState().toggleTab(tabId)
+          }}
+        >
+          <Radio size={12} />
+        </button>
+      )}
+      <span className="relative flex shrink-0">
+        <Icon size={13} className={active ? 'text-fg' : 'text-faint'} />
+        {/* Terminal local luôn "connected" — chỉ hiện chấm khi là phiên từ xa hoặc đã kết thúc. */}
+        {(kind !== 'local' || state === 'exited') && (
+          <StatusDot
+            state={state}
+            className={cx(
+              'absolute -right-0.5 -bottom-0.5 ring-2',
+              active ? 'ring-terminal' : 'ring-surface'
+            )}
+          />
+        )}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{title}</span>
       <button
         type="button"
         aria-label="Close tab"
         data-testid="tab-close"
-        className={`ml-auto flex size-5 items-center justify-center rounded text-faint hover:bg-hover hover:text-fg ${active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+        className={cx(
+          'flex size-5 shrink-0 items-center justify-center rounded text-faint transition-opacity duration-100 hover:bg-hover hover:text-fg',
+          active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+        )}
         onMouseDown={(e) => {
           e.stopPropagation()
         }}
@@ -85,13 +150,41 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
 }
 
 function Empty(): React.JSX.Element {
+  const overrides = useSettings((s) => s.settings.keybindings)
+  const key = (id: string): string => displayKeybinding(keybindingFor(id, overrides, isMac))
+  const hints = [
+    { id: 'tab.new', label: 'New terminal' },
+    { id: 'hosts.search', label: 'Search hosts' },
+    { id: 'palette.open', label: 'Command palette' }
+  ]
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 bg-canvas text-center">
-      <TerminalSquare size={28} className="text-faint" />
-      <p className="text-sm text-muted">No open tabs</p>
-      <p className="text-xs text-faint">
-        Open a terminal, double-click a host, or use quick connect.
-      </p>
+    <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-5 bg-canvas p-6 text-center">
+      <div className="flex size-12 items-center justify-center rounded-xl border border-line bg-surface text-muted shadow-xs">
+        <TerminalSquare size={22} />
+      </div>
+      <div>
+        <p className="text-sm font-semibold text-fg">No open sessions</p>
+        <p className="mt-1 text-xs text-muted">
+          Open a local terminal, double-click a saved host, or use quick connect.
+        </p>
+      </div>
+      <Button
+        variant="primary"
+        icon={<SquareTerminal size={14} />}
+        onClick={() => useTabs.getState().addLocal()}
+      >
+        New terminal
+      </Button>
+      <dl className="grid grid-cols-[auto_auto] items-center gap-x-4 gap-y-2 text-xs">
+        {hints.map((h) => (
+          <Fragment key={h.id}>
+            <dt className="text-right text-muted">{h.label}</dt>
+            <dd className="text-left">
+              <Kbd>{key(h.id)}</Kbd>
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
     </div>
   )
 }

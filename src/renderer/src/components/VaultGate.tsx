@@ -17,24 +17,34 @@ function errorText(result: Exclude<VaultResult, { ok: true }>): string {
   }
 }
 
+/** Logo app (cùng kiểu với build/icon.png) kèm huy hiệu nhỏ cho biết đang tạo hay mở khoá. */
 function Card({
   icon,
   title,
+  subtitle,
   children
 }: {
   icon: ReactNode
   title: string
+  subtitle: string
   children: ReactNode
 }): React.JSX.Element {
   return (
-    <div className="shadow-elevated w-full max-w-sm rounded-2xl border border-line bg-elevated p-7">
-      <div className="mb-5 flex flex-col items-center gap-3 text-center">
-        <div className="flex size-11 items-center justify-center rounded-xl bg-accent-soft text-accent">
-          {icon}
+    <div className="shadow-elevated animate-dialog-in w-full max-w-sm rounded-2xl border border-line bg-elevated p-7">
+      <div className="mb-6 flex flex-col items-center gap-4 text-center">
+        <div className="relative">
+          <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-b from-[#1c2230] to-[#0d0f12] shadow-md ring-1 ring-black/10 dark:ring-white/10">
+            <span className="font-mono text-lg font-bold tracking-tighter text-[#4c8dff]">
+              &gt;_
+            </span>
+          </div>
+          <div className="absolute -right-1.5 -bottom-1.5 flex size-6 items-center justify-center rounded-full border-2 border-elevated bg-accent-solid text-white">
+            {icon}
+          </div>
         </div>
         <div>
-          <p className="text-xs font-medium tracking-wide text-faint uppercase">Shellhouse</p>
-          <h1 className="text-lg font-semibold text-fg">{title}</h1>
+          <h1 className="text-lg font-semibold tracking-tight text-fg">{title}</h1>
+          <p className="mt-1 text-xs text-muted">{subtitle}</p>
         </div>
       </div>
       {children}
@@ -68,7 +78,11 @@ function CreateVault(): React.JSX.Element {
   }
 
   return (
-    <Card icon={<KeyRound size={20} />} title="Create a master password">
+    <Card
+      icon={<KeyRound size={12} />}
+      title="Welcome to Shellhouse"
+      subtitle="Create a master password to protect your saved credentials."
+    >
       <form className="flex flex-col gap-3" onSubmit={(e) => void submit(e)}>
         <p className="text-xs leading-relaxed text-muted">
           Your master password encrypts every password and SSH key stored in Shellhouse.{' '}
@@ -118,6 +132,8 @@ function UnlockVault(): React.JSX.Element {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+  /** Tăng mỗi lần sai → chạy lại hiệu ứng rung. */
+  const [attempt, setAttempt] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const submit = async (event: SyntheticEvent): Promise<void> => {
@@ -130,12 +146,17 @@ function UnlockVault(): React.JSX.Element {
     setPassword('')
     if (!result.ok) {
       setError(errorText(result))
+      setAttempt((n) => n + 1)
       inputRef.current?.focus()
     }
   }
 
   return (
-    <Card icon={<LockKeyhole size={20} />} title="Shellhouse is locked">
+    <Card
+      icon={<LockKeyhole size={12} />}
+      title="Shellhouse is locked"
+      subtitle="Enter your master password to continue."
+    >
       <form className="flex flex-col gap-3" onSubmit={(e) => void submit(e)}>
         <Input
           ref={inputRef}
@@ -150,9 +171,11 @@ function UnlockVault(): React.JSX.Element {
           }}
         />
         {error && (
-          <Notice tone="danger" testId="vault-error">
-            {error}
-          </Notice>
+          <div key={attempt} className="animate-shake">
+            <Notice tone="danger" testId="vault-error">
+              {error}
+            </Notice>
+          </div>
         )}
         <Button type="submit" variant="primary" disabled={pending} data-testid="vault-submit">
           {pending ? 'Unlocking…' : 'Unlock'}
@@ -178,7 +201,7 @@ export function VaultGate({ children }: { children: ReactNode }): React.JSX.Elem
       {everUnlocked && children}
       {state !== 'unlocked' && (
         <div
-          className="absolute inset-0 z-50 flex items-center justify-center bg-canvas p-6"
+          className="sh-gate-bg absolute inset-0 z-50 flex items-center justify-center p-6"
           data-testid="vault-gate"
           data-vault-state={state ?? 'loading'}
         >

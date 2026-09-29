@@ -234,7 +234,7 @@ export function PromptDialog({
   }
   return (
     <div
-      className="absolute inset-0 z-10 flex items-center justify-center bg-black/30 p-4 backdrop-blur-[1px] dark:bg-black/50"
+      className="bg-overlay animate-fade-in absolute inset-0 z-10 flex items-center justify-center p-4 backdrop-blur-[2px]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) e.preventDefault()
       }}
@@ -248,7 +248,7 @@ export function PromptDialog({
         if (e.key === 'Escape') onAnswer(false, [])
       }}
     >
-      <div className="shadow-elevated w-full max-w-md rounded-xl border border-line bg-elevated p-5">
+      <div className="shadow-elevated animate-dialog-in w-full max-w-md rounded-xl border border-line bg-elevated p-5">
         {/* key = id: mỗi prompt mới có state (ô nhập, checkbox) mới */}
         <Body key={prompt.id} request={prompt.request} onAnswer={onAnswer} />
       </div>

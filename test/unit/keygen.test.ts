@@ -55,7 +55,8 @@ describe('generateVerifiedKey', () => {
       // Ghi nhận: bộ tạo của ssh2 có hỏng thật, và bộ kiểm chứng đã bắt được.
       process.stdout.write(`  (${retried}/300 key phải tạo lại do ssh2 sinh key hỏng)\n`)
     },
-    120_000
+    // ~2 phút trên WSL (gọi ssh-keygen 300 lần) — chừa dư cho máy CI chậm.
+    300_000
   )
 })
 

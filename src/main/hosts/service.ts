@@ -8,7 +8,9 @@ import type {
   HostTree,
   KeySummary
 } from '@shared/hosts'
-import { HOST_COLORS } from '@shared/hosts'
+import { buildGroupTree, groupMoveProblem, type GroupTree } from '@shared/group-tree'
+import { GroupDefaults, HOST_COLORS } from '@shared/hosts'
+import { inheritedDefaults, type GroupWithDefaults, type InheritedDefaults } from '@shared/inherit'
 import type { SavedForward, SavedForwardInput } from '@shared/forwards'
 import { parseQuickConnect } from '@shared/quick-connect'
 import { generateVerifiedKey, type KeyType } from './keygen'
@@ -50,6 +52,8 @@ interface HostRow {
   tags: string
   color: string | null
   last_used_at: number | null
+  favorite: number
+  sort: number
   username: string | null
   auth_type: 'password' | 'key' | 'agent' | null
   has_secret: number | null
@@ -59,6 +63,15 @@ interface HostRow {
 interface HostOptions {
   keyFile?: string
   proxyJump?: string
+  /** Cột port chỉ là giá trị giữ chỗ; port thật lấy từ nhóm (ADR-010). */
+  inheritPort?: boolean
+  /** Bỏ qua jump host kế thừa từ nhóm. */
+  direct?: boolean
+}
+
+function parseDefaults(raw: string): GroupDefaults {
+  const parsed = GroupDefaults.safeParse(parseJson<unknown>(raw, {}))
+  return parsed.success ? parsed.data : {}
 }
 
 function parseJson<T>(raw: string, fallback: T): T {
@@ -96,20 +109,16 @@ export class HostService {
   ) {}
 
   tree(): HostTree {
-    const groups = this.db
-      .prepare(
-        'SELECT id, parent_id, name, sort FROM groups WHERE deleted_at IS NULL ORDER BY sort, name'
-      )
-      .all() as { id: string; parent_id: string | null; name: string; sort: number }[]
+    const groups = this.groupRows()
     const rows = this.db
       .prepare(
         `SELECT h.id, h.group_id, h.label, h.hostname, h.port, h.identity_id, h.jump_host_ids,
                 h.mode, h.options, h.tags,
-                h.color, h.last_used_at, i.username, i.auth_type,
+                h.color, h.last_used_at, h.favorite, h.sort, i.username, i.auth_type,
                 (i.secret_enc IS NOT NULL) AS has_secret, i.key_id
          FROM hosts h LEFT JOIN identities i ON i.id = h.identity_id
          WHERE h.deleted_at IS NULL
-         ORDER BY h.label COLLATE NOCASE`
+         ORDER BY h.sort, h.label COLLATE NOCASE`
       )
       .all() as HostRow[]
     const keys = this.db
@@ -120,12 +129,7 @@ export class HostService {
       .all() as { id: string; name: string; type: string; public_key: string; encrypted: number }[]
 
     return {
-      groups: groups.map((g): GroupSummary => ({
-        id: g.id,
-        parentId: g.parent_id,
-        name: g.name,
-        sort: g.sort
-      })),
+      groups,
       hosts: rows.map((r): HostSummary => {
         const options = parseJson<HostOptions>(r.options, {})
         const auth =
@@ -135,7 +139,7 @@ export class HostService {
           groupId: r.group_id,
           label: r.label,
           hostname: r.hostname,
-          port: r.port,
+          port: options.inheritPort ? null : r.port,
           username: r.username ?? '',
           auth,
           hasPassword: auth === 'password' && r.has_secret === 1,
@@ -144,9 +148,12 @@ export class HostService {
           proxyJump: options.proxyJump ?? null,
           jumpHostIds: parseJson<string[]>(r.jump_host_ids, []),
           mode: r.mode === 'system' ? 'system' : 'builtin',
+          direct: options.direct === true,
           tags: parseJson<string[]>(r.tags, []),
           color: toColor(r.color),
-          lastUsedAt: r.last_used_at
+          lastUsedAt: r.last_used_at,
+          favorite: r.favorite === 1,
+          sort: r.sort
         }
       }),
       keys: keys.map((k): KeySummary => ({
@@ -221,11 +228,13 @@ export class HostService {
       const options: HostOptions = {}
       if (input.keyFile) options.keyFile = input.keyFile
       if (input.proxyJump) options.proxyJump = input.proxyJump
+      if (input.port === null) options.inheritPort = true
+      if (input.direct) options.direct = true
       const values = [
         input.groupId,
         input.label,
         input.hostname,
-        input.port,
+        input.port ?? 22,
         identityId,
         JSON.stringify(input.jumpHostIds),
         input.mode,
@@ -246,10 +255,10 @@ export class HostService {
         this.db
           .prepare(
             `INSERT INTO hosts (group_id, label, hostname, port, identity_id, jump_host_ids, mode,
-                                options, tags, color, updated_at, id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                                options, tags, color, updated_at, id, sort)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           )
-          .run(...values, hostId)
+          .run(...values, hostId, this.nextHostSort(input.groupId))
       }
       return hostId
     })()
@@ -275,33 +284,331 @@ export class HostService {
     })()
   }
 
+  private groupRows(): GroupSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, parent_id, name, sort, defaults FROM groups WHERE deleted_at IS NULL
+         ORDER BY sort, name COLLATE NOCASE`
+      )
+      .all() as {
+      id: string
+      parent_id: string | null
+      name: string
+      sort: number
+      defaults: string
+    }[]
+    return rows.map((r) => ({
+      id: r.id,
+      parentId: r.parent_id,
+      name: r.name,
+      sort: r.sort,
+      defaults: parseDefaults(r.defaults)
+    }))
+  }
+
+  private groupTree(): GroupTree<GroupWithDefaults> {
+    return buildGroupTree(this.groupRows())
+  }
+
+  /** Giá trị kế thừa cho một host (theo nhóm của nó). */
+  private inheritedFor(hostId: string): InheritedDefaults {
+    const row = this.db.prepare('SELECT group_id FROM hosts WHERE id = ?').get(hostId) as
+      { group_id: string | null } | undefined
+    return inheritedDefaults(this.groupTree(), row?.group_id ?? null)
+  }
+
+  /** Host mới: nếu nhóm đã được sắp xếp thủ công thì thêm vào cuối, không thì sort = 0 (theo tên). */
+  private nextHostSort(groupId: string | null): number {
+    const row = this.db
+      .prepare('SELECT MAX(sort) AS m FROM hosts WHERE group_id IS ? AND deleted_at IS NULL')
+      .get(groupId) as { m: number | null }
+    return row.m && row.m > 0 ? row.m + 1 : 0
+  }
+
+  private checkGroupDefaults(defaults: GroupDefaults): void {
+    if (defaults.keyId) {
+      const key = this.db
+        .prepare('SELECT 1 FROM keys WHERE id = ? AND deleted_at IS NULL')
+        .get(defaults.keyId)
+      if (!key) throw new Error('The selected key no longer exists')
+    }
+    for (const id of defaults.jumpHostIds ?? []) {
+      const host = this.db
+        .prepare('SELECT 1 FROM hosts WHERE id = ? AND deleted_at IS NULL')
+        .get(id)
+      if (!host) throw new Error('A selected jump host no longer exists')
+    }
+  }
+
+  /** Kiểm tra vị trí mới của nhóm: không tạo vòng, không quá sâu, không trùng tên cùng cấp. */
+  private checkGroupPlacement(id: string | null, parentId: string | null, name: string): void {
+    const tree = this.groupTree()
+    if (id !== null && !tree.byId.has(id)) throw new Error('The group no longer exists')
+    const problem = groupMoveProblem(tree, id, parentId)
+    if (problem) throw new Error(problem)
+    const clash = tree
+      .children(parentId)
+      .some(
+        (g) => g.id !== id && g.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0
+      )
+    if (clash) throw new Error(`There is already a group named "${name}" here`)
+  }
+
   saveGroup(input: GroupInput): string {
     const now = this.now()
-    if (input.id && input.parentId && this.isDescendant(input.parentId, input.id)) {
-      throw new Error('A group cannot be moved into its own subgroup')
-    }
+    const name = input.name.trim()
+    this.checkGroupPlacement(input.id ?? null, input.parentId, name)
+    if (input.defaults) this.checkGroupDefaults(input.defaults)
+    const defaults = input.defaults ? JSON.stringify(input.defaults) : null
     if (input.id) {
       this.db
-        .prepare('UPDATE groups SET name = ?, parent_id = ?, updated_at = ? WHERE id = ?')
-        .run(input.name, input.parentId, now, input.id)
+        .prepare(
+          `UPDATE groups SET name = ?, parent_id = ?, defaults = COALESCE(?, defaults), updated_at = ?
+           WHERE id = ?`
+        )
+        .run(name, input.parentId, defaults, now, input.id)
       return input.id
     }
     const id = uuidv7(now)
     this.db
-      .prepare('INSERT INTO groups (id, parent_id, name, updated_at) VALUES (?, ?, ?, ?)')
-      .run(id, input.parentId, input.name, now)
+      .prepare(
+        'INSERT INTO groups (id, parent_id, name, defaults, updated_at) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(id, input.parentId, name, defaults ?? '{}', now)
     return id
   }
 
-  /** Xoá nhóm và nhóm con; host bên trong chuyển ra ngoài (không bị xoá). */
+  /** Chuyển nhóm (cùng toàn bộ nhóm con và host bên trong) vào nhóm khác / ra cấp cao nhất. */
+  moveGroup(id: string, parentId: string | null): void {
+    const row = this.db.prepare('SELECT name FROM groups WHERE id = ?').get(id) as
+      { name: string } | undefined
+    if (!row) throw new Error('The group no longer exists')
+    this.checkGroupPlacement(id, parentId, row.name)
+    this.db
+      .prepare('UPDATE groups SET parent_id = ?, updated_at = ? WHERE id = ?')
+      .run(parentId, this.now(), id)
+  }
+
+  /**
+   * Xoá một nhóm mà không mất gì: host và nhóm con bên trong được dời lên nhóm cha của nó (hoặc
+   * ra cấp cao nhất). Nhóm con trùng tên với một nhóm đã có ở cấp trên thì được thêm hậu tố.
+   */
   deleteGroup(id: string): void {
-    this.db.prepare('DELETE FROM groups WHERE id = ?').run(id)
+    this.db.transaction(() => {
+      const row = this.db.prepare('SELECT parent_id FROM groups WHERE id = ?').get(id) as
+        { parent_id: string | null } | undefined
+      if (!row) return
+      const parent = row.parent_id
+      const now = this.now()
+      this.db
+        .prepare('UPDATE hosts SET group_id = ?, updated_at = ? WHERE group_id = ?')
+        .run(parent, now, id)
+      const tree = this.groupTree()
+      const taken = new Set(
+        tree
+          .children(parent)
+          .filter((g) => g.id !== id)
+          .map((g) => g.name.toLocaleLowerCase())
+      )
+      for (const child of tree.children(id)) {
+        let name = child.name
+        for (let n = 2; taken.has(name.toLocaleLowerCase()); n++) name = `${child.name} (${n})`
+        taken.add(name.toLocaleLowerCase())
+        this.db
+          .prepare('UPDATE groups SET parent_id = ?, name = ?, updated_at = ? WHERE id = ?')
+          .run(parent, name, now, child.id)
+      }
+      this.db.prepare('DELETE FROM groups WHERE id = ?').run(id)
+    })()
   }
 
   moveHost(hostId: string, groupId: string | null): void {
-    this.db
-      .prepare('UPDATE hosts SET group_id = ?, updated_at = ? WHERE id = ?')
-      .run(groupId, this.now(), hostId)
+    this.moveHosts([hostId], groupId)
+  }
+
+  /** Chuyển nhiều host vào một nhóm; thêm vào cuối nếu nhóm đích đã được sắp xếp thủ công. */
+  moveHosts(ids: readonly string[], groupId: string | null): void {
+    if (groupId !== null && !this.groupTree().byId.has(groupId))
+      throw new Error('The group no longer exists')
+    const now = this.now()
+    this.db.transaction(() => {
+      const move = this.db.prepare(
+        'UPDATE hosts SET group_id = ?, sort = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL'
+      )
+      for (const id of ids) move.run(groupId, this.nextHostSort(groupId), now, id)
+    })()
+  }
+
+  deleteHosts(ids: readonly string[]): void {
+    this.db.transaction(() => {
+      for (const id of ids) this.deleteHost(id)
+    })()
+  }
+
+  setFavorite(ids: readonly string[], favorite: boolean): void {
+    const now = this.now()
+    this.db.transaction(() => {
+      const stmt = this.db.prepare('UPDATE hosts SET favorite = ?, updated_at = ? WHERE id = ?')
+      for (const id of ids) stmt.run(favorite ? 1 : 0, now, id)
+    })()
+  }
+
+  /** Thêm / bỏ tag trên nhiều host (giữ nguyên các tag khác). */
+  tagHosts(ids: readonly string[], add: readonly string[], remove: readonly string[]): void {
+    const now = this.now()
+    const drop = new Set(remove.map((t) => t.toLowerCase()))
+    this.db.transaction(() => {
+      for (const id of ids) {
+        const row = this.db.prepare('SELECT tags FROM hosts WHERE id = ?').get(id) as
+          { tags: string } | undefined
+        if (!row) continue
+        const tags = parseJson<string[]>(row.tags, []).filter((t) => !drop.has(t.toLowerCase()))
+        for (const t of add)
+          if (!tags.some((x) => x.toLowerCase() === t.toLowerCase())) tags.push(t)
+        if (tags.length > 20) throw new Error('A host can have at most 20 tags')
+        this.db
+          .prepare('UPDATE hosts SET tags = ?, updated_at = ? WHERE id = ?')
+          .run(JSON.stringify(tags), now, id)
+      }
+    })()
+  }
+
+  /**
+   * Sắp xếp thủ công: `orderedIds` là thứ tự mới của các host trong nhóm `groupId` (host từ nhóm
+   * khác được chuyển vào). Host của nhóm không có trong danh sách được xếp sau, giữ thứ tự cũ.
+   */
+  reorderHosts(groupId: string | null, orderedIds: readonly string[]): void {
+    const now = this.now()
+    this.db.transaction(() => {
+      const rest = (
+        this.db
+          .prepare(
+            `SELECT id FROM hosts WHERE group_id IS ? AND deleted_at IS NULL
+             ORDER BY sort, label COLLATE NOCASE`
+          )
+          .all(groupId) as { id: string }[]
+      )
+        .map((r) => r.id)
+        .filter((id) => !orderedIds.includes(id))
+      const stmt = this.db.prepare(
+        'UPDATE hosts SET group_id = ?, sort = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL'
+      )
+      ;[...orderedIds, ...rest].forEach((id, i) => stmt.run(groupId, i + 1, now, id))
+    })()
+  }
+
+  /** Sắp xếp thủ công các nhóm cùng cấp (và chuyển nhóm vào cấp này nếu cần). */
+  reorderGroups(parentId: string | null, orderedIds: readonly string[]): void {
+    const now = this.now()
+    this.db.transaction(() => {
+      for (const id of orderedIds) {
+        const row = this.db.prepare('SELECT name, parent_id FROM groups WHERE id = ?').get(id) as
+          { name: string; parent_id: string | null } | undefined
+        if (!row) throw new Error('The group no longer exists')
+        if (row.parent_id !== parentId) this.moveGroup(id, parentId)
+      }
+      const rest = this.groupTree()
+        .children(parentId)
+        .map((g) => g.id)
+        .filter((id) => !orderedIds.includes(id))
+      const stmt = this.db.prepare('UPDATE groups SET sort = ?, updated_at = ? WHERE id = ?')
+      ;[...orderedIds, ...rest].forEach((id, i) => stmt.run(i + 1, now, id))
+    })()
+  }
+
+  /** Nhân bản host (kể cả mật khẩu / key trong vault và forward đã lưu). Trả về id mới. */
+  duplicateHost(id: string): string {
+    const now = this.now()
+    return this.db.transaction(() => {
+      const host = this.db
+        .prepare('SELECT * FROM hosts WHERE id = ? AND deleted_at IS NULL')
+        .get(id) as Record<string, unknown> | undefined
+      if (!host) throw new Error('Host not found')
+      const newId = uuidv7(now)
+      let identityId: string | null = null
+      if (typeof host['identity_id'] === 'string') {
+        const identity = this.db
+          .prepare('SELECT * FROM identities WHERE id = ?')
+          .get(host['identity_id']) as Record<string, unknown> | undefined
+        if (identity) {
+          identityId = uuidv7(now)
+          // Secret được mã hoá gắn với id identity (AD) → giải mã rồi mã hoá lại cho id mới.
+          let secretEnc: Buffer | null = null
+          if (identity['secret_enc'] instanceof Buffer) {
+            const secret = this.vault.decrypt(
+              { table: 'identities', id: String(identity['id']), field: 'secret_enc' },
+              identity['secret_enc']
+            )
+            try {
+              secretEnc = this.vault.encryptString(
+                { table: 'identities', id: identityId, field: 'secret_enc' },
+                secret.revealString()
+              )
+            } finally {
+              secret.dispose()
+            }
+          }
+          this.db
+            .prepare(
+              `INSERT INTO identities (id, name, username, auth_type, secret_enc, key_id, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+              identityId,
+              identity['name'],
+              identity['username'],
+              identity['auth_type'],
+              secretEnc,
+              identity['key_id'],
+              now
+            )
+        }
+      }
+      const label = this.uniqueLabel(String(host['label']))
+      this.db
+        .prepare(
+          `INSERT INTO hosts (id, group_id, label, hostname, port, identity_id, jump_host_ids, mode,
+                              options, tags, color, favorite, sort, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
+        )
+        .run(
+          newId,
+          host['group_id'],
+          label,
+          host['hostname'],
+          host['port'],
+          identityId,
+          host['jump_host_ids'],
+          host['mode'],
+          host['options'],
+          host['tags'],
+          host['color'],
+          this.nextHostSort((host['group_id'] as string | null) ?? null),
+          now
+        )
+      for (const f of this.listForwards(id))
+        this.saveForward({
+          hostId: newId,
+          kind: f.kind,
+          bindAddr: f.bindAddr,
+          bindPort: f.bindPort,
+          destHost: f.destHost,
+          destPort: f.destPort,
+          autoStart: f.autoStart
+        })
+      return newId
+    })()
+  }
+
+  private uniqueLabel(base: string): string {
+    const root = base.replace(/ \(copy(?: \d+)?\)$/, '')
+    for (let n = 1; ; n++) {
+      const label = n === 1 ? `${root} (copy)` : `${root} (copy ${n})`
+      const taken = this.db
+        .prepare('SELECT 1 FROM hosts WHERE label = ? COLLATE NOCASE AND deleted_at IS NULL')
+        .get(label)
+      if (!taken) return label
+    }
   }
 
   /** Lưu private key vào vault. Key có passphrase: passphrase nhập ở host hoặc khi kết nối. */
@@ -434,8 +741,22 @@ export class HostService {
       for (const id of ids) addSaved(id)
       return chain
     }
-    const proxyJump = parseJson<HostOptions>(row.options, {}).proxyJump
-    if (!proxyJump) return chain
+    const options = parseJson<HostOptions>(row.options, {})
+    const proxyJump = options.proxyJump
+    if (!proxyJump) {
+      if (options.direct) return chain
+      // Jump host kế thừa từ nhóm. Bỏ qua chính host này và các host đang trên đường đi
+      // (bastion nằm trong chính nhóm có jump = bastion thì kết nối thẳng), và host đã bị xoá.
+      const inherited = this.inheritedFor(hostId).jumpHostIds?.value ?? []
+      for (const id of inherited) {
+        if (visiting.has(id)) continue
+        const exists = this.db
+          .prepare('SELECT 1 FROM hosts WHERE id = ? AND deleted_at IS NULL')
+          .get(id)
+        if (exists) addSaved(id)
+      }
+      return chain
+    }
     for (const entry of proxyJump
       .split(',')
       .map((e) => e.trim())
@@ -581,7 +902,12 @@ export class HostService {
         }
       | undefined
     if (!row) throw new Error('Host not found')
-    if (!row.username) throw new Error('The host has no username')
+    const options = parseJson<HostOptions>(row.options, {})
+    const inherited = this.inheritedFor(hostId)
+    const username = row.username || inherited.username?.value
+    if (!username)
+      throw new Error(`"${row.label}" has no username — set one on the host or on its group`)
+    const port = options.inheritPort ? (inherited.port?.value ?? 22) : row.port
 
     const credentials: ResolvedHost['credentials'] = {}
     const secret =
@@ -593,6 +919,23 @@ export class HostService {
         : null
     try {
       if (row.auth_type === 'password' && secret) credentials.password = secret.revealString()
+      // Automatic: thử thêm key mặc định của nhóm (nếu key vẫn còn trong vault).
+      if (row.auth_type === 'agent' && inherited.keyId) {
+        const groupKey = this.db
+          .prepare('SELECT name, private_key_enc FROM keys WHERE id = ? AND deleted_at IS NULL')
+          .get(inherited.keyId.value) as { name: string; private_key_enc: Buffer } | undefined
+        if (groupKey) {
+          const pem = this.vault.decrypt(
+            { table: 'keys', id: inherited.keyId.value, field: 'private_key_enc' },
+            groupKey.private_key_enc
+          )
+          try {
+            credentials.privateKey = { data: pem.revealString(), label: groupKey.name }
+          } finally {
+            pem.dispose()
+          }
+        }
+      }
       if (row.auth_type === 'key' && row.key_id) {
         const key = this.db
           .prepare('SELECT name, private_key_enc FROM keys WHERE id = ?')
@@ -616,24 +959,12 @@ export class HostService {
       secret?.dispose()
     }
 
-    const options = parseJson<HostOptions>(row.options, {})
     return {
       label: row.label,
-      target: { host: row.hostname, port: row.port, username: row.username },
+      target: { host: row.hostname, port, username },
       credentials,
       ...(options.keyFile ? { keyFiles: [options.keyFile] } : {})
     }
-  }
-
-  private isDescendant(candidate: string, ancestor: string): boolean {
-    let current: string | null = candidate
-    for (let depth = 0; current && depth < 100; depth++) {
-      if (current === ancestor) return true
-      const row = this.db.prepare('SELECT parent_id FROM groups WHERE id = ?').get(current) as
-        { parent_id: string | null } | undefined
-      current = row?.parent_id ?? null
-    }
-    return false
   }
 }
 
