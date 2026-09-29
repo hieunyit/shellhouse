@@ -6,6 +6,8 @@ import { Button, Checkbox, Field, Input, Notice, SectionTitle, Select } from '..
 export function SecuritySection(): React.JSX.Element {
   const { settings, update } = useSettings()
   const s = settings.security
+  /** Giá trị vừa bấm, chờ main lưu xong (null = hiển thị theo trạng thái thật). */
+  const [rememberPending, setRememberPending] = useState<boolean | null>(null)
   const [security, setSecurity] = useState<VaultSecurity | null>(null)
   const [version, setVersion] = useState(0)
   const [current, setCurrent] = useState('')
@@ -17,7 +19,9 @@ export function SecuritySection(): React.JSX.Element {
   useEffect(() => {
     let cancelled = false
     void window.shellhouse.vaultSecurity().then((v) => {
-      if (!cancelled) setSecurity(v)
+      if (cancelled) return
+      setSecurity(v)
+      setRememberPending(null) // trạng thái thật đã về → bỏ giá trị tạm (không nhấp nháy)
     })
     return () => {
       cancelled = true
@@ -92,9 +96,12 @@ export function SecuritySection(): React.JSX.Element {
         <Checkbox
           data-testid="setting-remember"
           disabled={!security?.rememberAvailable}
-          checked={security?.rememberEnabled ?? false}
+          checked={rememberPending ?? security?.rememberEnabled ?? false}
           onChange={(e) => {
-            void window.shellhouse.setRememberOnDevice(e.target.checked).then((r) => {
+            // Đổi ngay trên giao diện; lưu vào keychain chạy nền, lỗi thì trả lại như cũ.
+            const next = e.target.checked
+            setRememberPending(next)
+            void window.shellhouse.setRememberOnDevice(next).then((r) => {
               if (!r.ok) say(false, r.message)
               setVersion((v) => v + 1)
             })
