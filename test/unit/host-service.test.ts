@@ -86,6 +86,7 @@ describe('HostService', () => {
     service.saveHost({ ...base, id, auth: 'password', password: '' })
     expect(service.tree().hosts[0]?.hasPassword).toBe(false)
     expect(service.resolveForConnect(id).credentials.password).toBeUndefined()
+    db.close() // Windows không cho xoá file DB đang mở khi dọn thư mục tạm
   })
 
   it('vault khoá → không lưu được mật khẩu, không giải mã được', async () => {

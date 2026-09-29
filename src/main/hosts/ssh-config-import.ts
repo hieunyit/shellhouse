@@ -1,5 +1,5 @@
 import { existsSync, globSync, readFileSync } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute, join, normalize } from 'node:path'
 // Chỉ dùng named export: gói này có cả bản ESM lẫn CJS, và default export của hai bản KHÁC nhau
 // (bản CJS mà Electron nạp trả về namespace) → `SSHConfig.DIRECTIVE` sẽ là undefined.
 import { LineType, parse, type SSHConfig } from 'ssh-config'
@@ -8,7 +8,9 @@ import { Hostname, Username, type ImportCandidate } from '@shared/hosts'
 const MAX_INCLUDE_DEPTH = 5
 
 function expandHome(path: string, home: string): string {
-  return path.replace(/^~(?=$|[\\/])/, home).replace(/%d/g, home)
+  const expanded = path.replace(/^~(?=$|[\\/])/, home).replace(/%d/g, home)
+  // Chuẩn hoá sau khi ghép: trên Windows `~/.ssh/id` thành `C:\Users\me\.ssh\id`, không lẫn `/`.
+  return expanded === path ? path : normalize(expanded)
 }
 
 /**

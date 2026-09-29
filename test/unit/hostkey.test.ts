@@ -32,7 +32,9 @@ describe.skipIf(!hasSshKeygen())('hostkey so với ssh-keygen', () => {
     expect(keyTypeOf(blob)).toBe(pub[0])
     const out = execFileSync('ssh-keygen', ['-lv', '-E', 'sha256', '-f', `${keyPath}.pub`], {
       encoding: 'utf8'
-    }).trimEnd()
+    })
+      .replace(/\r\n/g, '\n') // ssh-keygen trên Windows in CRLF
+      .trimEnd()
     const [summary, ...art] = out.split('\n')
     expect(summary).toContain(fingerprintSha256(blob))
     expect(summary).toContain(String(keyLabel(blob).bits))
