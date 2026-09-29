@@ -51,6 +51,12 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Allow Electron's sandbox (Ubuntu 24.04 AppArmor)
+        if: runner.os == 'Linux'
+        # Ubuntu 24.04 chặn user namespace không đặc quyền → sandbox Chromium không khởi động được.
+        # Chỉ nới trên máy CI tạm thời; bản phát hành không đổi gì.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: E2E (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum pnpm test:e2e

@@ -4,7 +4,8 @@ export default defineConfig({
   timeout: 30_000,
   retries: process.env['CI'] ? 1 : 0,
   workers: 1,
-  reporter: process.env['CI'] ? [['list'], ['html', { open: 'never' }]] : 'list',
+  // CI: reporter `github` biến lỗi thành annotation — đọc được trên trang GitHub không cần tải log.
+  reporter: process.env['CI'] ? [['list'], ['github'], ['html', { open: 'never' }]] : 'list',
   use: { trace: 'retain-on-failure' },
   projects: [
     { name: 'e2e', testDir: 'test/e2e' },

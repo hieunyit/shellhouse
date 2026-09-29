@@ -124,6 +124,12 @@ jobs:
           for f in "${files[@]}"; do node scripts/sign-update.mjs "$f"; done
 
       # Bản đóng gói thật phải khởi động được, nạp được native module (bắt lỗi asar/unpack/fuses).
+      - name: Allow Electron's sandbox (Ubuntu 24.04 AppArmor)
+        if: runner.os == 'Linux'
+        # Ubuntu 24.04 chặn user namespace không đặc quyền → sandbox Chromium không khởi động được.
+        # Chỉ nới trên máy CI tạm thời; bản phát hành không đổi gì.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Smoke test packaged app (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run --auto-servernum pnpm test:package
