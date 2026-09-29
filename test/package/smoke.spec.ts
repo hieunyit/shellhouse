@@ -52,7 +52,13 @@ test('bản đóng gói: khởi động, tạo vault, native module + Session Ho
     APPDATA: join(home, 'appdata'),
     SHELLHOUSE_TEST_HOOKS: '1' // phải bị bỏ qua trên bản đóng gói
   }
-  child = spawn(binary ?? '', ['--remote-debugging-port=0'], { env, stdio: 'pipe' })
+  // --user-data-dir: cách cô lập dữ liệu có hiệu lực trên mọi OS (Windows bỏ qua biến APPDATA —
+  // không có nó, test sẽ mở vault THẬT của người dùng).
+  const userData = join(home, 'userdata')
+  child = spawn(binary ?? '', ['--remote-debugging-port=0', `--user-data-dir=${userData}`], {
+    env,
+    stdio: 'pipe'
+  })
   const wsUrl = await new Promise<string>((ok, fail) => {
     let err = ''
     const timer = setTimeout(() => {
@@ -123,6 +129,6 @@ test('bản đóng gói: khởi động, tạo vault, native module + Session Ho
 
   const info = await page.evaluate(() => window.shellhouse.getInfo())
   expect(info.version).toMatch(/^\d+\.\d+\.\d+/)
-  if (process.platform === 'linux')
-    expect(readdirSync(join(home, 'config')).some((d) => /shellhouse/i.test(d))).toBe(true)
+  // Dữ liệu phải nằm trong thư mục tạm của test, không phải hồ sơ thật của người dùng.
+  expect(readdirSync(userData)).toContain('shellhouse.db')
 })
