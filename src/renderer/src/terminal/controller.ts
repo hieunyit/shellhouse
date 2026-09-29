@@ -19,6 +19,7 @@ import type { ITerminalOptions } from '@xterm/xterm'
 import { useHostStatus } from '../stores/host-status'
 import { SessionClient } from './session-client'
 import { broadcastInput } from './broadcast'
+import { tabTitle } from '@shared/tab-title'
 import { windowsPty } from '../lib/platform'
 
 export interface ActivePrompt {
@@ -172,7 +173,8 @@ export class TerminalController {
       term.onResize(({ cols, rows }) => {
         this.client?.resize(cols, rows)
       }),
-      term.onTitleChange((title) => {
+      term.onTitleChange((raw) => {
+        const title = tabTitle(raw)
         if (title) this.events.onTitle(title)
       })
     )

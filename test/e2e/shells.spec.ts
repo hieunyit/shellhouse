@@ -26,16 +26,24 @@ test('menu chọn shell: mở đúng shell đã chọn, tab mang tên shell', as
     await expect(page.locator(`[data-testid="tab"][data-tab-id="${cmd}"]`)).toContainText(
       'Command Prompt'
     )
+    // ConPTY đặt tiêu đề = đường dẫn exe → tab vẫn giữ tên shell, không hiện "C:\...\cmd.exe".
+    await page.waitForTimeout(1_000)
+    await expect(page.locator(`[data-testid="tab"][data-tab-id="${cmd}"]`)).not.toContainText(
+      '.exe'
+    )
     await sendLine(page, cmd, 'echo SHELL=%COMSPEC%')
     await waitForText(page, cmd, 'cmd.exe')
 
     // WSL: chỉ khi máy có ít nhất một bản phân phối.
     const wsl = page.locator('[data-testid^="menu-shell-wsl:"]')
     await page.getByTestId('new-tab-menu').click()
-    const count = await wsl.count()
+    // Đọc id TRƯỚC khi đóng menu (đóng rồi thì phần tử không còn).
+    const ids = await wsl.evaluateAll((els) =>
+      els.map((e) => (e.getAttribute('data-testid') ?? '').replace('menu-shell-', ''))
+    )
     await page.keyboard.press('Escape')
-    if (count > 0) {
-      const id = ((await wsl.first().getAttribute('data-testid')) ?? '').replace('menu-shell-', '')
+    const id = ids[0]
+    if (id) {
       const tab = await openShell(page, id)
       await sendLine(page, tab, 'echo KERNEL=$(uname -s)')
       await waitForText(page, tab, 'KERNEL=Linux', 20_000)
