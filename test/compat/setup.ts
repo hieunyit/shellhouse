@@ -46,7 +46,24 @@ function banner(port: number): Promise<string> {
   })
 }
 
+async function waitForServers(): Promise<void> {
+  const deadline = Date.now() + 60_000
+  for (const port of PORTS) {
+    while (!(await banner(port)).startsWith('SSH-')) {
+      if (Date.now() > deadline) throw new Error(`Server ở cổng ${port} không lên`)
+      await new Promise((r) => setTimeout(r, 500))
+    }
+  }
+}
+
+/** COMPAT_EXTERNAL=1: dùng server + key đã có (.run/), ví dụ chạy trên Windows tới Docker trong WSL. */
+const external = process.env['COMPAT_EXTERNAL'] === '1'
+
 export async function setup(): Promise<void> {
+  if (external) {
+    await waitForServers()
+    return
+  }
   rmSync(RUN, { recursive: true, force: true })
   mkdirSync(RUN, { recursive: true })
   for (const [type, bits] of [
@@ -71,15 +88,9 @@ export async function setup(): Promise<void> {
     ['ed25519', 'rsa'].map((t) => readFileSync(join(RUN, `id_${t}.pub`), 'utf8')).join('')
   )
   compose('up', '-d', '--build', '--force-recreate', '--remove-orphans')
-  const deadline = Date.now() + 60_000
-  for (const port of PORTS) {
-    while (!(await banner(port)).startsWith('SSH-')) {
-      if (Date.now() > deadline) throw new Error(`Server ở cổng ${port} không lên`)
-      await new Promise((r) => setTimeout(r, 500))
-    }
-  }
+  await waitForServers()
 }
 
 export function teardown(): void {
-  if (process.env['KEEP_COMPAT'] !== '1') compose('down', '--remove-orphans')
+  if (!external && process.env['KEEP_COMPAT'] !== '1') compose('down', '--remove-orphans')
 }
