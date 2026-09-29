@@ -178,6 +178,8 @@ export const ImportCandidate = z.object({
   label: z.string().optional(),
   /** Đường dẫn nhóm (MobaXterm: thư mục bookmark) — tạo nhóm lồng nhau khi nhập. */
   group: z.array(z.string()).optional(),
+  /** Tag có sẵn trong nguồn (CSV). */
+  tags: z.array(z.string()).optional(),
   hostname: z.string(),
   port: z.number().int(),
   username: z.string().nullable(),
@@ -190,14 +192,17 @@ export const ImportCandidate = z.object({
 })
 export type ImportCandidate = z.infer<typeof ImportCandidate>
 
-export const MobaScanResult = z.object({
+/** Kết quả quét file nhập (MobaXterm.ini, CSV). */
+export const FileImportScan = z.object({
   /** File đã đọc; null = không tìm thấy / người dùng huỷ chọn. */
   file: z.string().nullable(),
   candidates: z.array(ImportCandidate),
   /** Phiên không phải SSH bị bỏ qua, theo kiểu ("RDP" → 2). */
-  ignored: z.record(z.string(), z.number().int())
+  ignored: z.record(z.string(), z.number().int()),
+  /** Cột chứa bí mật đã bị bỏ qua (CSV có cột Password…). */
+  secretColumns: z.array(z.string()).optional()
 })
-export type MobaScanResult = z.infer<typeof MobaScanResult>
+export type FileImportScan = z.infer<typeof FileImportScan>
 
 export const MutationResult = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), id: z.string() }),

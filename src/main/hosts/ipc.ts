@@ -4,6 +4,7 @@ import { app, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electr
 import log from 'electron-log/main'
 import type { ImportCandidate, MutationResult } from '@shared/hosts'
 import { handle } from '../ipc/router'
+import { scanCsv } from './csv-import'
 import { decodeMobaIni, scanMobaXterm } from './mobaxterm-import'
 import type { HostService } from './service'
 import { scanSshConfig } from './ssh-config-import'
@@ -90,7 +91,7 @@ function importCandidates(
         proxyJump: c.proxyJump,
         jumpHostIds: [],
         mode: 'builtin',
-        tags: [tag],
+        tags: [...new Set([tag, ...(c.tags ?? [])])],
         color: null
       })
       imported++
@@ -323,6 +324,39 @@ export function registerHostIpc(
   handle('mobaxterm:import', isTrustedSender, (aliases) => {
     if (!mobaFile) throw new Error('Choose a MobaXterm file first')
     const result = importCandidates(service, scanMoba(mobaFile).candidates, aliases, 'mobaxterm')
+    notifyChanged()
+    return result
+  })
+
+  // CSV (Termius…): giống MobaXterm — main giữ đường dẫn file đã chọn.
+  let csvFile: string | null = null
+  const scanCsvFile = (file: string) => {
+    if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error('The file is too large')
+    return scanCsv(decodeMobaIni(readFileSync(file)), {
+      existingLabels: service.tree().hosts.map((h) => h.label),
+      defaultUser: currentUser()
+    })
+  }
+  handle('csv:scan', isTrustedSender, async () => {
+    const window = getWindow()
+    const options = {
+      title: 'Choose a CSV file with hosts',
+      filters: [
+        { name: 'CSV', extensions: ['csv', 'txt'] },
+        { name: 'All files', extensions: ['*'] }
+      ],
+      properties: ['openFile'] as 'openFile'[]
+    }
+    const picked = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options)
+    csvFile = picked.canceled ? null : (picked.filePaths[0] ?? null)
+    if (!csvFile) return { file: null, candidates: [], ignored: {} }
+    return { file: csvFile, ...scanCsvFile(csvFile) }
+  })
+  handle('csv:import', isTrustedSender, (aliases) => {
+    if (!csvFile) throw new Error('Choose a CSV file first')
+    const result = importCandidates(service, scanCsvFile(csvFile).candidates, aliases, 'csv')
     notifyChanged()
     return result
   })

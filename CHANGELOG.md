@@ -19,6 +19,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   tab is visible. Can be turned off in Settings → Terminal.
 - SFTP: upload and download whole folders (button, or drag a folder from Explorer/Finder).
   Symbolic links inside are skipped; an existing folder is only merged after you confirm.
+- Import hosts from CSV (Termius export or any spreadsheet): columns are matched by name,
+  groups become nested groups and tags are kept. Password columns are never imported.
 
 ### Changed
 

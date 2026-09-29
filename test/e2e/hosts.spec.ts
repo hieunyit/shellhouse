@@ -210,6 +210,30 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     await baseExpect(
       page.locator('[data-testid="host-row"][data-host-label="pg-main"]')
     ).toContainText('postgres@db.example.com')
+
+    // CSV (kiểu Termius): cột Password bị bỏ qua.
+    const csv = join(home, 'termius.csv')
+    writeFileSync(
+      csv,
+      'Groups,Label,Tags,Hostname/IP,Protocol,Port,Username,Password\n' +
+        'Staging,api-stg,api,api.stg.example.com,ssh,22,ubuntu,NOT-IMPORTED\n'
+    )
+    await app.evaluate(({ dialog }, f) => {
+      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [f] })
+    }, csv)
+    await page.getByTestId('import-ssh-config').click()
+    await dialog.getByTestId('import-source-csv').click()
+    await dialog.getByTestId('import-choose-file').click()
+    await baseExpect(dialog.getByTestId('import-secrets-skipped')).toContainText('Password')
+    await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toContainText(
+      'ubuntu@api.stg.example.com'
+    )
+    await dialog.getByTestId('import-run').click()
+    await baseExpect(dialog.getByTestId('import-result')).toContainText('Imported 1 host')
+    await dialog.getByRole('button', { name: 'Done' }).click()
+    await baseExpect(
+      page.locator('[data-testid="host-row"][data-host-label="api-stg"]')
+    ).toContainText('ubuntu@api.stg.example.com')
   } finally {
     await app.close()
     rmSync(home, { recursive: true, force: true })

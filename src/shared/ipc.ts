@@ -6,7 +6,7 @@ import {
   HostInput,
   HostTree,
   ImportCandidate,
-  MobaScanResult,
+  FileImportScan,
   MutationResult
 } from './hosts'
 import { SavedForward, SavedForwardInput } from './forwards'
@@ -151,8 +151,14 @@ export const invokeContract = {
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   /** true = cho người dùng chọn file; false = vị trí mặc định (%APPDATA%\MobaXterm). */
-  'mobaxterm:scan': { args: z.tuple([z.boolean()]), result: MobaScanResult },
+  'mobaxterm:scan': { args: z.tuple([z.boolean()]), result: FileImportScan },
   /** Nhập từ file vừa quét (main giữ đường dẫn — renderer không truyền đường dẫn). */
+  /** CSV (Termius…): luôn cho người dùng chọn file. */
+  'csv:scan': { args: z.tuple([]), result: FileImportScan },
+  'csv:import': {
+    args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
+    result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
+  },
   'mobaxterm:import': {
     args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
@@ -262,7 +268,9 @@ export interface ShellhouseApi {
   deleteKey(id: string): Promise<MutationResult>
   scanSshConfig(): Promise<ImportCandidate[]>
   importSshConfig(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
-  scanMobaXterm(pick: boolean): Promise<MobaScanResult>
+  scanMobaXterm(pick: boolean): Promise<FileImportScan>
+  scanCsv(): Promise<FileImportScan>
+  importCsv(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
   importMobaXterm(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
   onHostsChanged(listener: () => void): () => void
   listForwards(hostId: string): Promise<SavedForward[]>

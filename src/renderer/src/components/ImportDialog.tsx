@@ -3,20 +3,23 @@ import { FolderOpen } from 'lucide-react'
 import type { ImportCandidate } from '@shared/hosts'
 import { Button, Modal, Notice, Segmented } from './ui'
 
-type Source = 'ssh-config' | 'mobaxterm'
+type Source = 'ssh-config' | 'mobaxterm' | 'csv'
 
 interface Scan {
   candidates: ImportCandidate[]
   /** MobaXterm: file đã đọc (null = chưa có file). */
   file?: string | null
-  /** MobaXterm: phiên không phải SSH bị bỏ qua. */
+  /** MobaXterm / CSV: phiên không phải SSH bị bỏ qua. */
   ignored?: Record<string, number>
+  /** CSV: cột chứa bí mật (Password…) đã bị bỏ qua. */
+  secretColumns?: string[]
 }
 
 const DESCRIPTION: Record<Source, string> = {
   'ssh-config': 'Wildcard patterns are skipped. Nothing in the file is executed.',
   mobaxterm:
-    'SSH sessions and their folders are imported. Saved passwords are never read from MobaXterm.'
+    'SSH sessions and their folders are imported. Saved passwords are never read from MobaXterm.',
+  csv: 'Termius or spreadsheet export. Columns are matched by name; passwords are never imported.'
 }
 
 function cleanError(e: unknown): string {
@@ -52,9 +55,20 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
   }, [])
 
   const load = (next: Source, pick: boolean): void => {
-    setScan(null)
     setError(null)
-    apply(next === 'ssh-config' ? scanSshConfig() : window.shellhouse.scanMobaXterm(pick))
+    // CSV: không có vị trí mặc định — chờ người dùng chọn file.
+    if (next === 'csv' && !pick) {
+      setScan({ candidates: [], file: null })
+      return
+    }
+    setScan(null)
+    apply(
+      next === 'ssh-config'
+        ? scanSshConfig()
+        : next === 'csv'
+          ? window.shellhouse.scanCsv()
+          : window.shellhouse.scanMobaXterm(pick)
+    )
   }
 
   useEffect(() => {
@@ -74,7 +88,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
       const { imported, skipped } =
         source === 'ssh-config'
           ? await window.shellhouse.importSshConfig(aliases)
-          : await window.shellhouse.importMobaXterm(aliases)
+          : source === 'csv'
+            ? await window.shellhouse.importCsv(aliases)
+            : await window.shellhouse.importMobaXterm(aliases)
       setResult(
         `Imported ${imported} host${imported === 1 ? '' : 's'}.` +
           (skipped.length ? ` Skipped: ${skipped.join(', ')}.` : '')
@@ -120,14 +136,15 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
             testIdPrefix="import-source"
             options={[
               { value: 'ssh-config', label: '~/.ssh/config' },
-              { value: 'mobaxterm', label: 'MobaXterm' }
+              { value: 'mobaxterm', label: 'MobaXterm' },
+              { value: 'csv', label: 'CSV / Termius' }
             ]}
             onChange={(next) => {
               setSource(next)
               load(next, false)
             }}
           />
-          {source === 'mobaxterm' && (
+          {source !== 'ssh-config' && (
             <>
               <span
                 className="min-w-0 flex-1 truncate font-mono text-xs text-faint"
@@ -141,7 +158,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                 icon={<FolderOpen size={13} />}
                 data-testid="import-choose-file"
                 onClick={() => {
-                  load('mobaxterm', true)
+                  load(source, true)
                 }}
               >
                 Choose file…
@@ -162,12 +179,20 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
             ? 'No hosts found in ~/.ssh/config.'
             : scan?.file
               ? 'No SSH sessions found in this file.'
-              : 'MobaXterm.ini was not found in the usual place. Choose the file — portable MobaXterm keeps it next to MobaXterm.exe.'}
+              : source === 'csv'
+                ? 'Choose a CSV file. In Termius: export your hosts as CSV. A header row with Hostname (or Host / IP) is required; Label, Port, Username, Group and Tags are used when present.'
+                : 'MobaXterm.ini was not found in the usual place. Choose the file — portable MobaXterm keeps it next to MobaXterm.exe.'}
         </p>
       )}
       {!result && ignored.length > 0 && (
         <p className="text-xs text-faint" data-testid="import-ignored">
           Not imported (not SSH): {ignored.map(([kind, n]) => `${n} ${kind}`).join(', ')}.
+        </p>
+      )}
+      {!result && (scan?.secretColumns?.length ?? 0) > 0 && (
+        <p className="text-xs text-faint" data-testid="import-secrets-skipped">
+          Ignored columns with secrets: {scan?.secretColumns?.join(', ')}. Add passwords or keys
+          after importing.
         </p>
       )}
       {candidates && candidates.length > 0 && !result && (
