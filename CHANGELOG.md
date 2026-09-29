@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.1.0-beta.1] - 2026-09-29
+
 ### Added
 
 - Edit files on a server with your own editor: double-click a file (or **Edit**) in the SFTP
