@@ -63,7 +63,7 @@ function Item({
 /** Thanh số liệu server dưới terminal SSH (MobaXterm-style). */
 export function ServerStatsBar({ stats }: { stats: ServerStats }): React.JSX.Element {
   const mem = stats.memTotal > 0 ? (stats.memUsed / stats.memTotal) * 100 : 0
-  const disk = stats.diskTotal > 0 ? (stats.diskUsed / stats.diskTotal) * 100 : 0
+  const disk = stats.diskPercent
   return (
     <div
       className="@container flex h-6 shrink-0 items-center gap-4 overflow-hidden border-t border-line bg-surface px-3 text-[11px] whitespace-nowrap text-muted tabular-nums"
@@ -81,15 +81,23 @@ export function ServerStatsBar({ stats }: { stats: ServerStats }): React.JSX.Ele
         </span>
         <Meter percent={stats.cpu ?? 0} />
       </Item>
-      <Item icon={<MemoryStick size={12} />} title="Memory used / total" testId="stats-mem">
+      <Item
+        icon={<MemoryStick size={12} />}
+        title={`Memory: ${Math.round(mem)}% used (${bytes(stats.memTotal - stats.memUsed)} available)`}
+        testId="stats-mem"
+      >
         <span className={level(mem)}>
           {bytes(stats.memUsed)} / {bytes(stats.memTotal)}
         </span>
         <Meter percent={mem} />
       </Item>
       {stats.diskTotal > 0 && (
-        <Item icon={<HardDrive size={12} />} title="Disk used on /" testId="stats-disk">
-          <span className={level(disk)}>{Math.round(disk)}%</span>
+        <Item
+          icon={<HardDrive size={12} />}
+          title={`Disk /: ${bytes(stats.diskUsed)} used of ${bytes(stats.diskTotal)} (same % as df)`}
+          testId="stats-disk"
+        >
+          <span className={level(disk)}>{disk}%</span>
           <span className="hidden text-faint @lg:inline">of {bytes(stats.diskTotal)}</span>
         </Item>
       )}

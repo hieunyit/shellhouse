@@ -27,6 +27,7 @@ describe('server stats', () => {
       memTotal: 4028232 * 1024,
       diskUsed: 12119271 * 1024,
       diskTotal: 30298176 * 1024,
+      diskAvail: 16609512 * 1024,
       rxBytes: 5000,
       txBytes: 3000,
       uptimeSeconds: 1000,
@@ -43,6 +44,8 @@ describe('server stats', () => {
     expect(stats.cpu).toBeCloseTo(60) // bận +300 trên tổng +500
     expect(stats.rxRate).toBe(10_000)
     expect(stats.txRate).toBe(1000)
+    // Như `df`: 12119271 / (12119271 + 16609512) = 42,2% → 43% (làm tròn lên).
+    expect(stats.diskPercent).toBe(43)
   })
 
   it('bộ đếm mạng quay về 0 → không báo số âm', () => {

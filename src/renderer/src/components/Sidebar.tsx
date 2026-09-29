@@ -329,7 +329,7 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
           label: 'Open SFTP',
           icon: <FolderOpen size={14} />,
           onSelect: () => {
-            connect(host, { panel: 'sftp' })
+            connect(host, { view: 'files' })
           }
         },
         'separator',

@@ -15,7 +15,9 @@ export function secureWebPreferences(preload: string): WebPreferences {
     allowRunningInsecureContent: false,
     webviewTag: false,
     spellcheck: false,
-    navigateOnDragDrop: false
+    navigateOnDragDrop: false,
+    // Bản phát hành không có Developer Tools (không ai mở được để đọc dữ liệu trong cửa sổ).
+    devTools: !app.isPackaged
   }
 }
 

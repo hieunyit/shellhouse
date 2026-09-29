@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { NativeModuleStatus } from './session-host-protocol'
 import { SessionSpec } from './stream-protocol'
+import { LocalListing } from './local-files'
 import {
   GroupInput,
   HostInput,
@@ -169,6 +170,8 @@ export const invokeContract = {
   /** Hộp thoại của hệ điều hành — renderer không tự chọn đường dẫn trên máy. */
   'dialog:openFiles': { args: z.tuple([]), result: z.array(z.string()) },
   'dialog:saveFile': { args: z.tuple([z.string().max(255)]), result: z.string().nullable() },
+  /** Liệt kê thư mục trên máy (null = thư mục home) cho SFTP hai cột. */
+  'local:list': { args: z.tuple([z.string().max(4096).nullable()]), result: LocalListing },
   /** Chọn chương trình (editor) trên máy; null = huỷ. */
   'dialog:pickProgram': { args: z.tuple([]), result: z.string().nullable() },
   /** Chọn thư mục (mở sẵn ở thư mục log hoặc Downloads); null = huỷ. */
@@ -279,6 +282,7 @@ export interface ShellhouseApi {
   pickFilesToUpload(): Promise<string[]>
   pickSaveLocation(defaultName: string): Promise<string | null>
   pickProgram(): Promise<string | null>
+  listLocal(path: string | null): Promise<LocalListing>
   pickFolder(title: string, start: 'logs' | 'downloads'): Promise<string | null>
   openLogFolder(): Promise<void>
   prepareRemoteEdit(remoteName: string): Promise<string>

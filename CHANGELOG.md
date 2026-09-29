@@ -12,12 +12,24 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   Close, Close other tabs. **Ctrl+Shift+R** (⌘⇧R) reconnects the current tab.
 - Show / hide the sidebar with the button at the left of the tab bar or **Ctrl+Shift+B** (⌘B).
   Searching hosts shows it again.
+- **Open SFTP** on a host now opens a two-pane file manager: your computer on the left, the
+  server on the right. Drag between them, double-click a local file to upload, or use the
+  Upload / Download buttons; downloads go straight into the open local folder. "Show terminal"
+  switches to the shell of the same connection, and "File manager" switches back.
+
+### Changed
+
+- No menu bar on Windows and Linux (File / Edit / View / Window). macOS keeps a minimal menu.
+  Developer Tools are no longer available in release builds.
 
 ### Fixed
 
 - A connection that drops while the vault is locked (auto-lock) now waits and reconnects as
   soon as you unlock, instead of stopping with "VaultLockedError". Enter also retries a tab
   that could not connect.
+- Opening SFTP right after connecting no longer fails with "SFTP is only available on a
+  connected built-in SSH session" (same for Deploy key).
+- Disk usage in the server statistics bar matches `df` (used / (used + available), rounded up).
 
 ## [1.1.0-beta.2] - 2026-09-29
 

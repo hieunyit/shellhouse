@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
-import { ArrowLeftRight, FolderOpen, KeyRound } from 'lucide-react'
+import { ArrowLeftRight, Columns2, FolderOpen, KeyRound } from 'lucide-react'
+import { LocalPanel } from './LocalPanel'
+import type { LocalTarget, SftpActions } from './SftpPanel'
 import { connectionLabel, cx, StatusDot } from '../components/ui'
 import type { ForwardStatus } from '@shared/forwards'
 import { hostBorderClass, hostTileClass } from '../components/hostColors'
@@ -38,6 +40,12 @@ export function TerminalView({
   const [connected, setConnected] = useState(false)
   /** undefined = chưa có số liệu / tắt; null = server không hỗ trợ. */
   const [stats, setStats] = useState<ServerStats | null | undefined>(undefined)
+  /** 'files' = trình quản lý file hai cột (Local | Remote); terminal vẫn chạy phía sau. */
+  const [view, setView] = useState<'terminal' | 'files'>(
+    () => useTabs.getState().tabs.find((t) => t.id === tabId)?.view ?? 'terminal'
+  )
+  const [localTarget, setLocalTarget] = useState<LocalTarget | undefined>(undefined)
+  const sftpActions = useRef<SftpActions | null>(null)
   const [panel, setPanel] = useState<Panel>(
     () => useTabs.getState().tabs.find((t) => t.id === tabId)?.initialPanel ?? null
   )
@@ -148,6 +156,17 @@ export function TerminalView({
           )}
           <div className="flex-1" />
           <ToolbarButton
+            testId="toggle-files"
+            pressed={view === 'files'}
+            icon={<Columns2 size={13} />}
+            onClick={() => {
+              setView(view === 'files' ? 'terminal' : 'files')
+              if (panel === 'sftp') setPanel(null)
+            }}
+          >
+            {view === 'files' ? 'Show terminal' : 'File manager'}
+          </ToolbarButton>
+          <ToolbarButton
             testId="open-deploy-key"
             disabled={!connected}
             icon={<KeyRound size={13} />}
@@ -159,6 +178,7 @@ export function TerminalView({
           </ToolbarButton>
           <ToolbarButton
             testId="toggle-sftp"
+            disabled={view === 'files'}
             pressed={panel === 'sftp'}
             icon={<FolderOpen size={13} />}
             onClick={() => {
@@ -180,6 +200,31 @@ export function TerminalView({
         </div>
       )}
       <div className="relative flex min-h-0 flex-1">
+        {view === 'files' && (
+          <div className="absolute inset-0 z-10 flex bg-surface" data-testid="file-manager">
+            <LocalPanel
+              transfers={transfers}
+              actionsRef={sftpActions}
+              onTargetChange={setLocalTarget}
+            />
+            <SftpPanel
+              run={runSftp}
+              transfers={transfers}
+              connected={connected}
+              layout="pane"
+              localTarget={localTarget}
+              actionsRef={sftpActions}
+            />
+            {prompt && !multiExec && (
+              <PromptDialog
+                prompt={prompt}
+                onAnswer={(ok, answers) => {
+                  controllers.get(tabId)?.answerPrompt(prompt.id, ok, answers)
+                }}
+              />
+            )}
+          </div>
+        )}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1 bg-terminal">
             <div
@@ -187,7 +232,7 @@ export function TerminalView({
               data-testid={`terminal-${tabId}`}
               className="absolute inset-0 pt-2 pr-1 pb-1 pl-3"
             />
-            {prompt && !multiExec && (
+            {prompt && !multiExec && view === 'terminal' && (
               <PromptDialog
                 prompt={prompt}
                 onAnswer={(ok, answers) => {

@@ -71,6 +71,7 @@ const api: ShellhouseApi = {
   pickFilesToUpload: () => invoke('dialog:openFiles'),
   pickSaveLocation: (defaultName) => invoke('dialog:saveFile', defaultName),
   pickProgram: () => invoke('dialog:pickProgram'),
+  listLocal: (path) => invoke('local:list', path),
   pickFolder: (title, start) => invoke('dialog:pickFolder', title, start),
   openLogFolder: () => invoke('logs:openFolder'),
   prepareRemoteEdit: (remoteName) => invoke('files:prepareEdit', remoteName),

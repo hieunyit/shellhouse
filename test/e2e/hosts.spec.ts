@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -284,4 +284,74 @@ test('mất kết nối lúc vault đang khoá: báo rõ, mở khoá xong tự k
       )
     )
     .toBe(2)
+})
+
+test('chuột phải host → Open SFTP: trình quản lý file hai cột Local | Remote', async ({ page }) => {
+  const remote = mkdtempSync(join(tmpdir(), 'sh-remote-'))
+  const local = mkdtempSync(join(tmpdir(), 'sh-local-'))
+  try {
+    writeFileSync(join(remote, 'tren-server.txt'), 'từ server')
+    writeFileSync(join(local, 'tren-may.txt'), 'từ máy')
+    server = await startTestSshServer([{ username: 'alice', password: 'pw' }], { sftpRoot: remote })
+    await createHost(page, {
+      hostname: '127.0.0.1',
+      port: server.port,
+      username: 'alice',
+      label: 'File server',
+      password: 'pw'
+    })
+    await page
+      .locator('[data-testid="host-row"][data-host-label="File server"]')
+      .click({ button: 'right' })
+    await page.getByTestId('menu-sftp').click()
+    await page.getByTestId('hostkey-accept').click()
+
+    const manager = page.getByTestId('file-manager')
+    await expect(manager).toBeVisible()
+    await expect(page.getByTestId('tab').last()).toContainText('File server (SFTP)')
+    const remotePane = manager.getByTestId('sftp-panel')
+    const localPane = manager.getByTestId('local-panel')
+    // Thư mục home của máy hiện sẵn; chuyển tới thư mục test.
+    await localPane.getByTestId('local-path').fill(local)
+    await localPane.getByTestId('local-path').press('Enter')
+    await expect(
+      localPane.locator('[data-testid="local-entry"][data-name="tren-may.txt"]')
+    ).toBeVisible()
+    await expect(
+      remotePane.locator('[data-testid="sftp-entry"][data-name="tren-server.txt"]')
+    ).toBeVisible()
+
+    // Local → Remote: bấm đúp file.
+    await localPane.locator('[data-testid="local-entry"][data-name="tren-may.txt"]').dblclick()
+    await expect
+      .poll(() =>
+        existsSync(join(remote, 'tren-may.txt'))
+          ? readFileSync(join(remote, 'tren-may.txt'), 'utf8')
+          : ''
+      )
+      .toBe('từ máy')
+
+    // Remote → Local: kéo thả, lưu thẳng vào thư mục local đang mở (không hỏi chỗ lưu).
+    await remotePane
+      .locator('[data-testid="sftp-entry"][data-name="tren-server.txt"]')
+      .dragTo(localPane)
+    await expect
+      .poll(() =>
+        existsSync(join(local, 'tren-server.txt'))
+          ? readFileSync(join(local, 'tren-server.txt'), 'utf8')
+          : ''
+      )
+      .toBe('từ server')
+    await expect(
+      localPane.locator('[data-testid="local-entry"][data-name="tren-server.txt"]')
+    ).toBeVisible()
+
+    // Xem terminal của cùng kết nối.
+    await page.getByTestId('toggle-files').click()
+    await expect(manager).toHaveCount(0)
+    await waitForText(page, await activeTab(page), 'welcome to test server')
+  } finally {
+    rmSync(remote, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    rmSync(local, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  }
 })

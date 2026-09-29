@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent, type RefObject } from 'react'
 import {
   ArrowUp,
   Download,
@@ -15,6 +15,7 @@ import {
   Pencil,
   RefreshCw,
   RotateCcw,
+  Server,
   ShieldCheck,
   Trash2,
   Upload,
@@ -32,6 +33,8 @@ import {
   type TransferStatus
 } from '@shared/sftp'
 import { Button, cx, IconButton, Input, Modal, Notice, Select } from '../components/ui'
+import { replaceUnsafeFileChars } from '@shared/file-names'
+import { DRAG_LOCAL, DRAG_REMOTE, joinLocal } from '@shared/local-files'
 import { useSettings } from '../stores/settings'
 
 /** Sửa file lớn hơn thế này qua editor thường là nhầm (log, file nhị phân) — gợi ý tải về. */
@@ -61,14 +64,36 @@ type Dialog =
   | { kind: 'delete'; entry: SftpEntry }
   | null
 
+/** Thao tác khung Local (SFTP hai cột) gọi sang khung Remote. */
+export interface SftpActions {
+  /** Tải lên thư mục remote đang mở. */
+  upload(localPaths: string[]): Promise<void>
+  /** Tải một mục của thư mục remote đang mở về thư mục local đang mở. */
+  downloadByName(name: string): Promise<void>
+}
+
+/** Thư mục local đang mở ở khung bên cạnh (SFTP hai cột): tải về thẳng vào đây, không hỏi chỗ lưu. */
+export interface LocalTarget {
+  dir: string
+  sep: string
+  names: ReadonlySet<string>
+}
+
 export function SftpPanel({
   run,
   transfers,
-  connected
+  connected,
+  layout = 'side',
+  localTarget,
+  actionsRef
 }: {
   run: (op: SftpOp) => Promise<unknown>
   transfers: TransferStatus[]
   connected: boolean
+  /** 'side' = cột bên phải terminal; 'pane' = một nửa của trình quản lý file hai cột. */
+  layout?: 'side' | 'pane'
+  localTarget?: LocalTarget | undefined
+  actionsRef?: RefObject<SftpActions | null>
 }): React.JSX.Element {
   const [path, setPath] = useState<string | null>(null)
   const [pathInput, setPathInput] = useState('')
@@ -155,10 +180,9 @@ export function SftpPanel({
   /** Tải cả thư mục về máy; đích đã có thư mục cùng tên → hỏi gộp. */
   const downloadFolder = async (entry: SftpEntry): Promise<void> => {
     if (!path) return
-    const parent = await window.shellhouse.pickFolder(
-      'Choose where to save the folder',
-      'downloads'
-    )
+    const parent =
+      localTarget?.dir ??
+      (await window.shellhouse.pickFolder('Choose where to save the folder', 'downloads'))
     if (!parent) return
     const remotePath = joinRemote(path, entry.name)
     setError(null)
@@ -181,7 +205,16 @@ export function SftpPanel({
       await downloadFolder(entry)
       return
     }
-    const target = await window.shellhouse.pickSaveLocation(entry.name)
+    let target: string | null
+    if (localTarget) {
+      // Hai cột: tải thẳng vào thư mục local đang mở.
+      if (
+        localTarget.names.has(entry.name) &&
+        !window.confirm(`“${entry.name}” already exists in ${localTarget.dir}. Overwrite it?`)
+      )
+        return
+      target = joinLocal(localTarget.dir, replaceUnsafeFileChars(entry.name), localTarget.sep)
+    } else target = await window.shellhouse.pickSaveLocation(entry.name)
     if (!target) return
     // The system save dialog already asked about overwriting.
     await act({
@@ -214,9 +247,26 @@ export function SftpPanel({
     }
   }
 
+  // Khung Local gọi sang (nút "Upload →", kéo thả, bấm đúp).
+  const actions: SftpActions = {
+    upload,
+    downloadByName: async (name) => {
+      const entry = listing?.entries.find((e) => e.name === name)
+      if (entry) await download(entry)
+    }
+  }
+  useEffect(() => {
+    if (actionsRef) actionsRef.current = actions
+  })
+
   const onDrop = (event: DragEvent): void => {
     event.preventDefault()
     setDragOver(false)
+    const fromLocal = event.dataTransfer.getData(DRAG_LOCAL)
+    if (fromLocal) {
+      void upload(JSON.parse(fromLocal) as string[])
+      return
+    }
     const paths = [...event.dataTransfer.files]
       .map((f) => window.shellhouse.pathForFile(f))
       .filter(Boolean)
@@ -236,12 +286,15 @@ export function SftpPanel({
   return (
     <aside
       className={cx(
-        'animate-slide-in-right flex w-96 shrink-0 flex-col border-l border-line bg-surface',
+        'flex flex-col bg-surface',
+        layout === 'side'
+          ? 'animate-slide-in-right w-96 shrink-0 border-l border-line'
+          : 'min-w-0 flex-1',
         dragOver && 'ring-2 ring-accent ring-inset'
       )}
       data-testid="sftp-panel"
       onDragOver={(e) => {
-        if (e.dataTransfer.types.includes('Files')) {
+        if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes(DRAG_LOCAL)) {
           e.preventDefault()
           setDragOver(true)
         }
@@ -252,6 +305,11 @@ export function SftpPanel({
       onDrop={onDrop}
     >
       <div className="flex items-center gap-1 border-b border-line p-2">
+        {layout === 'pane' && (
+          <span className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted">
+            <Server size={14} /> Remote
+          </span>
+        )}
         <IconButton
           label="Parent folder"
           disabled={!path}
@@ -384,6 +442,11 @@ export function SftpPanel({
             aria-selected={selected === entry.name}
             data-testid="sftp-entry"
             data-name={entry.name}
+            draggable={layout === 'pane'}
+            onDragStart={(e) => {
+              e.dataTransfer.setData(DRAG_REMOTE, entry.name)
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
             className={cx(
               'flex h-8 cursor-default items-center gap-2.5 px-3 text-[13px] transition-colors duration-75',
               selected === entry.name ? 'bg-accent-soft' : 'hover:bg-hover'

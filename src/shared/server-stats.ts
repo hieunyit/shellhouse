@@ -10,6 +10,8 @@ export interface ServerStats {
   memTotal: number
   diskUsed: number
   diskTotal: number
+  /** % như cột Use% của `df`: đã dùng / (đã dùng + còn trống), làm tròn lên (không tính phần dành cho root). */
+  diskPercent: number
   /** Byte/giây (mọi card mạng trừ loopback); null ở lần đo đầu. */
   rxRate: number | null
   txRate: number | null
@@ -25,6 +27,7 @@ export interface StatsSample {
   memTotal: number
   diskUsed: number
   diskTotal: number
+  diskAvail: number
   rxBytes: number
   txBytes: number
   uptimeSeconds: number
@@ -69,6 +72,7 @@ export function parseStatsBlock(block: string): StatsSample | null {
   let load1 = NaN
   let diskUsed = NaN
   let diskTotal = NaN
+  let diskAvail = NaN
   let rxBytes = 0
   let txBytes = 0
   for (const line of lines) {
@@ -92,6 +96,7 @@ export function parseStatsBlock(block: string): StatsSample | null {
     else if (parts.length >= 6 && parts[5] === '/' && /^\d+$/.test(parts[1] ?? '')) {
       diskTotal = num(parts[1]) * 1024
       diskUsed = num(parts[2]) * 1024
+      diskAvail = num(parts[3]) * 1024
     } else if (line.includes(':')) {
       // /proc/net/dev: "eth0: rxBytes … (8 cột rx) txBytes …"
       const [name, rest] = line.split(':', 2) as [string, string | undefined]
@@ -113,6 +118,7 @@ export function parseStatsBlock(block: string): StatsSample | null {
     memTotal,
     diskUsed: Number.isNaN(diskUsed) ? 0 : diskUsed,
     diskTotal: Number.isNaN(diskTotal) ? 0 : diskTotal,
+    diskAvail: Number.isNaN(diskAvail) ? 0 : diskAvail,
     rxBytes,
     txBytes,
     uptimeSeconds,
@@ -142,6 +148,10 @@ export function computeStats(current: StatsSample, previous: StatsSample | null)
     memTotal: current.memTotal,
     diskUsed: current.diskUsed,
     diskTotal: current.diskTotal,
+    diskPercent:
+      current.diskUsed + current.diskAvail > 0
+        ? Math.ceil((current.diskUsed * 100) / (current.diskUsed + current.diskAvail))
+        : 0,
     rxRate,
     txRate,
     uptimeSeconds: current.uptimeSeconds,

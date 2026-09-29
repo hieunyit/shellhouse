@@ -13,14 +13,18 @@ export interface Tab {
   target: TabTarget
   /** Tab sinh ra từ lệnh chia màn hình: đặt cạnh tab nguồn theo hướng này ('within' = cùng nhóm). */
   splitFrom?: { tabId: string; direction: 'right' | 'below' | 'within' }
-  /** Panel mở sẵn khi tab vừa tạo (ví dụ "Open SFTP" từ menu chuột phải). */
+  /** Panel mở sẵn khi tab vừa tạo. */
   initialPanel?: 'sftp'
+  /** 'files' = trình quản lý file hai cột (Local | Remote) thay cho terminal ("Open SFTP"). */
+  view?: 'files'
 }
 
 export interface OpenHostOptions {
   /** Mở cạnh tab đang active thay vì thành tab mới. */
   split?: 'right' | 'below'
   panel?: 'sftp'
+  /** Mở thành trình quản lý file hai cột. */
+  view?: 'files'
 }
 
 interface TabsState {
@@ -53,7 +57,8 @@ export const useTabs = create<TabsState>((set, get) => {
     title: string,
     target: TabTarget,
     splitFrom?: Tab['splitFrom'],
-    initialPanel?: Tab['initialPanel']
+    initialPanel?: Tab['initialPanel'],
+    view?: Tab['view']
   ): string => {
     const id = crypto.randomUUID()
     set((s) => ({
@@ -64,7 +69,8 @@ export const useTabs = create<TabsState>((set, get) => {
           title,
           target,
           ...(splitFrom ? { splitFrom } : {}),
-          ...(initialPanel ? { initialPanel } : {})
+          ...(initialPanel ? { initialPanel } : {}),
+          ...(view ? { view } : {})
         }
       ],
       activeId: id
@@ -84,7 +90,13 @@ export const useTabs = create<TabsState>((set, get) => {
       const active = get().activeId
       const splitFrom =
         options?.split && active ? { tabId: active, direction: options.split } : undefined
-      return add(host.label, { kind: 'host', hostId: host.id }, splitFrom, options?.panel)
+      return add(
+        options?.view === 'files' ? `${host.label} (SFTP)` : host.label,
+        { kind: 'host', hostId: host.id },
+        splitFrom,
+        options?.panel,
+        options?.view
+      )
     },
     openHosts: (hosts, layout) => {
       const ids: string[] = []

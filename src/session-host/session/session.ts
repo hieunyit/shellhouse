@@ -323,8 +323,24 @@ export class Session {
     }
   }
 
+  /**
+   * Kết nối SSH tích hợp, chờ nếu đang mở dở: renderer thấy "đã xác thực" (và mở SFTP) trước khi
+   * kênh shell mở xong — yêu cầu SFTP tới trong khoảng đó phải chờ, không báo lỗi.
+   */
+  private async waitForSsh(timeoutMs = 30_000): Promise<SshShell | null> {
+    // Đọc qua hàm để TS không thu hẹp kiểu qua `await` (giá trị đổi trong lúc chờ).
+    const current = (): SshShell | null => this.ssh
+    const closed = (): boolean => this.closed
+    if (current() || this.spec.kind !== 'ssh') return current()
+    const deadline = Date.now() + timeoutMs
+    while (!current() && !closed() && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50))
+    }
+    return current()
+  }
+
   private async runSftp(op: SftpOp): Promise<unknown> {
-    const ssh = this.ssh
+    const ssh = await this.waitForSsh()
     if (!ssh) throw new Error('SFTP is only available on a connected built-in SSH session')
     this.sftp ??= new SftpService(ssh.client)
     const sftp = this.sftp
@@ -445,23 +461,16 @@ export class Session {
         void this.handleSftp(message.id, message.op)
         break
       case 'deploy-key': {
-        const id = message.id
-        const ssh = this.ssh
-        if (!ssh) {
-          this.post({
-            t: 'deploy-key-result',
-            id,
-            status: 'error',
-            message: 'Not connected with built-in SSH'
-          })
-          break
-        }
-        void deployPublicKey(ssh.client, message.publicKey).then((r) => {
+        const { id, publicKey } = message
+        void this.waitForSsh().then(async (ssh) => {
+          const r: { status: 'added' | 'exists' | 'error'; message?: string } = ssh
+            ? await deployPublicKey(ssh.client, publicKey)
+            : { status: 'error', message: 'Not connected with built-in SSH' }
           this.post({
             t: 'deploy-key-result',
             id,
             status: r.status,
-            message: r.status === 'error' ? r.message : null
+            message: r.status === 'error' ? (r.message ?? null) : null
           })
         })
         break

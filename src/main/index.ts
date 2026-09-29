@@ -19,7 +19,9 @@ import type { EventChannel, EventPayload } from '@shared/ipc'
 import { toForwardSpec } from '@shared/forwards'
 import { checkMainNativeModules } from './diagnostics'
 import { handle } from './ipc/router'
+import { installAppMenu, installDevToolsShortcut } from './app-menu'
 import { installEditContextMenu } from './context-menu'
+import { listLocal } from './local-files'
 import { openInEditor, RemoteEditFiles } from './remote-edit'
 import { sessionLogFor } from './session-log-path'
 import { ShellService } from './shells'
@@ -372,6 +374,7 @@ function registerIpc(): void {
     return result.canceled || !result.filePath ? null : result.filePath
   })
 
+  handle('local:list', isTrustedSender, (path) => listLocal(path, app.getPath('home')))
   handle('dialog:pickProgram', isTrustedSender, async () => {
     const options = {
       title: 'Choose an editor',
@@ -438,6 +441,7 @@ function createWindow(): void {
   })
 
   installEditContextMenu(mainWindow)
+  installDevToolsShortcut(mainWindow)
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     if (details.reason === 'clean-exit') return
     log.error(`Renderer gone: ${details.reason}`)
@@ -549,6 +553,7 @@ if (!app.requestSingleInstanceLock()) {
     } catch (error) {
       log.warn('Could not clean up old remote-edit copies', error)
     }
+    installAppMenu()
     registerIpc()
     registerSecurityIpc({
       vault,
