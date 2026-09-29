@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { VaultGate } from './components/VaultGate'
+import { setAppInfo } from './lib/platform'
 import { installTestHooks } from './test-hooks'
 import './styles.css'
 // Áp theme sáng/tối lên <html> ngay khi có cài đặt.
@@ -28,6 +29,7 @@ function loadFonts(): Promise<unknown> {
 }
 
 void Promise.all([window.shellhouse.getInfo(), loadFonts()]).then(([info]) => {
+  setAppInfo(info)
   if (info.testHooks) installTestHooks()
   createRoot(root).render(
     <StrictMode>

@@ -61,7 +61,9 @@ export const AppInfo = z.object({
   platform: z.string(),
   arch: z.string(),
   packaged: z.boolean(),
-  testHooks: z.boolean()
+  testHooks: z.boolean(),
+  /** Số build Windows (ví dụ 26200) — cho xterm.js biết cách ConPTY hoạt động. null ngoài Windows. */
+  windowsBuild: z.number().int().nullable()
 })
 export type AppInfo = z.infer<typeof AppInfo>
 

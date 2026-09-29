@@ -148,7 +148,8 @@ base('nhập từ ~/.ssh/config: xem trước, bỏ mục lỗi, nhập mục đ
       USERPROFILE: home,
       SHELLHOUSE_TEST_HOOKS: '1',
       SHELLHOUSE_FAST_KDF: '1',
-      SHELLHOUSE_USER_DATA: userData
+      SHELLHOUSE_USER_DATA: userData,
+      SHELLHOUSE_HOME: home
     }
   })
   try {

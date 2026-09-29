@@ -19,6 +19,7 @@ import type { ITerminalOptions } from '@xterm/xterm'
 import { useHostStatus } from '../stores/host-status'
 import { SessionClient } from './session-client'
 import { broadcastInput } from './broadcast'
+import { windowsPty } from '../lib/platform'
 
 export interface ActivePrompt {
   id: number
@@ -68,6 +69,9 @@ export function terminalOptions(settings: AppSettings, dark: boolean): ITerminal
     cursorBlink: t.cursorBlink,
     scrollback: t.scrollback,
     screenReaderMode: t.screenReaderMode,
+    // Lệnh xoá màn hình (ED2) đẩy nội dung đang hiện lên scrollback thay vì xoá mất — như Windows
+    // Terminal / GNOME. Quan trọng trên Windows: ConPTY xoá màn hình mỗi khi phiên mới bắt đầu.
+    scrollOnEraseInDisplay: true,
     theme: theme.colors
   }
 }
@@ -107,9 +111,11 @@ export class TerminalController {
     private readonly container: HTMLElement,
     private readonly events: ControllerEvents
   ) {
+    const conpty = target.kind === 'local' ? windowsPty() : undefined
     this.term = new Terminal({
       allowProposedApi: true, // cần cho unicode11
-      ...terminalOptions(useSettings.getState().settings, useAppearance.getState().dark)
+      ...terminalOptions(useSettings.getState().settings, useAppearance.getState().dark),
+      ...(conpty ? { windowsPty: conpty } : {})
     })
   }
 

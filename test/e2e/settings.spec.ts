@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { startTestSshServer, type TestSshServer } from '../integration/ssh-test-server'
-import { activeTab, E2E_PASSWORD, expect, test, waitForText } from './fixtures'
+import { activeTab, E2E_PASSWORD, expect, isWindows, test, waitForText } from './fixtures'
 
 const mod = process.platform === 'darwin' ? 'Meta' : 'Control+Shift'
 let server: TestSshServer | null = null
@@ -110,6 +110,8 @@ test('khoá khi máy khoá màn hình; "nhớ trên máy" chỉ bật được k
 test('tạo key → triển khai lên server bằng mật khẩu → đăng nhập lại bằng key, không cần mật khẩu', async ({
   page
 }) => {
+  // Server SSH giả chạy lệnh bằng /bin/sh (script deploy nhắm tới server POSIX ở đầu xa).
+  test.skip(isWindows, 'Server thử nghiệm cần /bin/sh')
   const home = mkdtempSync(join(tmpdir(), 'sh-home-'))
   dirs.push(home)
   server = await startTestSshServer([{ username: 'u', password: 'pw' }], { execHome: home })

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { release } from 'node:os'
 import { join } from 'node:path'
 import {
   app,
@@ -48,6 +49,9 @@ const testHooks = !app.isPackaged && process.env['SHELLHOUSE_TEST_HOOKS'] === '1
 // Mỗi lần khởi chạy E2E dùng thư mục dữ liệu riêng để không đụng dữ liệu thật.
 const userDataOverride = process.env['SHELLHOUSE_USER_DATA']
 if (!app.isPackaged && userDataOverride) app.setPath('userData', userDataOverride)
+// Thư mục home giả cho E2E (~/.ssh/config…). Trên Windows Electron không đọc biến HOME.
+const homeOverride = process.env['SHELLHOUSE_HOME']
+if (!app.isPackaged && homeOverride) app.setPath('home', homeOverride)
 
 process.on('uncaughtException', (error) => {
   log.error('uncaughtException', error)
@@ -165,7 +169,8 @@ function registerIpc(): void {
     platform: process.platform,
     arch: process.arch,
     packaged: app.isPackaged,
-    testHooks
+    testHooks,
+    windowsBuild: process.platform === 'win32' ? Number(release().split('.')[2]) || null : null
   }))
 
   handle('sessionHost:getStatus', isTrustedSender, () => supervisor.getStatus())
