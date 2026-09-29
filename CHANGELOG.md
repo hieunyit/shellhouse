@@ -17,6 +17,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - Server statistics under SSH terminals: CPU, memory, disk, network and uptime of Linux
   servers. Measured over a separate channel (nothing is typed into your shell), only while the
   tab is visible. Can be turned off in Settings → Terminal.
+- SFTP: upload and download whole folders (button, or drag a folder from Explorer/Finder).
+  Symbolic links inside are skipped; an existing folder is only merged after you confirm.
+
+### Changed
+
+- Lower latency on SSH connections: keystrokes and SFTP requests are sent immediately
+  (TCP_NODELAY, as OpenSSH does). Many small SFTP transfers are several times faster.
 
 ## [1.0.0-beta.2] - 2026-09-29
 

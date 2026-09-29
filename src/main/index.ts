@@ -383,10 +383,10 @@ function registerIpc(): void {
       : await dialog.showOpenDialog(options)
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
-  handle('dialog:pickFolder', isTrustedSender, async (title) => {
+  handle('dialog:pickFolder', isTrustedSender, async (title, start) => {
     const options = {
       title,
-      defaultPath: logDirectory(),
+      defaultPath: start === 'logs' ? logDirectory() : app.getPath('downloads'),
       properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[]
     }
     const result = mainWindow

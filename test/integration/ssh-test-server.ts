@@ -151,6 +151,8 @@ export async function startTestSshServer(
   const server = new Server({ hostKeys: [hostKey.private] }, (client) => {
     clients.add(client)
     client.on('close', () => clients.delete(client))
+    // Như sshd với phiên tương tác (có trong ssh2 nhưng thiếu trong @types/ssh2).
+    ;(client as unknown as { setNoDelay(noDelay: boolean): void }).setNoDelay(true)
     let keyPassed = false
     client.on('authentication', (ctx: AuthContext) => {
       events.authAttempts.push({ method: ctx.method, username: ctx.username })

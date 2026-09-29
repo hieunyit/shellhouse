@@ -254,6 +254,23 @@ export class SftpService implements LossGuard {
     await rmdir(path)
   }
 
+  /** Mục trong thư mục (không có . và ..), thuộc tính thô của server. */
+  async readdir(dir: string): Promise<{ filename: string; attrs: Stats }[]> {
+    const s = await this.channel()
+    const entries = await this.guarded<{ filename: string; attrs: Stats }[]>((cb) => {
+      s.readdir(dir, cb)
+    })
+    return entries.filter((e) => e.filename !== '.' && e.filename !== '..')
+  }
+
+  /** Thuộc tính của chính đường dẫn (link không bị đi theo). */
+  async lstat(path: string): Promise<Stats> {
+    const s = await this.channel()
+    return this.guarded<Stats>((cb) => {
+      s.lstat(path, cb)
+    })
+  }
+
   async unlinkIfExists(path: string): Promise<void> {
     const s = await this.channel()
     await new Promise<void>((resolve) => {

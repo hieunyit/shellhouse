@@ -165,8 +165,11 @@ export const invokeContract = {
   'dialog:saveFile': { args: z.tuple([z.string().max(255)]), result: z.string().nullable() },
   /** Chọn chương trình (editor) trên máy; null = huỷ. */
   'dialog:pickProgram': { args: z.tuple([]), result: z.string().nullable() },
-  /** Chọn thư mục; null = huỷ. */
-  'dialog:pickFolder': { args: z.tuple([z.string().max(100)]), result: z.string().nullable() },
+  /** Chọn thư mục (mở sẵn ở thư mục log hoặc Downloads); null = huỷ. */
+  'dialog:pickFolder': {
+    args: z.tuple([z.string().max(100), z.enum(['logs', 'downloads'])]),
+    result: z.string().nullable()
+  },
   /** Mở thư mục log phiên trong trình quản lý file (tạo nếu chưa có). */
   'logs:openFolder': { args: z.tuple([]), result: z.void() },
   /** Sửa file trên server: main cấp đường dẫn tạm cho tên file. */
@@ -268,7 +271,7 @@ export interface ShellhouseApi {
   pickFilesToUpload(): Promise<string[]>
   pickSaveLocation(defaultName: string): Promise<string | null>
   pickProgram(): Promise<string | null>
-  pickFolder(title: string): Promise<string | null>
+  pickFolder(title: string, start: 'logs' | 'downloads'): Promise<string | null>
   openLogFolder(): Promise<void>
   prepareRemoteEdit(remoteName: string): Promise<string>
   openInEditor(localPath: string): Promise<void>

@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, readFileSync, writeFileSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -134,4 +134,54 @@ test('sửa file trên server: bấm đúp mở editor, lưu → tự tải lên
   writeFileSync(local, 'port=8080\n') // "Lưu" trong editor
   await expect.poll(() => readFileSync(join(remote, 'app.conf'), 'utf8')).toBe('port=8080\n')
   await expect(panel.getByTestId('transfer-row').last()).toContainText('Saved to server')
+})
+
+test('tải cả thư mục lên và về qua giao diện', async ({ app, page }) => {
+  const remote = mkdtempSync(join(tmpdir(), 'sh-remote-'))
+  const local = mkdtempSync(join(tmpdir(), 'sh-local-'))
+  dirs.push(remote, local)
+  mkdirSync(join(local, 'du-an', 'src'), { recursive: true })
+  writeFileSync(join(local, 'du-an', 'README.md'), '# dự án')
+  writeFileSync(join(local, 'du-an', 'src', 'main.ts'), 'console.log(1)')
+  server = await startTestSshServer([{ username: 'u', password: 'p' }], { sftpRoot: remote })
+
+  await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
+  await page.getByTestId('quick-connect').press('Enter')
+  const tab = await activeTab(page)
+  await page.getByTestId('hostkey-accept').click()
+  await page.getByTestId('prompt-input').fill('p')
+  await page.getByTestId('prompt-submit').click()
+  await waitForText(page, tab, 'welcome to test server')
+  await page.getByTestId('toggle-sftp').last().click()
+  const panel = page.getByTestId('sftp-panel')
+
+  // Hộp thoại chọn thư mục được thay bằng đường dẫn cố định.
+  const pickFolder = (folder: string) =>
+    app.evaluate(({ dialog }, f) => {
+      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [f] })
+    }, folder)
+
+  await pickFolder(join(local, 'du-an'))
+  await panel.getByTestId('sftp-upload-folder').click()
+  await expect(panel.locator('[data-testid="sftp-entry"][data-name="du-an"]')).toBeVisible()
+  await expect
+    .poll(() =>
+      existsSync(join(remote, 'du-an', 'src', 'main.ts'))
+        ? readFileSync(join(remote, 'du-an', 'src', 'main.ts'), 'utf8')
+        : ''
+    )
+    .toBe('console.log(1)')
+
+  const saveTo = mkdtempSync(join(tmpdir(), 'sh-save-'))
+  dirs.push(saveTo)
+  await pickFolder(saveTo)
+  await panel.locator('[data-testid="sftp-entry"][data-name="du-an"]').click()
+  await panel.getByTestId('sftp-download').click()
+  await expect
+    .poll(() =>
+      existsSync(join(saveTo, 'du-an', 'README.md'))
+        ? readFileSync(join(saveTo, 'du-an', 'README.md'), 'utf8')
+        : ''
+    )
+    .toBe('# dự án')
 })

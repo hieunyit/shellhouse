@@ -2,7 +2,8 @@ import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { TransferStatus } from '@shared/sftp'
+import { FOLDER_EXISTS, type TransferStatus } from '@shared/sftp'
+import { downloadFolder, uploadFolder } from '../../src/session-host/sftp/folders'
 import { SftpService } from '../../src/session-host/sftp/service'
 import { PART_SUFFIX, TransferQueue } from '../../src/session-host/sftp/transfers'
 import { openSshShell } from '../../src/session-host/ssh/connect'
@@ -224,4 +225,60 @@ describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
     const id = queue.enqueue('download', join(localRoot, 'x'), join(remoteRoot, 'khong-co'), false)
     expect(await waitFor(id, ['error'])).toMatchObject({ error: 'File not found' })
   })
+
+  const settledAll = async (queue: TransferQueue): Promise<void> => {
+    const deadline = Date.now() + 15_000
+    while (queue.list().some((t) => t.state === 'queued' || t.state === 'running')) {
+      if (Date.now() > deadline) throw new Error('Hết giờ chờ hàng đợi')
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    expect(queue.list().filter((t) => t.state !== 'done')).toEqual([])
+  }
+
+  it(
+    'tải cả thư mục về và lên: giữ cây thư mục, bỏ symlink, không gộp khi chưa cho phép',
+    { timeout: 30_000 },
+    async () => {
+      const { remoteRoot, localRoot, sftp, queue } = await setup()
+      const outside = tempDir()
+      writeFileSync(join(outside, 'bi-mat.txt'), 'không được kéo về')
+      mkdirSync(join(remoteRoot, 'site', 'css', 'vendor'), { recursive: true })
+      writeFileSync(join(remoteRoot, 'site', 'index.html'), '<h1>hi</h1>')
+      writeFileSync(join(remoteRoot, 'site', 'css', 'a.css'), 'body{}')
+      writeFileSync(join(remoteRoot, 'site', 'css', 'vendor', 'b.css'), 'p{}')
+      mkdirSync(join(remoteRoot, 'site', 'empty'))
+      if (process.platform !== 'win32')
+        symlinkSync(outside, join(remoteRoot, 'site', 'link-ra-ngoai'))
+
+      expect(await downloadFolder(sftp, queue, join(remoteRoot, 'site'), localRoot, false)).toBe(3)
+      await settledAll(queue)
+      expect(readFileSync(join(localRoot, 'site', 'css', 'vendor', 'b.css'), 'utf8')).toBe('p{}')
+      expect(existsSync(join(localRoot, 'site', 'empty'))).toBe(true)
+      expect(existsSync(join(localRoot, 'site', 'link-ra-ngoai'))).toBe(false)
+      await expect(
+        downloadFolder(sftp, queue, join(remoteRoot, 'site'), localRoot, false)
+      ).rejects.toThrow(FOLDER_EXISTS)
+
+      // Tải ngược lên chỗ khác.
+      mkdirSync(join(remoteRoot, 'backup'))
+      expect(
+        await uploadFolder(sftp, queue, join(localRoot, 'site'), join(remoteRoot, 'backup'), false)
+      ).toBe(3)
+      await settledAll(queue)
+      expect(readFileSync(join(remoteRoot, 'backup', 'site', 'index.html'), 'utf8')).toBe(
+        '<h1>hi</h1>'
+      )
+      expect(existsSync(join(remoteRoot, 'backup', 'site', 'empty'))).toBe(true)
+      // Đã có → chỉ gộp khi cho phép.
+      await expect(
+        uploadFolder(sftp, queue, join(localRoot, 'site'), join(remoteRoot, 'backup'), false)
+      ).rejects.toThrow(FOLDER_EXISTS)
+      writeFileSync(join(localRoot, 'site', 'index.html'), '<h1>v2</h1>')
+      await uploadFolder(sftp, queue, join(localRoot, 'site'), join(remoteRoot, 'backup'), true)
+      await settledAll(queue)
+      expect(readFileSync(join(remoteRoot, 'backup', 'site', 'index.html'), 'utf8')).toBe(
+        '<h1>v2</h1>'
+      )
+    }
+  )
 })

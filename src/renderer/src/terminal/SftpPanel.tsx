@@ -9,6 +9,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  FolderUp,
   Link2,
   Loader2,
   Pencil,
@@ -21,6 +22,7 @@ import {
 } from 'lucide-react'
 import {
   baseName,
+  FOLDER_EXISTS,
   formatMode,
   joinRemote,
   parentRemote,
@@ -146,10 +148,39 @@ export function SftpPanel({
       if (names.has(name) && !overwrite) continue
       await act({ op: 'upload', localPath: local, remotePath: joinRemote(path, name), overwrite })
     }
+    // Thư mục được tạo ngay (file thì chờ tải xong) → hiện luôn.
+    if (localPaths.length > 0) await load(path)
+  }
+
+  /** Tải cả thư mục về máy; đích đã có thư mục cùng tên → hỏi gộp. */
+  const downloadFolder = async (entry: SftpEntry): Promise<void> => {
+    if (!path) return
+    const parent = await window.shellhouse.pickFolder(
+      'Choose where to save the folder',
+      'downloads'
+    )
+    if (!parent) return
+    const remotePath = joinRemote(path, entry.name)
+    setError(null)
+    try {
+      await run({ op: 'downloadFolder', remotePath, localParent: parent, overwrite: false })
+    } catch (e) {
+      const message = cleanError(e)
+      if (message !== FOLDER_EXISTS) {
+        setError(message)
+        return
+      }
+      if (window.confirm(`“${entry.name}” already exists there. Merge and overwrite files?`))
+        await act({ op: 'downloadFolder', remotePath, localParent: parent, overwrite: true })
+    }
   }
 
   const download = async (entry: SftpEntry): Promise<void> => {
     if (!path) return
+    if (entry.isDirLike) {
+      await downloadFolder(entry)
+      return
+    }
     const target = await window.shellhouse.pickSaveLocation(entry.name)
     if (!target) return
     // The system save dialog already asked about overwriting.
@@ -261,6 +292,20 @@ export function SftpPanel({
         >
           Upload
         </Button>
+        <IconButton
+          label="Upload a folder"
+          size="sm"
+          className="size-7"
+          data-testid="sftp-upload-folder"
+          disabled={!path}
+          onClick={() =>
+            void window.shellhouse
+              .pickFolder('Choose a folder to upload', 'downloads')
+              .then((dir) => upload(dir ? [dir] : []))
+          }
+        >
+          <FolderUp size={14} />
+        </IconButton>
         <Button
           size="sm"
           variant="ghost"
@@ -373,37 +418,33 @@ export function SftpPanel({
             </span>
           </div>
         ))}
-        {connected && listing && entries.length === 0 && (
-          <p className="p-3 text-xs text-faint">This folder is empty.</p>
-        )}
       </div>
 
       {selectedEntry && (
         <div className="flex items-center gap-1 border-t border-line px-2 py-1.5">
           {!selectedEntry.isDirLike && (
-            <>
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<FilePen size={13} />}
-                data-testid="sftp-edit"
-                title="Open in your editor — every save is uploaded to the server"
-                disabled={opening !== null}
-                onClick={() => void edit(selectedEntry)}
-              >
-                Edit
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<Download size={13} />}
-                data-testid="sftp-download"
-                onClick={() => void download(selectedEntry)}
-              >
-                Download
-              </Button>
-            </>
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<FilePen size={13} />}
+              data-testid="sftp-edit"
+              title="Open in your editor — every save is uploaded to the server"
+              disabled={opening !== null}
+              onClick={() => void edit(selectedEntry)}
+            >
+              Edit
+            </Button>
           )}
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Download size={13} />}
+            data-testid="sftp-download"
+            title={selectedEntry.isDirLike ? 'Download the whole folder' : undefined}
+            onClick={() => void download(selectedEntry)}
+          >
+            Download
+          </Button>
           <Button
             size="sm"
             variant="ghost"

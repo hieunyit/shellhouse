@@ -27,6 +27,20 @@ export const SftpOp = z.discriminatedUnion('op', [
     remotePath: RemotePath,
     overwrite: z.boolean()
   }),
+  /** Tải cả thư mục về `localParent/<tên>`; trả về số file đã xếp hàng. */
+  z.object({
+    op: z.literal('downloadFolder'),
+    remotePath: RemotePath,
+    localParent: LocalPath,
+    overwrite: z.boolean()
+  }),
+  /** Tải cả thư mục trên máy lên `remoteParent/<tên>`; trả về số file đã xếp hàng. */
+  z.object({
+    op: z.literal('uploadFolder'),
+    localPath: LocalPath,
+    remoteParent: RemotePath,
+    overwrite: z.boolean()
+  }),
   /**
    * Sửa file: tải về `localPath` (do main cấp, trong thư mục tạm), rồi theo dõi — mỗi lần lưu
    * thì tự tải ngược lên. Trả về khi đã tải về xong.
@@ -37,6 +51,9 @@ export const SftpOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('clearDone') })
 ])
 export type SftpOp = z.infer<typeof SftpOp>
+
+/** Lỗi khi tải thư mục mà đích đã có thư mục cùng tên — renderer hỏi "gộp và ghi đè?". */
+export const FOLDER_EXISTS = 'A folder with this name already exists at the destination'
 
 export type SftpEntryType = 'file' | 'dir' | 'link' | 'other'
 

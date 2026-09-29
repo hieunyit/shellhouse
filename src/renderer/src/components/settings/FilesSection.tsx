@@ -82,9 +82,11 @@ export function FilesSection(): React.JSX.Element {
           />
           <Button
             onClick={() =>
-              void window.shellhouse.pickFolder('Choose a folder for session logs').then((dir) => {
-                if (dir) void update({ logging: { directory: dir } })
-              })
+              void window.shellhouse
+                .pickFolder('Choose a folder for session logs', 'logs')
+                .then((dir) => {
+                  if (dir) void update({ logging: { directory: dir } })
+                })
             }
           >
             Choose…

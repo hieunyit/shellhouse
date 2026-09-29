@@ -102,7 +102,9 @@ export interface SshOpenOptions {
 
 function openTcp(host: string, port: number, timeoutMs: number): Promise<Socket> {
   return new Promise((resolve, reject) => {
-    const socket = netConnect({ host, port })
+    // TCP_NODELAY như OpenSSH cho phiên tương tác: gói nhỏ (phím gõ, yêu cầu SFTP) đi ngay, không
+    // chờ ACK trễ của gói trước (Nagle + delayed ACK = ~40–90 ms mỗi lượt hỏi-đáp).
+    const socket = netConnect({ host, port, noDelay: true })
     const timer = setTimeout(() => {
       socket.destroy()
       reject(new Error(`Timed out connecting to ${host}:${port}`))

@@ -15,8 +15,10 @@ import { SftpService } from '../sftp/service'
 import { deployPublicKey } from '../ssh/deploy-key'
 import { StatsMonitor } from '../ssh/stats-monitor'
 import { RemoteEdits } from '../sftp/edit'
+import { downloadFolder, uploadFolder } from '../sftp/folders'
 import { TransferQueue } from '../sftp/transfers'
-import type { SftpOp } from '@shared/sftp'
+import { parentRemote, type SftpOp } from '@shared/sftp'
+import { stat } from 'node:fs/promises'
 import type { ForwardSpec } from '@shared/forwards'
 import { LocalPty, resolveLocalShell } from '../transport/local-pty'
 import { buildShellEnv } from '../transport/shell'
@@ -348,7 +350,20 @@ export class Session {
       case 'download':
         return transfers.enqueue('download', op.localPath, op.remotePath, op.overwrite)
       case 'upload':
+        // Kéo thả từ Explorer/Finder có thể là thư mục → tải cả thư mục.
+        if ((await stat(op.localPath).catch(() => null))?.isDirectory())
+          return uploadFolder(
+            sftp,
+            transfers,
+            op.localPath,
+            parentRemote(op.remotePath),
+            op.overwrite
+          )
         return transfers.enqueue('upload', op.localPath, op.remotePath, op.overwrite)
+      case 'downloadFolder':
+        return downloadFolder(sftp, transfers, op.remotePath, op.localParent, op.overwrite)
+      case 'uploadFolder':
+        return uploadFolder(sftp, transfers, op.localPath, op.remoteParent, op.overwrite)
       case 'edit':
         this.edits ??= new RemoteEdits(sftp, transfers)
         await this.edits.open(op.remotePath, op.localPath)
