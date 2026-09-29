@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.1.0-beta.2] - 2026-09-29
+
 ### Fixed
 
 - Saved hosts with "Automatic" authentication no longer fail with "Failed to retrieve
