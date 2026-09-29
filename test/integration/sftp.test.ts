@@ -78,7 +78,9 @@ describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
       ['a.txt', 'file', false]
     ])
     const file = listing.entries.find((e) => e.name === 'a.txt')
-    expect(file).toMatchObject({ size: 5, mode: 0o640 })
+    expect(file).toMatchObject({ size: 5 })
+    // Windows OpenSSH chỉ giả lập quyền POSIX (không có 0o640) — app hiển thị đúng thứ server báo.
+    if (process.platform !== 'win32') expect(file?.mode).toBe(0o640)
   })
 
   it('mkdir, rename, chmod, xoá đệ quy (không đi theo symlink ra ngoài)', async () => {
@@ -91,7 +93,8 @@ describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
     symlinkSync(outside, join(remoteRoot, 'd', 'link-ra-ngoai'))
     await sftp.rename(join(remoteRoot, 'd'), join(remoteRoot, 'e'))
     await sftp.chmod(join(remoteRoot, 'e', 'sub', 'f'), 0o600)
-    expect(statSync(join(remoteRoot, 'e', 'sub', 'f')).mode & 0o777).toBe(0o600)
+    if (process.platform !== 'win32')
+      expect(statSync(join(remoteRoot, 'e', 'sub', 'f')).mode & 0o777).toBe(0o600)
     await expect(sftp.remove(join(remoteRoot, 'e'), false)).rejects.toThrow()
     await sftp.remove(join(remoteRoot, 'e'), true)
     expect(existsSync(join(remoteRoot, 'e'))).toBe(false)
