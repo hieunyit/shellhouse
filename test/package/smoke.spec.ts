@@ -1,7 +1,7 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { chromium, expect, test, type Browser } from '@playwright/test'
 
 /**
@@ -94,6 +94,32 @@ test('bản đóng gói: khởi động, tạo vault, native module + Session Ho
   )
   const status = await page.evaluate(() => window.shellhouse.getSessionHostStatus())
   expect(status.state).toBe('running')
+
+  // Mở rồi đóng một tab terminal local. Trên Windows, node-pty dùng child_process.fork() khi đóng
+  // ConPTY — với fuse RunAsNode tắt, fork có thể khởi động cả một app thứ hai.
+  const mainProcesses = (): number => {
+    if (process.platform !== 'win32') return 1
+    const out = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-Command',
+        `(Get-CimInstance Win32_Process -Filter "Name='${basename(binary ?? '')}'" | Where-Object { $_.CommandLine -notmatch '--type=' }).Count`
+      ],
+      { encoding: 'utf8' }
+    )
+    return Number(out.trim()) || 0
+  }
+  const before = mainProcesses()
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('tab')).toHaveCount(2)
+  await page.waitForTimeout(1_500)
+  const closedAt = Date.now()
+  await page.getByTestId('tab-close').last().click()
+  await expect(page.getByTestId('tab')).toHaveCount(1)
+  await page.waitForTimeout(2_000)
+  expect(mainProcesses()).toBe(before) // không có app thứ hai bật lên
+  expect(Date.now() - closedAt).toBeLessThan(4_500)
 
   const info = await page.evaluate(() => window.shellhouse.getInfo())
   expect(info.version).toMatch(/^\d+\.\d+\.\d+/)
