@@ -123,8 +123,13 @@ test('bản đóng gói: khởi động, tạo vault, native module + Session Ho
   const closedAt = Date.now()
   await page.getByTestId('tab-close').last().click()
   await expect(page.getByTestId('tab')).toHaveCount(1)
-  await page.waitForTimeout(2_000)
-  expect(mainProcesses()).toBe(before) // không có app thứ hai bật lên
+  // Đếm liên tục ~3 giây: một app thứ hai (nếu có) sẽ tự thoát nhanh vì khoá single-instance.
+  let most = 0
+  while (Date.now() - closedAt < 3_000) {
+    most = Math.max(most, mainProcesses())
+    await new Promise((r) => setTimeout(r, 150))
+  }
+  expect(most).toBe(before) // không có app thứ hai bật lên
   expect(Date.now() - closedAt).toBeLessThan(4_500)
 
   const info = await page.evaluate(() => window.shellhouse.getInfo())
