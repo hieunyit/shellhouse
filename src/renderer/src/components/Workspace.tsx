@@ -27,18 +27,23 @@ function TerminalPanel(props: IDockviewPanelProps<PanelParams>): React.JSX.Eleme
   const { tabId } = props.params
   const tab = useTabs((s) => s.tabs.find((t) => t.id === tabId))
   const [active, setActive] = useState(props.api.isActive)
+  const [visible, setVisible] = useState(props.api.isVisible)
 
   useEffect(() => {
-    const sub = props.api.onDidActiveChange((e) => {
+    const a = props.api.onDidActiveChange((e) => {
       setActive(e.isActive)
     })
+    const v = props.api.onDidVisibilityChange((e) => {
+      setVisible(e.isVisible)
+    })
     return () => {
-      sub.dispose()
+      a.dispose()
+      v.dispose()
     }
   }, [props.api])
 
   if (!tab) return null
-  return <TerminalView tabId={tab.id} target={tab.target} active={active} />
+  return <TerminalView tabId={tab.id} target={tab.target} active={active} visible={visible} />
 }
 
 /** Tab trong thanh tab của dockview (giữ data-testid cũ cho E2E). */

@@ -20,11 +20,14 @@ type Panel = 'forwards' | 'sftp' | null
 export function TerminalView({
   tabId,
   target,
-  active
+  active,
+  visible = true
 }: {
   tabId: string
   target: TabTarget
   active: boolean
+  /** Panel đang hiện trong bố cục (không bị tab khác cùng nhóm che). */
+  visible?: boolean
 }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const [prompt, setPrompt] = useState<ActivePrompt | null>(null)
@@ -90,6 +93,10 @@ export function TerminalView({
     // target không đổi trong suốt vòng đời một tab.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabId])
+
+  useEffect(() => {
+    controllers.get(tabId)?.setVisible(visible)
+  }, [tabId, visible])
 
   useEffect(() => {
     if (active && !prompt) controllers.get(tabId)?.activate()

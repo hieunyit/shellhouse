@@ -94,6 +94,10 @@ export class TerminalController {
   private reconnectAttempt = 0
   private reconnectTimer: number | null = null
   private rendererKind: 'webgl' | 'dom' = 'dom'
+  private webgl: WebglAddon | null = null
+  private webglUnavailable = false
+  private visibleInPanel = true
+  private inMultiExec = false
   private readonly disposables: IDisposable[] = []
   private resizeObserver: ResizeObserver | null = null
   /** Phần tử đang chứa terminal: container của tab, hoặc một ô của MultiExec. */
@@ -148,7 +152,7 @@ export class TerminalController {
     term.loadAddon(new Unicode11Addon())
     term.unicode.activeVersion = '11'
     term.open(this.container)
-    this.loadWebgl()
+    this.updateRenderer()
     // Gắn vào phần tử của xterm (không phải container) để vẫn chạy khi terminal được chuyển sang
     // ô MultiExec. preventDefault → Electron không hiện menu chỉnh sửa mặc định chồng lên.
     const onContextMenu = (e: MouseEvent): void => {
@@ -229,6 +233,8 @@ export class TerminalController {
     this.resizeObserver?.disconnect()
     this.resizeObserver?.observe(next)
     this.host = next
+    this.inMultiExec = target !== null
+    this.updateRenderer()
     this.scheduleFit()
   }
 
@@ -352,17 +358,43 @@ export class TerminalController {
     return this.disposed
   }
 
+  /**
+   * WebGL chỉ cho terminal ĐANG HIỂN THỊ. Mỗi WebGL context giữ texture atlas riêng trong tiến trình
+   * GPU (~80–90 MB): 10 tab đều giữ context thì GPU process lên ~900 MB (đo trên Windows). Tab ẩn
+   * dùng DOM renderer — không vẽ gì khi ẩn nên gần như không tốn; hiện lại thì tạo lại context.
+   */
+  private updateRenderer(): void {
+    if (this.disposed) return
+    const wanted = this.visibleInPanel || this.inMultiExec
+    if (wanted && !this.webgl && !this.webglUnavailable) this.loadWebgl()
+    else if (!wanted && this.webgl) {
+      this.webgl.dispose()
+      this.webgl = null
+      this.rendererKind = 'dom'
+    }
+  }
+
+  /** Panel của tab có đang hiện trong bố cục không (tab khác cùng nhóm đang được chọn → ẩn). */
+  setVisible(visible: boolean): void {
+    this.visibleInPanel = visible
+    this.updateRenderer()
+  }
+
   private loadWebgl(): void {
     try {
       const webgl = new WebglAddon()
       webgl.onContextLoss(() => {
-        // Mất context (driver, quá nhiều context...) → quay về DOM renderer.
+        // Mất context (driver, quá nhiều context...) → quay về DOM renderer; hiện lại sẽ thử lại.
         webgl.dispose()
+        if (this.webgl === webgl) this.webgl = null
         this.rendererKind = 'dom'
       })
       this.term.loadAddon(webgl)
+      this.webgl = webgl
       this.rendererKind = 'webgl'
     } catch {
+      // Máy không có WebGL → không thử lại nữa.
+      this.webglUnavailable = true
       this.rendererKind = 'dom'
     }
   }

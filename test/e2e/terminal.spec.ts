@@ -111,3 +111,29 @@ test('output lớn không làm treo UI', async ({ page }) => {
   const longest = await page.evaluate(() => window.__shellhouseTest.maxLongTaskMs())
   expect(longest).toBeLessThan(500)
 })
+
+test('WebGL chỉ cho terminal đang hiển thị (tiết kiệm bộ nhớ GPU)', async ({ page }) => {
+  const first = await activeTab(page)
+  const renderer = (id: string): Promise<string | null> =>
+    page.evaluate((t) => window.__shellhouseTest.renderer(t), id)
+  test.skip((await renderer(first)) !== 'webgl', 'Máy không có WebGL (không GPU)')
+
+  await page.getByTestId('new-tab').click()
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('tab')).toHaveCount(3)
+  const ids = await page.evaluate(() => window.__shellhouseTest.tabIds())
+  const shown = await activeTab(page)
+  await expect.poll(() => renderer(shown)).toBe('webgl')
+  for (const id of ids.filter((x) => x !== shown)) await expect.poll(() => renderer(id)).toBe('dom')
+
+  // Chọn lại tab đầu → nó có lại WebGL, tab vừa rời nhả ra.
+  await page.locator(`[data-testid="tab"][data-tab-id="${first}"]`).click()
+  await expect.poll(() => renderer(first)).toBe('webgl')
+  await expect.poll(() => renderer(shown)).toBe('dom')
+
+  // MultiExec: mọi ô đều hiển thị → đều WebGL; thoát thì trở lại như cũ.
+  await page.getByTestId('toggle-broadcast').click()
+  for (const id of ids) await expect.poll(() => renderer(id)).toBe('webgl')
+  await page.getByTestId('multiexec-exit').click()
+  await expect.poll(() => renderer(shown)).toBe('dom')
+})
