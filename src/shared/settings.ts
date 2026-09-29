@@ -44,6 +44,8 @@ const TerminalSettings = z.object({
   cursorBlink: z.boolean().catch(true),
   scrollback: z.number().int().min(1000).max(100_000).catch(10_000),
   copyOnSelect: z.boolean().catch(false),
+  /** Chuột phải trong terminal: hiện menu (Copy/Paste…) hoặc dán ngay như PuTTY / MobaXterm. */
+  rightClick: z.enum(['menu', 'paste']).catch('menu'),
   /** Bật cây accessibility của xterm.js để trình đọc màn hình đọc được output. Tốn thêm CPU. */
   screenReaderMode: z.boolean().catch(false)
 })

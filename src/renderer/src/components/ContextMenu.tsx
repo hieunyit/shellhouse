@@ -12,7 +12,7 @@ export interface MenuItem {
 }
 export type MenuEntry = MenuItem | 'separator'
 
-interface OpenMenu {
+export interface OpenMenu {
   x: number
   y: number
   entries: MenuEntry[]
@@ -48,7 +48,7 @@ export function useContextMenu(): {
   }
 }
 
-function ContextMenu({
+export function ContextMenu({
   x,
   y,
   entries,

@@ -10,6 +10,7 @@ import { useHosts } from './stores/hosts'
 import { useTabs } from './stores/tabs'
 import { toggleMultiExec, useBroadcast } from './terminal/broadcast'
 import { MultiExecView } from './terminal/MultiExecView'
+import { TerminalMenu } from './terminal/TerminalMenu'
 import { controllers } from './terminal/registry'
 
 type Overlay =
@@ -140,6 +141,7 @@ export function App(): React.JSX.Element {
           <Workspace />
           {multiExec && <MultiExecView />}
         </div>
+        <TerminalMenu />
       </div>
       {overlay?.kind === 'snippets' && (
         <SnippetsDialog

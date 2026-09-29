@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Upload } from 'lucide-react'
 import { BUILTIN_THEMES, importItermColors, importWindowsTerminal } from '@shared/themes'
 import { useSettings } from '../../stores/settings'
-import { Checkbox, Field, Input, Notice, SectionTitle, Select } from '../ui'
+import { Checkbox, Field, Input, Notice, SectionTitle, Segmented, Select } from '../ui'
 
 export function TerminalSection(): React.JSX.Element {
   const { settings, update } = useSettings()
@@ -164,6 +164,17 @@ export function TerminalSection(): React.JSX.Element {
           checked={t.cursorBlink}
           onChange={(e) => void update({ terminal: { cursorBlink: e.target.checked } })}
         />
+        <Field label="Right-click in the terminal">
+          <Segmented
+            value={t.rightClick}
+            onChange={(v) => void update({ terminal: { rightClick: v } })}
+            testIdPrefix="setting-right-click"
+            options={[
+              { value: 'menu', label: 'Show menu' },
+              { value: 'paste', label: 'Copy / paste (PuTTY style)' }
+            ]}
+          />
+        </Field>
         <Checkbox
           label="Copy on select"
           checked={t.copyOnSelect}

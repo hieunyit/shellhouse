@@ -16,6 +16,7 @@ import type { EventChannel, EventPayload } from '@shared/ipc'
 import { toForwardSpec } from '@shared/forwards'
 import { checkMainNativeModules } from './diagnostics'
 import { handle } from './ipc/router'
+import { installEditContextMenu } from './context-menu'
 import { installGlobalGuards, secureWebPreferences } from './security'
 import { isAppUrl } from './security-policy'
 import { spawnElectronHost } from './session-host/electron-spawn'
@@ -336,6 +337,7 @@ function createWindow(): void {
     mainWindow?.show()
   })
 
+  installEditContextMenu(mainWindow)
   mainWindow.webContents.on('render-process-gone', (_event, details) => {
     if (details.reason === 'clean-exit') return
     log.error(`Renderer gone: ${details.reason}`)

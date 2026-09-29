@@ -111,6 +111,11 @@ test('chụp màn hình giao diện', async () => {
         .click({ modifiers: ['Control'] })
       await shot('01c-multiselect')
       await page.keyboard.press('Escape')
+      await page
+        .locator(`[data-testid="terminal-${sshTab}"] .xterm-screen`)
+        .click({ button: 'right', position: { x: 160, y: 60 } })
+      await shot('01d-terminal-menu')
+      await page.keyboard.press('Escape')
 
       await page.getByTestId('toggle-sftp').last().click()
       await page.waitForTimeout(600)

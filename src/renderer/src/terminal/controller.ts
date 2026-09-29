@@ -36,6 +36,8 @@ export interface ControllerEvents {
   onConnectedChange(connected: boolean): void
   /** Trạng thái kết nối đổi (hiện chấm trạng thái trên tab / sidebar). */
   onStateChange?(state: TerminalState): void
+  /** Chuột phải trong terminal (chế độ "menu") — mở menu tại vị trí chuột. */
+  onContextMenu?(x: number, y: number): void
   /** Shell thoát bình thường (code 0) → tab nên đóng. */
   onCleanExit(): void
 }
@@ -140,6 +142,21 @@ export class TerminalController {
     term.unicode.activeVersion = '11'
     term.open(this.container)
     this.loadWebgl()
+    // Gắn vào phần tử của xterm (không phải container) để vẫn chạy khi terminal được chuyển sang
+    // ô MultiExec. preventDefault → Electron không hiện menu chỉnh sửa mặc định chồng lên.
+    const onContextMenu = (e: MouseEvent): void => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (useSettings.getState().settings.terminal.rightClick === 'paste') {
+        // Như PuTTY / MobaXterm: có vùng chọn thì copy, không thì dán.
+        if (this.term.hasSelection()) this.copySelection()
+        else this.pasteFromClipboard()
+      } else this.events.onContextMenu?.(e.clientX, e.clientY)
+    }
+    term.element?.addEventListener('contextmenu', onContextMenu)
+    this.disposables.push({
+      dispose: () => term.element?.removeEventListener('contextmenu', onContextMenu)
+    })
 
     term.attachCustomKeyEventHandler((event) => this.handleKey(event))
     this.disposables.push(
@@ -208,6 +225,36 @@ export class TerminalController {
   }
 
   focus(): void {
+    this.term.focus()
+  }
+
+  hasSelection(): boolean {
+    return this.term.hasSelection()
+  }
+
+  /** Copy vùng chọn vào clipboard (qua main — renderer không có quyền clipboard). */
+  copySelection(): void {
+    const text = this.term.getSelection()
+    if (text) void window.shellhouse.writeClipboard(text)
+    this.term.focus()
+  }
+
+  /** Dán như gõ phím (bracketed paste nếu shell bật) — cũng đi qua MultiExec nếu đang bật. */
+  pasteFromClipboard(): void {
+    void window.shellhouse.readClipboard().then((text) => {
+      if (text) this.term.paste(text)
+      this.term.focus()
+    })
+  }
+
+  selectAll(): void {
+    this.term.selectAll()
+    this.term.focus()
+  }
+
+  /** Xoá màn hình và scrollback (dòng đang gõ giữ lại). */
+  clear(): void {
+    this.term.clear()
     this.term.focus()
   }
 
@@ -478,16 +525,23 @@ export class TerminalController {
   private handleKey(event: KeyboardEvent): boolean {
     if (event.type !== 'keydown') return true
     if (matchCommand(event)) return false
+    // Ctrl+Insert / Shift+Insert: copy / dán kiểu Windows (PuTTY, MobaXterm, cmd).
+    if (event.code === 'Insert' && event.ctrlKey && !event.shiftKey && this.term.hasSelection()) {
+      this.copySelection()
+      return false
+    }
+    if (event.code === 'Insert' && event.shiftKey && !event.ctrlKey) {
+      this.pasteFromClipboard()
+      return false
+    }
     const copyPaste = isMac ? event.metaKey && !event.shiftKey : event.ctrlKey && event.shiftKey
     if (!copyPaste) return true
     if (event.code === 'KeyC' && this.term.hasSelection()) {
-      void window.shellhouse.writeClipboard(this.term.getSelection())
+      this.copySelection()
       return false
     }
     if (event.code === 'KeyV') {
-      void window.shellhouse.readClipboard().then((text) => {
-        if (text) this.term.paste(text)
-      })
+      this.pasteFromClipboard()
       return false
     }
     return true

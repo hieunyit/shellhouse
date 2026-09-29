@@ -7,6 +7,7 @@ import { hostBorderClass, hostTileClass } from '../components/hostColors'
 import { useHosts } from '../stores/hosts'
 import { useTabStatus } from '../stores/tab-status'
 import { useBroadcast } from './broadcast'
+import { useTerminalMenu } from './TerminalMenu'
 import { useTabs, type TabTarget } from '../stores/tabs'
 import { TerminalController, type ActivePrompt } from './controller'
 import { DeployKeyDialog, ForwardsPanel, SftpPanel } from '../lazy'
@@ -65,6 +66,9 @@ export function TerminalView({
       onForwards: setForwards,
       onTransfers: setTransfers,
       onConnectedChange: setConnected,
+      onContextMenu: (x, y) => {
+        useTerminalMenu.getState().open(tabId, x, y)
+      },
       onStateChange: (state) => {
         useTabStatus.getState().set(tabId, state)
       },
