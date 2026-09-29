@@ -17,7 +17,8 @@ const dirs: string[] = []
 test.afterEach(async () => {
   await server?.close()
   server = null
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+  for (const d of dirs.splice(0))
+    rmSync(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 })
 
 test.skip(!findSftpServer(), 'Cần sftp-server của OpenSSH')
