@@ -89,6 +89,8 @@ export class TerminalController {
   private rendererKind: 'webgl' | 'dom' = 'dom'
   private readonly disposables: IDisposable[] = []
   private resizeObserver: ResizeObserver | null = null
+  /** Phần tử đang chứa terminal: container của tab, hoặc một ô của MultiExec. */
+  private host: HTMLElement | null = null
   private resizeTimer: number | null = null
   private unsubscribeHost: (() => void) | null = null
   private unsubscribeSettings: (() => void) | null = null
@@ -155,6 +157,7 @@ export class TerminalController {
     this.resizeObserver = new ResizeObserver(() => {
       this.scheduleFit()
     })
+    this.host = this.container
     this.resizeObserver.observe(this.container)
     this.safeFit()
 
@@ -186,6 +189,25 @@ export class TerminalController {
 
   activate(): void {
     this.safeFit()
+    this.term.focus()
+  }
+
+  /**
+   * Chuyển terminal sang phần tử khác (ô của MultiExec); null = trả về tab của nó. Chỉ di chuyển
+   * DOM của xterm — phiên, scrollback và trạng thái giữ nguyên, không kết nối lại.
+   */
+  mountIn(target: HTMLElement | null): void {
+    const element = this.term.element
+    const next = target ?? this.container
+    if (this.disposed || !element || this.host === next) return
+    next.appendChild(element)
+    this.resizeObserver?.disconnect()
+    this.resizeObserver?.observe(next)
+    this.host = next
+    this.scheduleFit()
+  }
+
+  focus(): void {
     this.term.focus()
   }
 
@@ -490,7 +512,7 @@ export class TerminalController {
 
   private safeFit(): void {
     if (this.disposed) return
-    const { clientWidth, clientHeight } = this.container
+    const { clientWidth, clientHeight } = this.host ?? this.container
     if (clientWidth === 0 || clientHeight === 0) return
     try {
       this.fit.fit()

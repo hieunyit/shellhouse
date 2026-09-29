@@ -178,14 +178,14 @@ test('chụp màn hình giao diện', async () => {
     await page
       .locator('[data-testid="group-row"][data-group-name="Web"]')
       .click({ button: 'right' })
-    await page.getByTestId('menu-open-grid-broadcast').click()
+    await page.getByTestId('menu-open-multiexec').click()
     await page
       .getByTestId('hostkey-accept')
       .first()
       .click({ timeout: 3_000 })
       .catch(() => undefined)
     await page.waitForTimeout(1500)
-    await page.screenshot({ path: `${OUT}/light-10-broadcast-grid.png` })
+    await page.screenshot({ path: `${OUT}/light-10-multiexec.png` })
   } finally {
     await launched.close()
     await server.close()

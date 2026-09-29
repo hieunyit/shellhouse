@@ -192,32 +192,65 @@ test('kéo thả để sắp xếp host thủ công', async ({ page }) => {
   await expect.poll(order).toEqual(['alpha', 'bravo', 'charlie'])
 })
 
-test('mở cả nhóm thành lưới + gõ đồng loạt; Stop thì chỉ gõ vào một terminal', async ({ page }) => {
+test('MultiExec: mọi terminal xếp đều trên một màn hình, chọn ô nhận lệnh, thoát trả về tab', async ({
+  page
+}) => {
   server = await startTestSshServer([{ username: 'u', password: 'pw' }])
   const g = await saveGroup(page, 'Cluster')
   await saveHost(page, 'node-1', { groupId: g, port: server.port })
   await saveHost(page, 'node-2', { groupId: g, port: server.port })
-  const before = await page.getByTestId('tab').count()
+  const localTab = await page.evaluate(() => window.__shellhouseTest.activeTabId())
 
+  // Mở cả nhóm vào MultiExec: lưới gồm MỌI terminal (kể cả tab local), chỉ 2 host mới nhận lệnh.
   await groupRow(page, 'Cluster').click({ button: 'right' })
-  await page.getByTestId('menu-open-grid-broadcast').click()
-  await expect(page.getByTestId('tab')).toHaveCount(before + 2)
+  await page.getByTestId('menu-open-multiexec').click()
+  const grid = page.getByTestId('multiexec')
+  await expect(grid).toBeVisible()
+  await expect(grid.getByTestId('multiexec-cell')).toHaveCount(3)
+  await expect(page.getByTestId('multiexec-summary')).toHaveText('Typing goes to 2 of 3 terminals')
+  // Host key được xác nhận ngay trong ô lưới, không phải thoát ra.
   await acceptHostKeys(page, 2)
-  const tabs = await page.evaluate(() => window.__shellhouseTest.tabIds().slice(-2))
-  for (const id of tabs) await waitForText(page, id, 'welcome to test server')
-  await expect(page.locator('[data-broadcasting="true"]')).toHaveCount(2)
+  const nodes = await page.evaluate(() => window.__shellhouseTest.tabIds().slice(-2))
+  for (const id of nodes) await waitForText(page, id, 'welcome to test server')
 
-  await page.getByTestId(`terminal-${tabs[0] ?? ''}`).click()
+  // Các ô chia đều màn hình.
+  const boxes = await grid
+    .getByTestId('multiexec-cell')
+    .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width))
+  expect(Math.max(...boxes) - Math.min(...boxes)).toBeLessThan(2)
+
+  const cell = (id: string): Locator =>
+    page.locator(`[data-testid="multiexec-cell"][data-tab-id="${id}"]`)
+  await cell(nodes[0] ?? '').click()
   await page.keyboard.type('echo cung-luc\r')
-  for (const id of tabs) await waitForText(page, id, 'cung-luc')
+  for (const id of nodes) await waitForText(page, id, 'cung-luc')
+  expect(
+    await page.evaluate((id) => window.__shellhouseTest.bufferText(id), localTab ?? '')
+  ).not.toContain('cung-luc')
 
-  await page.getByTestId('broadcast-stop').first().click()
-  await expect(page.locator('[data-broadcasting="true"]')).toHaveCount(0)
-  await page.getByTestId(`terminal-${tabs[0] ?? ''}`).click()
+  // Bỏ chọn node-2 → chỉ node-1 nhận.
+  await cell(nodes[1] ?? '')
+    .getByTestId('multiexec-toggle')
+    .uncheck()
+  await expect(page.getByTestId('multiexec-summary')).toHaveText('Typing goes to 1 of 3 terminals')
+  await cell(nodes[0] ?? '').click()
   await page.keyboard.type('echo chi-mot\r')
-  await waitForText(page, tabs[0] ?? '', 'chi-mot')
+  await waitForText(page, nodes[0] ?? '', 'chi-mot')
   await page.waitForTimeout(500)
   expect(
-    await page.evaluate((id) => window.__shellhouseTest.bufferText(id), tabs[1] ?? '')
+    await page.evaluate((id) => window.__shellhouseTest.bufferText(id), nodes[1] ?? '')
   ).not.toContain('chi-mot')
+
+  // Thoát: terminal về lại tab của nó, phiên vẫn sống (không kết nối lại).
+  await page.getByTestId('multiexec-exit').click()
+  await expect(grid).toHaveCount(0)
+  for (const id of nodes)
+    await expect(page.locator(`[data-testid="terminal-${id}"] .xterm`)).toHaveCount(1)
+  expect(server.events.authAttempts.filter((a) => a.method === 'password')).toHaveLength(2)
+
+  // Nút trên thanh công cụ: bật MultiExec với tất cả terminal được chọn.
+  await page.getByTestId('toggle-broadcast').click()
+  await expect(page.getByTestId('multiexec-summary')).toHaveText('Typing goes to 3 of 3 terminals')
+  await page.getByTestId('toggle-broadcast').click()
+  await expect(grid).toHaveCount(0)
 })

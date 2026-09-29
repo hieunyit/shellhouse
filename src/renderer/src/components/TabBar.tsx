@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Columns2, Info, Lock, Plus, Radio, Rows2, ScrollText, Settings, Zap } from 'lucide-react'
 import { parseQuickConnect } from '@shared/quick-connect'
 import { useTabs } from '../stores/tabs'
-import { useBroadcast } from '../terminal/broadcast'
+import { toggleMultiExec, useBroadcast } from '../terminal/broadcast'
 import { cx, IconButton } from './ui'
 
 function QuickConnect(): React.JSX.Element {
@@ -100,17 +100,17 @@ export function TabBar({
         <ScrollText size={15} />
       </IconButton>
       <IconButton
-        label={broadcasting ? 'Stop typing into all terminals' : 'Type into all open terminals'}
+        label={
+          broadcasting
+            ? 'Exit MultiExec'
+            : 'MultiExec: show all terminals and type into them at once'
+        }
         data-testid="toggle-broadcast"
         active={broadcasting}
         aria-pressed={broadcasting}
         disabled={tabCount < 2 && !broadcasting}
         className={broadcasting ? 'text-warning' : ''}
-        onClick={() => {
-          const b = useBroadcast.getState()
-          if (b.enabled) b.stop()
-          else b.start(useTabs.getState().tabs.map((t) => t.id))
-        }}
+        onClick={toggleMultiExec}
       >
         <Radio size={15} />
       </IconButton>

@@ -35,19 +35,24 @@
   - Icon thư mục nhóm trong sidebar.
 - Form hiển thị "Using red from Production" khi đang kế thừa màu.
 
-### 3. Mở cả nhóm và gõ đồng loạt
+### 3. Mở cả nhóm và MultiExec (gõ đồng loạt)
 
-- Menu nhóm và menu khi chọn nhiều host có ba lựa chọn: mở thành tab, mở thành lưới, mở thành lưới
-  và gõ đồng loạt.
-- Lưới gần vuông (4 host → 2×2), mở trong khung mới bên phải. Tối đa 16 ô; mở hơn 8 phiên một lúc
-  thì hỏi xác nhận.
-- Gõ đồng loạt (`terminal/broadcast.ts`):
-  - Phím gõ và dán ở một terminal thuộc nhóm được gửi tới mọi terminal trong nhóm.
-  - Luôn hiển thị rõ khi đang bật: viền cam, banner "Typing into N terminals" có nút Stop, biểu
-    tượng phát sóng trên tab.
-  - Bật/tắt cho từng tab ngay trên tab; nút trên thanh trên cùng để bật cho mọi tab.
-  - Tab đóng thì tự rời nhóm; nhóm còn dưới 2 tab thì tự tắt.
-  - Hook test `sendInput` không đi qua broadcast.
+- Menu nhóm và menu khi chọn nhiều host có ba lựa chọn: mở thành tab, mở thành lưới chia màn hình,
+  và **Open in MultiExec**. Mở hơn 8 phiên một lúc thì hỏi xác nhận.
+- **MultiExec** (giống MobaXterm; nút trên thanh công cụ, `Ctrl+Shift+M` / `Cmd+Shift+M`):
+  - **Mọi** terminal đang mở được xếp đều thành lưới gần vuông trên một màn hình, là một lớp phủ
+    lên vùng làm việc.
+  - Mỗi ô có công tắc **Send input**. Gõ (và dán) ở một ô đang bật thì được gửi tới mọi ô đang
+    bật; gõ ở ô đang tắt thì chỉ vào ô đó.
+  - Thanh trên cùng: "Typing goes to N of M terminals", Select all, None, Exit MultiExec. Nút ⤢
+    trên từng ô: thoát và mở tab đó.
+- Terminal **không được tạo lại**: `TerminalController.mountIn()` chuyển phần tử DOM của xterm vào
+  ô lưới và trả về tab khi thoát. Phiên, scrollback và kết nối giữ nguyên; bố cục tab/chia màn
+  hình không bị đụng tới. Không dùng cách dựng lại bố cục của dockview, vì panel sẽ bị mount lại
+  và phiên bị mất.
+- Prompt (host key, mật khẩu) hiện **ngay trong ô lưới**. Trạng thái prompt nằm trong
+  `useTabStatus.prompts`, và TerminalView không vẽ bản thứ hai khi đang ở MultiExec.
+- Hook test `sendInput` không đi qua broadcast.
 
 ### 4. Menu chuột phải
 

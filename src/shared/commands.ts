@@ -18,6 +18,11 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: 'palette.open', title: 'Command palette', keys: ['Meta+Shift+P', 'Ctrl+Shift+P'] },
   { id: 'settings.open', title: 'Open settings', keys: ['Meta+,', 'Ctrl+,'] },
   { id: 'vault.lock', title: 'Lock vault', keys: ['Meta+Shift+L', 'Ctrl+Shift+L'] },
+  {
+    id: 'multiexec.toggle',
+    title: 'MultiExec: type into all terminals',
+    keys: ['Meta+Shift+M', 'Ctrl+Shift+M']
+  },
   { id: 'diagnostics.toggle', title: 'Toggle diagnostics', keys: [null, null] }
 ]
 

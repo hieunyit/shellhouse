@@ -8,6 +8,8 @@ import { preloadLazyParts, SettingsDialog, SnippetsDialog } from './lazy'
 import { matchCommand } from './lib/keybindings'
 import { useHosts } from './stores/hosts'
 import { useTabs } from './stores/tabs'
+import { toggleMultiExec, useBroadcast } from './terminal/broadcast'
+import { MultiExecView } from './terminal/MultiExecView'
 import { controllers } from './terminal/registry'
 
 type Overlay =
@@ -22,6 +24,18 @@ type Overlay =
 export function App(): React.JSX.Element {
   const [overlay, setOverlay] = useState<Overlay>(null)
   const activeId = useTabs((s) => s.activeId)
+  const multiExec = useBroadcast((s) => s.enabled)
+  // Vào / ra MultiExec: terminal đổi chỗ → đo lại kích thước và focus vào tab đang chọn.
+  useEffect(() => {
+    const id = useTabs.getState().activeId
+    if (!id) return
+    const frame = requestAnimationFrame(() => {
+      controllers.get(id)?.activate()
+    })
+    return () => {
+      cancelAnimationFrame(frame)
+    }
+  }, [multiExec])
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -70,6 +84,9 @@ export function App(): React.JSX.Element {
         break
       case 'settings.open':
         setOverlay({ kind: 'settings' })
+        break
+      case 'multiexec.toggle':
+        toggleMultiExec()
         break
       case 'vault.lock':
         void window.shellhouse.lockVault()
@@ -121,6 +138,7 @@ export function App(): React.JSX.Element {
         />
         <div className="relative min-h-0 flex-1">
           <Workspace />
+          {multiExec && <MultiExecView />}
         </div>
       </div>
       {overlay?.kind === 'snippets' && (

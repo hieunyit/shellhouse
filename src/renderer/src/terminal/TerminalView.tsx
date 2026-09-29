@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
-import { ArrowLeftRight, FolderOpen, KeyRound, Radio } from 'lucide-react'
+import { ArrowLeftRight, FolderOpen, KeyRound } from 'lucide-react'
 import { connectionLabel, cx, StatusDot } from '../components/ui'
 import type { ForwardStatus } from '@shared/forwards'
 import { hostBorderClass, hostTileClass } from '../components/hostColors'
@@ -33,8 +33,6 @@ export function TerminalView({
   const [panel, setPanel] = useState<Panel>(
     () => useTabs.getState().tabs.find((t) => t.id === tabId)?.initialPanel ?? null
   )
-  const broadcasting = useBroadcast((s) => s.enabled && s.tabIds.includes(tabId))
-  const broadcastCount = useBroadcast((s) => s.tabIds.length)
   // Màu môi trường + đường dẫn nhóm (host đã lưu): nhắc người dùng đang ở server nào.
   const hostId = target.kind === 'host' ? target.hostId : null
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
@@ -45,6 +43,7 @@ export function TerminalView({
   const env = hostId ? { color: envColor, path: envPath } : null
   const [deploying, setDeploying] = useState(false)
   const isRemote = target.kind !== 'local'
+  const multiExec = useBroadcast((s) => s.enabled)
   const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
   const runSftp = useCallback(
     (op: SftpOp) =>
@@ -59,7 +58,10 @@ export function TerminalView({
       onTitle: (title) => {
         useTabs.getState().setTitle(tabId, title)
       },
-      onPrompt: setPrompt,
+      onPrompt: (p) => {
+        setPrompt(p)
+        useTabStatus.getState().setPrompt(tabId, p)
+      },
       onForwards: setForwards,
       onTransfers: setTransfers,
       onConnectedChange: setConnected,
@@ -150,35 +152,13 @@ export function TerminalView({
         </div>
       )}
       <div className="relative flex min-h-0 flex-1">
-        <div
-          className={cx(
-            'relative min-w-0 flex-1 bg-terminal',
-            broadcasting && 'ring-2 ring-warning ring-inset'
-          )}
-          data-broadcasting={broadcasting}
-        >
-          {broadcasting && (
-            <div className="animate-fade-in absolute top-1.5 right-3 z-10 flex items-center gap-2 rounded-md bg-warning px-2 py-1 text-[11px] font-semibold text-canvas shadow-md">
-              <Radio size={12} />
-              Typing into {broadcastCount} terminals
-              <button
-                type="button"
-                className="rounded bg-canvas/20 px-1.5 hover:bg-canvas/35"
-                data-testid="broadcast-stop"
-                onClick={() => {
-                  useBroadcast.getState().stop()
-                }}
-              >
-                Stop
-              </button>
-            </div>
-          )}
+        <div className="relative min-w-0 flex-1 bg-terminal">
           <div
             ref={ref}
             data-testid={`terminal-${tabId}`}
             className="absolute inset-0 pt-2 pr-1 pb-1 pl-3"
           />
-          {prompt && (
+          {prompt && !multiExec && (
             <PromptDialog
               prompt={prompt}
               onAnswer={(ok, answers) => {

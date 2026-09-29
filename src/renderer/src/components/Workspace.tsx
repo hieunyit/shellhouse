@@ -7,10 +7,9 @@ import {
   type IDockviewPanelProps
 } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
-import { Radio, Server, SquareTerminal, TerminalSquare, X } from 'lucide-react'
+import { Server, SquareTerminal, TerminalSquare, X } from 'lucide-react'
 import { useTabStatus } from '../stores/tab-status'
 import { useHosts } from '../stores/hosts'
-import { useBroadcast } from '../terminal/broadcast'
 import { hostColorClass } from './hostColors'
 import { keybindingFor } from '@shared/commands'
 import { displayKeybinding, isMac } from '../lib/keybindings'
@@ -66,8 +65,6 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
     return t?.kind === 'host' ? t.hostId : null
   })
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
-  const broadcastOn = useBroadcast((s) => s.enabled)
-  const inBroadcast = useBroadcast((s) => s.tabIds.includes(tabId))
   const Icon = kind === 'local' ? SquareTerminal : Server
   return (
     <div
@@ -92,27 +89,6 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
           aria-hidden
           className={cx('absolute inset-x-0 top-0 h-0.5', hostColorClass[envColor])}
         />
-      )}
-      {broadcastOn && (
-        <button
-          type="button"
-          aria-pressed={inBroadcast}
-          aria-label={inBroadcast ? 'Stop typing into this tab' : 'Also type into this tab'}
-          title={inBroadcast ? 'Receiving broadcast input' : 'Not receiving broadcast input'}
-          data-testid="tab-broadcast"
-          className={cx(
-            'flex size-5 shrink-0 items-center justify-center rounded',
-            inBroadcast ? 'text-warning' : 'text-faint opacity-60 hover:opacity-100'
-          )}
-          onMouseDown={(e) => {
-            e.stopPropagation()
-          }}
-          onClick={() => {
-            useBroadcast.getState().toggleTab(tabId)
-          }}
-        >
-          <Radio size={12} />
-        </button>
       )}
       <span className="relative flex shrink-0">
         <Icon size={13} className={active ? 'text-fg' : 'text-faint'} />

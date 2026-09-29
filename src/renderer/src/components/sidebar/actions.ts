@@ -12,16 +12,17 @@ export function connect(host: HostSummary, options?: OpenHostOptions): void {
   useTabs.getState().addHost({ id: host.id, label: host.label }, options)
 }
 
+/** `multiExec`: mở thành tab rồi bật MultiExec (lưới đều, gõ đồng loạt vào các host vừa mở). */
 export function openMany(
   hosts: readonly HostSummary[],
   layout: 'tabs' | 'grid',
-  broadcast = false
+  multiExec = false
 ): void {
   const ids = useTabs.getState().openHosts(
     hosts.map((h) => ({ id: h.id, label: h.label })),
-    layout
+    multiExec ? 'tabs' : layout
   )
-  if (broadcast) useBroadcast.getState().start(ids)
+  if (multiExec) useBroadcast.getState().start(ids)
 }
 
 /** Mọi host trong nhóm (kể cả nhóm con cháu), theo đúng thứ tự hiển thị. */

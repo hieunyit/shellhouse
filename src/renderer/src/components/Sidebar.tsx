@@ -382,8 +382,8 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
           }
         },
         {
-          id: 'open-grid-broadcast',
-          label: 'Open in a grid and type into all',
+          id: 'open-multiexec',
+          label: 'Open in MultiExec (type into all)',
           icon: <Radio size={14} />,
           disabled: targets.length > MAX_GRID,
           onSelect: () => {
@@ -424,8 +424,8 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
         }
       },
       {
-        id: 'open-grid-broadcast',
-        label: 'Open all in a grid and type into all',
+        id: 'open-multiexec',
+        label: 'Open all in MultiExec (type into all)',
         icon: <Radio size={14} />,
         disabled: n < 2 || n > MAX_GRID,
         onSelect: () => {
@@ -1137,7 +1137,7 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
       {dialog?.kind === 'open-many' && (
         <ConfirmDialog
           title={`Open ${plural(dialog.hosts.length, 'session')}?`}
-          message={`This connects to ${plural(dialog.hosts.length, 'host')} at once${dialog.layout === 'grid' ? ' in a grid' : ''}${dialog.broadcast ? ', and what you type goes to all of them' : ''}.`}
+          message={`This connects to ${plural(dialog.hosts.length, 'host')} at once${dialog.layout === 'grid' ? ' in a grid' : ''}${dialog.broadcast ? ', and shows them all in MultiExec' : ''}.`}
           confirmLabel="Open all"
           onConfirm={() => {
             openMany(dialog.hosts, dialog.layout, dialog.broadcast)
