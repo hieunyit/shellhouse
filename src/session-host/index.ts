@@ -114,6 +114,7 @@ port.on('message', (event) => {
               ...(request.ssh.keyFiles ? { keyFiles: request.ssh.keyFiles } : {}),
               ...(request.ssh.jumps ? { jumps: request.ssh.jumps } : {}),
               ...(request.ssh.legacyAlgorithms ? { legacyAlgorithms: true } : {}),
+              ...(request.ssh.storedOnly ? { storedOnly: true } : {}),
               ...(request.ssh.autoForwards ? { autoForwards: request.ssh.autoForwards } : {})
             }
           : {}),

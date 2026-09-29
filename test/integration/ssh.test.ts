@@ -56,6 +56,7 @@ interface ConnectOpts {
   /** Đường dẫn agent (mặc định: không dùng agent). */
   agent?: string
   logs?: string[]
+  storedOnly?: boolean
 }
 
 async function connectTo(opts: ConnectOpts): Promise<Harness> {
@@ -76,7 +77,8 @@ async function connectTo(opts: ConnectOpts): Promise<Harness> {
     destination: {
       target: spec.target,
       knownKeyTypes: [],
-      ...(opts.credentials ? { credentials: opts.credentials } : {})
+      ...(opts.credentials ? { credentials: opts.credentials } : {}),
+      ...(opts.storedOnly ? { storedOnly: true } : {})
     },
     ...(opts.jumps ? { jumps: opts.jumps } : {}),
     cols: spec.cols,
@@ -167,6 +169,31 @@ describe('SSH: xác thực', () => {
     })
     await h.waitFor('welcome')
     expect(logs.some((l) => l.startsWith('SSH agent unavailable'))).toBe(true)
+  })
+
+  it('host đặt rõ Password: chỉ gửi password đã lưu — không thử agent, không thử key mặc định', async () => {
+    const key = generateTestKey()
+    const keyFile = join(tempDir(), 'id_ed25519')
+    writeFileSync(keyFile, key.private)
+    const s = await server([{ username: 'alice', password: 's3cret', publicKey: key.public }])
+    const logs: string[] = []
+    const h = await connectTo({
+      port: s.port,
+      username: 'alice',
+      hostKey: 'match',
+      credentials: { password: 's3cret' },
+      storedOnly: true,
+      keyFiles: [keyFile],
+      agent:
+        process.platform === 'win32'
+          ? '\\\\.\\pipe\\shellhouse-no-such-agent'
+          : join(tempDir(), 'no-such-agent.sock'),
+      logs
+    })
+    await h.waitFor('welcome')
+    expect(logs.some((l) => l.includes('agent'))).toBe(false)
+    expect(s.events.authAttempts.map((a) => a.method)).not.toContain('publickey')
+    expect(h.prompts.filter((p) => p.kind === 'password')).toEqual([])
   })
 
   it('sai password 3 lần → thất bại, không hỏi quá 3 lần', async () => {

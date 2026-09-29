@@ -272,6 +272,7 @@ function registerIpc(): void {
           ...(resolved ? { credentials: resolved.credentials } : {}),
           ...(resolved?.keyFiles ? { keyFiles: resolved.keyFiles } : {}),
           ...(resolved?.legacyAlgorithms ? { legacyAlgorithms: true } : {}),
+          ...(resolved?.storedOnly ? { storedOnly: true } : {}),
           ...(resolved && resolved.jumps.length > 0
             ? {
                 jumps: resolved.jumps.map((j) => ({
@@ -279,7 +280,8 @@ function registerIpc(): void {
                   knownKeyTypes: known(j.target),
                   credentials: j.credentials,
                   ...(j.keyFiles ? { keyFiles: j.keyFiles } : {}),
-                  ...(j.legacyAlgorithms ? { legacyAlgorithms: true } : {})
+                  ...(j.legacyAlgorithms ? { legacyAlgorithms: true } : {}),
+                  ...(j.storedOnly ? { storedOnly: true } : {})
                 }))
               }
             : {})

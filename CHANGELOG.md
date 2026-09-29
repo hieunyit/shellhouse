@@ -12,6 +12,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   identities from agent" when no SSH agent is running (Windows without the OpenSSH
   Authentication Agent service or Pageant). The agent is skipped and the next method is used,
   as OpenSSH does.
+- Hosts set to **Password** or **SSH key** authentication use only that stored credential; the
+  SSH agent and the default keys in `~/.ssh` are tried only with **Automatic**.
 
 ## [1.1.0-beta.1] - 2026-09-29
 

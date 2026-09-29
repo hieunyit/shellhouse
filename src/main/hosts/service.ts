@@ -31,6 +31,8 @@ export interface ResolvedHop {
   keyFiles?: string[]
   /** Cho phép thuật toán cũ (thiết bị đời cũ). */
   legacyAlgorithms?: boolean
+  /** Host chọn rõ Password / SSH key: chỉ dùng thông tin đã lưu, không thử agent / key mặc định. */
+  storedOnly?: boolean
 }
 
 /** Thứ Session Host cần để kết nối một host đã lưu. */
@@ -970,7 +972,8 @@ export class HostService {
       target: { host: row.hostname, port, username },
       credentials,
       ...(options.keyFile ? { keyFiles: [options.keyFile] } : {}),
-      ...(options.legacy ? { legacyAlgorithms: true } : {})
+      ...(options.legacy ? { legacyAlgorithms: true } : {}),
+      ...(row.auth_type === 'password' || row.auth_type === 'key' ? { storedOnly: true } : {})
     }
   }
 }

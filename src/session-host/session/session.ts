@@ -77,6 +77,7 @@ export interface SessionExtras {
   jumps?: readonly HopConfig[]
   autoForwards?: readonly ForwardSpec[]
   legacyAlgorithms?: boolean
+  storedOnly?: boolean
   log?: SessionLogOptions
 }
 
@@ -177,7 +178,8 @@ export class Session {
           knownKeyTypes: this.extras.knownKeyTypes ?? [],
           ...(this.extras.credentials ? { credentials: this.extras.credentials } : {}),
           ...(this.extras.keyFiles ? { keyFiles: this.extras.keyFiles } : {}),
-          ...(this.extras.legacyAlgorithms ? { legacyAlgorithms: true } : {})
+          ...(this.extras.legacyAlgorithms ? { legacyAlgorithms: true } : {}),
+          ...(this.extras.storedOnly ? { storedOnly: true } : {})
         }
         const transport = await openSshShell({
           destination,

@@ -83,6 +83,12 @@ export interface HopConfig {
   keyFiles?: readonly string[]
   /** Cho phép thuật toán cũ (ssh-rsa/SHA-1, DH group1/14-sha1, CBC) — thiết bị đời cũ. */
   legacyAlgorithms?: boolean
+  /**
+   * Chỉ dùng `credentials` / `keyFiles` của chặng này — không thử agent và key mặc định
+   * (~/.ssh/id_*). Host đặt rõ Password / SSH key: tránh lỗi agent và "Too many authentication
+   * failures" khi máy có nhiều key.
+   */
+  storedOnly?: boolean
 }
 
 export interface SshOpenOptions {
@@ -215,8 +221,8 @@ function connectHop(options: HopOptions): Promise<Client> {
       authHandler: createAuthHandler({
         username,
         host,
-        agent: options.agent,
-        keyFiles: hop.keyFiles ?? options.defaultKeys,
+        agent: hop.storedOnly ? null : options.agent,
+        keyFiles: hop.keyFiles ?? (hop.storedOnly ? [] : options.defaultKeys),
         ...(hop.credentials ? { credentials: hop.credentials } : {}),
         ctx
       })

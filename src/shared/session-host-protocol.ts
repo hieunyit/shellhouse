@@ -26,7 +26,8 @@ export const Hop = z.object({
   knownKeyTypes: z.array(z.string()),
   credentials: Credentials.optional(),
   keyFiles: z.array(z.string()).optional(),
-  legacyAlgorithms: z.boolean().optional()
+  legacyAlgorithms: z.boolean().optional(),
+  storedOnly: z.boolean().optional()
 })
 export type Hop = z.infer<typeof Hop>
 
@@ -50,6 +51,8 @@ export const HostRequest = z.discriminatedUnion('type', [
         keyFiles: z.array(z.string()).optional(),
         /** Cho phép thuật toán cũ (thiết bị đời cũ) cho đích cuối. */
         legacyAlgorithms: z.boolean().optional(),
+        /** Chỉ dùng thông tin đã lưu (host chọn Password / SSH key) — không thử agent, key mặc định. */
+        storedOnly: z.boolean().optional(),
         /** ProxyJump: các chặng trung gian theo thứ tự. */
         jumps: z.array(Hop).max(8).optional(),
         /** Forward tự bật ngay khi kết nối xong. */
