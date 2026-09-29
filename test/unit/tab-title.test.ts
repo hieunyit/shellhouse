@@ -10,6 +10,10 @@ describe('tabTitle', () => {
   it('cmd đang chạy lệnh: "…cmd.exe - ping x" → "ping x"', () => {
     expect(tabTitle('C:\\WINDOWS\\system32\\cmd.exe - ping 8.8.8.8')).toBe('ping 8.8.8.8')
   })
+  it('shell chạy quyền admin: bỏ tiền tố "Administrator: "', () => {
+    expect(tabTitle('Administrator: C:\\Windows\\System32\\cmd.exe')).toBe('')
+    expect(tabTitle('Administrator: C:\\Windows\\system32\\cmd.exe - dir')).toBe('dir')
+  })
   it('tiêu đề bình thường giữ nguyên', () => {
     expect(tabTitle('user@host: ~/src')).toBe('user@host: ~/src')
     expect(tabTitle('vim notes.exe.txt')).toBe('vim notes.exe.txt')

@@ -8,7 +8,7 @@ import {
   startTestSshServer,
   type TestSshServer
 } from '../integration/ssh-test-server'
-import { activeTab, expect, test, waitForText } from './fixtures'
+import { activeTab, expect, isWindows, test, waitForText } from './fixtures'
 
 const sha = (b: Buffer): string => createHash('sha256').update(b).digest('hex')
 
@@ -17,7 +17,7 @@ const dirs: string[] = []
 test.afterEach(async () => {
   await server?.close()
   server = null
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
 })
 
 test.skip(!findSftpServer(), 'Cần sftp-server của OpenSSH')
@@ -41,8 +41,12 @@ test('SFTP qua giao diện: tải lên, tạo thư mục, tải về, xoá', asy
 
   await page.getByTestId('toggle-sftp').last().click()
   const panel = page.getByTestId('sftp-panel')
-  // macOS: /var là symlink tới /private/var — server trả đường dẫn thật.
-  await expect(panel.getByTestId('sftp-path')).toHaveValue(realpathSync(remote))
+  // macOS: /var là symlink tới /private/var — server trả đường dẫn thật. Windows: sftp-server của
+  // Win32-OpenSSH trả dạng "/C:/Users/…".
+  const real = realpathSync(remote)
+  await expect(panel.getByTestId('sftp-path')).toHaveValue(
+    isWindows ? `/${real.replaceAll('\\', '/')}` : real
+  )
   await expect(panel.locator('[data-testid="sftp-entry"][data-name="co-san.txt"]')).toBeVisible()
 
   // Tải lên (hộp thoại chọn file được thay bằng đường dẫn cố định).

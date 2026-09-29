@@ -90,12 +90,15 @@ export async function activeTab(page: Page): Promise<string> {
   return id
 }
 
-/** Đợi tới khi `text` xuất hiện trong buffer của tab. */
+/**
+ * Đợi tới khi `text` xuất hiện trong buffer của tab. Runner Windows của CI khởi động PowerShell rất
+ * chậm khi hai shell mở cùng lúc → chờ lâu hơn.
+ */
 export async function waitForText(
   page: Page,
   tabId: string,
   text: string,
-  timeout = 10_000
+  timeout = isWindows ? 30_000 : 10_000
 ): Promise<void> {
   await page.waitForFunction(
     ([id, t]) => window.__shellhouseTest.bufferText(id).includes(t),
