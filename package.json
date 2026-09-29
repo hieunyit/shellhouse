@@ -1,9 +1,16 @@
 {
   "name": "shellhouse",
-  "version": "0.1.0",
+  "version": "1.0.0-beta.1",
   "private": true,
   "description": "SSH & terminal client",
-  "homepage": "https://shellhouse.invalid",
+  "homepage": "https://github.com/hieunyit/shellhouse",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hieunyit/shellhouse.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hieunyit/shellhouse/issues"
+  },
   "desktopName": "shellhouse.desktop",
   "main": "./out/main/index.js",
   "author": "hieuny",

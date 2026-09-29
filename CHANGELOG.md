@@ -6,6 +6,42 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] - 2026-09-29
+
+First public beta.
+
+### Added
+
+- **Local shells**: pick PowerShell, PowerShell 7, Command Prompt, any WSL distribution, Git Bash
+  (Windows) or any shell from `/etc/shells` (macOS/Linux) from the menu next to "+ Terminal";
+  choose a default shell in Settings.
+- **Nested groups** with drag and drop, recursive host counts, search by group path and safe
+  deletion (hosts and subgroups move up).
+- **Group defaults**: username, port, SSH key, jump hosts and an environment color that hosts
+  inside inherit unless they override them. Production-style environment colors on tabs and the
+  session bar.
+- **MultiExec**: tile every open terminal on one screen and type into the ones you select.
+- **Context menus** for hosts, groups and the terminal (copy, paste, split, SFTP, copy SSH command,
+  duplicate, move, tags); multi-select with Ctrl/Shift; favorites, recent hosts and manual ordering.
+- **Copy and paste**: terminal menu or PuTTY-style right-click, Ctrl+Insert / Shift+Insert, and a
+  standard Cut/Copy/Paste menu in text fields.
+- **Legacy algorithms** per host for old switches and routers (ssh-rsa, SHA-1 key exchange, CBC),
+  with a "Legacy" badge on the session bar.
+- Resizable sidebar; refreshed look (Inter / JetBrains Mono, smoother dialogs and panels).
+
+### Fixed
+
+- Terminal output stays in scrollback when a Windows (ConPTY) session restarts.
+- Tabs keep the shell name instead of an `.exe` path on Windows.
+- `~/.ssh/...` paths from `~/.ssh/config` are imported with native separators on Windows.
+- Much lower GPU memory with many tabs (WebGL only for visible terminals).
+- Dialogs no longer lose what you typed when they open while loading.
+
+### Verified
+
+- Real SSH servers: OpenSSH 7.4, 8.2, 9.6, 10.3, Dropbear, legacy-only devices, password + TOTP
+  2FA and two-level bastions — from Linux and Windows.
+
 ## [0.1.0] - 2026-09-28
 
 ### Added
