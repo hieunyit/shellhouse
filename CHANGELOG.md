@@ -14,6 +14,9 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   and the double-click action in Settings → Files.
 - Session logs: record everything a session prints to a file, one folder per host (off, SSH
   sessions only, or all sessions). Plain text by default, with colors and control codes removed.
+- Server statistics under SSH terminals: CPU, memory, disk, network and uptime of Linux
+  servers. Measured over a separate channel (nothing is typed into your shell), only while the
+  tab is visible. Can be turned off in Settings → Terminal.
 
 ## [1.0.0-beta.2] - 2026-09-29
 

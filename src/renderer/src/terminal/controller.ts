@@ -7,6 +7,7 @@ import { Terminal, type IDisposable } from '@xterm/xterm'
 import type { SessionHostStatus } from '@shared/ipc'
 import type { ExitReason, PromptRequest, SessionSpec } from '@shared/stream-protocol'
 import type { ForwardSpec, ForwardStatus } from '@shared/forwards'
+import type { ServerStats } from '@shared/server-stats'
 import type { SftpOp, TransferStatus } from '@shared/sftp'
 import type { TabTarget } from '../stores/tabs'
 import { openSession } from '../lib/sessions'
@@ -34,6 +35,8 @@ export interface ControllerEvents {
   /** Trạng thái các forward đang chạy trên kết nối này. */
   onForwards(list: ForwardStatus[]): void
   onTransfers(list: TransferStatus[]): void
+  /** Thanh theo dõi server: số liệu mới; null = server không hỗ trợ; undefined = chưa có / tắt. */
+  onStats?(stats: ServerStats | null | undefined): void
   /** Đã/không còn kết nối SSH tích hợp (bật/tắt các tính năng cần SSH). */
   onConnectedChange(connected: boolean): void
   /** Trạng thái kết nối đổi (hiện chấm trạng thái trên tab / sidebar). */
@@ -100,6 +103,8 @@ export class TerminalController {
   private webglUnavailable = false
   private visibleInPanel = true
   private inMultiExec = false
+  /** Đã yêu cầu session đo số liệu server. */
+  private statsOn = false
   private readonly disposables: IDisposable[] = []
   private resizeObserver: ResizeObserver | null = null
   /** Phần tử đang chứa terminal: container của tab, hoặc một ô của MultiExec. */
@@ -205,6 +210,7 @@ export class TerminalController {
       this.safeFit()
       if (this.term.cols !== before.cols || this.term.rows !== before.rows)
         this.client?.resize(this.term.cols, this.term.rows)
+      this.syncStats()
     }
     this.unsubscribeSettings = useSettings.subscribe(apply)
     this.disposables.push({ dispose: useAppearance.subscribe(apply) })
@@ -237,6 +243,7 @@ export class TerminalController {
     this.host = next
     this.inMultiExec = target !== null
     this.updateRenderer()
+    this.syncStats()
     this.scheduleFit()
   }
 
@@ -367,6 +374,22 @@ export class TerminalController {
    * GPU (~80–90 MB): 10 tab đều giữ context thì GPU process lên ~900 MB (đo trên Windows). Tab ẩn
    * dùng DOM renderer — không vẽ gì khi ẩn nên gần như không tốn; hiện lại thì tạo lại context.
    */
+  /**
+   * Thanh theo dõi server chỉ đo khi tab SSH đang hiện (không phải ô MultiExec) và cài đặt bật —
+   * tab ẩn không chạy vòng lặp trên server.
+   */
+  private syncStats(): void {
+    const on =
+      this.target.kind !== 'local' &&
+      this.visibleInPanel &&
+      !this.inMultiExec &&
+      useSettings.getState().settings.terminal.serverStats
+    if (on === this.statsOn || !this.client) return
+    this.statsOn = on
+    this.client.setStats(on)
+    if (!on) this.events.onStats?.(undefined)
+  }
+
   private updateRenderer(): void {
     if (this.disposed) return
     const wanted = this.visibleInPanel || this.inMultiExec
@@ -389,6 +412,7 @@ export class TerminalController {
   setVisible(visible: boolean): void {
     this.visibleInPanel = visible
     this.updateRenderer()
+    this.syncStats()
   }
 
   private loadWebgl(): void {
@@ -466,10 +490,15 @@ export class TerminalController {
         },
         transfers: (list) => {
           this.events.onTransfers(list)
+        },
+        stats: (stats) => {
+          this.events.onStats?.(stats)
         }
       })
       // Local: có shell ngay. SSH: chờ status 'connected' (đã xác thực) mới coi là kết nối.
       if (this.target.kind === 'local') this.setState('connected')
+      this.statsOn = false
+      this.syncStats()
       if (this.pendingInput) {
         this.client.input(this.pendingInput)
         this.pendingInput = ''
@@ -510,8 +539,10 @@ export class TerminalController {
     this.clearPrompts()
     this.events.onConnectedChange(false)
     this.events.onForwards([])
+    this.events.onStats?.(undefined)
     this.client?.close()
     this.client = null
+    this.statsOn = false
     if (reason === 'normal' && code === 0) {
       this.setState('exited')
       this.events.onCleanExit()
@@ -539,6 +570,8 @@ export class TerminalController {
       // Port đã chết theo Session Host cũ; bỏ client, giữ scrollback.
       this.generation++
       this.client = null
+      this.statsOn = false
+      this.events.onStats?.(undefined)
       this.clearPrompts()
       this.events.onConnectedChange(false)
       this.events.onForwards([])

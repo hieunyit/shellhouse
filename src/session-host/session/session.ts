@@ -13,6 +13,7 @@ import { OutputPump, type PausableSource } from '../stream/output-pump'
 import { ForwardManager } from '../forward/manager'
 import { SftpService } from '../sftp/service'
 import { deployPublicKey } from '../ssh/deploy-key'
+import { StatsMonitor } from '../ssh/stats-monitor'
 import { RemoteEdits } from '../sftp/edit'
 import { TransferQueue } from '../sftp/transfers'
 import type { SftpOp } from '@shared/sftp'
@@ -87,6 +88,8 @@ export class Session {
   private transfers: TransferQueue | null = null
   private edits: RemoteEdits | null = null
   private log: SessionLog | null = null
+  private stats: StatsMonitor | null = null
+  private wantStats = false
   /** Yêu cầu forward đến trước khi kết nối xong. */
   private pendingForwards: ForwardSpec[] = []
   private readonly pump: OutputPump
@@ -196,6 +199,7 @@ export class Session {
           void this.forwards.start(spec)
         }
         this.pendingForwards = []
+        this.syncStats()
         if (this.pendingInput) {
           transport.write(this.pendingInput)
           this.pendingInput = ''
@@ -242,6 +246,8 @@ export class Session {
     this.closed = true
     this.log?.close(`=== Session ended ${new Date().toISOString()} ===`)
     this.log = null
+    this.stats?.stop()
+    this.stats = null
     this.pump.dispose()
     this.forwards?.dispose()
     this.forwards = null
@@ -385,6 +391,18 @@ export class Session {
     }
   }
 
+  /** Thanh theo dõi server: chạy khi renderer muốn (tab đang hiện) và đã có SSH tích hợp. */
+  private syncStats(): void {
+    const ssh = this.ssh
+    if (!ssh || this.closed) return
+    this.stats ??= new StatsMonitor(ssh.client, (update) => {
+      if ('stats' in update) this.post({ t: 'stats', stats: update.stats })
+      else this.post({ t: 'stats-unsupported', reason: update.unsupported })
+    })
+    if (this.wantStats) this.stats.start()
+    else this.stats.stop()
+  }
+
   private handleClientMessage(raw: unknown): void {
     const parsed = ClientMessage.safeParse(raw)
     if (!parsed.success) {
@@ -435,6 +453,10 @@ export class Session {
         if (this.forwards) void this.forwards.start(message.spec)
         else if (this.spec.kind === 'ssh') this.pendingForwards.push(message.spec)
         else this.rejectForward(message.spec, 'Only available with built-in SSH')
+        break
+      case 'stats':
+        this.wantStats = message.on
+        this.syncStats()
         break
       case 'forward-stop':
         this.forwards?.stop(message.id)

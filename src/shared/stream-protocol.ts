@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { Hostname, Username } from './hosts'
 import { ForwardSpec, type ForwardStatus } from './forwards'
+import type { ServerStats } from './server-stats'
 import { SftpOp, type TransferStatus } from './sftp'
 
 /**
@@ -44,6 +45,8 @@ export const ClientMessage = z.discriminatedUnion('t', [
       .max(16 * 1024)
       .refine((k) => !/[\r\n]/.test(k), 'Must be a single line')
   }),
+  /** Bật/tắt thanh theo dõi server (chỉ chạy khi tab đang hiện — không tốn tài nguyên server). */
+  z.object({ t: z.literal('stats'), on: z.boolean() }),
   z.object({ t: z.literal('forward-start'), spec: ForwardSpec }),
   z.object({ t: z.literal('forward-stop'), id: z.string().max(64) }),
   z.object({ t: z.literal('forward-remove'), id: z.string().max(64) }),
@@ -107,6 +110,8 @@ export type ServerMessage =
   | { t: 'sftp-result'; id: number; ok: true; result: unknown }
   | { t: 'sftp-result'; id: number; ok: false; error: string }
   | { t: 'transfers'; list: TransferStatus[] }
+  | { t: 'stats'; stats: ServerStats }
+  | { t: 'stats-unsupported'; reason: string }
   | {
       t: 'deploy-key-result'
       id: number
@@ -140,6 +145,10 @@ export function isServerMessage(value: unknown): value is ServerMessage {
       return Array.isArray(m['list'])
     case 'deploy-key-result':
       return typeof m['id'] === 'number' && typeof m['status'] === 'string'
+    case 'stats':
+      return typeof m['stats'] === 'object' && m['stats'] !== null
+    case 'stats-unsupported':
+      return typeof m['reason'] === 'string'
     case 'sftp-result':
       return typeof m['id'] === 'number' && typeof m['ok'] === 'boolean'
     default:

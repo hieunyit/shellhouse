@@ -337,6 +337,10 @@ export async function startTestSshServer(
             channel.exit(code ?? 1)
             channel.end()
           })
+          // Như sshd: client đóng kênh → lệnh (có thể là vòng lặp vô hạn) không chạy tiếp.
+          channel.on('close', () => {
+            child.kill()
+          })
         })
         // SFTP: nối kênh thô vào sftp-server THẬT của OpenSSH (không tự viết server SFTP giả).
         session.on('subsystem', (acceptSub, rejectSub, info) => {

@@ -12,7 +12,9 @@ import { useTabs, type TabTarget } from '../stores/tabs'
 import { TerminalController, type ActivePrompt } from './controller'
 import { DeployKeyDialog, ForwardsPanel, SftpPanel } from '../lazy'
 import type { SftpOp, TransferStatus } from '@shared/sftp'
+import type { ServerStats } from '@shared/server-stats'
 import { PromptDialog } from './PromptDialog'
+import { ServerStatsBar } from './ServerStatsBar'
 import { controllers } from './registry'
 
 type Panel = 'forwards' | 'sftp' | null
@@ -34,6 +36,8 @@ export function TerminalView({
   const [forwards, setForwards] = useState<ForwardStatus[]>([])
   const [transfers, setTransfers] = useState<TransferStatus[]>([])
   const [connected, setConnected] = useState(false)
+  /** undefined = chưa có số liệu / tắt; null = server không hỗ trợ. */
+  const [stats, setStats] = useState<ServerStats | null | undefined>(undefined)
   const [panel, setPanel] = useState<Panel>(
     () => useTabs.getState().tabs.find((t) => t.id === tabId)?.initialPanel ?? null
   )
@@ -71,6 +75,7 @@ export function TerminalView({
       },
       onForwards: setForwards,
       onTransfers: setTransfers,
+      onStats: setStats,
       onConnectedChange: setConnected,
       onContextMenu: (x, y) => {
         useTerminalMenu.getState().open(tabId, x, y)
@@ -175,20 +180,23 @@ export function TerminalView({
         </div>
       )}
       <div className="relative flex min-h-0 flex-1">
-        <div className="relative min-w-0 flex-1 bg-terminal">
-          <div
-            ref={ref}
-            data-testid={`terminal-${tabId}`}
-            className="absolute inset-0 pt-2 pr-1 pb-1 pl-3"
-          />
-          {prompt && !multiExec && (
-            <PromptDialog
-              prompt={prompt}
-              onAnswer={(ok, answers) => {
-                controllers.get(tabId)?.answerPrompt(prompt.id, ok, answers)
-              }}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div className="relative min-h-0 flex-1 bg-terminal">
+            <div
+              ref={ref}
+              data-testid={`terminal-${tabId}`}
+              className="absolute inset-0 pt-2 pr-1 pb-1 pl-3"
             />
-          )}
+            {prompt && !multiExec && (
+              <PromptDialog
+                prompt={prompt}
+                onAnswer={(ok, answers) => {
+                  controllers.get(tabId)?.answerPrompt(prompt.id, ok, answers)
+                }}
+              />
+            )}
+          </div>
+          {stats && <ServerStatsBar stats={stats} />}
         </div>
         {deploying && (
           <DeployKeyDialog

@@ -6,6 +6,7 @@ import {
   type PromptRequest
 } from '@shared/stream-protocol'
 import type { ForwardSpec, ForwardStatus } from '@shared/forwards'
+import type { ServerStats } from '@shared/server-stats'
 import type { SftpOp, TransferStatus } from '@shared/sftp'
 
 export interface SessionClientHandlers {
@@ -18,6 +19,8 @@ export interface SessionClientHandlers {
   promptCancelled(id: number): void
   forwards(list: ForwardStatus[]): void
   transfers(list: TransferStatus[]): void
+  /** Thanh theo dõi server: số liệu mới, hoặc server không hỗ trợ (null). */
+  stats(stats: ServerStats | null): void
 }
 
 /** Đầu renderer của một MessagePort session: nhận output + ack, gửi input/resize. */
@@ -70,6 +73,12 @@ export class SessionClient {
         case 'transfers':
           handlers.transfers(message.list)
           break
+        case 'stats':
+          handlers.stats(message.stats)
+          break
+        case 'stats-unsupported':
+          handlers.stats(null)
+          break
         case 'deploy-key-result': {
           const pending = this.deployPending.get(message.id)
           this.deployPending.delete(message.id)
@@ -112,6 +121,10 @@ export class SessionClient {
       this.deployPending.set(id, resolve)
       this.send({ t: 'deploy-key', id, publicKey })
     })
+  }
+
+  setStats(on: boolean): void {
+    this.send({ t: 'stats', on })
   }
 
   startForward(spec: ForwardSpec): void {

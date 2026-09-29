@@ -201,6 +201,13 @@ export function TerminalSection(): React.JSX.Element {
           onChange={(e) => void update({ terminal: { copyOnSelect: e.target.checked } })}
         />
         <Checkbox
+          label="Show server statistics"
+          description="CPU, memory, disk and network under SSH terminals (Linux servers). Measured only while the tab is visible."
+          checked={t.serverStats}
+          data-testid="setting-server-stats"
+          onChange={(e) => void update({ terminal: { serverStats: e.target.checked } })}
+        />
+        <Checkbox
           label="Screen reader mode"
           description="Lets screen readers announce terminal output. Uses more CPU on busy output."
           checked={t.screenReaderMode}
