@@ -45,7 +45,7 @@ function linuxPssKb(pid: number): number | null {
 }
 
 test('benchmark terminal', async () => {
-  test.skip(process.platform === 'win32', 'Chưa có lệnh benchmark cho PowerShell')
+  const isWindows = process.platform === 'win32'
 
   const workDir = mkdtempSync(join(tmpdir(), 'shellhouse-bench-'))
   const bigFile = join(workDir, 'big.txt')
@@ -97,10 +97,16 @@ test('benchmark terminal', async () => {
     await page.evaluate(() => window.__shellhouseTest.maxLongTaskMs(true))
     const catStart = Date.now()
     await page.evaluate(
-      ([id, file]) => {
-        window.__shellhouseTest.sendInput(id, `clear; cat '${file}'; echo __BENCH_$((40+2))__\r`)
+      ([id, file, win]) => {
+        window.__shellhouseTest.sendInput(
+          id,
+          win
+            ? // PowerShell: ghi thẳng ra console (đi qua ConPTY như output thật).
+              `Clear-Host; [Console]::Out.Write([IO.File]::ReadAllText('${file}')); Write-Output ('__BENCH_' + (40+2) + '__')\r`
+            : `clear; cat '${file}'; echo __BENCH_$((40+2))__\r`
+        )
       },
-      [tab, bigFile] as const
+      [tab, bigFile, isWindows] as const
     )
     await page.waitForFunction(
       (id) => window.__shellhouseTest.bufferText(id, 5).includes('__BENCH_42__'),
@@ -126,12 +132,17 @@ test('benchmark terminal', async () => {
       electronApp.getAppMetrics().map((m) => ({
         pid: m.pid,
         type: m.type,
-        workingSetKb: m.memory.workingSetSize
+        workingSetKb: m.memory.workingSetSize,
+        // Chỉ có trên Windows: bộ nhớ riêng của process (không đếm trùng DLL / bộ nhớ dùng chung).
+        privateKb: m.memory.privateBytes ?? null
       }))
     )
     const perProcess = metrics.map((m) => ({
       ...m,
-      kb: (process.platform === 'linux' ? linuxPssKb(m.pid) : null) ?? m.workingSetKb
+      kb:
+        (process.platform === 'linux' ? linuxPssKb(m.pid) : null) ??
+        (isWindows ? m.privateKb : null) ??
+        m.workingSetKb
     }))
     const ramKb = perProcess.reduce((sum, m) => sum + m.kb, 0)
     const ramBreakdown = perProcess.map((m) => `${m.type} ${Math.round(m.kb / 1024)}`).join(', ')
@@ -162,7 +173,7 @@ test('benchmark terminal', async () => {
         `cat 100 MB:         ${catMs} ms   (mục tiêu < ${TARGET.cat100MbMs})   ${verdict(catMs, TARGET.cat100MbMs)}`,
         `  UI bị chặn lâu nhất: ${row.longTask} ms (mục tiêu < ${TARGET.longTaskMs})   ${verdict(longTask, TARGET.longTaskMs)}`,
         `Độ trễ phím p50/p95: ${row.keyP50} / ${row.keyP95} ms (mục tiêu p95 < ${TARGET.keyP95Ms})   ${verdict(keyP95, TARGET.keyP95Ms)}`,
-        `RAM 10 tab local:   ${row.ramMb} MB ${process.platform === 'linux' ? 'PSS' : 'working set'}   (mục tiêu < ${TARGET.ram10TabsMb})   ${verdict(ramMb, TARGET.ram10TabsMb)}`,
+        `RAM 10 tab local:   ${row.ramMb} MB ${process.platform === 'linux' ? 'PSS' : isWindows ? 'private' : 'working set'}   (mục tiêu < ${TARGET.ram10TabsMb})   ${verdict(ramMb, TARGET.ram10TabsMb)}`,
         `  theo process (MB): ${ramBreakdown}`,
         ''
       ].join('\n')
