@@ -43,7 +43,8 @@ jobs:
         run: pnpm typecheck
 
       - name: Unit tests
-        run: pnpm test
+        shell: bash
+        run: set -o pipefail; pnpm test 2>&1 | tee unit.log
 
       - name: Rebuild native modules for Electron
         run: pnpm rebuild:native
@@ -59,11 +60,20 @@ jobs:
 
       - name: E2E (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum pnpm test:e2e
+        shell: bash
+        run: set -o pipefail; xvfb-run --auto-servernum pnpm test:e2e 2>&1 | tee e2e.log
 
       - name: E2E
         if: runner.os != 'Linux'
-        run: pnpm test:e2e
+        shell: bash
+        run: set -o pipefail; pnpm test:e2e 2>&1 | tee e2e.log
+
+      - name: Show failures as annotations
+        if: failure()
+        shell: bash
+        run: |
+          node scripts/ci-annotate.mjs unit.log "Unit tests (${{ matrix.os }})"
+          node scripts/ci-annotate.mjs e2e.log "E2E (${{ matrix.os }})"
 
       - name: Package (unsigned)
         run: pnpm exec electron-builder --dir --publish never
