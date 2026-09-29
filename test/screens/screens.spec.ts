@@ -1,4 +1,6 @@
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Page } from '@playwright/test'
 import { startTestSshServer } from '../integration/ssh-test-server'
 import { activeTab, expect, launchApp, test, waitForText } from '../e2e/fixtures'
@@ -19,7 +21,11 @@ async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
 
 test('chụp màn hình giao diện', async () => {
   mkdirSync(OUT, { recursive: true })
-  const server = await startTestSshServer([{ username: 'demo', password: 'pw' }])
+  // execHome: server chạy lệnh thật → thanh số liệu server (Linux) có dữ liệu.
+  const server = await startTestSshServer([{ username: 'demo', password: 'pw' }], {
+    execHome: mkdtempSync(join(tmpdir(), 'sh-screens-')),
+    sftpRoot: mkdtempSync(join(tmpdir(), 'sh-screens-sftp-'))
+  })
   const launched = await launchApp()
   const { page } = launched
   await page.setViewportSize({ width: 1360, height: 820 })
@@ -126,6 +132,33 @@ test('chụp màn hình giao diện', async () => {
       await shot('03-forwards')
       await page.getByTestId('toggle-forwards').last().click()
 
+      // Menu chuột phải của tab.
+      await page.locator(`[data-testid="tab"][data-tab-id="${sshTab}"]`).click({ button: 'right' })
+      await shot('03b-tab-menu')
+      await page.keyboard.press('Escape')
+
+      // Trình quản lý file hai cột.
+      await page.getByTestId('toggle-files').last().click()
+      await page.waitForTimeout(700)
+      await shot('03c-file-manager')
+      await page.getByTestId('toggle-files').last().click()
+
+      // Workspaces + Import.
+      await page.getByTestId('open-workspaces').click()
+      await page.getByTestId('workspace-name').fill('Prod web + DB')
+      await page.getByTestId('workspace-save').click()
+      await shot('03d-workspaces')
+      await page.keyboard.press('Escape')
+      await page.getByTestId('import-ssh-config').click()
+      await page.getByTestId('import-source-csv').click()
+      await shot('03e-import')
+      await page.keyboard.press('Escape')
+
+      // Thanh bên ẩn.
+      await page.getByTestId('toggle-sidebar').click()
+      await shot('03f-sidebar-hidden')
+      await page.getByTestId('toggle-sidebar').click()
+
       await page.getByTestId('add-host').click()
       await shot('04-host-form')
       await page.keyboard.press('Escape')
@@ -153,6 +186,7 @@ test('chụp màn hình giao diện', async () => {
         'appearance',
         'terminal',
         'security',
+        'files',
         'keys',
         'shortcuts',
         'updates'

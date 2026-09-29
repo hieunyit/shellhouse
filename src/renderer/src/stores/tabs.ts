@@ -48,6 +48,8 @@ interface TabsState {
   activate: (id: string) => void
   cycle: (delta: 1 | -1) => void
   setTitle: (id: string, title: string) => void
+  /** Tab chuyển giữa terminal và trình quản lý file hai cột. */
+  setView: (id: string, view: 'files' | undefined) => void
 }
 
 let localCounter = 0
@@ -127,7 +129,7 @@ export const useTabs = create<TabsState>((set, get) => {
           item.target.kind === 'local'
             ? (shellName(item.target.shellId) ?? `Local ${++localCounter}`)
             : item.title
-        ids.push(add(title, item.target, splitFrom))
+        ids.push(add(title, item.target, splitFrom, undefined, item.view))
       }
       return ids
     },
@@ -148,7 +150,13 @@ export const useTabs = create<TabsState>((set, get) => {
         source.target.kind === 'local'
           ? (shellName(source.target.shellId) ?? `Local ${++localCounter}`)
           : source.title
-      return add(title, source.target, { tabId: source.id, direction: 'within' })
+      return add(
+        title,
+        source.target,
+        { tabId: source.id, direction: 'within' },
+        undefined,
+        source.view
+      )
     },
     closeOthers: (id) => {
       set((s) => ({ tabs: s.tabs.filter((t) => t.id === id), activeId: id }))
@@ -172,6 +180,17 @@ export const useTabs = create<TabsState>((set, get) => {
       const index = tabs.findIndex((t) => t.id === activeId)
       const next = tabs[(index + delta + tabs.length) % tabs.length]
       if (next) set({ activeId: next.id })
+    },
+    setView: (id, view) => {
+      set((s) => ({
+        tabs: s.tabs.map((t) => {
+          if (t.id !== id) return t
+          const next = { ...t }
+          if (view) next.view = view
+          else delete next.view
+          return next
+        })
+      }))
     },
     setTitle: (id, title) => {
       set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, title } : t)) }))

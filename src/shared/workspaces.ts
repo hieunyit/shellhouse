@@ -22,7 +22,9 @@ export const WorkspaceItem = z.object({
   title: z.string().max(200),
   /** Mở cạnh mục thứ `after` (chỉ số trong danh sách); null = tab mới bình thường. */
   after: z.number().int().min(0).nullable(),
-  direction: z.enum(['right', 'below', 'within'])
+  direction: z.enum(['right', 'below', 'within']),
+  /** Tab đang ở trình quản lý file hai cột. */
+  view: z.literal('files').optional()
 })
 export type WorkspaceItem = z.infer<typeof WorkspaceItem>
 
@@ -91,7 +93,9 @@ function firstView(node: GridNode): string | null {
 export function layoutToItems(
   root: GridNode,
   orientation: GridOrientation,
-  describe: (panelId: string) => { target: WorkspaceTarget; title: string } | null
+  describe: (
+    panelId: string
+  ) => { target: WorkspaceTarget; title: string; view?: 'files' | undefined } | null
 ): WorkspaceItem[] {
   const items: WorkspaceItem[] = []
   const indexOf = new Map<string, number>()
@@ -108,6 +112,7 @@ export function layoutToItems(
     items.push({
       target: info.target,
       title: info.title,
+      ...(info.view ? { view: info.view } : {}),
       after: anchor ?? null,
       direction: anchor === undefined ? 'within' : direction
     })

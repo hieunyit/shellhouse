@@ -30,6 +30,11 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - Opening SFTP right after connecting no longer fails with "SFTP is only available on a
   connected built-in SSH session" (same for Deploy key).
 - Disk usage in the server statistics bar matches `df` (used / (used + available), rounded up).
+- The right-click menu of a tab was cut off by the tab strip; menus now always open fully.
+- The server statistics bar stays visible in the two-pane file manager; sizes of 1000 GB and
+  more are shown in TB.
+- Workspaces and "Duplicate tab" keep a tab in file-manager mode.
+- The command palette no longer shows "—" next to commands without a shortcut.
 
 ## [1.1.0-beta.2] - 2026-09-29
 

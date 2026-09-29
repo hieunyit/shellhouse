@@ -263,7 +263,7 @@ export function captureWorkspaceItems(): WorkspaceItem[] {
   const { tabs } = useTabs.getState()
   return layoutToItems(grid.root, grid.orientation, (panelId) => {
     const tab = tabs.find((t) => t.id === panelId)
-    return tab ? { target: tab.target, title: tab.title } : null
+    return tab ? { target: tab.target, title: tab.title, view: tab.view } : null
   })
 }
 

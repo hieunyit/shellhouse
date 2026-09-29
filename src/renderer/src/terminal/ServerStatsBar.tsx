@@ -6,7 +6,8 @@ function bytes(n: number): string {
   if (n < 1024) return `${Math.round(n)} B`
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(0)} KB`
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(n < 10 * 1024 ** 2 ? 1 : 0)} MB`
-  return `${(n / 1024 ** 3).toFixed(1)} GB`
+  if (n < 1000 * 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`
+  return `${(n / 1024 ** 4).toFixed(1)} TB`
 }
 
 function uptime(seconds: number): string {

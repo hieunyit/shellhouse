@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { cx, useEscapeToClose } from './ui'
 
@@ -42,7 +43,9 @@ export function useContextMenu(): {
     []
   )
   return {
-    menu: state ? <ContextMenu {...state} onClose={close} /> : null,
+    // Portal ra <body>: nơi mở menu có thể nằm trong khung cắt phần tràn (tab của dockview) hoặc có
+    // transform — `position: fixed` khi đó bị giới hạn trong khung, menu bị cắt.
+    menu: state ? createPortal(<ContextMenu {...state} onClose={close} />, document.body) : null,
     open,
     close
   }

@@ -41,9 +41,14 @@ export function TerminalView({
   /** undefined = chưa có số liệu / tắt; null = server không hỗ trợ. */
   const [stats, setStats] = useState<ServerStats | null | undefined>(undefined)
   /** 'files' = trình quản lý file hai cột (Local | Remote); terminal vẫn chạy phía sau. */
-  const [view, setView] = useState<'terminal' | 'files'>(
+  const [view, setViewState] = useState<'terminal' | 'files'>(
     () => useTabs.getState().tabs.find((t) => t.id === tabId)?.view ?? 'terminal'
   )
+  // Ghi lại vào tab để Workspace / Duplicate giữ đúng chế độ.
+  const setView = (next: 'terminal' | 'files'): void => {
+    setViewState(next)
+    useTabs.getState().setView(tabId, next === 'files' ? 'files' : undefined)
+  }
   const [localTarget, setLocalTarget] = useState<LocalTarget | undefined>(undefined)
   const sftpActions = useRef<SftpActions | null>(null)
   const [panel, setPanel] = useState<Panel>(
@@ -200,33 +205,33 @@ export function TerminalView({
         </div>
       )}
       <div className="relative flex min-h-0 flex-1">
-        {view === 'files' && (
-          <div className="absolute inset-0 z-10 flex bg-surface" data-testid="file-manager">
-            <LocalPanel
-              transfers={transfers}
-              actionsRef={sftpActions}
-              onTargetChange={setLocalTarget}
-            />
-            <SftpPanel
-              run={runSftp}
-              transfers={transfers}
-              connected={connected}
-              layout="pane"
-              localTarget={localTarget}
-              actionsRef={sftpActions}
-            />
-            {prompt && !multiExec && (
-              <PromptDialog
-                prompt={prompt}
-                onAnswer={(ok, answers) => {
-                  controllers.get(tabId)?.answerPrompt(prompt.id, ok, answers)
-                }}
-              />
-            )}
-          </div>
-        )}
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1 bg-terminal">
+            {view === 'files' && (
+              <div className="absolute inset-0 z-10 flex bg-surface" data-testid="file-manager">
+                <LocalPanel
+                  transfers={transfers}
+                  actionsRef={sftpActions}
+                  onTargetChange={setLocalTarget}
+                />
+                <SftpPanel
+                  run={runSftp}
+                  transfers={transfers}
+                  connected={connected}
+                  layout="pane"
+                  localTarget={localTarget}
+                  actionsRef={sftpActions}
+                />
+                {prompt && !multiExec && (
+                  <PromptDialog
+                    prompt={prompt}
+                    onAnswer={(ok, answers) => {
+                      controllers.get(tabId)?.answerPrompt(prompt.id, ok, answers)
+                    }}
+                  />
+                )}
+              </div>
+            )}
             <div
               ref={ref}
               data-testid={`terminal-${tabId}`}

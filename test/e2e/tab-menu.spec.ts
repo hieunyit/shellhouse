@@ -8,6 +8,10 @@ test('chuột phải tiêu đề tab: Restart shell / Duplicate / Close other ta
 
   await header.click({ button: 'right' })
   await expect(page.getByTestId('context-menu')).toBeVisible()
+  // Menu không bị khung tab của dockview cắt: đủ 6 mục, nằm trọn trong cửa sổ.
+  const box = await page.getByTestId('context-menu').boundingBox()
+  expect(box?.height ?? 0).toBeGreaterThan(150)
+  await expect(page.getByTestId('menu-tab-close-others')).toBeInViewport()
   await page.getByTestId('menu-tab-reconnect').click()
   await waitForText(page, tab, '— new session —')
   const { command, expected } = echoComputed('after-restart')

@@ -51,7 +51,8 @@ export function CommandPalette({
     const commands: Item[] = COMMANDS.filter((c) => c.id !== 'palette.open').map((c) => ({
       id: c.id,
       title: c.title,
-      hint: displayKeybinding(keybindingFor(c.id, overrides, isMac)),
+      // Lệnh không có phím tắt: không hiện gì (thay vì "—").
+      hint: ((key) => (key ? displayKeybinding(key) : ''))(keybindingFor(c.id, overrides, isMac)),
       group: 'Commands' as const,
       icon: <SquareChevronRight size={14} />,
       shortcut: true,
