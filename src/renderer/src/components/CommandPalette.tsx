@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { CornerDownLeft, Search, Server, SquareChevronRight } from 'lucide-react'
+import { CornerDownLeft, Search, Server, SquareChevronRight, SquareTerminal } from 'lucide-react'
 import { COMMANDS, keybindingFor } from '@shared/commands'
 import { bestScore } from '@shared/fuzzy'
 import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
+import { useShells } from '../stores/shells'
 import { useTabs } from '../stores/tabs'
 import { cx, useEscapeToClose, useFocusTrap } from './ui'
 
@@ -35,6 +36,7 @@ export function CommandPalette({
   useEscapeToClose(onClose)
   const overrides = useSettings((s) => s.settings.keybindings)
   const hosts = useHosts((s) => s.tree.hosts)
+  const shells = useShells((s) => s.shells)
 
   const items = useMemo<Item[]>(() => {
     const commands: Item[] = COMMANDS.filter((c) => c.id !== 'palette.open').map((c) => ({
@@ -59,14 +61,25 @@ export function CommandPalette({
         useTabs.getState().addHost({ id: h.id, label: h.label })
       }
     }))
-    const all = [...commands, ...connect]
+    const terminals: Item[] = shells.map((sh) => ({
+      id: `shell:${sh.id}`,
+      title: `New terminal: ${sh.name}`,
+      hint: '',
+      group: 'Commands' as const,
+      icon: <SquareTerminal size={14} />,
+      shortcut: false,
+      run: () => {
+        useTabs.getState().addLocal(sh.id)
+      }
+    }))
+    const all = [...commands, ...terminals, ...connect]
     if (!query.trim()) return all
     return all
       .map((item) => ({ item, score: bestScore(query, [item.title, item.hint]) }))
       .filter((r): r is { item: Item; score: number } => r.score !== null)
       .sort((a, b) => b.score - a.score)
       .map((r) => r.item)
-  }, [query, overrides, hosts, runCommand])
+  }, [query, overrides, hosts, shells, runCommand])
 
   // Giữ mục đang chọn trong vùng nhìn thấy khi di chuyển bằng phím mũi tên.
   useEffect(() => {

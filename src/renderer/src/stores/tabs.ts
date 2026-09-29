@@ -1,7 +1,8 @@
 import { create } from 'zustand'
+import { shellName } from './shells'
 
 export type TabTarget =
-  | { kind: 'local' }
+  | { kind: 'local'; shellId?: string }
   | { kind: 'ssh'; host: string; port: number; username: string }
   | { kind: 'host'; hostId: string }
 
@@ -24,7 +25,8 @@ export interface OpenHostOptions {
 interface TabsState {
   tabs: Tab[]
   activeId: string | null
-  addLocal: () => string
+  /** Tab terminal local; `shellId` = shell cụ thể (không có = shell mặc định). */
+  addLocal: (shellId?: string) => string
   addSsh: (target: { host: string; port: number; username: string }) => string
   addHost: (host: { id: string; label: string }, options?: OpenHostOptions) => string
   /** Mở nhiều host: thành các tab, hoặc xếp lưới (chia màn hình) trong một khung. */
@@ -65,7 +67,10 @@ export const useTabs = create<TabsState>((set, get) => {
   return {
     tabs: [],
     activeId: null,
-    addLocal: () => add(`Local ${++localCounter}`, { kind: 'local' }),
+    addLocal: (shellId) => {
+      const title = shellName(shellId) ?? `Local ${++localCounter}`
+      return add(title, shellId ? { kind: 'local', shellId } : { kind: 'local' })
+    },
     addSsh: (t) =>
       add(`${t.username}@${t.host}${t.port === 22 ? '' : `:${t.port}`}`, { kind: 'ssh', ...t }),
     addHost: (host, options) => {
@@ -98,7 +103,10 @@ export const useTabs = create<TabsState>((set, get) => {
       const { tabs, activeId } = get()
       const source = tabs.find((t) => t.id === activeId)
       if (!source) return null
-      const title = source.target.kind === 'local' ? `Local ${++localCounter}` : source.title
+      const title =
+        source.target.kind === 'local'
+          ? (shellName(source.target.shellId) ?? `Local ${++localCounter}`)
+          : source.title
       return add(title, source.target, { tabId: source.id, direction })
     },
     close: (id) => {

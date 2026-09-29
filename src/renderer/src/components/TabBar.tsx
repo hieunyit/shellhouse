@@ -1,7 +1,22 @@
 import { useState } from 'react'
-import { Columns2, Info, Lock, Plus, Radio, Rows2, ScrollText, Settings, Zap } from 'lucide-react'
+import {
+  ChevronDown,
+  Columns2,
+  Info,
+  Lock,
+  Plus,
+  Radio,
+  RefreshCw,
+  Rows2,
+  ScrollText,
+  Settings,
+  SquareTerminal,
+  Zap
+} from 'lucide-react'
 import { parseQuickConnect } from '@shared/quick-connect'
+import { useShells } from '../stores/shells'
 import { useTabs } from '../stores/tabs'
+import { useContextMenu, type MenuEntry } from './ContextMenu'
 import { toggleMultiExec, useBroadcast } from '../terminal/broadcast'
 import { cx, IconButton } from './ui'
 
@@ -62,6 +77,7 @@ export function TabBar({
   onOpenDiagnostics: () => void
 }): React.JSX.Element {
   const addLocal = useTabs((s) => s.addLocal)
+  const { menu, open: openMenu } = useContextMenu()
   const split = useTabs((s) => s.split)
   const hasTab = useTabs((s) => s.activeId !== null)
   const tabCount = useTabs((s) => s.tabs.length)
@@ -79,6 +95,40 @@ export function TabBar({
       >
         <Plus size={14} /> Terminal
       </button>
+      <IconButton
+        label="Choose a shell"
+        size="sm"
+        className="-ml-1 size-7"
+        data-testid="new-tab-menu"
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect()
+          const { shells, defaultId } = useShells.getState()
+          openMenu(
+            { clientX: rect.left, clientY: rect.bottom + 4, preventDefault: () => undefined },
+            [
+              ...shells.map((s): MenuEntry => ({
+                id: `shell-${s.id}`,
+                label: s.name,
+                icon: <SquareTerminal size={14} />,
+                ...(s.id === defaultId ? { hint: 'Default' } : {}),
+                onSelect: () => {
+                  addLocal(s.id)
+                }
+              })),
+              'separator',
+              {
+                id: 'shell-refresh',
+                label: 'Refresh shell list',
+                icon: <RefreshCw size={14} />,
+                onSelect: () => void useShells.getState().load(true)
+              }
+            ]
+          )
+        }}
+      >
+        <ChevronDown size={14} />
+      </IconButton>
+      {menu}
       <div className="mx-1 h-4 w-px bg-line" />
       <IconButton
         label="Split right"

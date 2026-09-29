@@ -435,7 +435,12 @@ export class TerminalController {
 
   private specFor(): SessionSpec {
     const size = { cols: this.term.cols, rows: this.term.rows }
-    if (this.target.kind === 'local') return { kind: 'local', ...size }
+    if (this.target.kind === 'local')
+      return {
+        kind: 'local',
+        ...size,
+        ...(this.target.shellId ? { shellId: this.target.shellId } : {})
+      }
     if (this.target.kind === 'host') return { kind: 'host', ...size, hostId: this.target.hostId }
     const { host, port, username } = this.target
     return { kind: 'ssh', ...size, target: { host, port, username } }

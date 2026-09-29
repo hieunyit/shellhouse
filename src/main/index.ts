@@ -18,6 +18,7 @@ import { toForwardSpec } from '@shared/forwards'
 import { checkMainNativeModules } from './diagnostics'
 import { handle } from './ipc/router'
 import { installEditContextMenu } from './context-menu'
+import { ShellService } from './shells'
 import { installGlobalGuards, secureWebPreferences } from './security'
 import { isAppUrl } from './security-policy'
 import { spawnElectronHost } from './session-host/electron-spawn'
@@ -88,6 +89,7 @@ let vaultController: VaultController | null = null
 let deviceKeys: DeviceKeyStore | null = null
 let updater: Updater | null = null
 
+const shells = new ShellService()
 const supervisor = new SessionHostSupervisor({
   spawn: spawnElectronHost,
   logger: log.scope('supervisor')
@@ -188,13 +190,26 @@ function registerIpc(): void {
     }
   })
 
-  handle('session:open', isTrustedSender, (spec) => {
+  handle('session:open', isTrustedSender, async (spec) => {
     const window = mainWindow
     if (!window) throw new Error('No window')
     const sessionId = randomUUID()
     const { port1, port2 } = new MessageChannelMain()
     if (spec.kind === 'local') {
-      supervisor.openSession(sessionId, spec, port1)
+      const shell = await shells.resolve(
+        spec.shellId,
+        requireSettings().get().terminal.defaultShell
+      )
+      supervisor.openSession(
+        sessionId,
+        {
+          kind: 'local',
+          cols: spec.cols,
+          rows: spec.rows,
+          ...(shell ? { shell: { file: shell.file, args: shell.args } } : {})
+        },
+        port1
+      )
     } else {
       // Host đã lưu: giải mã thông tin xác thực ngay tại main, không đi qua renderer.
       const resolved =
@@ -271,6 +286,16 @@ function registerIpc(): void {
     if (!settings) throw new Error('Data is not ready yet')
     return settings
   }
+  // Chỉ gửi id / tên / loại — đường dẫn chương trình ở lại main.
+  const shellList = async (refresh: boolean) => {
+    const list = refresh ? await shells.refresh() : await shells.list()
+    const preferred = requireSettings().get().terminal.defaultShell
+    return {
+      shells: list.map((s) => ({ id: s.id, name: s.name, kind: s.kind })),
+      defaultId: (list.find((s) => s.id === preferred) ?? list[0])?.id ?? null
+    }
+  }
+  handle('shells:list', isTrustedSender, (refresh) => shellList(refresh))
   handle('settings:get', isTrustedSender, () => requireSettings().get())
   handle('settings:update', isTrustedSender, (patch) => requireSettings().update(patch))
 

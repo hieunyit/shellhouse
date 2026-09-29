@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { Upload } from 'lucide-react'
 import { BUILTIN_THEMES, importItermColors, importWindowsTerminal } from '@shared/themes'
 import { useSettings } from '../../stores/settings'
+import { useShells } from '../../stores/shells'
 import { Checkbox, Field, Input, Notice, SectionTitle, Segmented, Select } from '../ui'
 
 export function TerminalSection(): React.JSX.Element {
   const { settings, update } = useSettings()
+  const shells = useShells((s) => s.shells)
   const t = settings.terminal
   const themes = [...BUILTIN_THEMES, ...settings.customThemes]
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
@@ -135,6 +137,24 @@ export function TerminalSection(): React.JSX.Element {
 
       <section className="flex flex-col gap-3">
         <SectionTitle>Behavior</SectionTitle>
+        <Field label="Shell for new terminals">
+          <Select
+            data-testid="setting-default-shell"
+            value={t.defaultShell}
+            onChange={(e) => {
+              void update({ terminal: { defaultShell: e.target.value } }).then(() =>
+                useShells.getState().load()
+              )
+            }}
+          >
+            <option value="">Automatic</option>
+            {shells.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Cursor style">
             <Select

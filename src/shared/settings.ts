@@ -44,6 +44,8 @@ const TerminalSettings = z.object({
   cursorBlink: z.boolean().catch(true),
   scrollback: z.number().int().min(1000).max(100_000).catch(10_000),
   copyOnSelect: z.boolean().catch(false),
+  /** Shell cho tab terminal mới (id từ danh sách dò được); '' = tự chọn. */
+  defaultShell: z.string().max(80).catch(''),
   /** Chuột phải trong terminal: hiện menu (Copy/Paste…) hoặc dán ngay như PuTTY / MobaXterm. */
   rightClick: z.enum(['menu', 'paste']).catch('menu'),
   /** Bật cây accessibility của xterm.js để trình đọc màn hình đọc được output. Tốn thêm CPU. */

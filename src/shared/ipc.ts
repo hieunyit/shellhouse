@@ -114,6 +114,20 @@ export const invokeContract = {
     args: z.tuple([z.string().max(64).nullable(), z.array(z.string().max(64)).max(1000)]),
     result: MutationResult
   },
+  /** Shell local có trên máy (PowerShell, cmd, WSL…). `true` = dò lại. */
+  'shells:list': {
+    args: z.tuple([z.boolean()]),
+    result: z.object({
+      shells: z.array(
+        z.object({
+          id: z.string(),
+          name: z.string(),
+          kind: z.enum(['powershell', 'cmd', 'wsl', 'bash', 'posix'])
+        })
+      ),
+      defaultId: z.string().nullable()
+    })
+  },
   'groups:save': { args: z.tuple([GroupInput]), result: MutationResult },
   'groups:delete': { args: z.tuple([z.string().max(64)]), result: z.void() },
   /** Chuyển nhóm vào nhóm khác (null = cấp cao nhất). */
@@ -209,6 +223,7 @@ export interface ShellhouseApi {
   saveGroup(input: GroupInput): Promise<MutationResult>
   deleteGroup(id: string): Promise<void>
   moveGroup(id: string, parentId: string | null): Promise<MutationResult>
+  listShells(refresh?: boolean): Promise<InvokeResult<'shells:list'>>
   moveHosts(ids: string[], groupId: string | null): Promise<MutationResult>
   deleteHosts(ids: string[]): Promise<void>
   setFavorite(ids: string[], favorite: boolean): Promise<void>

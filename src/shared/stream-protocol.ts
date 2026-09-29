@@ -150,9 +150,21 @@ export function isServerMessage(value: unknown): value is ServerMessage {
 export const LocalSessionSpec = z.object({
   kind: z.literal('local'),
   cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
-  rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows)
+  rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows),
+  /** Shell đã dò được (PowerShell, cmd, WSL…); không có = shell mặc định. */
+  shellId: z.string().max(80).optional()
 })
 export type LocalSessionSpec = z.infer<typeof LocalSessionSpec>
+
+/**
+ * Main → Session Host: main tra `shellId` ra chương trình cụ thể. Chỉ có ở spec đã phân giải —
+ * renderer không gửi được đường dẫn file để chạy.
+ */
+export const ResolvedLocalSessionSpec = LocalSessionSpec.extend({
+  shell: z
+    .object({ file: z.string().max(1024), args: z.array(z.string().max(1024)).max(16) })
+    .optional()
+})
 
 /** Kết nối SSH tới một đích (kết nối nhanh). Host đã lưu dùng `hostId` (tuần 6). */
 export const SshSessionSpec = z.object({
@@ -206,7 +218,7 @@ export type SystemSshSessionSpec = z.infer<typeof SystemSshSessionSpec>
 
 /** Spec Session Host thực sự nhận (host đã lưu đã được main phân giải). */
 export const ResolvedSessionSpec = z.discriminatedUnion('kind', [
-  LocalSessionSpec,
+  ResolvedLocalSessionSpec,
   SshSessionSpec,
   SystemSshSessionSpec
 ])

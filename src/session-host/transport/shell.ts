@@ -1,5 +1,7 @@
 import { existsSync } from 'node:fs'
-import { posix, win32 } from 'node:path'
+import { findOnPath } from '../../node-shared/find-on-path'
+
+export { findOnPath }
 
 export interface ShellLaunch {
   file: string
@@ -20,22 +22,6 @@ interface ShellContext {
 /** Biến môi trường của app/Electron không được lọt sang shell người dùng. */
 const STRIPPED_ENV =
   /^(ELECTRON_|VITE_|SHELLHOUSE_)|^(NODE_OPTIONS|NODE_ENV|CHROME_DESKTOP|GOOGLE_API_KEY)$/
-
-export function findOnPath(
-  name: string,
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform,
-  exists: (path: string) => boolean = existsSync
-): string | null {
-  const pathVar = env['PATH'] ?? env['Path'] ?? ''
-  const path = platform === 'win32' ? win32 : posix
-  for (const dir of pathVar.split(path.delimiter)) {
-    if (!dir) continue
-    const candidate = path.join(dir, name)
-    if (exists(candidate)) return candidate
-  }
-  return null
-}
 
 export function buildShellEnv(ctx: ShellContext): Record<string, string> {
   const env: Record<string, string> = {}

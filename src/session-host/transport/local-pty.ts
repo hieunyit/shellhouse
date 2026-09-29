@@ -22,14 +22,19 @@ function currentUserShell(): string | null {
   }
 }
 
-export function resolveLocalShell(appVersion: string): ShellLaunch {
-  return defaultShell({
+export function resolveLocalShell(
+  appVersion: string,
+  override?: { file: string; args: string[] }
+): ShellLaunch {
+  const launch = defaultShell({
     platform: process.platform,
     env: process.env,
     homedir: homedir(),
     userShell: currentUserShell(),
     appVersion
   })
+  // Shell do người dùng chọn (main đã tra từ danh sách dò được): giữ env / cwd đã chuẩn bị.
+  return override ? { ...launch, file: override.file, args: override.args } : launch
 }
 
 /** Shell local chạy trong PTY (forkpty trên Unix, ConPTY trên Windows). */

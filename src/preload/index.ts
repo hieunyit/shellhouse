@@ -45,6 +45,7 @@ const api: ShellhouseApi = {
   saveGroup: (input) => invoke('groups:save', input),
   deleteGroup: (id) => invoke('groups:delete', id),
   moveGroup: (id, parentId) => invoke('groups:move', id, parentId),
+  listShells: (refresh) => invoke('shells:list', refresh ?? false),
   moveHosts: (ids, groupId) => invoke('hosts:moveMany', ids, groupId),
   deleteHosts: (ids) => invoke('hosts:deleteMany', ids),
   setFavorite: (ids, favorite) => invoke('hosts:setFavorite', ids, favorite),

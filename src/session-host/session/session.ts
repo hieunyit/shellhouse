@@ -128,7 +128,7 @@ export class Session {
     }
     try {
       if (this.spec.kind === 'local') {
-        const launch = resolveLocalShell(this.deps.appVersion)
+        const launch = resolveLocalShell(this.deps.appVersion, this.spec.shell)
         this.transport = new LocalPty(launch, this.spec.cols, this.spec.rows, callbacks)
         this.deps.log('info', `Session ${this.id}: started ${launch.file}`)
       } else if (this.spec.kind === 'system-ssh') {

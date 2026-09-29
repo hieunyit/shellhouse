@@ -7,6 +7,7 @@ import { Workspace } from './components/Workspace'
 import { preloadLazyParts, SettingsDialog, SnippetsDialog } from './lazy'
 import { matchCommand } from './lib/keybindings'
 import { useHosts } from './stores/hosts'
+import { useShells } from './stores/shells'
 import { useTabs } from './stores/tabs'
 import { toggleMultiExec, useBroadcast } from './terminal/broadcast'
 import { MultiExecView } from './terminal/MultiExecView'
@@ -47,9 +48,15 @@ export function App(): React.JSX.Element {
     void preloadLazyParts()
   }, [])
 
-  // Mở sẵn một tab khi khởi động.
+  // Mở sẵn một tab khi khởi động (sau khi biết danh sách shell để đặt đúng tên tab).
   useEffect(() => {
-    if (useTabs.getState().tabs.length === 0) useTabs.getState().addLocal()
+    void useShells
+      .getState()
+      .load()
+      .catch(() => undefined)
+      .finally(() => {
+        if (useTabs.getState().tabs.length === 0) useTabs.getState().addLocal()
+      })
   }, [])
 
   const runCommand = useCallback((id: string): void => {
