@@ -6,11 +6,10 @@ directories:
 files:
   - out/**
   - package.json
-  # Chỉ giữ prebuild native của nền tảng đang build (bớt ~30 MB). Smoke test gói kiểm tra
-  # native module vẫn nạp được: pnpm test:package.
-  - '!**/node_modules/*/prebuilds/**'
-  - '**/node_modules/*/prebuilds/${platform}-${arch}/**'
-  - '**/node_modules/*/prebuilds/${platform}-${arch}.node'
+  # Prebuild native: mỗi nền tảng (mục linux/win/mac bên dưới) LOẠI BỎ bản của nền tảng khác.
+  # - Với node_modules, electron-builder chỉ dùng pattern loại trừ ("!"), bỏ qua pattern include.
+  # - Không dùng ${platform}: đó là nền tảng của MÁY BUILD, build chéo sẽ lấy nhầm bản.
+  # - Chỉ phát hành x64 (Linux, Windows); macOS build riêng arm64 và x64 nên giữ cả hai.
 asar: true
 asarUnpack:
   - '**/*.node'
@@ -31,11 +30,27 @@ electronFuses:
 
 win:
   target: [nsis, zip]
+  # Bản node-pty tự build (build/, bin/) là của máy build — Windows dùng prebuild win32-x64 có sẵn
+  # (N-API, kèm conpty). Bỏ file debug .pdb cho gói nhỏ hơn.
+  files:
+    - '!**/node_modules/*/prebuilds/{linux,linuxmusl,darwin,android,ios}*/**'
+    - '!**/node_modules/*/prebuilds/{linux,linuxmusl,darwin,android,ios}*.node'
+    - '!**/node_modules/*/prebuilds/win32-arm64/**'
+    - '!**/node_modules/*/prebuilds/win32-arm64.node'
+    - '!**/node_modules/*/prebuilds/win32-ia32/**'
+    - '!**/node_modules/*/prebuilds/win32-ia32.node'
+    - '!**/node_modules/node-pty/build/**'
+    - '!**/node_modules/node-pty/bin/**'
+    - '!**/node_modules/node-pty/third_party/conpty/*/win10-arm64/**'
+    - '!**/*.pdb'
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
 mac:
+  files:
+    - '!**/node_modules/*/prebuilds/{linux,linuxmusl,win32,android,ios}*/**'
+    - '!**/node_modules/*/prebuilds/{linux,linuxmusl,win32,android,ios}*.node'
   # Mỗi arch build trên runner riêng (native module khớp arch); zip cần cho auto-update trên macOS.
   target: [dmg, zip]
   category: public.app-category.developer-tools
@@ -43,6 +58,13 @@ mac:
   notarize: false # CI bật bằng -c.mac.notarize=true khi có secret Apple (docs/RELEASING.md)
 linux:
   target: [AppImage, deb, rpm]
+  files:
+    - '!**/node_modules/*/prebuilds/{linuxmusl,win32,darwin,android,ios}*/**'
+    - '!**/node_modules/*/prebuilds/{linuxmusl,win32,darwin,android,ios}*.node'
+    - '!**/node_modules/*/prebuilds/linux-arm64/**'
+    - '!**/node_modules/*/prebuilds/linux-arm64.node'
+    - '!**/node_modules/*/prebuilds/linux-arm/**'
+    - '!**/node_modules/*/prebuilds/linux-arm.node'
   category: Development
   maintainer: hieuny
   executableName: shellhouse

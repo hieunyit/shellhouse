@@ -92,3 +92,18 @@
 - Link trong terminal không mở được: handler mặc định của WebLinksAddon mở cửa sổ trống trước, và
   bị chặn.
 - IPC nhận cả từ frame con (nếu có) thuộc cửa sổ chính. Đã giới hạn chỉ nhận từ frame gốc.
+
+## Bổ sung (2026-09-29): lọc prebuild khi build chéo
+
+Bản build Windows đầu tiên (build chéo từ Linux) mang nhầm prebuild **Linux** và thiếu `pty.node`
+bản Windows, nên app sẽ không chạy. Có hai nguyên nhân:
+
+- Macro `${platform}` là nền tảng của **máy build**, không phải nền tảng đích.
+- Với `node_modules`, electron-builder chỉ dùng pattern loại trừ (`!`), bỏ qua pattern include.
+
+Cách sửa: mỗi mục `linux` / `win` / `mac` trong `electron-builder.yml` tự loại bỏ prebuild của nền
+tảng khác. Kiểm tra bằng magic bytes: bản Windows toàn PE (`MZ`), bản Linux toàn ELF. Bản Windows
+đã chạy thử trên Windows thật: Session Host khởi động, SQLite tạo được DB, log không có lỗi.
+
+Build chéo từ Linux chỉ ra được bản zip portable. Bộ cài NSIS cần Wine, hoặc build trên Windows /
+CI (`release.yml` đã build Windows trên `windows-latest`).
