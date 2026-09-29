@@ -17,8 +17,17 @@ const dirs: string[] = []
 test.afterEach(async () => {
   await server?.close()
   server = null
-  for (const d of dirs.splice(0))
-    rmSync(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+})
+// Dọn sau khi app đã đóng: trên Windows sftp-server.exe (cwd = thư mục remote) còn sống tới lúc phiên
+// SSH của app đóng, xoá sớm sẽ gặp EPERM.
+test.afterAll(() => {
+  for (const d of dirs.splice(0)) {
+    try {
+      rmSync(d, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    } catch {
+      // Thư mục tạm — để hệ điều hành dọn.
+    }
+  }
 })
 
 test.skip(!findSftpServer(), 'Cần sftp-server của OpenSSH')

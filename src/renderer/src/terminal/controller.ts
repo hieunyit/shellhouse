@@ -83,6 +83,8 @@ export class TerminalController {
   private readonly fit = new FitAddon()
   readonly search = new SearchAddon()
   private client: SessionClient | null = null
+  /** Phím gõ khi phiên đang mở (tab vừa tạo) — gửi ngay khi có phiên, không để mất. */
+  private pendingInput = ''
   private state: TerminalState = 'idle'
   /** Tăng mỗi lần bắt đầu kết nối hoặc mất host; kết quả của lần kết nối cũ bị bỏ. */
   private generation = 0
@@ -332,7 +334,9 @@ export class TerminalController {
   // ---------- Test hooks ----------
 
   sendInput(data: string): void {
-    this.client?.input(data)
+    if (this.client) this.client.input(data)
+    else if (this.state === 'idle' || this.state === 'connecting')
+      this.pendingInput = (this.pendingInput + data).slice(-64 * 1024)
   }
 
   async measureEchoLatency(samples: number): Promise<number[]> {
@@ -466,7 +470,12 @@ export class TerminalController {
       })
       // Local: có shell ngay. SSH: chờ status 'connected' (đã xác thực) mới coi là kết nối.
       if (this.target.kind === 'local') this.setState('connected')
+      if (this.pendingInput) {
+        this.client.input(this.pendingInput)
+        this.pendingInput = ''
+      }
     } catch (error) {
+      this.pendingInput = ''
       if (this.isDisposed() || generation !== this.generation) return
       const message = error instanceof Error ? error.message : String(error)
       this.term.write(`\r\n${YELLOW}Could not open the session: ${message}${RESET}\r\n`)
@@ -570,7 +579,7 @@ export class TerminalController {
       return
     }
     if (broadcastInput(this.tabId, data)) return
-    this.client?.input(data)
+    this.sendInput(data)
   }
 
   /** Trả false để xterm bỏ qua phím (phím tắt của app hoặc copy/paste). */

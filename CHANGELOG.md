@@ -32,7 +32,8 @@ First public beta.
 ### Fixed
 
 - Terminal output stays in scrollback when a Windows (ConPTY) session restarts.
-- Tabs keep the shell name instead of an `.exe` path on Windows.
+- Tabs keep the shell name instead of an `.exe` path on Windows, including elevated shells.
+- Keys typed into a new tab while its session is still starting are no longer lost.
 - `~/.ssh/...` paths from `~/.ssh/config` are imported with native separators on Windows.
 - Much lower GPU memory with many tabs (WebGL only for visible terminals).
 - Dialogs no longer lose what you typed when they open while loading.
