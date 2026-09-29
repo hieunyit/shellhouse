@@ -6,6 +6,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Fixed
+
+- Saved hosts with "Automatic" authentication no longer fail with "Failed to retrieve
+  identities from agent" when no SSH agent is running (Windows without the OpenSSH
+  Authentication Agent service or Pageant). The agent is skipped and the next method is used,
+  as OpenSSH does.
+
 ## [1.1.0-beta.1] - 2026-09-29
 
 ### Added

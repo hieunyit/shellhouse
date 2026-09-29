@@ -53,6 +53,9 @@ interface ConnectOpts {
   jumps?: HopConfig[]
   /** Ghi lại các host được hỏi host key (theo thứ tự). */
   verifiedHosts?: string[]
+  /** Đường dẫn agent (mặc định: không dùng agent). */
+  agent?: string
+  logs?: string[]
 }
 
 async function connectTo(opts: ConnectOpts): Promise<Harness> {
@@ -78,7 +81,7 @@ async function connectTo(opts: ConnectOpts): Promise<Harness> {
     ...(opts.jumps ? { jumps: opts.jumps } : {}),
     cols: spec.cols,
     rows: spec.rows,
-    agent: null,
+    agent: opts.agent ?? null,
     keyFiles: opts.keyFiles ?? [],
     ...(opts.timeouts ? { timeouts: opts.timeouts } : {}),
     callbacks: {
@@ -90,7 +93,9 @@ async function connectTo(opts: ConnectOpts): Promise<Harness> {
     },
     ctx: {
       status: () => undefined,
-      log: () => undefined,
+      log: (_level, message) => {
+        opts.logs?.push(message)
+      },
       prompt: (req) => {
         prompts.push(req)
         return Promise.resolve(opts.answer?.(req) ?? { ok: false, answers: [] })
@@ -141,6 +146,27 @@ describe('SSH: xác thực', () => {
     h.transport.write('echo xin-chao\r')
     await h.waitFor('xin-chao\r\n')
     expect(s.events.ptyRequests[0]).toEqual({ cols: 100, rows: 30, term: 'xterm-256color' })
+  })
+
+  it('agent không chạy (Windows không bật OpenSSH agent / Pageant) → bỏ qua, vẫn đăng nhập bằng password', async () => {
+    // Server cho cả publickey (để app thử agent trước) lẫn password.
+    const s = await server([
+      { username: 'alice', password: 's3cret', publicKey: generateTestKey().public }
+    ])
+    const logs: string[] = []
+    const h = await connectTo({
+      port: s.port,
+      username: 'alice',
+      hostKey: 'match',
+      answer: password('s3cret'),
+      agent:
+        process.platform === 'win32'
+          ? '\\\\.\\pipe\\shellhouse-no-such-agent'
+          : join(tempDir(), 'no-such-agent.sock'),
+      logs
+    })
+    await h.waitFor('welcome')
+    expect(logs.some((l) => l.startsWith('SSH agent unavailable'))).toBe(true)
   })
 
   it('sai password 3 lần → thất bại, không hỏi quá 3 lần', async () => {

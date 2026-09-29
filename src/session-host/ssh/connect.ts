@@ -171,7 +171,16 @@ function connectHop(options: HopOptions): Promise<Client> {
       fail(new Error(`Server ${host} did not respond to the SSH handshake`))
     }, timeouts.handshakeMs)
 
-    client.once('error', fail)
+    // ssh2 báo lỗi agent (không có agent chạy, Pageant đóng…) qua 'error' nhưng VẪN tự thử cách
+    // xác thực tiếp theo — không được coi là lỗi kết nối (như OpenSSH: agent hỏng thì bỏ qua).
+    const onError = (error: Error & { level?: string }): void => {
+      if (error.level === 'agent') {
+        ctx.log('info', `SSH agent unavailable, trying other methods: ${error.message}`)
+        return
+      }
+      fail(error)
+    }
+    client.on('error', onError)
     client.once('close', () => {
       fail(new Error(`Server ${host} closed the connection`))
     })
@@ -179,7 +188,7 @@ function connectHop(options: HopOptions): Promise<Client> {
       if (settled) return
       settled = true
       clearTimeout(handshakeTimer)
-      client.removeListener('error', fail)
+      client.removeListener('error', onError)
       resolve(client)
     })
 
