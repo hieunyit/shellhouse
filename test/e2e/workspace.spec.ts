@@ -49,18 +49,24 @@ test('chia màn hình: hai terminal hiển thị cùng lúc, chạy độc lập
 })
 
 test('snippet có biến: tạo, điền biến, chèn và chạy trong terminal', async ({ page }) => {
-  test.skip(isWindows, 'Lệnh POSIX')
+  // Cùng một kết quả "xin-chao-hieu-42" bằng cú pháp POSIX sh hoặc PowerShell.
+  const body = isWindows
+    ? 'Write-Output ("xin-chao-{{ten}}-{{so:4}}" + (1+1))'
+    : 'echo "xin-chao-{{ten}}-{{so:4}}$((1+1))"'
+  const preview = isWindows
+    ? 'Write-Output ("xin-chao-hieu-4" + (1+1))'
+    : 'echo "xin-chao-hieu-4$((1+1))"'
   const tab = await activeTab(page)
   await page.getByTestId('open-snippets').click()
   const dialog = page.getByTestId('snippets-dialog')
   await dialog.getByTestId('snippet-new').click()
   await dialog.getByTestId('snippet-name').fill('chào hỏi')
-  await dialog.getByTestId('snippet-body').fill('echo "xin-chao-{{ten}}-{{so:4}}$((1+1))"')
+  await dialog.getByTestId('snippet-body').fill(body)
   await dialog.getByTestId('snippet-save').click()
 
   await expect(dialog.getByTestId('snippet-var-so')).toHaveValue('4')
   await dialog.getByTestId('snippet-var-ten').fill('hieu')
-  await expect(dialog.getByTestId('snippet-preview')).toHaveText('echo "xin-chao-hieu-4$((1+1))"')
+  await expect(dialog.getByTestId('snippet-preview')).toHaveText(preview)
   await dialog.getByTestId('snippet-run').click()
   await expect(dialog).toHaveCount(0)
   await waitForText(page, tab, 'xin-chao-hieu-42')
@@ -80,7 +86,7 @@ test('snippet có biến: tạo, điền biến, chèn và chạy trong terminal
 })
 
 test('snippet nhiều dòng được dán (bracketed paste), không tự chạy từng dòng', async ({ page }) => {
-  test.skip(isWindows, 'Lệnh POSIX')
+  test.skip(isWindows, 'Cần bash (bracketed paste của PSReadLine khác)')
   const tab = await activeTab(page)
   // Bật bracketed paste như bash/zsh hiện đại.
   await sendLine(page, tab, "bind 'set enable-bracketed-paste on' 2>/dev/null; echo san-sang")

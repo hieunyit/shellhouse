@@ -35,7 +35,9 @@ export function findSftpServer(): string | null {
     '/usr/lib/openssh/sftp-server',
     '/usr/libexec/sftp-server',
     '/usr/libexec/openssh/sftp-server',
-    join(homedir(), '.local/opt/openssh-sftp/usr/lib/openssh/sftp-server')
+    join(homedir(), '.local/opt/openssh-sftp/usr/lib/openssh/sftp-server'),
+    // OpenSSH có sẵn trong Windows 10/11.
+    'C:\\Windows\\System32\\OpenSSH\\sftp-server.exe'
   ]
   return candidates.find((c): c is string => !!c && existsSync(c)) ?? null
 }

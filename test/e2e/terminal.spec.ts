@@ -18,18 +18,18 @@ test('gõ phím thật vào terminal', async ({ page }) => {
 })
 
 test('biến môi trường terminal được đặt đúng', async ({ page }) => {
-  test.skip(isWindows, 'Kiểm tra bằng cú pháp POSIX')
   const tab = await activeTab(page)
   await sendLine(
     page,
     tab,
-    'echo "T=$TERM C=$COLORTERM P=$TERM_PROGRAM E=${ELECTRON_RUN_AS_NODE:-none}"'
+    isWindows
+      ? 'Write-Output "T=$env:TERM C=$env:COLORTERM P=$env:TERM_PROGRAM E=$(if ($env:ELECTRON_RUN_AS_NODE) { $env:ELECTRON_RUN_AS_NODE } else { \'none\' })"'
+      : 'echo "T=$TERM C=$COLORTERM P=$TERM_PROGRAM E=${ELECTRON_RUN_AS_NODE:-none}"'
   )
   await waitForText(page, tab, 'T=xterm-256color C=truecolor P=Shellhouse E=none')
 })
 
 test('kích thước PTY theo kích thước cửa sổ', async ({ app, page }) => {
-  test.skip(isWindows, 'stty không có trên Windows')
   const tab = await activeTab(page)
   await app.evaluate(({ BrowserWindow }) => {
     BrowserWindow.getAllWindows()[0]?.setSize(900, 600)
@@ -37,7 +37,13 @@ test('kích thước PTY theo kích thước cửa sổ', async ({ app, page }) 
   await page.waitForTimeout(300)
   const size = await page.evaluate((id) => window.__shellhouseTest.size(id), tab)
   expect(size).not.toBeNull()
-  await sendLine(page, tab, 'echo "SIZE=$(stty size)"')
+  await sendLine(
+    page,
+    tab,
+    isWindows
+      ? 'Write-Output "SIZE=$($Host.UI.RawUI.WindowSize.Height) $($Host.UI.RawUI.WindowSize.Width)"'
+      : 'echo "SIZE=$(stty size)"'
+  )
   await waitForText(page, tab, `SIZE=${size?.rows} ${size?.cols}`)
 })
 
@@ -89,15 +95,17 @@ test('Session Host bị giết → tab mở lại phiên mới, giữ scrollback
 })
 
 test('output lớn không làm treo UI', async ({ page }) => {
-  test.skip(isWindows, 'Dùng lệnh POSIX')
   const tab = await activeTab(page)
   await page.evaluate(() => window.__shellhouseTest.maxLongTaskMs(true))
   const { command, expected } = echoComputed('bigdone')
-  // ~20 MB output
+  const line = '0123456789abcdef0123456789abcdef0123456789'
+  // ~20 MB output (trên Windows đi qua ConPTY).
   await sendLine(
     page,
     tab,
-    `yes 0123456789abcdef0123456789abcdef0123456789 | head -n 450000; ${command}`
+    isWindows
+      ? `[Console]::Out.Write(((,'${line}') * 450000) -join [char]10); ${command}`
+      : `yes ${line} | head -n 450000; ${command}`
   )
   await waitForText(page, tab, expected, 30_000)
   const longest = await page.evaluate(() => window.__shellhouseTest.maxLongTaskMs())
