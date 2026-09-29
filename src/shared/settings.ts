@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { Workspace } from './workspaces'
 
 /** Bảng màu terminal (định dạng theo xterm.js ITheme). */
 export const TerminalTheme = z.object({
@@ -97,7 +98,9 @@ export const AppSettings = z.object({
   logging: LoggingSettings.catch(LoggingSettings.parse({})),
   /** Ghi đè phím tắt: commandId → tổ hợp phím ('' = bỏ phím tắt). */
   keybindings: z.record(z.string().max(64), z.string().max(64)).catch({}),
-  customThemes: z.array(TerminalTheme).max(100).catch([])
+  customThemes: z.array(TerminalTheme).max(100).catch([]),
+  /** Bố cục tab đã lưu (mở lại bằng bảng lệnh). */
+  workspaces: z.array(Workspace).max(50).catch([])
 })
 export type AppSettings = z.infer<typeof AppSettings>
 
@@ -120,7 +123,8 @@ export const SettingsPatch = z.object({
   files: FileSettings.partial().optional(),
   logging: LoggingSettings.partial().optional(),
   keybindings: z.record(z.string().max(64), z.string().max(64)).optional(),
-  customThemes: z.array(TerminalTheme).max(100).optional()
+  customThemes: z.array(TerminalTheme).max(100).optional(),
+  workspaces: z.array(Workspace).max(50).optional()
 })
 export type SettingsPatch = z.infer<typeof SettingsPatch>
 
@@ -134,6 +138,7 @@ export function applyPatch(current: AppSettings, patch: SettingsPatch): AppSetti
     files: { ...current.files, ...patch.files },
     logging: { ...current.logging, ...patch.logging },
     keybindings: patch.keybindings ?? current.keybindings,
-    customThemes: patch.customThemes ?? current.customThemes
+    customThemes: patch.customThemes ?? current.customThemes,
+    workspaces: patch.workspaces ?? current.workspaces
   })
 }

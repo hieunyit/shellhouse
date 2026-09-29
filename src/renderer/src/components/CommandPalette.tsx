@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { CornerDownLeft, Search, Server, SquareChevronRight, SquareTerminal } from 'lucide-react'
+import {
+  CornerDownLeft,
+  LayoutGrid,
+  Search,
+  Server,
+  SquareChevronRight,
+  SquareTerminal
+} from 'lucide-react'
+import { openWorkspace } from './WorkspacesDialog'
 import { COMMANDS, keybindingFor } from '@shared/commands'
 import { bestScore } from '@shared/fuzzy'
 import { displayKeybinding, isMac } from '../lib/keybindings'
@@ -37,6 +45,7 @@ export function CommandPalette({
   const overrides = useSettings((s) => s.settings.keybindings)
   const hosts = useHosts((s) => s.tree.hosts)
   const shells = useShells((s) => s.shells)
+  const workspaces = useSettings((s) => s.settings.workspaces)
 
   const items = useMemo<Item[]>(() => {
     const commands: Item[] = COMMANDS.filter((c) => c.id !== 'palette.open').map((c) => ({
@@ -72,14 +81,25 @@ export function CommandPalette({
         useTabs.getState().addLocal(sh.id)
       }
     }))
-    const all = [...commands, ...terminals, ...connect]
+    const layouts: Item[] = workspaces.map((w) => ({
+      id: `workspace:${w.id}`,
+      title: `Open workspace: ${w.name}`,
+      hint: `${w.items.length} tab${w.items.length === 1 ? '' : 's'}`,
+      group: 'Commands' as const,
+      icon: <LayoutGrid size={14} />,
+      shortcut: false,
+      run: () => {
+        openWorkspace(w)
+      }
+    }))
+    const all = [...commands, ...layouts, ...terminals, ...connect]
     if (!query.trim()) return all
     return all
       .map((item) => ({ item, score: bestScore(query, [item.title, item.hint]) }))
       .filter((r): r is { item: Item; score: number } => r.score !== null)
       .sort((a, b) => b.score - a.score)
       .map((r) => r.item)
-  }, [query, overrides, hosts, shells, runCommand])
+  }, [query, overrides, hosts, shells, workspaces, runCommand])
 
   // Giữ mục đang chọn trong vùng nhìn thấy khi di chuyển bằng phím mũi tên.
   useEffect(() => {

@@ -21,6 +21,9 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   Symbolic links inside are skipped; an existing folder is only merged after you confirm.
 - Import hosts from CSV (Termius export or any spreadsheet): columns are matched by name,
   groups become nested groups and tags are kept. Password columns are never imported.
+- Workspaces: save the current tabs and splits under a name (tab bar → Workspaces) and reopen
+  them in one step from the same dialog or the command palette. Hosts deleted since are
+  skipped.
 
 ### Changed
 

@@ -17,6 +17,7 @@ import { useSettings } from '../stores/settings'
 import { Button, connectionLabel, cx, Kbd, StatusDot } from './ui'
 import { useTabs } from '../stores/tabs'
 import { TerminalView } from '../terminal/TerminalView'
+import { layoutToItems, type WorkspaceItem } from '@shared/workspaces'
 
 interface PanelParams {
   tabId: string
@@ -172,6 +173,21 @@ function Empty(): React.JSX.Element {
 
 const components = { terminal: TerminalPanel }
 
+/** Dockview đang hiển thị — để chụp bố cục khi lưu workspace. */
+let currentApi: DockviewApi | null = null
+
+/** Bố cục tab hiện tại thành danh sách mở lại được (xem @shared/workspaces). */
+export function captureWorkspaceItems(): WorkspaceItem[] {
+  const api = currentApi
+  if (!api || api.panels.length === 0) return []
+  const { grid } = api.toJSON()
+  const { tabs } = useTabs.getState()
+  return layoutToItems(grid.root, grid.orientation, (panelId) => {
+    const tab = tabs.find((t) => t.id === panelId)
+    return tab ? { target: tab.target, title: tab.title } : null
+  })
+}
+
 /** Màu lấy hoàn toàn từ design token (styles.css) → tự đổi theo sáng/tối. */
 const shellhouseTheme: DockviewTheme = {
   name: 'shellhouse',
@@ -245,6 +261,7 @@ export function Workspace(): React.JSX.Element {
       defaultRenderer="always"
       onReady={(event) => {
         apiRef.current = event.api
+        currentApi = event.api
         setApi(event.api)
       }}
     />

@@ -3,6 +3,7 @@ import {
   ChevronDown,
   Columns2,
   Info,
+  LayoutGrid,
   Lock,
   Plus,
   Radio,
@@ -70,11 +71,13 @@ function QuickConnect(): React.JSX.Element {
 export function TabBar({
   onOpenSnippets,
   onOpenSettings,
-  onOpenDiagnostics
+  onOpenDiagnostics,
+  onOpenWorkspaces
 }: {
   onOpenSnippets: () => void
   onOpenSettings: () => void
   onOpenDiagnostics: () => void
+  onOpenWorkspaces: () => void
 }): React.JSX.Element {
   const addLocal = useTabs((s) => s.addLocal)
   const { menu, open: openMenu } = useContextMenu()
@@ -148,6 +151,13 @@ export function TabBar({
       </IconButton>
       <IconButton label="Snippets" data-testid="open-snippets" onClick={onOpenSnippets}>
         <ScrollText size={15} />
+      </IconButton>
+      <IconButton
+        label="Workspaces: save or reopen a set of tabs"
+        data-testid="open-workspaces"
+        onClick={onOpenWorkspaces}
+      >
+        <LayoutGrid size={15} />
       </IconButton>
       <IconButton
         label={

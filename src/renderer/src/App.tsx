@@ -4,6 +4,7 @@ import type { SettingsSectionId } from './components/settings/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { TabBar } from './components/TabBar'
 import { Workspace } from './components/Workspace'
+import { WorkspacesDialog } from './components/WorkspacesDialog'
 import { preloadLazyParts, SettingsDialog, SnippetsDialog } from './lazy'
 import { matchCommand } from './lib/keybindings'
 import { useHosts } from './stores/hosts'
@@ -17,6 +18,7 @@ import { controllers } from './terminal/registry'
 type Overlay =
   | { kind: 'snippets' }
   | { kind: 'palette' }
+  | { kind: 'workspaces' }
   | {
       kind: 'settings'
       section?: SettingsSectionId
@@ -96,6 +98,9 @@ export function App(): React.JSX.Element {
       case 'multiexec.toggle':
         toggleMultiExec()
         break
+      case 'workspaces.open':
+        setOverlay({ kind: 'workspaces' })
+        break
       case 'vault.lock':
         void window.shellhouse.lockVault()
         break
@@ -143,6 +148,9 @@ export function App(): React.JSX.Element {
           onOpenDiagnostics={() => {
             setOverlay({ kind: 'settings', section: 'diagnostics' })
           }}
+          onOpenWorkspaces={() => {
+            setOverlay({ kind: 'workspaces' })
+          }}
         />
         <div className="relative min-h-0 flex-1">
           <Workspace />
@@ -162,6 +170,7 @@ export function App(): React.JSX.Element {
       {overlay?.kind === 'palette' && (
         <CommandPalette onClose={closeOverlay} runCommand={runCommand} />
       )}
+      {overlay?.kind === 'workspaces' && <WorkspacesDialog onClose={closeOverlay} />}
       {overlay?.kind === 'settings' && (
         <SettingsDialog
           onClose={closeOverlay}

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { WorkspaceItem } from '@shared/workspaces'
 import { shellName } from './shells'
 
 export type TabTarget =
@@ -10,8 +11,8 @@ export interface Tab {
   id: string
   title: string
   target: TabTarget
-  /** Tab sinh ra từ lệnh chia màn hình: đặt cạnh tab nguồn theo hướng này. */
-  splitFrom?: { tabId: string; direction: 'right' | 'below' }
+  /** Tab sinh ra từ lệnh chia màn hình: đặt cạnh tab nguồn theo hướng này ('within' = cùng nhóm). */
+  splitFrom?: { tabId: string; direction: 'right' | 'below' | 'within' }
   /** Panel mở sẵn khi tab vừa tạo (ví dụ "Open SFTP" từ menu chuột phải). */
   initialPanel?: 'sftp'
 }
@@ -31,6 +32,8 @@ interface TabsState {
   addHost: (host: { id: string; label: string }, options?: OpenHostOptions) => string
   /** Mở nhiều host: thành các tab, hoặc xếp lưới (chia màn hình) trong một khung. */
   openHosts: (hosts: readonly { id: string; label: string }[], layout: 'tabs' | 'grid') => string[]
+  /** Mở lại một workspace đã lưu (thêm vào các tab đang mở). */
+  openWorkspace: (items: readonly WorkspaceItem[]) => string[]
   /** Mở một phiên mới cùng đích với tab hiện tại, đặt cạnh nó. */
   split: (direction: 'right' | 'below') => string | null
   close: (id: string) => void
@@ -97,6 +100,19 @@ export const useTabs = create<TabsState>((set, get) => {
         }
         ids.push(add(host.label, { kind: 'host', hostId: host.id }, splitFrom))
       })
+      return ids
+    },
+    openWorkspace: (items) => {
+      const ids: string[] = []
+      for (const item of items) {
+        const anchor = item.after === null ? undefined : ids[item.after]
+        const splitFrom = anchor ? { tabId: anchor, direction: item.direction } : undefined
+        const title =
+          item.target.kind === 'local'
+            ? (shellName(item.target.shellId) ?? `Local ${++localCounter}`)
+            : item.title
+        ids.push(add(title, item.target, splitFrom))
+      }
       return ids
     },
     split: (direction) => {

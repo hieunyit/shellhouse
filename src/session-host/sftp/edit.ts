@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { watch, type FSWatcher } from 'node:fs'
+import { unwatchFile, watch, watchFile, type FSWatcher } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import type { SftpService } from './service'
@@ -7,6 +7,7 @@ import type { TransferQueue } from './transfers'
 
 /** Editor thường ghi file nhiều bước (ghi tạm → đổi tên); chờ yên rồi mới tải lên. */
 const SETTLE_MS = 400
+const POLL_MS = 1000
 
 interface Edit {
   remotePath: string
@@ -66,6 +67,12 @@ export class RemoteEdits {
     watcher.on('error', () => {
       this.stop(localPath)
     })
+    // Lưới an toàn: fs.watch có thể lỡ sự kiện (macOS/FSEvents cần một lúc mới bắt đầu nhận; ổ
+    // mạng). Hỏi mtime/size mỗi giây — trùng với fs.watch cũng không sao vì so hash trước khi tải.
+    watchFile(localPath, { interval: POLL_MS }, (current, previous) => {
+      if (current.mtimeMs !== previous.mtimeMs || current.size !== previous.size)
+        this.schedule(localPath)
+    })
     this.edits.set(localPath, {
       remotePath,
       localPath,
@@ -83,6 +90,7 @@ export class RemoteEdits {
     const edit = this.edits.get(localPath)
     if (!edit) return
     edit.watcher.close()
+    unwatchFile(localPath)
     if (edit.timer) clearTimeout(edit.timer)
     this.edits.delete(localPath)
   }

@@ -23,6 +23,7 @@ export const COMMANDS: readonly CommandDef[] = [
     title: 'MultiExec: type into all terminals',
     keys: ['Meta+Shift+M', 'Ctrl+Shift+M']
   },
+  { id: 'workspaces.open', title: 'Workspaces: save or open a layout', keys: [null, null] },
   { id: 'diagnostics.toggle', title: 'Toggle diagnostics', keys: [null, null] }
 ]
 
