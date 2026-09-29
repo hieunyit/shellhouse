@@ -1,0 +1,8 @@
+# OpenSSH theo bản Ubuntu (20.04 → 8.2p1, 24.04 → 9.6p1).
+ARG UBUNTU=24.04
+FROM ubuntu:${UBUNTU}
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server \
+ && rm -rf /var/lib/apt/lists/*
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

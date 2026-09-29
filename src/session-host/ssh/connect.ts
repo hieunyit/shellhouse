@@ -1,3 +1,4 @@
+import { getCiphers } from 'node:crypto'
 import { connect as netConnect, type Socket } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { Client, type ClientChannel } from 'ssh2'
@@ -25,6 +26,39 @@ export function hostKeyAlgorithms(knownKeyTypes: readonly string[]): string[] {
   return [...new Set([...preferred, ...DEFAULT_HOST_KEY_ALGOS])]
 }
 
+/**
+ * Thuật toán cũ cho thiết bị đời cũ (switch, router, server trước 2015) — CHỈ bật theo từng host.
+ * Được nối vào SAU danh sách hiện đại: server mới vẫn thương lượng thuật toán mạnh.
+ * Chỉ giữ những cipher mà bản OpenSSL/BoringSSL đang chạy thực sự có.
+ */
+const LEGACY_CIPHERS = (
+  [
+    ['aes128-cbc', 'aes-128-cbc'],
+    ['aes192-cbc', 'aes-192-cbc'],
+    ['aes256-cbc', 'aes-256-cbc'],
+    ['3des-cbc', 'des-ede3-cbc']
+  ] as const
+)
+  .filter(([, openssl]) => getCiphers().includes(openssl))
+  .map(([name]) => name)
+
+export function algorithmsFor(hop: Pick<HopConfig, 'knownKeyTypes' | 'legacyAlgorithms'>): object {
+  const hostKeys = hostKeyAlgorithms(hop.knownKeyTypes)
+  if (!hop.legacyAlgorithms) return { serverHostKey: hostKeys }
+  return {
+    serverHostKey: [...hostKeys, 'ssh-rsa', 'ssh-dss'],
+    kex: {
+      append: [
+        'diffie-hellman-group14-sha1',
+        'diffie-hellman-group-exchange-sha1',
+        'diffie-hellman-group1-sha1'
+      ]
+    },
+    cipher: { append: LEGACY_CIPHERS },
+    hmac: { append: ['hmac-md5'] }
+  }
+}
+
 export const TIMEOUTS = {
   /** Mở TCP (hoặc kênh qua jump host). */
   tcpMs: 15_000,
@@ -47,6 +81,8 @@ export interface HopConfig {
   credentials?: StoredCredentials
   /** Thay cho key mặc định (~/.ssh/id_*), ví dụ IdentityFile từ ~/.ssh/config. */
   keyFiles?: readonly string[]
+  /** Cho phép thuật toán cũ (ssh-rsa/SHA-1, DH group1/14-sha1, CBC) — thiết bị đời cũ. */
+  legacyAlgorithms?: boolean
 }
 
 export interface SshOpenOptions {
@@ -152,7 +188,7 @@ function connectHop(options: HopOptions): Promise<Client> {
       readyTimeout: 30 * 60 * 1000,
       keepaliveInterval: timeouts.keepaliveIntervalMs,
       keepaliveCountMax: timeouts.keepaliveCountMax,
-      algorithms: { serverHostKey: hostKeyAlgorithms(hop.knownKeyTypes) as never },
+      algorithms: algorithmsFor(hop),
       hostVerifier: (key: Buffer, verify: (valid: boolean) => void) => {
         clearTimeout(handshakeTimer)
         ctx

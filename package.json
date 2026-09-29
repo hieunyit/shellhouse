@@ -27,6 +27,7 @@
     "package:dir": "electron-vite build && electron-builder --dir --publish never",
     "bench": "playwright test --project=bench",
     "fuzz": "FUZZ_RUNS=50000 vitest run test/fuzz",
+    "test:compat": "vitest run --config vitest.compat.config.ts",
     "soak": "playwright test --project=soak",
     "test:package": "playwright test --project=package",
     "screens": "playwright test --project=screens"

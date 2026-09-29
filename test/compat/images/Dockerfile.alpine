@@ -1,0 +1,6 @@
+# OpenSSH mới nhất (Alpine edge / stable mới nhất).
+FROM alpine:latest
+RUN apk add --no-cache openssh-server openssh-sftp-server shadow
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

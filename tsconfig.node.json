@@ -3,6 +3,7 @@
   "include": [
     "electron.vite.config.ts",
     "vitest.config.ts",
+    "vitest.compat.config.ts",
     "playwright.config.ts",
     "src/main/**/*",
     "src/session-host/**/*",
@@ -11,6 +12,7 @@
     "src/shared/**/*",
     "test/unit/**/*",
     "test/integration/**/*",
+    "test/compat/**/*",
     "test/fuzz/**/*"
   ],
   "compilerOptions": {

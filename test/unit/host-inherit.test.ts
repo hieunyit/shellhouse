@@ -109,6 +109,21 @@ describe('kế thừa từ nhóm khi kết nối', () => {
   })
 })
 
+describe('thuật toán legacy', () => {
+  it('lưu theo host, truyền khi kết nối (cả khi host là jump host)', async () => {
+    const { service } = await setup()
+    const old = service.saveHost(
+      host({ label: 'old-switch', username: 'admin', legacyAlgorithms: true })
+    )
+    const modern = service.saveHost(host({ label: 'web', username: 'u', jumpHostIds: [old] }))
+    expect(service.tree().hosts.find((h) => h.id === old)?.legacyAlgorithms).toBe(true)
+    expect(service.resolveForConnect(old).legacyAlgorithms).toBe(true)
+    const r = service.resolveForConnect(modern)
+    expect(r.legacyAlgorithms).toBeUndefined()
+    expect(r.jumps[0]?.legacyAlgorithms).toBe(true)
+  })
+})
+
 describe('thao tác hàng loạt', () => {
   it('yêu thích, gắn/bỏ tag, di chuyển, xoá nhiều host', async () => {
     const { service } = await setup()

@@ -1,0 +1,7 @@
+# OpenSSH 7.4p1 — CentOS 7, server cũ còn rất phổ biến trong doanh nghiệp. Repo đã chuyển về vault.
+FROM centos:7
+RUN sed -i -e 's/^mirrorlist/#mirrorlist/' -e 's|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|' /etc/yum.repos.d/CentOS-*.repo \
+ && yum install -y openssh-server passwd && yum clean all
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

@@ -173,3 +173,18 @@ base('nhập từ ~/.ssh/config: xem trước, bỏ mục lỗi, nhập mục đ
     rmSync(home, { recursive: true, force: true })
   }
 })
+
+test('tuỳ chọn "Allow legacy algorithms" được lưu theo host', async ({ page }) => {
+  await page.getByTestId('add-host').click()
+  const form = page.getByTestId('host-form')
+  await form.getByTestId('host-hostname').fill('10.0.0.1')
+  await form.getByTestId('host-username').fill('admin')
+  await form.getByTestId('host-label').fill('old-switch')
+  await form.getByTestId('host-legacy').check()
+  await form.getByTestId('host-save').click()
+  await expect(form).toHaveCount(0)
+  const row = page.locator('[data-testid="host-row"][data-host-label="old-switch"]')
+  await row.hover()
+  await row.getByTestId('host-edit').click()
+  await expect(form.getByTestId('host-legacy')).toBeChecked()
+})

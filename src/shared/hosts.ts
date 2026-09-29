@@ -85,6 +85,8 @@ export const HostSummary = z.object({
   mode: HostMode,
   /** true = kết nối thẳng, bỏ qua jump host của nhóm. */
   direct: z.boolean(),
+  /** Cho phép thuật toán cũ (thiết bị đời cũ). */
+  legacyAlgorithms: z.boolean(),
   tags: z.array(z.string()),
   color: z.enum(HOST_COLORS).nullable(),
   lastUsedAt: z.number().nullable(),
@@ -121,6 +123,8 @@ export const HostInput = z.object({
   mode: HostMode,
   /** true = bỏ qua jump host kế thừa từ nhóm. */
   direct: z.boolean().optional(),
+  /** Cho phép thuật toán cũ (ssh-rsa/SHA-1, DH-SHA1, CBC) — chỉ cho thiết bị đời cũ. */
+  legacyAlgorithms: z.boolean().optional(),
   tags: z
     .array(z.string().trim().min(1).max(40, 'Each tag can be at most 40 characters'))
     .max(20, 'At most 20 tags'),

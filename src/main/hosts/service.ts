@@ -29,6 +29,8 @@ export interface ResolvedHop {
   }
   /** IdentityFile từ ~/.ssh/config — dùng thay cho key mặc định. */
   keyFiles?: string[]
+  /** Cho phép thuật toán cũ (thiết bị đời cũ). */
+  legacyAlgorithms?: boolean
 }
 
 /** Thứ Session Host cần để kết nối một host đã lưu. */
@@ -67,6 +69,8 @@ interface HostOptions {
   inheritPort?: boolean
   /** Bỏ qua jump host kế thừa từ nhóm. */
   direct?: boolean
+  /** Cho phép thuật toán cũ (ssh-rsa/SHA-1, DH-SHA1, CBC) — thiết bị đời cũ. */
+  legacy?: boolean
 }
 
 function parseDefaults(raw: string): GroupDefaults {
@@ -149,6 +153,7 @@ export class HostService {
           jumpHostIds: parseJson<string[]>(r.jump_host_ids, []),
           mode: r.mode === 'system' ? 'system' : 'builtin',
           direct: options.direct === true,
+          legacyAlgorithms: options.legacy === true,
           tags: parseJson<string[]>(r.tags, []),
           color: toColor(r.color),
           lastUsedAt: r.last_used_at,
@@ -230,6 +235,7 @@ export class HostService {
       if (input.proxyJump) options.proxyJump = input.proxyJump
       if (input.port === null) options.inheritPort = true
       if (input.direct) options.direct = true
+      if (input.legacyAlgorithms) options.legacy = true
       const values = [
         input.groupId,
         input.label,
@@ -963,7 +969,8 @@ export class HostService {
       label: row.label,
       target: { host: row.hostname, port, username },
       credentials,
-      ...(options.keyFile ? { keyFiles: [options.keyFile] } : {})
+      ...(options.keyFile ? { keyFiles: [options.keyFile] } : {}),
+      ...(options.legacy ? { legacyAlgorithms: true } : {})
     }
   }
 }

@@ -225,13 +225,15 @@ function registerIpc(): void {
           ...(autoForwards.length > 0 ? { autoForwards } : {}),
           ...(resolved ? { credentials: resolved.credentials } : {}),
           ...(resolved?.keyFiles ? { keyFiles: resolved.keyFiles } : {}),
+          ...(resolved?.legacyAlgorithms ? { legacyAlgorithms: true } : {}),
           ...(resolved && resolved.jumps.length > 0
             ? {
                 jumps: resolved.jumps.map((j) => ({
                   target: j.target,
                   knownKeyTypes: known(j.target),
                   credentials: j.credentials,
-                  ...(j.keyFiles ? { keyFiles: j.keyFiles } : {})
+                  ...(j.keyFiles ? { keyFiles: j.keyFiles } : {}),
+                  ...(j.legacyAlgorithms ? { legacyAlgorithms: true } : {})
                 }))
               }
             : {})

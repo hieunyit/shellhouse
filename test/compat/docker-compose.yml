@@ -1,0 +1,93 @@
+# Ma trận tương thích SSH (KE-HOACH-MOI.md mục 8.2). Chạy: pnpm test:compat
+# Mọi cổng chỉ mở trên 127.0.0.1. User thử nghiệm: tester / compat-pw; authorized_keys do test tạo.
+name: shellhouse-compat
+
+x-common: &common
+  restart: 'no'
+  volumes:
+    - ./.run:/compat:ro
+
+services:
+  openssh74:
+    <<: *common
+    build: { context: images, dockerfile: Dockerfile.centos7 }
+    image: shellhouse-compat/centos7
+    ports: ['127.0.0.1:22741:22']
+    # sshd CentOS 7 bật GSSAPI + tra DNS ngược: trong Docker mỗi lần đăng nhập mất ~60 giây (với cả
+    # client OpenSSH chuẩn) — lỗi môi trường kinh điển, không phải của app. Tắt để test chạy nhanh.
+    command: ['-o', 'GSSAPIAuthentication=no', '-o', 'UseDNS=no']
+
+  openssh82:
+    <<: *common
+    build: { context: images, dockerfile: Dockerfile.ubuntu, args: { UBUNTU: '20.04' } }
+    image: shellhouse-compat/ubuntu2004
+    ports: ['127.0.0.1:22821:22']
+
+  openssh96:
+    <<: *common
+    build: { context: images, dockerfile: Dockerfile.ubuntu, args: { UBUNTU: '24.04' } }
+    image: shellhouse-compat/ubuntu2404
+    ports: ['127.0.0.1:22961:22']
+
+  openssh-latest:
+    <<: *common
+    build: { context: images, dockerfile: Dockerfile.alpine }
+    image: shellhouse-compat/alpine
+    ports: ['127.0.0.1:22991:22']
+
+  dropbear:
+    <<: *common
+    build: { context: images, dockerfile: Dockerfile.dropbear }
+    image: shellhouse-compat/dropbear
+    ports: ['127.0.0.1:22201:22']
+
+  # Thiết bị đời cũ (switch / router): CHỈ có thuật toán cũ — ssh-rsa, DH group1/14-sha1, CBC, hmac-sha1.
+  legacy:
+    <<: *common
+    image: shellhouse-compat/centos7
+    depends_on: [openssh74]
+    ports: ['127.0.0.1:22101:22']
+    command:
+      - -o
+      - GSSAPIAuthentication=no
+      - -o
+      - UseDNS=no
+      - -o
+      - KexAlgorithms=diffie-hellman-group14-sha1,diffie-hellman-group1-sha1
+      - -o
+      - Ciphers=aes128-cbc,3des-cbc
+      - -o
+      - MACs=hmac-sha1
+      - -o
+      - HostKeyAlgorithms=ssh-rsa
+      - -o
+      - HostKey=/etc/ssh/ssh_host_rsa_key
+
+  totp:
+    <<: *common
+    build: { context: images, dockerfile: Dockerfile.totp }
+    image: shellhouse-compat/totp
+    ports: ['127.0.0.1:22301:22']
+
+  # Bastion 2 tầng: chỉ bastion1 mở ra ngoài; bastion2 và target chỉ thấy được trong mạng nội bộ.
+  bastion1:
+    <<: *common
+    image: shellhouse-compat/ubuntu2404
+    depends_on: [openssh96]
+    ports: ['127.0.0.1:22401:22']
+    networks: [edge, inner]
+  bastion2:
+    <<: *common
+    image: shellhouse-compat/ubuntu2404
+    depends_on: [openssh96]
+    networks: [inner, deep]
+  target:
+    <<: *common
+    image: shellhouse-compat/alpine
+    depends_on: [openssh-latest]
+    networks: [deep]
+
+networks:
+  edge: {}
+  inner: { internal: true }
+  deep: { internal: true }

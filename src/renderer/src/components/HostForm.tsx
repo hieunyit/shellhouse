@@ -44,6 +44,7 @@ export function HostForm({
   const [jumpHostIds, setJumpHostIds] = useState<string[]>(host?.jumpHostIds ?? [])
   const [mode, setMode] = useState<HostMode>(host?.mode ?? 'builtin')
   const [direct, setDirect] = useState(host?.direct ?? false)
+  const [legacy, setLegacy] = useState(host?.legacyAlgorithms ?? false)
   const groupTree = useHosts((s) => s.groupTree)
   const inherited = useMemo(() => inheritedDefaults(groupTree, groupId), [groupTree, groupId])
   const from = (g: { groupName: string } | undefined): string => (g ? ` (from ${g.groupName})` : '')
@@ -84,6 +85,7 @@ export function HostForm({
       jumpHostIds,
       mode,
       ...(direct ? { direct: true } : {}),
+      ...(legacy ? { legacyAlgorithms: true } : {}),
       tags: tags
         .split(',')
         .map((t) => t.trim())
@@ -385,6 +387,15 @@ export function HostForm({
           )}
         </div>
 
+        <Checkbox
+          data-testid="host-legacy"
+          checked={legacy}
+          onChange={(e) => {
+            setLegacy(e.target.checked)
+          }}
+          label="Allow legacy algorithms"
+          description="For old switches, routers and servers that only offer ssh-rsa (SHA-1), SHA-1 key exchange or CBC ciphers. Weaker security — enable only for devices that need it."
+        />
         <Checkbox
           data-testid="host-mode-system"
           checked={mode === 'system'}

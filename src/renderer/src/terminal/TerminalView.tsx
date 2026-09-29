@@ -42,6 +42,9 @@ export function TerminalView({
     return groupId ? s.groupTree.path(groupId).join(' / ') : ''
   })
   const env = hostId ? { color: envColor, path: envPath } : null
+  const legacy = useHosts((s) =>
+    hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.legacyAlgorithms ?? false) : false
+  )
   const [deploying, setDeploying] = useState(false)
   const isRemote = target.kind !== 'local'
   const multiExec = useBroadcast((s) => s.enabled)
@@ -110,6 +113,15 @@ export function TerminalView({
             <StatusDot state={state} />
             <span className="hidden text-muted @xs:inline">{connectionLabel[state]}</span>
           </span>
+          {legacy && (
+            <span
+              className="ml-2 hidden shrink-0 rounded bg-warning-soft px-1.5 py-px text-[11px] font-medium text-warning @sm:inline"
+              data-testid="session-legacy"
+              title="Legacy algorithms are allowed for this host (weaker security)"
+            >
+              Legacy
+            </span>
+          )}
           {env?.path && (
             <span
               className={cx(

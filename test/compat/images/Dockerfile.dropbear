@@ -1,0 +1,9 @@
+# Dropbear — SSH server của router / thiết bị nhúng. SFTP dùng sftp-server của OpenSSH (thường gặp
+# trên OpenWrt khi cài thêm gói), Dropbear tìm nó ở /usr/libexec/sftp-server.
+FROM alpine:latest
+RUN apk add --no-cache dropbear openssh-sftp-server \
+ && mkdir -p /usr/libexec /etc/dropbear && ln -sf /usr/lib/ssh/sftp-server /usr/libexec/sftp-server \
+ && adduser -D -s /bin/sh tester && echo 'tester:compat-pw' | chpasswd
+COPY dropbear-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]

@@ -25,7 +25,8 @@ export const Hop = z.object({
   target: z.object({ host: z.string(), port: z.number().int(), username: z.string() }),
   knownKeyTypes: z.array(z.string()),
   credentials: Credentials.optional(),
-  keyFiles: z.array(z.string()).optional()
+  keyFiles: z.array(z.string()).optional(),
+  legacyAlgorithms: z.boolean().optional()
 })
 export type Hop = z.infer<typeof Hop>
 
@@ -47,6 +48,8 @@ export const HostRequest = z.discriminatedUnion('type', [
         credentials: Credentials.optional(),
         /** IdentityFile từ ~/.ssh/config. */
         keyFiles: z.array(z.string()).optional(),
+        /** Cho phép thuật toán cũ (thiết bị đời cũ) cho đích cuối. */
+        legacyAlgorithms: z.boolean().optional(),
         /** ProxyJump: các chặng trung gian theo thứ tự. */
         jumps: z.array(Hop).max(8).optional(),
         /** Forward tự bật ngay khi kết nối xong. */

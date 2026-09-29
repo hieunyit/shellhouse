@@ -1,0 +1,12 @@
+# Xác thực 2 bước: mật khẩu + mã TOTP (PAM google-authenticator) qua keyboard-interactive.
+FROM ubuntu:24.04
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server libpam-google-authenticator \
+ && rm -rf /var/lib/apt/lists/*
+# Bí mật TOTP cố định (chỉ dùng cho test) — test tự tính mã từ bí mật này.
+RUN useradd -m -s /bin/sh tester && echo 'tester:compat-pw' | chpasswd \
+ && printf 'JBSWY3DPEHPK3PXP\n" TOTP_AUTH\n" WINDOW_SIZE 3\n' > /home/tester/.google_authenticator \
+ && chown tester /home/tester/.google_authenticator && chmod 400 /home/tester/.google_authenticator \
+ && printf 'auth required pam_unix.so\nauth required pam_google_authenticator.so\naccount required pam_unix.so\nsession required pam_unix.so\n' > /etc/pam.d/sshd
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh", "-o", "UsePAM=yes", "-o", "KbdInteractiveAuthentication=yes", "-o", "PasswordAuthentication=no", "-o", "AuthenticationMethods=keyboard-interactive"]

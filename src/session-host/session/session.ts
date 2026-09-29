@@ -71,6 +71,7 @@ export interface SessionExtras {
   keyFiles?: readonly string[]
   jumps?: readonly HopConfig[]
   autoForwards?: readonly ForwardSpec[]
+  legacyAlgorithms?: boolean
 }
 
 /** Một session terminal: nối transport (PTY/SSH) với MessagePort của renderer. */
@@ -153,7 +154,8 @@ export class Session {
           target: this.spec.target,
           knownKeyTypes: this.extras.knownKeyTypes ?? [],
           ...(this.extras.credentials ? { credentials: this.extras.credentials } : {}),
-          ...(this.extras.keyFiles ? { keyFiles: this.extras.keyFiles } : {})
+          ...(this.extras.keyFiles ? { keyFiles: this.extras.keyFiles } : {}),
+          ...(this.extras.legacyAlgorithms ? { legacyAlgorithms: true } : {})
         }
         const transport = await openSshShell({
           destination,
