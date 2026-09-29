@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2026-09-29
+
 ### Added
 
 - Import hosts from MobaXterm (`MobaXterm.ini`): SSH sessions with their bookmark folders as
@@ -16,6 +18,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 - Checking for updates while a new release is still being published no longer shows a raw
   HTTP 404 error; update errors are shown as one short sentence (details go to the log).
+- The Windows installer file name has no spaces, so the updater can download it from GitHub
+  (`Shellhouse-Setup-<version>.exe`).
 
 ## [1.0.0-beta.1] - 2026-09-29
 

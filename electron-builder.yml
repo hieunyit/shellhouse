@@ -44,6 +44,9 @@ win:
     - '!**/node_modules/node-pty/third_party/conpty/*/win10-arm64/**'
     - '!**/*.pdb'
 nsis:
+  # Không có dấu cách: GitHub đổi dấu cách trong tên file tải lên thành dấu chấm, còn latest.yml
+  # ghi dấu gạch → trình cập nhật tải file không tồn tại (404). Giữ tên y hệt ở cả hai nơi.
+  artifactName: ${productName}-Setup-${version}.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
