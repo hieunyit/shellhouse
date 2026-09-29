@@ -103,7 +103,9 @@ jobs:
 
       - name: Keep per-arch macOS channel file
         if: runner.os == 'macOS'
-        run: mv dist/latest-mac.yml dist/latest-mac-${{ matrix.name }}.yml
+        # Bản stable ghi latest-mac.yml, bản beta ghi beta-mac.yml.
+        shell: bash
+        run: for f in dist/*-mac.yml; do mv "$f" "${f%.yml}-${{ matrix.name }}.yml"; done
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
@@ -115,7 +117,11 @@ jobs:
           SHELLHOUSE_UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
         run: |
           [ -n "$SHELLHOUSE_UPDATE_SIGNING_KEY" ] || { echo "::error::UPDATE_SIGNING_KEY missing"; exit 1; }
-          node scripts/sign-update.mjs dist/latest-linux.yml
+          # latest-linux.yml (stable) hoặc beta-linux.yml (beta).
+          shopt -s nullglob
+          files=(dist/*-linux*.yml)
+          [ ${#files[@]} -gt 0 ] || { echo "::error::no Linux channel file in dist/"; exit 1; }
+          for f in "${files[@]}"; do node scripts/sign-update.mjs "$f"; done
 
       # Bản đóng gói thật phải khởi động được, nạp được native module (bắt lỗi asar/unpack/fuses).
       - name: Smoke test packaged app (Linux)
@@ -145,6 +151,7 @@ jobs:
             dist/*.zip
             dist/*.blockmap
             dist/latest*.yml
+            dist/beta*.yml
             dist/SHA256SUMS-*.txt
           if-no-files-found: error
           retention-days: 14

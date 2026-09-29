@@ -84,10 +84,13 @@ export class Updater {
   }
 
   setChannel(channel: 'stable' | 'beta'): void {
-    autoUpdater.allowPrerelease = channel === 'beta'
-    autoUpdater.channel = channel === 'beta' ? 'beta' : 'latest'
+    // Đang chạy bản beta (x.y.z-beta.N) thì theo kênh beta — không thì sẽ không bao giờ thấy bản
+    // beta mới hơn (chưa có bản stable nào).
+    const beta = channel === 'beta' || app.getVersion().includes('-')
+    autoUpdater.allowPrerelease = beta
+    autoUpdater.channel = beta ? 'beta' : 'latest'
     // Từ beta quay về stable có thể là "hạ phiên bản".
-    autoUpdater.allowDowngrade = channel === 'stable'
+    autoUpdater.allowDowngrade = !beta
   }
 
   async check(): Promise<void> {
