@@ -71,6 +71,10 @@ test('benchmark terminal', async () => {
     await page.getByTestId('vault-password').waitFor({ state: 'visible', timeout: 20_000 })
     const startupMs = Date.now() - launchedAt
     await page.evaluate(() => window.shellhouse.createVault('bench-master-password'))
+    // Không để vault tự khoá giữa chừng khi máy chạy benchmark mà không ai chạm chuột.
+    await page.evaluate(() =>
+      window.shellhouse.updateSettings({ security: { autoLockMinutes: 0 } })
+    )
     await page.waitForFunction(
       () => {
         if (!('__shellhouseTest' in window)) return false

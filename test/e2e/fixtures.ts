@@ -42,6 +42,9 @@ export async function launchApp(extraEnv: Record<string, string> = {}): Promise<
   await page.waitForFunction(() => 'shellhouse' in window)
   const created = await page.evaluate((pw) => window.shellhouse.createVault(pw), E2E_PASSWORD)
   if (!created.ok) throw new Error(`Không tạo được vault: ${created.message}`)
+  // Tự khoá đo thời gian rảnh của CẢ MÁY: chạy test trên máy thật mà không ai chạm chuột lâu hơn
+  // 15 phút thì vault tự khoá giữa chừng. Test nào cần thì tự bật lại.
+  await page.evaluate(() => window.shellhouse.updateSettings({ security: { autoLockMinutes: 0 } }))
   await page.waitForFunction(() => {
     if (!('__shellhouseTest' in window)) return false
     const hooks = window.__shellhouseTest
