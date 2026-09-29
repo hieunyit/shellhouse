@@ -36,6 +36,10 @@ interface TabsState {
   openWorkspace: (items: readonly WorkspaceItem[]) => string[]
   /** Mở một phiên mới cùng đích với tab hiện tại, đặt cạnh nó. */
   split: (direction: 'right' | 'below') => string | null
+  /** Mở thêm một phiên cùng đích, thành tab cạnh tab này. */
+  duplicate: (id: string) => string | null
+  /** Đóng mọi tab trừ tab này. */
+  closeOthers: (id: string) => void
   close: (id: string) => void
   activate: (id: string) => void
   cycle: (delta: 1 | -1) => void
@@ -124,6 +128,18 @@ export const useTabs = create<TabsState>((set, get) => {
           ? (shellName(source.target.shellId) ?? `Local ${++localCounter}`)
           : source.title
       return add(title, source.target, { tabId: source.id, direction })
+    },
+    duplicate: (id) => {
+      const source = get().tabs.find((t) => t.id === id)
+      if (!source) return null
+      const title =
+        source.target.kind === 'local'
+          ? (shellName(source.target.shellId) ?? `Local ${++localCounter}`)
+          : source.title
+      return add(title, source.target, { tabId: source.id, direction: 'within' })
+    },
+    closeOthers: (id) => {
+      set((s) => ({ tabs: s.tabs.filter((t) => t.id === id), activeId: id }))
     },
     close: (id) => {
       set((s) => {

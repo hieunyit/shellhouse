@@ -6,6 +6,19 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- Right-click a tab title: Reconnect (Restart shell for local tabs), Duplicate tab, Split,
+  Close, Close other tabs. **Ctrl+Shift+R** (⌘⇧R) reconnects the current tab.
+- Show / hide the sidebar with the button at the left of the tab bar or **Ctrl+Shift+B** (⌘B).
+  Searching hosts shows it again.
+
+### Fixed
+
+- A connection that drops while the vault is locked (auto-lock) now waits and reconnects as
+  soon as you unlock, instead of stopping with "VaultLockedError". Enter also retries a tab
+  that could not connect.
+
 ## [1.1.0-beta.2] - 2026-09-29
 
 ### Fixed

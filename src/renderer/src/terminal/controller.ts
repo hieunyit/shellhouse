@@ -18,6 +18,7 @@ import { useAppearance } from '../stores/appearance'
 import { isMac, matchCommand } from '../lib/keybindings'
 import type { ITerminalOptions } from '@xterm/xterm'
 import { useHostStatus } from '../stores/host-status'
+import { useVault } from '../stores/vault'
 import { SessionClient } from './session-client'
 import { broadcastInput } from './broadcast'
 import { tabTitle } from '@shared/tab-title'
@@ -112,6 +113,8 @@ export class TerminalController {
   private resizeTimer: number | null = null
   private unsubscribeHost: (() => void) | null = null
   private unsubscribeSettings: (() => void) | null = null
+  /** Đang chờ vault mở khoá để kết nối lại. */
+  private unsubscribeVault: (() => void) | null = null
   private echoWaiter: { byte: number; resolve: (t: number) => void } | null = null
   private disposed = false
 
@@ -286,6 +289,7 @@ export class TerminalController {
     this.disposed = true
     this.unsubscribeHost?.()
     this.unsubscribeSettings?.()
+    this.stopWaitingForUnlock()
     this.cancelReconnect()
     this.resizeObserver?.disconnect()
     if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer)
@@ -506,10 +510,57 @@ export class TerminalController {
     } catch (error) {
       this.pendingInput = ''
       if (this.isDisposed() || generation !== this.generation) return
-      const message = error instanceof Error ? error.message : String(error)
-      this.term.write(`\r\n${YELLOW}Could not open the session: ${message}${RESET}\r\n`)
+      const message = (error instanceof Error ? error.message : String(error)).replace(
+        /^Error invoking remote method '[^']+': (\w*Error: )?/,
+        ''
+      )
       this.setState('disconnected')
+      // Vault khoá (tự khoá khi máy rảnh) → không lấy được mật khẩu đã lưu. Chờ mở khoá rồi tự nối.
+      if (/vault is locked/i.test(message)) {
+        this.term.write(
+          `\r\n${YELLOW}[The vault is locked — unlock it and this tab reconnects]${RESET}\r\n`
+        )
+        this.waitForUnlock()
+        return
+      }
+      this.term.write(`\r\n${YELLOW}Could not open the session: ${message}${RESET}\r\n`)
     }
+  }
+
+  private waitForUnlock(): void {
+    this.stopWaitingForUnlock()
+    this.unsubscribeVault = useVault.subscribe((s) => {
+      if (s.state !== 'unlocked') return
+      this.stopWaitingForUnlock()
+      if (this.state === 'disconnected' || this.state === 'exited') void this.connect()
+    })
+  }
+
+  private stopWaitingForUnlock(): void {
+    this.unsubscribeVault?.()
+    this.unsubscribeVault = null
+  }
+
+  /**
+   * Kết nối lại ngay (menu chuột phải của tab / phím tắt): bỏ phiên hiện tại nếu còn, mở phiên
+   * mới — scrollback giữ nguyên. Tab local: khởi động lại shell.
+   */
+  reconnect(): void {
+    if (this.disposed) return
+    this.cancelReconnect()
+    this.stopWaitingForUnlock()
+    if (this.client) {
+      this.generation++
+      this.client.close()
+      this.client = null
+      this.statsOn = false
+      this.clearPrompts()
+      this.events.onConnectedChange(false)
+      this.events.onForwards([])
+      this.events.onStats?.(undefined)
+    }
+    this.setState('exited')
+    void this.connect()
   }
 
   private specFor(): SessionSpec {
@@ -606,7 +657,10 @@ export class TerminalController {
   }
 
   private handleInput(data: string): void {
-    if ((this.state === 'exited' || this.state === 'reconnecting') && data === '\r') {
+    if (
+      (this.state === 'exited' || this.state === 'reconnecting' || this.state === 'disconnected') &&
+      data === '\r'
+    ) {
       this.setState('exited')
       void this.connect()
       return

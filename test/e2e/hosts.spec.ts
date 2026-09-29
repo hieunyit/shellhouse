@@ -254,3 +254,34 @@ test('tuỳ chọn "Allow legacy algorithms" được lưu theo host', async ({ 
   await row.getByTestId('host-edit').click()
   await expect(form.getByTestId('host-legacy')).toBeChecked()
 })
+
+test('mất kết nối lúc vault đang khoá: báo rõ, mở khoá xong tự kết nối lại', async ({ page }) => {
+  server = await startTestSshServer([{ username: 'alice', password: 'pw-trong-vault' }])
+  await createHost(page, {
+    hostname: '127.0.0.1',
+    port: server.port,
+    username: 'alice',
+    label: 'Khoá rồi nối lại',
+    password: 'pw-trong-vault'
+  })
+  await page.locator('[data-testid="host-row"][data-host-label="Khoá rồi nối lại"]').dblclick()
+  const tab = await activeTab(page)
+  await page.getByTestId('hostkey-accept').click()
+  await waitForText(page, tab, 'welcome to test server')
+
+  // Vault tự khoá (máy rảnh) rồi kết nối lại (như mất mạng) → không lấy được mật khẩu đã lưu.
+  await page.evaluate(() => window.shellhouse.lockVault())
+  await page.evaluate((id) => {
+    window.__shellhouseTest.reconnect(id)
+  }, tab)
+  await waitForText(page, tab, 'The vault is locked')
+  await page.evaluate((pw) => window.shellhouse.unlockVault(pw), E2E_PASSWORD)
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (id) => window.__shellhouseTest.bufferText(id).split('welcome to test server').length - 1,
+        tab
+      )
+    )
+    .toBe(2)
+})

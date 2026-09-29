@@ -17,6 +17,8 @@ export interface ShellhouseTestHooks {
     tabId: string
   ): 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'exited' | null
   sendInput(tabId: string, data: string): void
+  /** Kết nối lại tab (như menu Reconnect) — dùng khi màn hình khoá đang che giao diện. */
+  reconnect(tabId: string): void
   /** Gõ từng ký tự và đo thời gian tới khi echo được vẽ ra (ms). */
   measureEchoLatency(tabId: string, samples: number): Promise<number[]>
   /** Chạy thao tác SFTP trên kết nối của tab (soak test). */

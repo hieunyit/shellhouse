@@ -8,6 +8,7 @@ import { WorkspacesDialog } from './components/WorkspacesDialog'
 import { preloadLazyParts, SettingsDialog, SnippetsDialog } from './lazy'
 import { matchCommand } from './lib/keybindings'
 import { useHosts } from './stores/hosts'
+import { useSettings } from './stores/settings'
 import { useShells } from './stores/shells'
 import { useTabs } from './stores/tabs'
 import { toggleMultiExec, useBroadcast } from './terminal/broadcast'
@@ -29,6 +30,7 @@ export function App(): React.JSX.Element {
   const [overlay, setOverlay] = useState<Overlay>(null)
   const activeId = useTabs((s) => s.activeId)
   const multiExec = useBroadcast((s) => s.enabled)
+  const sidebarHidden = useSettings((s) => s.settings.appearance.sidebarHidden)
   // Vào / ra MultiExec: terminal đổi chỗ → đo lại kích thước và focus vào tab đang chọn.
   useEffect(() => {
     const id = useTabs.getState().activeId
@@ -76,6 +78,17 @@ export function App(): React.JSX.Element {
       case 'tab.prev':
         tabs.cycle(-1)
         break
+      case 'tab.reconnect':
+        if (tabs.activeId) controllers.get(tabs.activeId)?.reconnect()
+        break
+      case 'tab.duplicate':
+        if (tabs.activeId) tabs.duplicate(tabs.activeId)
+        break
+      case 'sidebar.toggle': {
+        const { settings, update } = useSettings.getState()
+        void update({ appearance: { sidebarHidden: !settings.appearance.sidebarHidden } })
+        break
+      }
       case 'pane.splitRight':
         tabs.split('right')
         break
@@ -83,8 +96,16 @@ export function App(): React.JSX.Element {
         tabs.split('below')
         break
       case 'hosts.search':
-        searchRef.current?.focus()
-        searchRef.current?.select()
+        // Thanh bên đang ẩn → hiện ra rồi mới focus ô tìm.
+        void (async () => {
+          const { settings, update } = useSettings.getState()
+          if (settings.appearance.sidebarHidden)
+            await update({ appearance: { sidebarHidden: false } })
+          requestAnimationFrame(() => {
+            searchRef.current?.focus()
+            searchRef.current?.select()
+          })
+        })()
         break
       case 'snippets.open':
         setOverlay({ kind: 'snippets' })
@@ -136,7 +157,7 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="flex h-full">
-      <Sidebar ref={searchRef} />
+      {!sidebarHidden && <Sidebar ref={searchRef} />}
       <div className="flex min-w-0 flex-1 flex-col">
         <TabBar
           onOpenSnippets={() => {

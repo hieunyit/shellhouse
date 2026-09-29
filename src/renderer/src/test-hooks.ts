@@ -35,6 +35,9 @@ export function installTestHooks(): void {
       return term ? { cols: term.cols, rows: term.rows } : null
     },
     renderer: (tabId) => controllers.get(tabId)?.renderer ?? null,
+    reconnect: (tabId) => {
+      controllers.get(tabId)?.reconnect()
+    },
     terminalOptions: (tabId) => {
       const term = controllers.get(tabId)?.term
       if (!term) return null

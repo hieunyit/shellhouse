@@ -5,6 +5,8 @@ import {
   Info,
   LayoutGrid,
   Lock,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Radio,
   RefreshCw,
@@ -15,6 +17,9 @@ import {
   Zap
 } from 'lucide-react'
 import { parseQuickConnect } from '@shared/quick-connect'
+import { keybindingFor } from '@shared/commands'
+import { displayKeybinding, isMac } from '../lib/keybindings'
+import { useSettings } from '../stores/settings'
 import { useShells } from '../stores/shells'
 import { useTabs } from '../stores/tabs'
 import { useContextMenu, type MenuEntry } from './ContextMenu'
@@ -85,9 +90,21 @@ export function TabBar({
   const hasTab = useTabs((s) => s.activeId !== null)
   const tabCount = useTabs((s) => s.tabs.length)
   const broadcasting = useBroadcast((s) => s.enabled)
+  const sidebarHidden = useSettings((s) => s.settings.appearance.sidebarHidden)
+  const overrides = useSettings((s) => s.settings.keybindings)
+  const updateSettings = useSettings((s) => s.update)
 
   return (
     <nav className="flex h-11 shrink-0 items-center gap-1 border-b border-line bg-surface px-2">
+      <IconButton
+        label={`${sidebarHidden ? 'Show' : 'Hide'} sidebar (${displayKeybinding(keybindingFor('sidebar.toggle', overrides, isMac))})`}
+        data-testid="toggle-sidebar"
+        aria-pressed={!sidebarHidden}
+        onClick={() => void updateSettings({ appearance: { sidebarHidden: !sidebarHidden } })}
+      >
+        {sidebarHidden ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+      </IconButton>
+      <div className="mx-0.5 h-4 w-px bg-line" />
       <button
         type="button"
         aria-label="New terminal"

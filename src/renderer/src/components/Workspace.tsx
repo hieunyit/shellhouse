@@ -7,7 +7,18 @@ import {
   type IDockviewPanelProps
 } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
-import { Server, SquareTerminal, TerminalSquare, X } from 'lucide-react'
+import {
+  Columns2,
+  Copy,
+  RotateCw,
+  Rows2,
+  Server,
+  SquareTerminal,
+  TerminalSquare,
+  X
+} from 'lucide-react'
+import { useContextMenu } from './ContextMenu'
+import { controllers } from '../terminal/registry'
 import { useTabStatus } from '../stores/tab-status'
 import { useHosts } from '../stores/hosts'
 import { hostColorClass } from './hostColors'
@@ -72,62 +83,130 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
   })
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
   const Icon = kind === 'local' ? SquareTerminal : Server
-  return (
-    <div
-      role="tab"
-      aria-selected={active}
-      data-testid="tab"
-      data-tab-id={tabId}
-      data-tab-state={state}
-      title={`${title} — ${connectionLabel[state]}`}
-      data-env-color={envColor ?? ''}
-      className="group relative flex h-full max-w-60 min-w-28 items-center gap-2 pr-1.5 pl-3 text-xs"
-      onMouseDown={(e) => {
-        // Chuột giữa = đóng tab, như trình duyệt.
-        if (e.button === 1) {
-          e.preventDefault()
-          props.api.close()
+  const overrides = useSettings((s) => s.settings.keybindings)
+  const { menu, open: openMenu } = useContextMenu()
+  const key = (id: string): string => displayKeybinding(keybindingFor(id, overrides, isMac))
+  const onContextMenu = (e: React.MouseEvent): void => {
+    e.preventDefault()
+    const tabs = useTabs.getState()
+    const others = tabs.tabs.length > 1
+    openMenu(e, [
+      {
+        id: 'tab-reconnect',
+        label: kind === 'local' ? 'Restart shell' : 'Reconnect',
+        icon: <RotateCw size={14} />,
+        hint: key('tab.reconnect'),
+        onSelect: () => {
+          tabs.activate(tabId)
+          controllers.get(tabId)?.reconnect()
         }
-      }}
-    >
-      {envColor && (
-        <span
-          aria-hidden
-          className={cx('absolute inset-x-0 top-0 h-0.5', hostColorClass[envColor])}
-        />
-      )}
-      <span className="relative flex shrink-0">
-        <Icon size={13} className={active ? 'text-fg' : 'text-faint'} />
-        {/* Terminal local luôn "connected" — chỉ hiện chấm khi là phiên từ xa hoặc đã kết thúc. */}
-        {(kind !== 'local' || state === 'exited') && (
-          <StatusDot
-            state={state}
-            className={cx(
-              'absolute -right-0.5 -bottom-0.5 ring-2',
-              active ? 'ring-terminal' : 'ring-surface'
-            )}
-          />
-        )}
-      </span>
-      <span className="min-w-0 flex-1 truncate">{title}</span>
-      <button
-        type="button"
-        aria-label="Close tab"
-        data-testid="tab-close"
-        className={cx(
-          'flex size-5 shrink-0 items-center justify-center rounded text-faint transition-opacity duration-100 hover:bg-hover hover:text-fg',
-          active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-        )}
+      },
+      {
+        id: 'tab-duplicate',
+        label: 'Duplicate tab',
+        icon: <Copy size={14} />,
+        onSelect: () => {
+          tabs.duplicate(tabId)
+        }
+      },
+      {
+        id: 'tab-split-right',
+        label: 'Split right',
+        icon: <Columns2 size={14} />,
+        onSelect: () => {
+          tabs.activate(tabId)
+          tabs.split('right')
+        }
+      },
+      {
+        id: 'tab-split-below',
+        label: 'Split down',
+        icon: <Rows2 size={14} />,
+        onSelect: () => {
+          tabs.activate(tabId)
+          tabs.split('below')
+        }
+      },
+      'separator',
+      {
+        id: 'tab-close',
+        label: 'Close tab',
+        icon: <X size={14} />,
+        hint: key('tab.close'),
+        onSelect: () => {
+          tabs.close(tabId)
+        }
+      },
+      {
+        id: 'tab-close-others',
+        label: 'Close other tabs',
+        disabled: !others,
+        onSelect: () => {
+          tabs.closeOthers(tabId)
+        }
+      }
+    ])
+  }
+  return (
+    <>
+      {menu}
+      <div
+        role="tab"
+        aria-selected={active}
+        data-testid="tab"
+        data-tab-id={tabId}
+        data-tab-state={state}
+        title={`${title} — ${connectionLabel[state]}`}
+        data-env-color={envColor ?? ''}
+        className="group relative flex h-full max-w-60 min-w-28 items-center gap-2 pr-1.5 pl-3 text-xs"
+        onContextMenu={onContextMenu}
         onMouseDown={(e) => {
-          e.stopPropagation()
-        }}
-        onClick={() => {
-          props.api.close()
+          // Chuột giữa = đóng tab, như trình duyệt.
+          if (e.button === 1) {
+            e.preventDefault()
+            props.api.close()
+          }
         }}
       >
-        <X size={12} />
-      </button>
-    </div>
+        {envColor && (
+          <span
+            aria-hidden
+            className={cx('absolute inset-x-0 top-0 h-0.5', hostColorClass[envColor])}
+          />
+        )}
+        <span className="relative flex shrink-0">
+          <Icon size={13} className={active ? 'text-fg' : 'text-faint'} />
+          {/* Terminal local luôn "connected" — chỉ hiện chấm khi là phiên từ xa hoặc đã kết thúc. */}
+          {(kind !== 'local' || state === 'exited') && (
+            <StatusDot
+              state={state}
+              className={cx(
+                'absolute -right-0.5 -bottom-0.5 ring-2',
+                active ? 'ring-terminal' : 'ring-surface'
+              )}
+            />
+          )}
+        </span>
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <button
+          type="button"
+          aria-label="Close tab"
+          data-testid="tab-close"
+          className={cx(
+            'flex size-5 shrink-0 items-center justify-center rounded text-faint transition-opacity duration-100 hover:bg-hover hover:text-fg',
+            active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          )}
+          onMouseDown={(e) => {
+            e.stopPropagation()
+          }}
+          onClick={() => {
+            props.api.close()
+          }}
+        >
+          <X size={12} />
+        </button>
+      </div>
+    </>
   )
 }
 

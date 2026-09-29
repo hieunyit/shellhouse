@@ -65,7 +65,9 @@ const SecuritySettings = z.object({
 
 const AppearanceSettings = z.object({
   /** Giao diện app: theo hệ điều hành, hoặc cố định sáng/tối. */
-  theme: z.enum(['system', 'light', 'dark']).catch('system')
+  theme: z.enum(['system', 'light', 'dark']).catch('system'),
+  /** Ẩn thanh bên (danh sách host) để terminal rộng hơn. */
+  sidebarHidden: z.boolean().catch(false)
 })
 
 const FileSettings = z.object({
