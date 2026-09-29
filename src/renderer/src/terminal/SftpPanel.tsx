@@ -5,10 +5,12 @@ import {
   Eye,
   EyeOff,
   File,
+  FilePen,
   Folder,
   FolderOpen,
   FolderPlus,
   Link2,
+  Loader2,
   Pencil,
   RefreshCw,
   RotateCcw,
@@ -28,6 +30,18 @@ import {
   type TransferStatus
 } from '@shared/sftp'
 import { Button, cx, IconButton, Input, Modal, Notice, Select } from '../components/ui'
+import { useSettings } from '../stores/settings'
+
+/** Sửa file lớn hơn thế này qua editor thường là nhầm (log, file nhị phân) — gợi ý tải về. */
+const MAX_EDIT_BYTES = 50 * 1024 * 1024
+
+/** Bỏ tiền tố "Error invoking remote method '…': Error: " của Electron. */
+function cleanError(e: unknown): string {
+  return (e instanceof Error ? e.message : String(e)).replace(
+    /^Error invoking remote method '[^']+': (Error: )?/,
+    ''
+  )
+}
 
 function formatSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -64,6 +78,9 @@ export function SftpPanel({
   const [selected, setSelected] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [dragOver, setDragOver] = useState(false)
+  /** Tên file đang tải về để mở trong editor. */
+  const [opening, setOpening] = useState<string | null>(null)
+  const doubleClick = useSettings((s) => s.settings.files.doubleClick)
   const lastDone = useRef(0)
 
   const load = useCallback(
@@ -142,6 +159,28 @@ export function SftpPanel({
       localPath: target,
       overwrite: true
     })
+  }
+
+  /** Mở bằng editor trên máy; mỗi lần lưu, session host tự tải lên (xem session-host/sftp/edit.ts). */
+  const edit = async (entry: SftpEntry): Promise<void> => {
+    if (!path) return
+    if (entry.size > MAX_EDIT_BYTES) {
+      setError(
+        `“${entry.name}” is too large to edit (${formatSize(entry.size)}). Download it instead.`
+      )
+      return
+    }
+    setError(null)
+    setOpening(entry.name)
+    try {
+      const localPath = await window.shellhouse.prepareRemoteEdit(entry.name)
+      await run({ op: 'edit', remotePath: joinRemote(path, entry.name), localPath })
+      await window.shellhouse.openInEditor(localPath)
+    } catch (e) {
+      setError(cleanError(e))
+    } finally {
+      setOpening(null)
+    }
   }
 
   const onDrop = (event: DragEvent): void => {
@@ -309,6 +348,7 @@ export function SftpPanel({
             }}
             onDoubleClick={() => {
               if (entry.isDirLike && path) void load(joinRemote(path, entry.name))
+              else if (doubleClick === 'edit') void edit(entry)
               else void download(entry)
             }}
           >
@@ -322,6 +362,9 @@ export function SftpPanel({
               )}
             </span>
             <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+            {opening === entry.name && (
+              <Loader2 size={13} className="animate-spin text-muted" aria-label="Opening" />
+            )}
             <span className="w-16 text-right text-xs text-faint tabular-nums">
               {entry.isDirLike ? '' : formatSize(entry.size)}
             </span>
@@ -338,15 +381,28 @@ export function SftpPanel({
       {selectedEntry && (
         <div className="flex items-center gap-1 border-t border-line px-2 py-1.5">
           {!selectedEntry.isDirLike && (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<Download size={13} />}
-              data-testid="sftp-download"
-              onClick={() => void download(selectedEntry)}
-            >
-              Download
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<FilePen size={13} />}
+                data-testid="sftp-edit"
+                title="Open in your editor — every save is uploaded to the server"
+                disabled={opening !== null}
+                onClick={() => void edit(selectedEntry)}
+              >
+                Edit
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Download size={13} />}
+                data-testid="sftp-download"
+                onClick={() => void download(selectedEntry)}
+              >
+                Download
+              </Button>
+            </>
           )}
           <Button
             size="sm"
@@ -418,7 +474,8 @@ export function SftpPanel({
                   <span className="text-faint">
                     {t.state === 'running' && `${pct}% · ${formatSize(t.bytesPerSecond)}/s`}
                     {t.state === 'queued' && 'Queued'}
-                    {t.state === 'done' && `Done${t.resumedFrom > 0 ? ' (resumed)' : ''}`}
+                    {t.state === 'done' &&
+                      (t.edit ? 'Saved to server' : `Done${t.resumedFrom > 0 ? ' (resumed)' : ''}`)}
                     {t.state === 'cancelled' && 'Cancelled'}
                     {t.state === 'error' && 'Failed'}
                   </span>

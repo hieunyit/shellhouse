@@ -27,6 +27,11 @@ export const SftpOp = z.discriminatedUnion('op', [
     remotePath: RemotePath,
     overwrite: z.boolean()
   }),
+  /**
+   * Sửa file: tải về `localPath` (do main cấp, trong thư mục tạm), rồi theo dõi — mỗi lần lưu
+   * thì tự tải ngược lên. Trả về khi đã tải về xong.
+   */
+  z.object({ op: z.literal('edit'), remotePath: RemotePath, localPath: LocalPath }),
   z.object({ op: z.literal('cancel'), transferId: z.string().max(64) }),
   z.object({ op: z.literal('retry'), transferId: z.string().max(64) }),
   z.object({ op: z.literal('clearDone') })
@@ -66,6 +71,8 @@ export interface TransferStatus {
   state: TransferState
   error: string | null
   bytesPerSecond: number
+  /** Lượt tải lên của tính năng sửa file (lưu trong editor → server). */
+  edit?: boolean
 }
 
 /** Chuỗi quyền kiểu `ls -l`: rwxr-xr-x. */

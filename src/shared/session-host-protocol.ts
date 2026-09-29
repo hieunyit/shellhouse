@@ -55,6 +55,14 @@ export const HostRequest = z.discriminatedUnion('type', [
         /** Forward tự bật ngay khi kết nối xong. */
         autoForwards: z.array(ForwardSpec).max(64).optional()
       })
+      .optional(),
+    /** Ghi log phiên ra file — đường dẫn do main đặt theo cài đặt. */
+    log: z
+      .object({
+        path: z.string().min(1).max(4096),
+        stripAnsi: z.boolean(),
+        header: z.string().max(2048)
+      })
       .optional()
   }),
   z.object({

@@ -13,6 +13,7 @@ import { OutputPump, type PausableSource } from '../stream/output-pump'
 import { ForwardManager } from '../forward/manager'
 import { SftpService } from '../sftp/service'
 import { deployPublicKey } from '../ssh/deploy-key'
+import { RemoteEdits } from '../sftp/edit'
 import { TransferQueue } from '../sftp/transfers'
 import type { SftpOp } from '@shared/sftp'
 import type { ForwardSpec } from '@shared/forwards'
@@ -22,6 +23,7 @@ import { buildSystemSshArgs, findSystemSsh } from '../transport/system-ssh'
 import { homedir } from 'node:os'
 import type { PromptReply, Transport, TransportContext, TransportExit } from '../transport/types'
 import { classifyConnectError } from './exit-reason'
+import { SessionLog, type SessionLogOptions } from './session-log'
 
 const MAX_PENDING_INPUT = 64 * 1024
 
@@ -72,6 +74,7 @@ export interface SessionExtras {
   jumps?: readonly HopConfig[]
   autoForwards?: readonly ForwardSpec[]
   legacyAlgorithms?: boolean
+  log?: SessionLogOptions
 }
 
 /** Một session terminal: nối transport (PTY/SSH) với MessagePort của renderer. */
@@ -82,6 +85,8 @@ export class Session {
   private forwards: ForwardManager | null = null
   private sftp: SftpService | null = null
   private transfers: TransferQueue | null = null
+  private edits: RemoteEdits | null = null
+  private log: SessionLog | null = null
   /** Yêu cầu forward đến trước khi kết nối xong. */
   private pendingForwards: ForwardSpec[] = []
   private readonly pump: OutputPump
@@ -118,8 +123,20 @@ export class Session {
   }
 
   async start(): Promise<void> {
+    if (this.extras.log) {
+      try {
+        this.log = new SessionLog(this.extras.log, (message) => {
+          this.deps.log('warn', `Session ${this.id}: ${message}`)
+          this.post({ t: 'error', message })
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        this.post({ t: 'error', message: `Could not start the session log: ${message}` })
+      }
+    }
     const callbacks = {
       onData: (data: Uint8Array) => {
+        this.log?.write(data)
         this.pump.push(data)
       },
       onExit: (exit: TransportExit) => {
@@ -223,9 +240,13 @@ export class Session {
   private end(): void {
     if (this.closed) return
     this.closed = true
+    this.log?.close(`=== Session ended ${new Date().toISOString()} ===`)
+    this.log = null
     this.pump.dispose()
     this.forwards?.dispose()
     this.forwards = null
+    this.edits?.dispose()
+    this.edits = null
     this.transfers?.dispose()
     this.transfers = null
     this.sftp?.close()
@@ -322,6 +343,10 @@ export class Session {
         return transfers.enqueue('download', op.localPath, op.remotePath, op.overwrite)
       case 'upload':
         return transfers.enqueue('upload', op.localPath, op.remotePath, op.overwrite)
+      case 'edit':
+        this.edits ??= new RemoteEdits(sftp, transfers)
+        await this.edits.open(op.remotePath, op.localPath)
+        return null
       case 'cancel':
         transfers.cancel(op.transferId)
         return null

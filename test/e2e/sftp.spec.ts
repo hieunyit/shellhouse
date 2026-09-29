@@ -96,3 +96,42 @@ test('SFTP qua giao diện: tải lên, tạo thư mục, tải về, xoá', asy
   await expect(panel.locator('[data-testid="sftp-entry"][data-name="tai-len.bin"]')).toHaveCount(0)
   expect(existsSync(join(remote, 'tai-len.bin'))).toBe(false)
 })
+
+test('sửa file trên server: bấm đúp mở editor, lưu → tự tải lên', async ({ app, page }) => {
+  const remote = mkdtempSync(join(tmpdir(), 'sh-remote-'))
+  dirs.push(remote)
+  writeFileSync(join(remote, 'app.conf'), 'port=80\n')
+  server = await startTestSshServer([{ username: 'u', password: 'p' }], { sftpRoot: remote })
+
+  // Editor giả: ghi lại đường dẫn main định mở thay vì mở chương trình thật.
+  await app.evaluate(({ shell }) => {
+    const opened: string[] = []
+    Object.assign(globalThis, { __opened: opened })
+    shell.openPath = (p) => {
+      opened.push(p)
+      return Promise.resolve('')
+    }
+  })
+  const opened = (): Promise<string[]> =>
+    app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened)
+
+  await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
+  await page.getByTestId('quick-connect').press('Enter')
+  const tab = await activeTab(page)
+  await page.getByTestId('hostkey-accept').click()
+  await page.getByTestId('prompt-input').fill('p')
+  await page.getByTestId('prompt-submit').click()
+  await waitForText(page, tab, 'welcome to test server')
+  await page.getByTestId('toggle-sftp').last().click()
+  const panel = page.getByTestId('sftp-panel')
+
+  await panel.locator('[data-testid="sftp-entry"][data-name="app.conf"]').dblclick()
+  await expect.poll(async () => (await opened()).length).toBe(1)
+  const [local] = await opened()
+  if (!local) throw new Error('editor was not opened')
+  expect(readFileSync(local, 'utf8')).toBe('port=80\n')
+
+  writeFileSync(local, 'port=8080\n') // "Lưu" trong editor
+  await expect.poll(() => readFileSync(join(remote, 'app.conf'), 'utf8')).toBe('port=8080\n')
+  await expect(panel.getByTestId('transfer-row').last()).toContainText('Saved to server')
+})

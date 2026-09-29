@@ -21,7 +21,23 @@ interface Job {
   status: TransferStatus
   overwrite: boolean
   cancelled: boolean
+  /** Upload chỉ khi mtime trên server vẫn là giá trị này (giây) — không ghi đè thay đổi của người khác. */
+  expectRemoteMtime: number | null
+  mode: number | null
+  /** Người chờ lượt truyền kết thúc (done / error / cancelled). */
+  waiters: ((status: TransferStatus) => void)[]
 }
+
+export interface EnqueueOptions {
+  expectRemoteMtime?: number
+  /** Lượt truyền của tính năng sửa file (hiện "Saved" thay vì "Done"). */
+  edit?: boolean
+  /** Upload: đặt quyền này cho file mới TRƯỚC khi thay file cũ (không có lúc nào sai quyền). */
+  mode?: number
+}
+
+export const REMOTE_CHANGED_MESSAGE =
+  'The file was changed on the server after you opened it — not overwritten. Open it again to get the latest version.'
 
 /** Mã lỗi SFTP (số, theo giao thức) và lỗi hệ thống tệp của Node. */
 function errorText(error: unknown): string {
@@ -80,7 +96,8 @@ export class TransferQueue {
     direction: 'upload' | 'download',
     localPath: string,
     remotePath: string,
-    overwrite: boolean
+    overwrite: boolean,
+    options: EnqueueOptions = {}
   ): string {
     if (!isAbsolute(localPath)) throw new Error('Local path must be absolute')
     const id = randomUUID()
@@ -95,14 +112,33 @@ export class TransferQueue {
         resumedFrom: 0,
         state: 'queued',
         error: null,
-        bytesPerSecond: 0
+        bytesPerSecond: 0,
+        ...(options.edit ? { edit: true } : {})
       },
       overwrite,
-      cancelled: false
+      cancelled: false,
+      expectRemoteMtime: options.expectRemoteMtime ?? null,
+      mode: options.mode ?? null,
+      waiters: []
     })
     this.notify(true)
     this.pump()
     return id
+  }
+
+  /** Chờ lượt truyền kết thúc; trả về trạng thái cuối. */
+  settled(id: string): Promise<TransferStatus> {
+    const job = this.jobs.get(id)
+    if (!job) return Promise.reject(new Error('Unknown transfer'))
+    const { state } = job.status
+    if (state === 'done' || state === 'error' || state === 'cancelled')
+      return Promise.resolve({ ...job.status })
+    return new Promise((resolve) => job.waiters.push(resolve))
+  }
+
+  private settle(job: Job): void {
+    const waiters = job.waiters.splice(0)
+    for (const resolve of waiters) resolve({ ...job.status })
   }
 
   cancel(id: string): void {
@@ -111,6 +147,7 @@ export class TransferQueue {
     job.cancelled = true
     if (job.status.state === 'queued') {
       job.status.state = 'cancelled'
+      this.settle(job)
       this.notify(true)
     }
   }
@@ -132,7 +169,13 @@ export class TransferQueue {
 
   dispose(): void {
     this.disposed = true
-    for (const job of this.jobs.values()) job.cancelled = true
+    for (const job of this.jobs.values()) {
+      job.cancelled = true
+      if (job.status.state === 'queued') {
+        job.status.state = 'cancelled'
+        this.settle(job)
+      }
+    }
     if (this.notifyTimer) clearTimeout(this.notifyTimer)
   }
 
@@ -161,6 +204,7 @@ export class TransferQueue {
       job.status.state = job.cancelled ? 'cancelled' : 'error'
       job.status.error = job.cancelled ? null : errorText(error)
     } finally {
+      this.settle(job)
       this.notify(true)
     }
   }
@@ -204,8 +248,10 @@ export class TransferQueue {
     const { remotePath, localPath } = job.status
     const local = await fs.stat(localPath)
     if (!local.isFile()) throw new Error('Only files can be uploaded')
-    if (!job.overwrite && (await this.sftp.statOrNull(remotePath)))
-      throw new Error('The destination file already exists')
+    const existing = await this.sftp.statOrNull(remotePath)
+    if (!job.overwrite && existing) throw new Error('The destination file already exists')
+    if (job.expectRemoteMtime !== null && existing && existing.mtime !== job.expectRemoteMtime)
+      throw new Error(REMOTE_CHANGED_MESSAGE)
     const size = local.size
     job.status.size = size
     const part = remotePath + PART_SUFFIX
@@ -232,6 +278,7 @@ export class TransferQueue {
     }
     const written = (await this.sftp.stat(part)).size
     if (written !== size) throw new Error(`Size mismatch after upload (${written}/${size})`)
+    if (job.mode !== null) await this.sftp.chmod(part, job.mode)
     await this.sftp.rename(part, remotePath, job.overwrite)
   }
 

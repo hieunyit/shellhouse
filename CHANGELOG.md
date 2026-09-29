@@ -6,6 +6,15 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- Edit files on a server with your own editor: double-click a file (or **Edit**) in the SFTP
+  panel; every save is uploaded back. The original permissions are kept, and if someone else
+  changed the file on the server since you opened it, it is not overwritten. Choose the editor
+  and the double-click action in Settings → Files.
+- Session logs: record everything a session prints to a file, one folder per host (off, SSH
+  sessions only, or all sessions). Plain text by default, with colors and control codes removed.
+
 ## [1.0.0-beta.2] - 2026-09-29
 
 ### Added

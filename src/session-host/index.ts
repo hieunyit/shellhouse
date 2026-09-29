@@ -106,11 +106,8 @@ port.on('message', (event) => {
         log('warn', `session:open ${request.sessionId} is missing its MessagePort`)
         return
       }
-      sessions.open(
-        request.sessionId,
-        request.spec,
-        adaptPort(sessionPort),
-        request.ssh
+      sessions.open(request.sessionId, request.spec, adaptPort(sessionPort), {
+        ...(request.ssh
           ? {
               knownKeyTypes: request.ssh.knownKeyTypes,
               ...(request.ssh.credentials ? { credentials: request.ssh.credentials } : {}),
@@ -119,8 +116,9 @@ port.on('message', (event) => {
               ...(request.ssh.legacyAlgorithms ? { legacyAlgorithms: true } : {}),
               ...(request.ssh.autoForwards ? { autoForwards: request.ssh.autoForwards } : {})
             }
-          : {}
-      )
+          : {}),
+        ...(request.log ? { log: request.log } : {})
+      })
       break
     }
     case 'hostkey:result': {

@@ -163,6 +163,16 @@ export const invokeContract = {
   /** Hộp thoại của hệ điều hành — renderer không tự chọn đường dẫn trên máy. */
   'dialog:openFiles': { args: z.tuple([]), result: z.array(z.string()) },
   'dialog:saveFile': { args: z.tuple([z.string().max(255)]), result: z.string().nullable() },
+  /** Chọn chương trình (editor) trên máy; null = huỷ. */
+  'dialog:pickProgram': { args: z.tuple([]), result: z.string().nullable() },
+  /** Chọn thư mục; null = huỷ. */
+  'dialog:pickFolder': { args: z.tuple([z.string().max(100)]), result: z.string().nullable() },
+  /** Mở thư mục log phiên trong trình quản lý file (tạo nếu chưa có). */
+  'logs:openFolder': { args: z.tuple([]), result: z.void() },
+  /** Sửa file trên server: main cấp đường dẫn tạm cho tên file. */
+  'files:prepareEdit': { args: z.tuple([z.string().min(1).max(255)]), result: z.string() },
+  /** Mở bằng editor trong cài đặt — chỉ file do `files:prepareEdit` cấp. */
+  'files:openInEditor': { args: z.tuple([z.string().max(4096)]), result: z.void() },
   'settings:get': { args: z.tuple([]), result: AppSettings },
   'settings:update': { args: z.tuple([SettingsPatch]), result: AppSettings },
   'snippets:list': { args: z.tuple([]), result: z.array(SnippetSummary) },
@@ -257,6 +267,11 @@ export interface ShellhouseApi {
   deleteForward(id: string): Promise<void>
   pickFilesToUpload(): Promise<string[]>
   pickSaveLocation(defaultName: string): Promise<string | null>
+  pickProgram(): Promise<string | null>
+  pickFolder(title: string): Promise<string | null>
+  openLogFolder(): Promise<void>
+  prepareRemoteEdit(remoteName: string): Promise<string>
+  openInEditor(localPath: string): Promise<void>
   /** Đường dẫn của file kéo thả từ hệ điều hành. */
   pathForFile(file: File): string
   getSettings(): Promise<AppSettings>

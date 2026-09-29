@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { mkdirSync } from 'node:fs'
 import { release } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -9,6 +10,7 @@ import {
   MessageChannelMain,
   nativeTheme,
   powerMonitor,
+  shell as electronShell,
   type IpcMainInvokeEvent
 } from 'electron'
 import log from 'electron-log/main'
@@ -18,6 +20,8 @@ import { toForwardSpec } from '@shared/forwards'
 import { checkMainNativeModules } from './diagnostics'
 import { handle } from './ipc/router'
 import { installEditContextMenu } from './context-menu'
+import { openInEditor, RemoteEditFiles } from './remote-edit'
+import { sessionLogFor } from './session-log-path'
 import { ShellService } from './shells'
 import { installGlobalGuards, secureWebPreferences } from './security'
 import { isAppUrl } from './security-policy'
@@ -90,6 +94,8 @@ let deviceKeys: DeviceKeyStore | null = null
 let updater: Updater | null = null
 
 const shells = new ShellService()
+/** Bản sao tạm khi sửa file trên server — trong userData để mỗi hồ sơ (và E2E) tách biệt. */
+const remoteEdits = new RemoteEditFiles(join(app.getPath('userData'), 'remote-edit'))
 const supervisor = new SessionHostSupervisor({
   spawn: spawnElectronHost,
   logger: log.scope('supervisor')
@@ -105,6 +111,15 @@ function isTrustedSender(event: IpcMainInvokeEvent): boolean {
   // Chỉ frame gốc; app không dùng iframe nên frame con nào gửi IPC cũng là bất thường.
   if (frame.parent !== null) return false
   return isAppUrl(frame.url, devServerUrl)
+}
+
+function defaultLogDirectory(): string {
+  return join(app.getPath('documents'), 'Shellhouse logs')
+}
+
+/** Thư mục log đang dùng (cài đặt hoặc mặc định). */
+function logDirectory(): string {
+  return settings?.get().logging.directory.trim() || defaultLogDirectory()
 }
 
 function requireHosts(): HostService {
@@ -195,6 +210,9 @@ function registerIpc(): void {
     if (!window) throw new Error('No window')
     const sessionId = randomUUID()
     const { port1, port2 } = new MessageChannelMain()
+    const logFor = (kind: 'local' | 'ssh', label: string) =>
+      sessionLogFor(requireSettings().get().logging, { kind, label }, defaultLogDirectory()) ??
+      undefined
     if (spec.kind === 'local') {
       const shell = await shells.resolve(
         spec.shellId,
@@ -208,7 +226,9 @@ function registerIpc(): void {
           rows: spec.rows,
           ...(shell ? { shell: { file: shell.file, args: shell.args } } : {})
         },
-        port1
+        port1,
+        undefined,
+        logFor('local', shell?.name ?? 'Local terminal')
       )
     } else {
       // Host đã lưu: giải mã thông tin xác thực ngay tại main, không đi qua renderer.
@@ -217,6 +237,10 @@ function registerIpc(): void {
       const target = resolved ? resolved.target : spec.kind === 'ssh' ? spec.target : null
       if (!target) throw new Error('Invalid session spec')
       const size = { cols: spec.cols, rows: spec.rows }
+      const log = logFor(
+        'ssh',
+        `${target.username}@${target.host}${target.port === 22 ? '' : `-${target.port}`}`
+      )
       if (resolved?.mode === 'system') {
         supervisor.openSession(
           sessionId,
@@ -228,7 +252,9 @@ function registerIpc(): void {
             keyFile: resolved.keyFile,
             ...(systemSshTestOptions ? { testOptions: systemSshTestOptions } : {})
           },
-          port1
+          port1,
+          undefined,
+          log
         )
       } else {
         const known = (t: { host: string; port: number }): string[] =>
@@ -240,7 +266,7 @@ function registerIpc(): void {
                 .filter((f) => f.autoStart)
                 .map(toForwardSpec)
             : []
-        supervisor.openSession(sessionId, { kind: 'ssh', ...size, target }, port1, {
+        const ssh = {
           knownKeyTypes: known(target),
           ...(autoForwards.length > 0 ? { autoForwards } : {}),
           ...(resolved ? { credentials: resolved.credentials } : {}),
@@ -257,7 +283,8 @@ function registerIpc(): void {
                 }))
               }
             : {})
-        })
+        }
+        supervisor.openSession(sessionId, { kind: 'ssh', ...size, target }, port1, ssh, log)
       }
       if (resolved) send('hosts:changed', null) // cập nhật "dùng gần nhất"
     }
@@ -341,6 +368,45 @@ function registerIpc(): void {
       ? await dialog.showSaveDialog(mainWindow, options)
       : await dialog.showSaveDialog(options)
     return result.canceled || !result.filePath ? null : result.filePath
+  })
+
+  handle('dialog:pickProgram', isTrustedSender, async () => {
+    const options = {
+      title: 'Choose an editor',
+      properties: ['openFile'] as 'openFile'[],
+      ...(process.platform === 'win32'
+        ? { filters: [{ name: 'Programs', extensions: ['exe'] }] }
+        : {})
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+  handle('dialog:pickFolder', isTrustedSender, async (title) => {
+    const options = {
+      title,
+      defaultPath: logDirectory(),
+      properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[]
+    }
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options)
+    return result.canceled ? null : (result.filePaths[0] ?? null)
+  })
+  handle('logs:openFolder', isTrustedSender, async () => {
+    const dir = logDirectory()
+    mkdirSync(dir, { recursive: true })
+    const error = await electronShell.openPath(dir)
+    if (error) throw new Error(error)
+  })
+  handle('files:prepareEdit', isTrustedSender, (remoteName) => remoteEdits.prepare(remoteName))
+  handle('files:openInEditor', isTrustedSender, async (localPath) => {
+    if (!remoteEdits.owns(localPath)) throw new Error('This file cannot be opened')
+    await openInEditor(localPath, requireSettings().get().files.editor, {
+      openPath: (p) => electronShell.openPath(p),
+      platform: process.platform
+    })
   })
 
   handle('clipboard:readText', isTrustedSender, () => clipboard.readText())
@@ -476,6 +542,11 @@ if (!app.requestSingleInstanceLock()) {
       setTimeout(() => void updaterRef.check(), 10_000).unref()
     }
 
+    try {
+      remoteEdits.cleanup()
+    } catch (error) {
+      log.warn('Could not clean up old remote-edit copies', error)
+    }
     registerIpc()
     registerSecurityIpc({
       vault,

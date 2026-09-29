@@ -121,14 +121,18 @@ export class SessionHostSupervisor {
     sessionId: string,
     spec: ResolvedSessionSpec,
     port: MessagePortMain,
-    ssh?: Extract<HostRequestType, { type: 'session:open' }>['ssh']
+    ssh?: Extract<HostRequestType, { type: 'session:open' }>['ssh'],
+    log?: Extract<HostRequestType, { type: 'session:open' }>['log']
   ): void {
     const child = this.child
     if (!child || this.status.state !== 'running') {
       port.close()
       throw new Error(`The session host is not ready (${this.status.state})`)
     }
-    child.postMessage({ type: 'session:open', sessionId, spec, ...(ssh ? { ssh } : {}) }, [port])
+    child.postMessage(
+      { type: 'session:open', sessionId, spec, ...(ssh ? { ssh } : {}), ...(log ? { log } : {}) },
+      [port]
+    )
   }
 
   /** Gửi tin trả lời cho Session Host (ví dụ kết quả kiểm tra host key). */

@@ -65,6 +65,22 @@ const AppearanceSettings = z.object({
   theme: z.enum(['system', 'light', 'dark']).catch('system')
 })
 
+const FileSettings = z.object({
+  /** Chương trình mở file khi sửa file trên server; '' = ứng dụng mặc định của hệ điều hành. */
+  editor: z.string().max(1024).catch(''),
+  /** Bấm đúp file trong SFTP: mở để sửa (tự tải lên khi lưu) hoặc tải về. */
+  doubleClick: z.enum(['edit', 'download']).catch('edit')
+})
+
+const LoggingSettings = z.object({
+  /** Tự ghi output của phiên ra file: tắt, chỉ phiên SSH, hoặc mọi phiên (kể cả terminal local). */
+  mode: z.enum(['off', 'ssh', 'all']).catch('off'),
+  /** '' = Documents/Shellhouse logs. */
+  directory: z.string().max(1024).catch(''),
+  /** Bỏ mã màu / điều khiển terminal → file văn bản thường, dễ đọc và tìm kiếm. */
+  stripAnsi: z.boolean().catch(true)
+})
+
 const UpdateSettings = z.object({
   channel: z.enum(['stable', 'beta']).catch('stable'),
   autoCheck: z.boolean().catch(true)
@@ -75,6 +91,8 @@ export const AppSettings = z.object({
   terminal: TerminalSettings.catch(TerminalSettings.parse({})),
   security: SecuritySettings.catch(SecuritySettings.parse({})),
   updates: UpdateSettings.catch(UpdateSettings.parse({})),
+  files: FileSettings.catch(FileSettings.parse({})),
+  logging: LoggingSettings.catch(LoggingSettings.parse({})),
   /** Ghi đè phím tắt: commandId → tổ hợp phím ('' = bỏ phím tắt). */
   keybindings: z.record(z.string().max(64), z.string().max(64)).catch({}),
   customThemes: z.array(TerminalTheme).max(100).catch([])
@@ -97,6 +115,8 @@ export const SettingsPatch = z.object({
   terminal: TerminalSettings.partial().optional(),
   security: SecuritySettings.partial().optional(),
   updates: UpdateSettings.partial().optional(),
+  files: FileSettings.partial().optional(),
+  logging: LoggingSettings.partial().optional(),
   keybindings: z.record(z.string().max(64), z.string().max(64)).optional(),
   customThemes: z.array(TerminalTheme).max(100).optional()
 })
@@ -109,6 +129,8 @@ export function applyPatch(current: AppSettings, patch: SettingsPatch): AppSetti
     terminal: { ...current.terminal, ...patch.terminal },
     security: { ...current.security, ...patch.security },
     updates: { ...current.updates, ...patch.updates },
+    files: { ...current.files, ...patch.files },
+    logging: { ...current.logging, ...patch.logging },
     keybindings: patch.keybindings ?? current.keybindings,
     customThemes: patch.customThemes ?? current.customThemes
   })

@@ -1,8 +1,18 @@
 import { useState } from 'react'
-import { Download, Info, Keyboard, KeyRound, Palette, Shield, SquareTerminal } from 'lucide-react'
+import {
+  Download,
+  FolderOpen,
+  Info,
+  Keyboard,
+  KeyRound,
+  Palette,
+  Shield,
+  SquareTerminal
+} from 'lucide-react'
 import { Diagnostics } from '../Diagnostics'
 import { cx, Modal } from '../ui'
 import { AppearanceSection } from './AppearanceSection'
+import { FilesSection } from './FilesSection'
 import { KeysSection } from './KeysSection'
 import { SecuritySection } from './SecuritySection'
 import { ShortcutsSection } from './ShortcutsSection'
@@ -12,6 +22,7 @@ import { UpdatesSection } from './UpdatesSection'
 const SECTIONS = [
   { id: 'appearance', title: 'Appearance', icon: Palette },
   { id: 'terminal', title: 'Terminal', icon: SquareTerminal },
+  { id: 'files', title: 'Files', icon: FolderOpen },
   { id: 'security', title: 'Security', icon: Shield },
   { id: 'keys', title: 'SSH keys', icon: KeyRound },
   { id: 'shortcuts', title: 'Shortcuts', icon: Keyboard },
@@ -62,6 +73,7 @@ export function SettingsDialog({
         <div className="min-w-0 flex-1 overflow-auto p-6">
           {section === 'appearance' && <AppearanceSection />}
           {section === 'terminal' && <TerminalSection />}
+          {section === 'files' && <FilesSection />}
           {section === 'security' && <SecuritySection />}
           {section === 'keys' && <KeysSection />}
           {section === 'shortcuts' && <ShortcutsSection />}
