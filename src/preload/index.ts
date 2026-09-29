@@ -57,6 +57,8 @@ const api: ShellhouseApi = {
   deleteKey: (id) => invoke('keys:delete', id),
   scanSshConfig: () => invoke('sshConfig:scan'),
   importSshConfig: (aliases) => invoke('sshConfig:import', aliases),
+  scanMobaXterm: (pick) => invoke('mobaxterm:scan', pick),
+  importMobaXterm: (aliases) => invoke('mobaxterm:import', aliases),
   onHostsChanged: (listener) =>
     subscribe('hosts:changed', () => {
       listener()

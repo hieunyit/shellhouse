@@ -120,7 +120,7 @@ test('form từ chối hostname chèn tham số', async ({ page }) => {
   await expect(page.getByTestId('host-form')).toBeVisible()
 })
 
-base('nhập từ ~/.ssh/config: xem trước, bỏ mục lỗi, nhập mục được chọn', async () => {
+base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, nhập mục được chọn', async () => {
   const home = mkdtempSync(join(tmpdir(), 'shellhouse-home-'))
   mkdirSync(join(home, '.ssh'))
   writeFileSync(join(home, '.ssh', 'id_test'), 'dummy')
@@ -139,6 +139,27 @@ base('nhập từ ~/.ssh/config: xem trước, bỏ mục lỗi, nhập mục đ
       '  User fallback'
     ].join('\n')
   )
+  // MobaXterm.ini ở vị trí mặc định (%APPDATA%\MobaXterm): một phiên SSH trong thư mục lồng nhau,
+  // một phiên RDP (bỏ qua) và mục mật khẩu (không bao giờ được đọc).
+  const appData = join(home, 'AppData', 'Roaming')
+  mkdirSync(join(appData, 'MobaXterm'), { recursive: true })
+  const sshSession = (host: string, user: string): string =>
+    `#109#0%${host}%22%${user}%%-1%-1%%%22%%0%0%0%%%-1%0%0%0%%1080%%0%0%1#MobaFont%10%0%0%-1%15#0# #-1`
+  writeFileSync(
+    join(appData, 'MobaXterm', 'MobaXterm.ini'),
+    [
+      '[Bookmarks]',
+      'SubRep=',
+      'ImgNum=42',
+      'desktop=#91#4%192.0.2.10%3389%administrator%0%0%0%0%-1%0%0%-1%%%%%0#MobaFont%10#0# #-1',
+      '[Bookmarks_1]',
+      'SubRep=Prod\\Database',
+      'ImgNum=41',
+      `pg-main=${sshSession('db.example.com', 'postgres')}`,
+      '[Passwords]',
+      'ssh22:postgres@db.example.com=NOT-READ'
+    ].join('\r\n')
+  )
   const userData = join(home, 'userdata')
   const app = await electron.launch({
     args: ['.'],
@@ -146,6 +167,7 @@ base('nhập từ ~/.ssh/config: xem trước, bỏ mục lỗi, nhập mục đ
       ...process.env,
       HOME: home,
       USERPROFILE: home,
+      APPDATA: appData,
       SHELLHOUSE_TEST_HOOKS: '1',
       SHELLHOUSE_FAST_KDF: '1',
       SHELLHOUSE_USER_DATA: userData,
@@ -169,6 +191,25 @@ base('nhập từ ~/.ssh/config: xem trước, bỏ mục lỗi, nhập mục đ
 
     const row = page.locator('[data-testid="host-row"][data-host-label="web"]')
     await baseExpect(row).toContainText('deploy@web.example.com')
+
+    // MobaXterm: nhóm lồng nhau theo thư mục bookmark.
+    await page.getByTestId('import-ssh-config').click()
+    await dialog.getByTestId('import-source-mobaxterm').click()
+    await baseExpect(dialog.getByTestId('import-file')).toContainText('MobaXterm.ini')
+    await baseExpect(dialog.getByTestId('import-ignored')).toContainText('1 RDP')
+    await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toHaveCount(1)
+    await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toContainText(
+      'postgres@db.example.com'
+    )
+    await dialog.getByTestId('import-run').click()
+    await baseExpect(dialog.getByTestId('import-result')).toContainText('Imported 1 host')
+    await dialog.getByRole('button', { name: 'Done' }).click()
+    await baseExpect(
+      page.locator('[data-testid="group-row"][data-group-name="Database"]')
+    ).toBeVisible()
+    await baseExpect(
+      page.locator('[data-testid="host-row"][data-host-label="pg-main"]')
+    ).toContainText('postgres@db.example.com')
   } finally {
     await app.close()
     rmSync(home, { recursive: true, force: true })

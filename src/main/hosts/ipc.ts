@@ -1,11 +1,15 @@
-import { readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { app, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
-import type { MutationResult } from '@shared/hosts'
+import type { ImportCandidate, MutationResult } from '@shared/hosts'
 import { handle } from '../ipc/router'
+import { decodeMobaIni, scanMobaXterm } from './mobaxterm-import'
 import type { HostService } from './service'
 import { scanSshConfig } from './ssh-config-import'
+
+/** MobaXterm.ini thật chỉ vài trăm KB; giới hạn để không đọc nhầm file khổng lồ. */
+const MAX_MOBA_INI_BYTES = 16 * 1024 * 1024
 
 const MAX_KEY_FILE_BYTES = 64 * 1024
 
@@ -27,6 +31,75 @@ function readSshConfig(): string {
   } catch {
     return ''
   }
+}
+
+/** Vị trí mặc định của bản cài đặt; bản portable để file cạnh exe → người dùng tự chọn. */
+function defaultMobaIni(): string | null {
+  const appData = process.env['APPDATA']
+  if (!appData) return null
+  const file = join(appData, 'MobaXterm', 'MobaXterm.ini')
+  return existsSync(file) ? file : null
+}
+
+function readMobaIni(file: string): string {
+  if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error('The file is too large')
+  return decodeMobaIni(readFileSync(file))
+}
+
+/** Nhóm theo đường dẫn tên (tạo nếu chưa có, so tên không phân biệt hoa thường như service). */
+function ensureGroupPath(service: HostService, path: readonly string[]): string | null {
+  let parentId: string | null = null
+  for (const name of path) {
+    const found = service
+      .tree()
+      .groups.find(
+        (g) =>
+          g.parentId === parentId &&
+          g.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0
+      )
+    parentId = found ? found.id : service.saveGroup({ parentId, name })
+  }
+  return parentId
+}
+
+function importCandidates(
+  service: HostService,
+  candidates: readonly ImportCandidate[],
+  aliases: readonly string[],
+  tag: string
+): { imported: number; skipped: string[] } {
+  const wanted = new Set(aliases)
+  let imported = 0
+  const skipped: string[] = []
+  for (const c of candidates) {
+    if (!wanted.has(c.alias)) continue
+    if (c.problem || !c.username) {
+      skipped.push(c.alias)
+      continue
+    }
+    try {
+      service.saveHost({
+        groupId: ensureGroupPath(service, c.group ?? []),
+        label: c.label ?? c.alias,
+        hostname: c.hostname,
+        port: c.port,
+        username: c.username,
+        auth: 'auto',
+        keyId: null,
+        keyFile: c.keyFile,
+        proxyJump: c.proxyJump,
+        jumpHostIds: [],
+        mode: 'builtin',
+        tags: [tag],
+        color: null
+      })
+      imported++
+    } catch (error) {
+      log.warn(`Skipping ${c.alias}: ${errorMessage(error)}`)
+      skipped.push(c.alias)
+    }
+  }
+  return { imported, skipped }
 }
 
 function currentUser(): string {
@@ -205,43 +278,52 @@ export function registerHostIpc(
     })
   )
   handle('sshConfig:import', isTrustedSender, (aliases) => {
-    const wanted = new Set(aliases)
     const candidates = scanSshConfig(readSshConfig(), {
       home: app.getPath('home'),
       existingLabels: service.tree().hosts.map((h) => h.label),
       defaultUser: currentUser()
     })
-    let imported = 0
-    const skipped: string[] = []
-    for (const c of candidates) {
-      if (!wanted.has(c.alias)) continue
-      if (c.problem || !c.username) {
-        skipped.push(c.alias)
-        continue
-      }
-      try {
-        service.saveHost({
-          groupId: null,
-          label: c.alias,
-          hostname: c.hostname,
-          port: c.port,
-          username: c.username,
-          auth: 'auto',
-          keyId: null,
-          keyFile: c.keyFile,
-          proxyJump: c.proxyJump,
-          jumpHostIds: [],
-          mode: 'builtin',
-          tags: ['ssh-config'],
-          color: null
-        })
-        imported++
-      } catch (error) {
-        log.warn(`Skipping ${c.alias}: ${errorMessage(error)}`)
-        skipped.push(c.alias)
-      }
-    }
+    const result = importCandidates(service, candidates, aliases, 'ssh-config')
     notifyChanged()
-    return { imported, skipped }
+    return result
+  })
+
+  // File MobaXterm vừa quét — lần nhập đọc lại chính file này (renderer không chọn đường dẫn).
+  let mobaFile: string | null = null
+  const scanMoba = (file: string) =>
+    scanMobaXterm(readMobaIni(file), {
+      home: app.getPath('home'),
+      existingLabels: service.tree().hosts.map((h) => h.label),
+      defaultUser: currentUser()
+    })
+  handle('mobaxterm:scan', isTrustedSender, async (pick) => {
+    let file = pick ? null : defaultMobaIni()
+    if (pick) {
+      const window = getWindow()
+      const options = {
+        title: 'Choose MobaXterm.ini',
+        ...(process.env['APPDATA']
+          ? { defaultPath: join(process.env['APPDATA'], 'MobaXterm') }
+          : {}),
+        filters: [
+          { name: 'MobaXterm configuration', extensions: ['ini', 'mxtsessions'] },
+          { name: 'All files', extensions: ['*'] }
+        ],
+        properties: ['openFile'] as 'openFile'[]
+      }
+      const picked = window
+        ? await dialog.showOpenDialog(window, options)
+        : await dialog.showOpenDialog(options)
+      file = picked.canceled ? null : (picked.filePaths[0] ?? null)
+    }
+    mobaFile = file
+    if (!file) return { file: null, candidates: [], ignored: {} }
+    return { file, ...scanMoba(file) }
+  })
+  handle('mobaxterm:import', isTrustedSender, (aliases) => {
+    if (!mobaFile) throw new Error('Choose a MobaXterm file first')
+    const result = importCandidates(service, scanMoba(mobaFile).candidates, aliases, 'mobaxterm')
+    notifyChanged()
+    return result
   })
 }

@@ -943,7 +943,7 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
           </button>
           <button
             type="button"
-            title="Import from ~/.ssh/config"
+            title="Import hosts from ~/.ssh/config or MobaXterm"
             data-testid="import-ssh-config"
             className="inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md text-xs text-muted hover:bg-hover hover:text-fg"
             onClick={() => {

@@ -10,6 +10,7 @@ import { renderSnippet, snippetVariables } from '@shared/snippets'
 import { ClientMessage, isServerMessage } from '@shared/stream-protocol'
 import { importItermColors, importWindowsTerminal } from '@shared/themes'
 import { hostFieldMatches, parseOpenSshKnownHosts } from '../../src/main/known-hosts'
+import { scanMobaXterm } from '../../src/main/hosts/mobaxterm-import'
 import { scanSshConfig } from '../../src/main/hosts/ssh-config-import'
 import { tempDir } from '../unit/helpers'
 
@@ -35,6 +36,37 @@ describe('fuzz: parser không crash, kết quả luôn hợp lệ', () => {
         expect(target.host.startsWith('-')).toBe(false)
         expect(target.username.startsWith('-')).toBe(false)
         expect(target.username).not.toMatch(/\s/)
+      }),
+      opts
+    )
+  })
+
+  it('scanMobaXterm: không crash; mục không có lỗi luôn hợp lệ, không chèn được tham số', () => {
+    const home = tempDir()
+    const field = nearly('ab-.1:[]_ \\', 12)
+    const session = fc
+      .tuple(fc.constantFrom('0', '1', '4', '14', ''), fc.array(field, { maxLength: 20 }))
+      .map(([kind, fields]) => `#109#${[kind, ...fields].join('%')}#MobaFont%10#0# #-1`)
+    const line = fc.oneof(
+      fc.constantFrom('[Bookmarks]', '[Bookmarks_3]', '[Passwords]', 'SubRep=a\\b', 'ImgNum=1'),
+      fc.tuple(nearly('ab=[]\\', 10), session).map(([k, v]) => `${k}=${v}`),
+      nearly('[]=#%\\ab')
+    )
+    fc.assert(
+      fc.property(fc.array(line, { maxLength: 30 }), (lines) => {
+        const { candidates } = scanMobaXterm(lines.join('\r\n'), {
+          home,
+          existingLabels: [],
+          defaultUser: 'me'
+        })
+        for (const c of candidates) {
+          if (c.problem) continue
+          expect(Hostname.safeParse(c.hostname).success).toBe(true)
+          expect(Username.safeParse(c.username).success).toBe(true)
+          expect(c.port).toBeGreaterThanOrEqual(1)
+          expect(c.port).toBeLessThanOrEqual(65535)
+          for (const hop of c.proxyJump?.split(',') ?? []) expect(hop.startsWith('-')).toBe(false)
+        }
       }),
       opts
     )

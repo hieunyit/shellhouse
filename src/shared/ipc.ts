@@ -1,7 +1,14 @@
 import { z } from 'zod'
 import { NativeModuleStatus } from './session-host-protocol'
 import { SessionSpec } from './stream-protocol'
-import { GroupInput, HostInput, HostTree, ImportCandidate, MutationResult } from './hosts'
+import {
+  GroupInput,
+  HostInput,
+  HostTree,
+  ImportCandidate,
+  MobaScanResult,
+  MutationResult
+} from './hosts'
 import { SavedForward, SavedForwardInput } from './forwards'
 import { SnippetInput, SnippetSummary } from './snippets'
 import { AppSettings, SettingsPatch } from './settings'
@@ -143,6 +150,13 @@ export const invokeContract = {
     args: z.tuple([z.array(z.string().max(255)).max(1000)]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
+  /** true = cho người dùng chọn file; false = vị trí mặc định (%APPDATA%\MobaXterm). */
+  'mobaxterm:scan': { args: z.tuple([z.boolean()]), result: MobaScanResult },
+  /** Nhập từ file vừa quét (main giữ đường dẫn — renderer không truyền đường dẫn). */
+  'mobaxterm:import': {
+    args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
+    result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
+  },
   'forwards:list': { args: z.tuple([z.string().max(64)]), result: z.array(SavedForward) },
   'forwards:save': { args: z.tuple([SavedForwardInput]), result: MutationResult },
   'forwards:delete': { args: z.tuple([z.string().max(64)]), result: z.void() },
@@ -235,6 +249,8 @@ export interface ShellhouseApi {
   deleteKey(id: string): Promise<MutationResult>
   scanSshConfig(): Promise<ImportCandidate[]>
   importSshConfig(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
+  scanMobaXterm(pick: boolean): Promise<MobaScanResult>
+  importMobaXterm(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
   onHostsChanged(listener: () => void): () => void
   listForwards(hostId: string): Promise<SavedForward[]>
   saveForward(input: SavedForwardInput): Promise<MutationResult>

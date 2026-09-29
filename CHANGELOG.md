@@ -6,6 +6,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- Import hosts from MobaXterm (`MobaXterm.ini`): SSH sessions with their bookmark folders as
+  nested groups, private keys and jump hosts. Other session types are listed as skipped; saved
+  passwords are never read.
+
 ## [1.0.0-beta.1] - 2026-09-29
 
 First public beta.

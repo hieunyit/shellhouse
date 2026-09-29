@@ -172,7 +172,12 @@ export type HostTree = z.infer<typeof HostTree>
 
 /** Một mục đọc được từ ~/.ssh/config, chờ người dùng chọn để nhập. */
 export const ImportCandidate = z.object({
+  /** Khoá duy nhất trong lần quét (MobaXterm: thư mục + tên). */
   alias: z.string(),
+  /** Tên hiển thị khi nhập; không có = `alias`. */
+  label: z.string().optional(),
+  /** Đường dẫn nhóm (MobaXterm: thư mục bookmark) — tạo nhóm lồng nhau khi nhập. */
+  group: z.array(z.string()).optional(),
   hostname: z.string(),
   port: z.number().int(),
   username: z.string().nullable(),
@@ -184,6 +189,15 @@ export const ImportCandidate = z.object({
   problem: z.string().nullable()
 })
 export type ImportCandidate = z.infer<typeof ImportCandidate>
+
+export const MobaScanResult = z.object({
+  /** File đã đọc; null = không tìm thấy / người dùng huỷ chọn. */
+  file: z.string().nullable(),
+  candidates: z.array(ImportCandidate),
+  /** Phiên không phải SSH bị bỏ qua, theo kiểu ("RDP" → 2). */
+  ignored: z.record(z.string(), z.number().int())
+})
+export type MobaScanResult = z.infer<typeof MobaScanResult>
 
 export const MutationResult = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), id: z.string() }),
