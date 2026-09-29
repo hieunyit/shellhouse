@@ -1,0 +1,25 @@
+/**
+ * Lỗi của electron-updater → trạng thái cho người dùng. Tag mới đã có nhưng release chưa publish
+ * (hoặc CI đang tải file lên) → GitHub trả 404 cho file kênh: đó là "chưa có bản mới", không phải lỗi.
+ */
+export function describeUpdateError(
+  error: unknown
+): { kind: 'none' } | { kind: 'error'; message: string } {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
+  const text = error instanceof Error ? error.message : String(error)
+  if (
+    code === 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND' ||
+    code === 'ERR_UPDATER_LATEST_VERSION_NOT_FOUND' ||
+    code === 'ERR_UPDATER_NO_PUBLISHED_VERSIONS' ||
+    /No published versions/i.test(text)
+  )
+    return { kind: 'none' }
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|net::ERR_/.test(text))
+    return { kind: 'error', message: 'Could not reach the update server. Check your connection.' }
+  const first = text.split('\n')[0]?.trim() ?? ''
+  return {
+    kind: 'error',
+    message: first.length > 160 ? `${first.slice(0, 157)}…` : first || 'Update check failed.'
+  }
+}

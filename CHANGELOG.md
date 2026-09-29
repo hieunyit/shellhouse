@@ -12,6 +12,11 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   nested groups, private keys and jump hosts. Other session types are listed as skipped; saved
   passwords are never read.
 
+### Fixed
+
+- Checking for updates while a new release is still being published no longer shows a raw
+  HTTP 404 error; update errors are shown as one short sentence (details go to the log).
+
 ## [1.0.0-beta.1] - 2026-09-29
 
 First public beta.

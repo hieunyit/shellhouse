@@ -4,6 +4,7 @@ import { app } from 'electron'
 import log from 'electron-log/main'
 import { autoUpdater } from 'electron-updater'
 import type { UpdateStatus } from '@shared/updates'
+import { describeUpdateError } from '../node-shared/update-errors'
 import { verifyUpdateSignature } from '../node-shared/update-signature'
 import { UPDATE_PUBLIC_KEYS } from './update-keys'
 
@@ -66,7 +67,7 @@ export class Updater {
       this.set({ state: 'ready', version: info.version })
     })
     autoUpdater.on('error', (error) => {
-      this.set({ state: 'error', message: error.message })
+      this.fail(error)
     })
   }
 
@@ -93,12 +94,20 @@ export class Updater {
     autoUpdater.allowDowngrade = !beta
   }
 
+  /** Lỗi đầy đủ (URL, header, stack) chỉ vào log; người dùng thấy một câu ngắn. */
+  private fail(error: unknown): void {
+    log.scope('updater').warn(error)
+    const outcome = describeUpdateError(error)
+    if (outcome.kind === 'none') this.set({ state: 'none', checkedAt: Date.now() })
+    else this.set({ state: 'error', message: outcome.message })
+  }
+
   async check(): Promise<void> {
     if (!this.enabled) return
     try {
       await autoUpdater.checkForUpdates()
     } catch (error) {
-      this.set({ state: 'error', message: error instanceof Error ? error.message : String(error) })
+      this.fail(error)
     }
   }
 
@@ -107,7 +116,7 @@ export class Updater {
     try {
       await autoUpdater.downloadUpdate()
     } catch (error) {
-      this.set({ state: 'error', message: error instanceof Error ? error.message : String(error) })
+      this.fail(error)
     }
   }
 
