@@ -120,6 +120,33 @@ test('benchmark terminal', async () => {
     const catMs = Date.now() - catStart
     const longTask = await page.evaluate(() => window.__shellhouseTest.maxLongTaskMs())
 
+    /** Tổng RAM các process của app: PSS (Linux) / private bytes (Windows) / working set. */
+    const measureRam = async (): Promise<{ ramMb: number; ramBreakdown: string }> => {
+      const metrics = await app.evaluate(({ app: electronApp }) =>
+        electronApp.getAppMetrics().map((m) => ({
+          pid: m.pid,
+          type: m.type,
+          workingSetKb: m.memory.workingSetSize,
+          // Chỉ có trên Windows: bộ nhớ riêng của process (không đếm trùng DLL / bộ nhớ dùng chung).
+          privateKb: m.memory.privateBytes ?? null
+        }))
+      )
+      const perProcess = metrics.map((m) => ({
+        ...m,
+        kb:
+          (process.platform === 'linux' ? linuxPssKb(m.pid) : null) ??
+          (isWindows ? m.privateKb : null) ??
+          m.workingSetKb
+      }))
+      const ramKb = perProcess.reduce((sum, m) => sum + m.kb, 0)
+      const ramBreakdown = perProcess.map((m) => `${m.type} ${Math.round(m.kb / 1024)}`).join(', ')
+      const ramMb = ramKb / 1024
+      return { ramMb, ramBreakdown }
+    }
+    // Mức nền: chỉ 1 tab (phần chênh lên 10 tab = chi phí thật của mỗi tab thêm).
+    await page.waitForTimeout(1_500)
+    const ram1 = await measureRam()
+
     // ---- RAM với 10 tab ----
     for (let i = 0; i < 9; i++) await page.getByTestId('new-tab').click()
     await page.waitForFunction(
@@ -132,25 +159,7 @@ test('benchmark terminal', async () => {
       { timeout: 30_000 }
     )
     await page.waitForTimeout(2_000)
-    const metrics = await app.evaluate(({ app: electronApp }) =>
-      electronApp.getAppMetrics().map((m) => ({
-        pid: m.pid,
-        type: m.type,
-        workingSetKb: m.memory.workingSetSize,
-        // Chỉ có trên Windows: bộ nhớ riêng của process (không đếm trùng DLL / bộ nhớ dùng chung).
-        privateKb: m.memory.privateBytes ?? null
-      }))
-    )
-    const perProcess = metrics.map((m) => ({
-      ...m,
-      kb:
-        (process.platform === 'linux' ? linuxPssKb(m.pid) : null) ??
-        (isWindows ? m.privateKb : null) ??
-        m.workingSetKb
-    }))
-    const ramKb = perProcess.reduce((sum, m) => sum + m.kb, 0)
-    const ramBreakdown = perProcess.map((m) => `${m.type} ${Math.round(m.kb / 1024)}`).join(', ')
-    const ramMb = ramKb / 1024
+    const { ramMb, ramBreakdown } = await measureRam()
 
     const row = {
       date: new Date().toISOString(),
@@ -179,6 +188,8 @@ test('benchmark terminal', async () => {
         `Độ trễ phím p50/p95: ${row.keyP50} / ${row.keyP95} ms (mục tiêu p95 < ${TARGET.keyP95Ms})   ${verdict(keyP95, TARGET.keyP95Ms)}`,
         `RAM 10 tab local:   ${row.ramMb} MB ${process.platform === 'linux' ? 'PSS' : isWindows ? 'private' : 'working set'}   (mục tiêu < ${TARGET.ram10TabsMb})   ${verdict(ramMb, TARGET.ram10TabsMb)}`,
         `  theo process (MB): ${ramBreakdown}`,
+        `RAM 1 tab:          ${round(ram1.ramMb)} MB → mỗi tab thêm ≈ ${round((ramMb - ram1.ramMb) / 9)} MB`,
+        `  theo process (MB): ${ram1.ramBreakdown}`,
         ''
       ].join('\n')
     )
