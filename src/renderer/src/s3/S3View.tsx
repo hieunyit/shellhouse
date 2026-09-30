@@ -2,8 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } fro
 import {
   ArrowUp,
   BarChart3,
+  Check,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Cloud,
+  CloudUpload,
   Copy,
   Database,
   Download,
@@ -38,6 +42,7 @@ import { Button, Checkbox, cx, IconButton, Input, Modal, Notice, Select } from '
 import { useContextMenu, type MenuEntry } from '../components/ContextMenu'
 import { S3StatsDialog, type StatsTarget } from './S3Stats'
 import { cleanError, formatSize } from './format'
+import { S3Transfers } from './S3Transfers'
 import { useS3 } from '../stores/s3'
 import { useTabStatus } from '../stores/tab-status'
 import { S3SessionClient } from './s3-client'
@@ -75,7 +80,14 @@ export function S3View({
   const [dragOver, setDragOver] = useState(false)
   const [stats, setStats] = useState<StatsTarget[] | null>(null)
   const [opening, setOpening] = useState<string | null>(null)
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
+    key: 'name',
+    dir: 'asc'
+  })
   const { menu, open: openMenu } = useContextMenu()
+  const listRef = useRef<HTMLDivElement | null>(null)
+  /** Mục "con trỏ" cho phím mũi tên và Shift+bấm. */
+  const anchor = useRef<string | null>(null)
 
   const run = useCallback(async (op: S3Op): Promise<unknown> => {
     const client = clientRef.current
@@ -309,13 +321,95 @@ export function S3View({
   const entries = useMemo(() => {
     const all = listing?.entries ?? []
     const q = filter.trim().toLowerCase()
-    return q ? all.filter((e) => e.name.toLowerCase().includes(q)) : all
-  }, [listing, filter])
+    const shown = q ? all.filter((e) => e.name.toLowerCase().includes(q)) : [...all]
+    const dir = sort.dir === 'asc' ? 1 : -1
+    // Thư mục luôn đứng trước; cùng giá trị thì theo tên (số theo thứ tự tự nhiên: 2 < 10).
+    return shown.sort((a, b) => {
+      if (a.isFolder !== b.isFolder) return a.isFolder ? -1 : 1
+      // Thư mục không có dung lượng / ngày: sắp theo Size / Modified thì vẫn giữ A→Z.
+      if (a.isFolder && sort.key !== 'name') return collator.compare(a.name, b.name)
+      const by =
+        sort.key === 'size'
+          ? a.size - b.size
+          : sort.key === 'modified'
+            ? (a.modified ?? 0) - (b.modified ?? 0)
+            : 0
+      return (by || collator.compare(a.name, b.name)) * dir
+    })
+  }, [listing, filter, sort])
   const chosen = entries.filter((e) => selected.has(e.key))
   const crumbs = prefix.split('/').filter(Boolean)
   const fileCount = listing?.entries.filter((e) => !e.isFolder).length ?? 0
   const folderCount = (listing?.entries.length ?? 0) - fileCount
   const filesSize = listing?.entries.reduce((n, e) => n + e.size, 0) ?? 0
+  const one = chosen.length === 1 ? chosen[0] : undefined
+
+  /** Chọn như trình quản lý file: bấm = chọn một, Ctrl/⌘ = thêm/bớt, Shift = chọn dải. */
+  const select = (entry: S3Entry, e: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }) => {
+    if (e.shiftKey && anchor.current !== null) {
+      const a = entries.findIndex((x) => x.key === anchor.current)
+      const b = entries.findIndex((x) => x.key === entry.key)
+      if (a !== -1 && b !== -1) {
+        const [from, to] = a < b ? [a, b] : [b, a]
+        setSelected(new Set(entries.slice(from, to + 1).map((x) => x.key)))
+        return
+      }
+    }
+    anchor.current = entry.key
+    if (e.ctrlKey || e.metaKey) {
+      const next = new Set(selected)
+      if (next.has(entry.key)) next.delete(entry.key)
+      else next.add(entry.key)
+      setSelected(next)
+    } else setSelected(new Set([entry.key]))
+  }
+
+  const moveCursor = (delta: number): void => {
+    if (entries.length === 0) return
+    const current = entries.findIndex((x) => x.key === anchor.current)
+    const next =
+      current === -1
+        ? delta > 0
+          ? 0
+          : entries.length - 1
+        : Math.max(0, Math.min(entries.length - 1, current + delta))
+    const entry = entries[next]
+    if (!entry) return
+    anchor.current = entry.key
+    setSelected(new Set([entry.key]))
+    listRef.current
+      ?.querySelector(`[data-key="${CSS.escape(entry.key)}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }
+
+  const onListKey = (e: React.KeyboardEvent): void => {
+    const handled = (): void => {
+      e.preventDefault()
+    }
+    if (e.key === 'ArrowDown') {
+      handled()
+      moveCursor(1)
+    } else if (e.key === 'ArrowUp') {
+      handled()
+      moveCursor(-1)
+    } else if (e.key === 'F2' && one) {
+      handled()
+      setDialog({ kind: 'rename', entry: one })
+    } else if (e.key === 'Delete' && chosen.length > 0) {
+      handled()
+      setDialog({ kind: 'delete', entries: chosen })
+    } else if (e.key === 'Enter' && one && bucket !== null) {
+      handled()
+      if (one.isFolder) void load(bucket, one.key)
+      else void download([one])
+    } else if (e.key === 'Backspace' && bucket !== null && prefix !== '') {
+      handled()
+      void load(bucket, parentPrefix(prefix))
+    } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+      handled()
+      setSelected(new Set(entries.map((x) => x.key)))
+    }
+  }
 
   const onDrop = (event: DragEvent): void => {
     event.preventDefault()
@@ -326,26 +420,59 @@ export function S3View({
     void upload(paths)
   }
 
+  const sortHeader = (key: SortKey, label: string, className?: string): React.JSX.Element => {
+    const activeSort = sort.key === key
+    const Arrow = sort.dir === 'asc' ? ChevronUp : ChevronDown
+    return (
+      <button
+        type="button"
+        role="columnheader"
+        aria-sort={activeSort ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+        className={cx(
+          'flex min-w-0 items-center gap-0.5 rounded hover:text-fg',
+          key === 'size' && 'justify-end',
+          activeSort && 'text-muted',
+          className
+        )}
+        onClick={() => {
+          setSort(
+            activeSort
+              ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
+              : { key, dir: key === 'name' ? 'asc' : 'desc' }
+          )
+        }}
+      >
+        <span className="truncate">{label}</span>
+        {activeSort && <Arrow size={12} className="shrink-0" />}
+      </button>
+    )
+  }
+
+  const location = bucket === null ? '' : `${bucket}/${prefix}`
+
   return (
-    <div className="flex h-full min-h-0 bg-surface" data-testid="s3-view">
+    <div
+      className="@container flex h-full min-h-0 w-full min-w-0 overflow-hidden bg-surface"
+      data-testid="s3-view"
+    >
       {/* Buckets */}
-      <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-subtle/40">
-        <div className="flex h-10 items-center gap-2 border-b border-line px-3 text-xs">
-          <Cloud size={14} className="text-muted" />
-          <span className="min-w-0 flex-1 truncate font-medium text-fg" title={account?.endpoint}>
+      <aside className="flex w-40 shrink-0 flex-col border-r border-line bg-subtle/40 @3xl:w-56">
+        <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line pr-1.5 pl-3 text-xs">
+          <Cloud size={14} className="shrink-0 text-muted" />
+          <span
+            className="min-w-0 flex-1 truncate font-medium text-fg"
+            title={account ? account.endpoint || `AWS ${account.region || 'us-east-1'}` : undefined}
+          >
             {account?.name ?? 'S3'}
           </span>
-          <IconButton
-            label="New bucket"
-            size="sm"
-            data-testid="s3-new-bucket"
-            disabled={!ready}
-            onClick={() => {
-              setDialog({ kind: 'bucket' })
-            }}
-          >
-            <Plus size={13} />
+          <IconButton label="Refresh buckets" size="sm" onClick={() => void loadBuckets()}>
+            <RefreshCw size={13} />
           </IconButton>
+        </div>
+        <div className="flex h-8 shrink-0 items-center gap-1 pr-1.5 pl-3 text-[11px] font-semibold tracking-wider text-faint uppercase">
+          <span className="flex-1">
+            Buckets{buckets && buckets.length > 0 ? ` · ${buckets.length}` : ''}
+          </span>
           <IconButton
             label="Bucket statistics"
             size="sm"
@@ -357,13 +484,29 @@ export function S3View({
           >
             <BarChart3 size={13} />
           </IconButton>
-          <IconButton label="Refresh buckets" size="sm" onClick={() => void loadBuckets()}>
-            <RefreshCw size={13} />
+          <IconButton
+            label="New bucket"
+            size="sm"
+            data-testid="s3-new-bucket"
+            disabled={!ready}
+            onClick={() => {
+              setDialog({ kind: 'bucket' })
+            }}
+          >
+            <Plus size={13} />
           </IconButton>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto p-1.5" role="listbox" aria-label="Buckets">
-          {buckets === null && !error && <p className="p-2 text-xs text-faint">Connecting…</p>}
-          {buckets?.length === 0 && <p className="p-2 text-xs text-faint">No buckets.</p>}
+        <div
+          className="min-h-0 flex-1 overflow-auto px-1.5 pb-1.5"
+          role="listbox"
+          aria-label="Buckets"
+        >
+          {buckets === null && !error && (
+            <p className="flex items-center gap-2 px-2 py-1.5 text-xs text-faint">
+              <RefreshCw size={12} className="animate-spin" /> Connecting…
+            </p>
+          )}
+          {buckets?.length === 0 && <p className="px-2 py-1.5 text-xs text-faint">No buckets.</p>}
           {buckets?.map((b) => (
             <button
               key={b.name}
@@ -372,10 +515,15 @@ export function S3View({
               aria-selected={bucket === b.name}
               data-testid="s3-bucket"
               data-name={b.name}
+              title={
+                b.createdAt
+                  ? `${b.name}\nCreated ${dateFormat.format(new Date(b.createdAt))}`
+                  : b.name
+              }
               className={cx(
                 'flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px]',
                 bucket === b.name
-                  ? 'bg-accent-soft text-fg'
+                  ? 'bg-accent-soft font-medium text-fg'
                   : 'text-muted hover:bg-hover hover:text-fg'
               )}
               onClick={() => void load(b.name, '')}
@@ -399,7 +547,10 @@ export function S3View({
                 ])
               }}
             >
-              <Database size={14} className="shrink-0" />
+              <Database
+                size={14}
+                className={cx('shrink-0', bucket === b.name ? 'text-accent' : '')}
+              />
               <span className="min-w-0 flex-1 truncate">{b.name}</span>
             </button>
           ))}
@@ -408,48 +559,52 @@ export function S3View({
 
       {/* Objects */}
       <section
-        className={cx('flex min-w-0 flex-1 flex-col', dragOver && 'ring-2 ring-accent ring-inset')}
+        className="@container relative flex min-w-0 flex-1 flex-col"
         onDragOver={(e) => {
           if (bucket !== null && e.dataTransfer.types.includes('Files')) {
             e.preventDefault()
             setDragOver(true)
           }
         }}
-        onDragLeave={() => {
-          setDragOver(false)
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false)
         }}
         onDrop={onDrop}
       >
-        <div className="flex h-10 items-center gap-1 border-b border-line px-2">
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
           <IconButton
-            label="Parent folder"
+            label="Parent folder (Backspace)"
             disabled={bucket === null || prefix === ''}
             onClick={() => bucket !== null && void load(bucket, parentPrefix(prefix))}
           >
             <ArrowUp size={15} />
           </IconButton>
           <nav
-            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-[13px]"
+            className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden text-[13px] whitespace-nowrap"
             aria-label="Path"
             data-testid="s3-path"
+            title={location ? `s3://${location}` : undefined}
           >
             {bucket === null ? (
-              <span className="px-1 text-faint">Choose a bucket</span>
+              <span className="px-1 text-faint">No bucket selected</span>
             ) : (
               <>
                 <button
                   type="button"
-                  className="shrink-0 rounded px-1.5 py-0.5 font-medium text-fg hover:bg-hover"
+                  className="min-w-0 shrink truncate rounded px-1.5 py-0.5 font-medium text-fg hover:bg-hover"
                   onClick={() => void load(bucket, '')}
                 >
                   {bucket}
                 </button>
                 {crumbs.map((c, i) => (
-                  <span key={i} className="flex min-w-0 items-center gap-0.5">
+                  <span key={i} className="flex min-w-0 shrink items-center gap-0.5">
                     <ChevronRight size={12} className="shrink-0 text-faint" />
                     <button
                       type="button"
-                      className="min-w-0 truncate rounded px-1.5 py-0.5 text-muted hover:bg-hover hover:text-fg"
+                      className={cx(
+                        'min-w-0 truncate rounded px-1.5 py-0.5 hover:bg-hover hover:text-fg',
+                        i === crumbs.length - 1 ? 'text-fg' : 'text-muted'
+                      )}
                       onClick={() => void load(bucket, `${crumbs.slice(0, i + 1).join('/')}/`)}
                     >
                       {c}
@@ -459,17 +614,30 @@ export function S3View({
               </>
             )}
           </nav>
-          <div className="flex h-7 w-44 items-center gap-1.5 rounded-md border border-line bg-subtle px-2">
-            <Search size={12} className="text-faint" />
+          <label className="flex h-7 w-28 shrink-0 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent @xl:w-44">
+            <Search size={12} className="shrink-0 text-faint" />
             <input
               className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-faint"
-              placeholder="Filter this folder"
+              placeholder="Filter"
+              aria-label="Filter this folder"
               value={filter}
               onChange={(e) => {
                 setFilter(e.target.value)
               }}
             />
-          </div>
+            {filter && (
+              <button
+                type="button"
+                aria-label="Clear filter"
+                className="text-faint hover:text-fg"
+                onClick={() => {
+                  setFilter('')
+                }}
+              >
+                <X size={12} />
+              </button>
+            )}
+          </label>
           <IconButton
             label="Refresh"
             disabled={bucket === null}
@@ -478,259 +646,314 @@ export function S3View({
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </IconButton>
         </div>
-        <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<Upload size={13} />}
-            data-testid="s3-upload"
+
+        <div
+          className="flex h-10 shrink-0 items-center gap-0.5 overflow-hidden border-b border-line px-2"
+          role="toolbar"
+          aria-label="Actions"
+        >
+          <ToolButton
+            icon={<Upload size={14} />}
+            label="Upload"
+            labelAt="md"
+            testId="s3-upload"
             disabled={bucket === null}
             onClick={() => void window.shellhouse.pickFilesToUpload().then(upload)}
-          >
-            Upload
-          </Button>
-          <IconButton
-            label="Upload a folder"
-            size="sm"
-            className="size-7"
+          />
+          <ToolButton
+            icon={<FolderUp size={14} />}
+            label="Upload folder"
+            labelAt="5xl"
             disabled={bucket === null}
             onClick={() =>
               void window.shellhouse
                 .pickFolder('Choose a folder to upload', 'downloads')
                 .then((dir) => upload(dir ? [dir] : []))
             }
-          >
-            <FolderUp size={14} />
-          </IconButton>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<FolderPlus size={13} />}
-            data-testid="s3-mkdir"
+          />
+          <ToolButton
+            icon={<FolderPlus size={14} />}
+            label="New folder"
+            labelAt="xl"
+            testId="s3-mkdir"
             disabled={bucket === null}
             onClick={() => {
               setDialog({ kind: 'mkdir' })
             }}
-          >
-            New folder
-          </Button>
-          <div className="flex-1" />
+          />
+          <span className="flex-1" />
           {chosen.length > 0 && (
             <>
-              {chosen.length === 1 && chosen[0] && !chosen[0].isFolder && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon={<FilePen size={13} />}
-                  data-testid="s3-edit"
+              {one && !one.isFolder && (
+                <ToolButton
+                  icon={<FilePen size={14} />}
+                  label={opening ? 'Opening…' : 'Edit'}
+                  labelAt="3xl"
+                  testId="s3-edit"
                   disabled={opening !== null}
-                  onClick={() => {
-                    if (chosen[0]) void edit(chosen[0])
-                  }}
-                >
-                  {opening ? 'Opening…' : 'Edit'}
-                </Button>
+                  onClick={() => void edit(one)}
+                />
               )}
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<Download size={13} />}
-                data-testid="s3-download"
+              <ToolButton
+                icon={<Download size={14} />}
+                label={chosen.length > 1 ? `Download ${chosen.length}` : 'Download'}
+                labelAt="xl"
+                testId="s3-download"
                 onClick={() => void download(chosen)}
-              >
-                Download{chosen.length > 1 ? ` ${chosen.length}` : ''}
-              </Button>
-              {chosen.length === 1 && chosen[0] && !chosen[0].isFolder && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon={<Link size={13} />}
-                  data-testid="s3-link"
+              />
+              {one && !one.isFolder && (
+                <ToolButton
+                  icon={<Link size={14} />}
+                  label="Share link"
+                  labelAt="5xl"
+                  testId="s3-link"
                   onClick={() => {
-                    if (chosen[0]) setDialog({ kind: 'link', entry: chosen[0] })
+                    setDialog({ kind: 'link', entry: one })
                   }}
-                >
-                  Share link
-                </Button>
+                />
               )}
-              {chosen.length === 1 && (
-                <IconButton
-                  label="Rename (F2)"
-                  size="sm"
-                  className="size-7"
-                  data-testid="s3-rename"
+              {one && (
+                <ToolButton
+                  icon={<Pencil size={14} />}
+                  label="Rename"
+                  labelAt="5xl"
+                  testId="s3-rename"
                   onClick={() => {
-                    if (chosen[0]) setDialog({ kind: 'rename', entry: chosen[0] })
+                    setDialog({ kind: 'rename', entry: one })
                   }}
-                >
-                  <Pencil size={14} />
-                </IconButton>
+                />
               )}
-              <IconButton
+              <ToolButton
+                icon={<Copy size={14} />}
                 label="Copy to…"
-                size="sm"
-                className="size-7"
-                data-testid="s3-copy"
+                labelAt="5xl"
+                testId="s3-copy"
                 onClick={() => {
                   setDialog({ kind: 'copy', entries: chosen, move: false })
                 }}
-              >
-                <Copy size={14} />
-              </IconButton>
-              <IconButton
+              />
+              <ToolButton
+                icon={<FolderInput size={14} />}
                 label="Move to…"
-                size="sm"
-                className="size-7"
-                data-testid="s3-move"
+                labelAt="5xl"
+                testId="s3-move"
                 onClick={() => {
                   setDialog({ kind: 'copy', entries: chosen, move: true })
                 }}
-              >
-                <FolderInput size={14} />
-              </IconButton>
-              <Button
-                size="sm"
-                variant="danger-ghost"
-                icon={<Trash2 size={13} />}
-                data-testid="s3-delete"
+              />
+              <span className="mx-1 h-4 w-px shrink-0 bg-line" />
+              <ToolButton
+                icon={<Trash2 size={14} />}
+                label="Delete"
+                labelAt="3xl"
+                testId="s3-delete"
+                danger
                 onClick={() => {
                   setDialog({ kind: 'delete', entries: chosen })
                 }}
-              >
-                Delete
-              </Button>
+              />
             </>
           )}
         </div>
 
         {error && (
-          <div className="border-b border-line p-2">
-            <Notice tone="danger" testId="s3-error">
-              {error}
-            </Notice>
+          <div className="flex shrink-0 items-start gap-1 border-b border-line p-2">
+            <div className="min-w-0 flex-1">
+              <Notice tone="danger" testId="s3-error">
+                {error}
+              </Notice>
+            </div>
+            <IconButton
+              label="Dismiss"
+              size="sm"
+              onClick={() => {
+                setError(null)
+              }}
+            >
+              <X size={13} />
+            </IconButton>
           </div>
         )}
 
-        <div
-          className="min-h-0 flex-1 overflow-auto outline-none"
-          role="listbox"
-          aria-label="Objects"
-          aria-multiselectable
-          tabIndex={0}
-          onKeyDown={(e) => {
-            const only = chosen.length === 1 ? chosen[0] : undefined
-            if (e.key === 'F2' && only) {
-              e.preventDefault()
-              setDialog({ kind: 'rename', entry: only })
-            } else if (e.key === 'Delete' && chosen.length > 0) {
-              e.preventDefault()
-              setDialog({ kind: 'delete', entries: chosen })
-            } else if (e.key === 'Enter' && only?.isFolder && bucket !== null) {
-              e.preventDefault()
-              void load(bucket, only.key)
-            } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
-              e.preventDefault()
-              setSelected(new Set(entries.map((x) => x.key)))
+        {bucket === null ? (
+          <Empty
+            icon={<Database size={20} />}
+            title={buckets?.length === 0 ? 'No buckets yet' : 'Choose a bucket'}
+            text={
+              buckets?.length === 0
+                ? 'Create a bucket to start storing files.'
+                : 'Pick a bucket on the left to browse its folders and objects.'
             }
-          }}
-        >
-          {bucket !== null && (
-            <div className="sticky top-0 z-10 grid grid-cols-[1fr_6rem_10rem_7rem] gap-2 border-b border-line bg-surface px-3 py-1.5 text-[11px] font-medium text-faint">
-              <span>Name</span>
-              <span className="text-right">Size</span>
-              <span>Modified</span>
-              <span>Class</span>
-            </div>
-          )}
-          {listing && entries.length === 0 && (
-            <p className="px-4 py-10 text-center text-xs text-faint">
-              {filter
-                ? 'Nothing matches the filter.'
-                : 'This folder is empty. Drop files here to upload.'}
-            </p>
-          )}
-          {entries.map((entry) => (
-            <div
-              key={entry.key}
-              role="option"
-              aria-selected={selected.has(entry.key)}
-              data-testid="s3-entry"
-              data-name={entry.name}
-              className={cx(
-                'grid h-8 cursor-default grid-cols-[1fr_6rem_10rem_7rem] items-center gap-2 px-3 text-[13px]',
-                selected.has(entry.key) ? 'bg-accent-soft' : 'hover:bg-hover'
-              )}
-              onClick={(e) => {
-                if (e.ctrlKey || e.metaKey) {
-                  const next = new Set(selected)
-                  if (next.has(entry.key)) next.delete(entry.key)
-                  else next.add(entry.key)
-                  setSelected(next)
-                } else setSelected(new Set([entry.key]))
-              }}
-              onDoubleClick={() => {
-                if (entry.isFolder && bucket !== null) void load(bucket, entry.key)
-                else void download([entry])
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault()
-                // Chuột phải vào mục chưa chọn → chỉ chọn mục đó (như trình quản lý file).
-                const list = selected.has(entry.key) ? chosen : [entry]
-                if (!selected.has(entry.key)) setSelected(new Set([entry.key]))
-                openMenu(e, entryMenu(list))
-              }}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                {entry.isFolder ? (
-                  <Folder size={15} className="shrink-0 text-accent" />
-                ) : (
-                  <File size={15} className="shrink-0 text-muted" />
-                )}
-                <span className="truncate">{entry.name}</span>
-              </span>
-              <span className="text-right text-xs text-faint tabular-nums">
-                {entry.isFolder ? '' : formatSize(entry.size)}
-              </span>
-              <span className="truncate text-xs text-faint">
-                {entry.modified ? new Date(entry.modified).toLocaleString() : ''}
-              </span>
-              <span className="truncate text-xs text-faint">{entry.storageClass ?? ''}</span>
-            </div>
-          ))}
-          {listing?.truncated && (
-            <p className="p-3 text-xs text-faint">Only the first 5000 items are shown.</p>
-          )}
-        </div>
-
-        {listing && (
+            action={
+              buckets?.length === 0 ? (
+                <Button
+                  size="sm"
+                  icon={<Plus size={13} />}
+                  onClick={() => {
+                    setDialog({ kind: 'bucket' })
+                  }}
+                >
+                  New bucket
+                </Button>
+              ) : null
+            }
+          />
+        ) : (
           <div
-            className="flex h-7 shrink-0 items-center gap-3 border-t border-line px-3 text-[11px] text-faint"
+            ref={listRef}
+            className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset"
+            role="grid"
+            aria-label="Objects"
+            aria-multiselectable
+            tabIndex={0}
+            onKeyDown={onListKey}
+          >
+            <div
+              role="row"
+              className={cx(
+                'sticky top-0 z-10 grid h-8 items-center gap-3 border-b border-line bg-surface px-3 text-[11px] font-medium text-faint',
+                columns
+              )}
+            >
+              {sortHeader('name', 'Name')}
+              {sortHeader('size', 'Size')}
+              {sortHeader('modified', 'Modified', 'hidden @xl:flex')}
+              <span role="columnheader" className="hidden @3xl:block">
+                Class
+              </span>
+            </div>
+            {listing && entries.length === 0 && (
+              <Empty
+                icon={<FolderOpen size={20} />}
+                title={filter ? 'No matches' : 'This folder is empty'}
+                text={
+                  filter
+                    ? `Nothing in this folder matches “${filter}”.`
+                    : 'Drop files here, or upload from your computer.'
+                }
+                action={
+                  filter ? null : (
+                    <Button
+                      size="sm"
+                      icon={<Upload size={13} />}
+                      onClick={() => void window.shellhouse.pickFilesToUpload().then(upload)}
+                    >
+                      Upload files
+                    </Button>
+                  )
+                }
+              />
+            )}
+            {entries.map((entry) => {
+              const isSelected = selected.has(entry.key)
+              return (
+                <div
+                  key={entry.key}
+                  role="row"
+                  aria-selected={isSelected}
+                  data-testid="s3-entry"
+                  data-name={entry.name}
+                  data-key={entry.key}
+                  className={cx(
+                    'grid h-8 cursor-default items-center gap-3 px-3 text-[13px] select-none',
+                    columns,
+                    isSelected ? 'bg-accent-soft' : 'hover:bg-hover'
+                  )}
+                  onClick={(e) => {
+                    select(entry, e)
+                  }}
+                  onDoubleClick={() => {
+                    if (entry.isFolder) void load(bucket, entry.key)
+                    else void download([entry])
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    // Chuột phải vào mục chưa chọn → chỉ chọn mục đó (như trình quản lý file).
+                    const list = isSelected ? chosen : [entry]
+                    if (!isSelected) {
+                      anchor.current = entry.key
+                      setSelected(new Set([entry.key]))
+                    }
+                    openMenu(e, entryMenu(list))
+                  }}
+                >
+                  <span role="gridcell" className="flex min-w-0 items-center gap-2">
+                    {entry.isFolder ? (
+                      <Folder size={15} className="shrink-0 text-accent" />
+                    ) : (
+                      <File size={15} className="shrink-0 text-muted" />
+                    )}
+                    <span className="truncate" title={entry.name}>
+                      {entry.name}
+                    </span>
+                  </span>
+                  <span role="gridcell" className="text-right text-xs text-muted tabular-nums">
+                    {entry.isFolder ? '' : formatSize(entry.size)}
+                  </span>
+                  <span
+                    role="gridcell"
+                    className="hidden truncate text-xs text-muted tabular-nums @xl:block"
+                  >
+                    {entry.modified ? dateFormat.format(new Date(entry.modified)) : ''}
+                  </span>
+                  <span role="gridcell" className="hidden truncate text-xs text-faint @3xl:block">
+                    {entry.isFolder ? '' : storageClassLabel(entry.storageClass)}
+                  </span>
+                </div>
+              )
+            })}
+            {listing?.truncated && (
+              <p className="p-3 text-xs text-faint">
+                Only the first 5,000 items are shown. Use the filter or open a subfolder.
+              </p>
+            )}
+            {!listing && loading && (
+              <p className="flex items-center gap-2 p-4 text-xs text-faint">
+                <RefreshCw size={12} className="animate-spin" /> Loading…
+              </p>
+            )}
+          </div>
+        )}
+
+        {listing && bucket !== null && (
+          <div
+            className="flex h-7 shrink-0 items-center gap-3 overflow-hidden border-t border-line px-3 text-[11px] whitespace-nowrap text-faint"
             data-testid="s3-status"
           >
-            <span>
+            <span className="min-w-0 flex-1 truncate">
               {folderCount} folder{folderCount === 1 ? '' : 's'}, {fileCount} file
               {fileCount === 1 ? '' : 's'} · {formatSize(filesSize)}
               {chosen.length > 0 ? ` · ${chosen.length} selected` : ''}
             </span>
-            <span className="flex-1" />
             <button
               type="button"
-              className="rounded px-1.5 py-0.5 hover:bg-hover hover:text-fg"
+              className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-hover hover:text-fg"
+              title="Count every object in this folder and its subfolders"
               data-testid="s3-folder-stats"
               onClick={() => {
                 folderStats([])
               }}
             >
-              Total size incl. subfolders…
+              <BarChart3 size={12} />
+              <span className="hidden @md:inline">Folder size…</span>
             </button>
           </div>
         )}
 
-        <Transfers
+        <S3Transfers
           transfers={transfers}
           onCancel={(id) => void act({ op: 'cancel', transferId: id })}
           onClear={() => void act({ op: 'clearDone' })}
         />
+
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent-soft/80">
+            <p className="flex items-center gap-2 text-sm font-medium text-fg">
+              <CloudUpload size={18} className="text-accent" />
+              Drop to upload to {location || bucket}
+            </p>
+          </div>
+        )}
       </section>
 
       {menu}
@@ -764,79 +987,93 @@ export function S3View({
   )
 }
 
-function Transfers({
-  transfers,
-  onCancel,
-  onClear
+type SortKey = 'name' | 'size' | 'modified'
+
+const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
+/** Ngày giờ dạng số theo thói quen máy người dùng (không có chữ → giao diện vẫn thuần tiếng Anh). */
+const dateFormat = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit'
+})
+/** Cột danh sách: Modified / Class chỉ hiện khi khung đủ rộng (container query). */
+const columns =
+  'grid-cols-[minmax(0,1fr)_5rem] @xl:grid-cols-[minmax(0,1fr)_5rem_8.5rem] @3xl:grid-cols-[minmax(0,1fr)_5rem_8.5rem_6.5rem]'
+
+function storageClassLabel(cls: string | null): string {
+  if (!cls) return 'Standard'
+  return cls
+    .toLowerCase()
+    .split('_')
+    .map((w) => (w === 'ia' ? 'IA' : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ')
+}
+
+/** Mức rộng của khung mà từ đó nút hiện cả chữ (hẹp hơn: chỉ icon + tooltip). */
+const labelAt = {
+  md: 'hidden @md:inline',
+  xl: 'hidden @xl:inline',
+  '3xl': 'hidden @3xl:inline',
+  '5xl': 'hidden @5xl:inline'
+} as const
+
+function ToolButton({
+  icon,
+  label,
+  labelAt: at,
+  testId,
+  danger,
+  disabled,
+  onClick
 }: {
-  transfers: TransferStatus[]
-  onCancel: (id: string) => void
-  onClear: () => void
-}): React.JSX.Element | null {
-  if (transfers.length === 0) return null
+  icon: React.ReactNode
+  label: string
+  labelAt: keyof typeof labelAt
+  testId?: string
+  danger?: boolean
+  disabled?: boolean
+  onClick: () => void
+}): React.JSX.Element {
   return (
-    <div className="max-h-44 overflow-auto border-t border-line p-2.5" data-testid="s3-transfers">
-      <div className="mb-1.5 flex items-center text-xs font-medium text-muted">
-        <span className="flex-1">Transfers</span>
-        <button
-          type="button"
-          className="rounded px-1.5 py-0.5 text-faint hover:bg-hover hover:text-fg"
-          onClick={onClear}
-        >
-          Clear finished
-        </button>
-      </div>
-      {transfers.map((t) => {
-        const pct =
-          t.size > 0 ? Math.floor((t.transferred / t.size) * 100) : t.state === 'done' ? 100 : 0
-        const name = t.remotePath.split('/').at(-1) ?? t.remotePath
-        return (
-          <div key={t.id} className="mb-2 text-xs" data-testid="s3-transfer" data-state={t.state}>
-            <div className="flex items-center gap-1.5">
-              {t.direction === 'upload' ? (
-                <Upload size={12} className="text-muted" />
-              ) : (
-                <Download size={12} className="text-muted" />
-              )}
-              <span className="min-w-0 flex-1 truncate" title={t.remotePath}>
-                {name}
-              </span>
-              <span className="text-faint">
-                {t.state === 'running' && `${pct}% · ${formatSize(t.bytesPerSecond)}/s`}
-                {t.state === 'queued' && 'Queued'}
-                {t.state === 'done' && 'Done'}
-                {t.state === 'cancelled' && 'Cancelled'}
-                {t.state === 'error' && 'Failed'}
-              </span>
-              {(t.state === 'running' || t.state === 'queued') && (
-                <IconButton
-                  label="Cancel"
-                  size="sm"
-                  onClick={() => {
-                    onCancel(t.id)
-                  }}
-                >
-                  <X size={12} />
-                </IconButton>
-              )}
-            </div>
-            <div className="mt-1 h-1 overflow-hidden rounded-full bg-subtle">
-              <div
-                className={cx(
-                  'h-1 rounded-full transition-[width]',
-                  t.state === 'error'
-                    ? 'bg-danger'
-                    : t.state === 'done'
-                      ? 'bg-success'
-                      : 'bg-accent'
-                )}
-                style={{ width: `${pct}%` }}
-              />
-            </div>
-            {t.error && <p className="mt-1 text-danger">{t.error}</p>}
-          </div>
-        )
-      })}
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      data-testid={testId}
+      disabled={disabled}
+      className={cx(
+        'inline-flex h-7 min-w-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-1.5 text-xs font-medium whitespace-nowrap transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40',
+        danger ? 'text-danger hover:bg-danger-soft' : 'text-muted hover:bg-hover hover:text-fg'
+      )}
+      onClick={onClick}
+    >
+      {icon}
+      <span className={cx(labelAt[at], 'pr-0.5')}>{label}</span>
+    </button>
+  )
+}
+
+function Empty({
+  icon,
+  title,
+  text,
+  action
+}: {
+  icon: React.ReactNode
+  title: string
+  text: string
+  action: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-12 text-center">
+      <span className="flex size-10 items-center justify-center rounded-xl border border-line bg-subtle text-muted">
+        {icon}
+      </span>
+      <p className="mt-1 text-[13px] font-medium text-fg">{title}</p>
+      <p className="max-w-xs text-xs text-muted">{text}</p>
+      {action && <div className="mt-2">{action}</div>}
     </div>
   )
 }
@@ -866,6 +1103,7 @@ function S3Dialog({
   const [url, setUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const problem =
     dialog.kind === 'bucket'
@@ -1056,16 +1294,39 @@ function S3Dialog({
           <p className="text-xs text-danger">{problem}</p>
         )}
         {dialog.kind === 'delete' && (
-          <p className="text-[13px]">
-            Delete{' '}
-            {dialog.entries.length === 1 ? (
-              <strong>{dialog.entries[0]?.name}</strong>
-            ) : (
-              `${dialog.entries.length} items`
+          <>
+            <p className="text-[13px]">
+              {dialog.entries.length === 1 ? (
+                <>
+                  Delete <strong className="break-all">{dialog.entries[0]?.name}</strong>
+                  {folders > 0 ? ' and everything inside it' : ''}?
+                </>
+              ) : (
+                <>
+                  Delete these {dialog.entries.length} items
+                  {folders > 0 ? ', including everything inside the folders' : ''}?
+                </>
+              )}
+            </p>
+            {dialog.entries.length > 1 && (
+              <ul className="max-h-32 overflow-auto rounded-md border border-line bg-subtle px-2.5 py-1.5 font-mono text-xs text-muted">
+                {dialog.entries.slice(0, 50).map((e) => (
+                  <li key={e.key} className="flex items-center gap-1.5 truncate py-0.5">
+                    {e.isFolder ? (
+                      <Folder size={12} className="shrink-0 text-accent" />
+                    ) : (
+                      <File size={12} className="shrink-0" />
+                    )}
+                    <span className="truncate">{e.name}</span>
+                  </li>
+                ))}
+                {dialog.entries.length > 50 && (
+                  <li className="py-0.5 text-faint">…and {dialog.entries.length - 50} more</li>
+                )}
+              </ul>
             )}
-            {folders > 0 ? ' and EVERYTHING inside the selected folders' : ''}? This cannot be
-            undone.
-          </p>
+            <p className="text-xs text-danger">This cannot be undone.</p>
+          </>
         )}
         {dialog.kind === 'link' && (
           <>
@@ -1078,6 +1339,7 @@ function S3Dialog({
               onChange={(e) => {
                 setExpires(e.target.value)
                 setUrl(null)
+                setCopied(false)
               }}
             >
               <option value="3600">Valid for 1 hour</option>
@@ -1093,7 +1355,16 @@ function S3Dialog({
                   data-testid="s3-link-url"
                   className="min-w-0 flex-1"
                 />
-                <Button onClick={() => void window.shellhouse.writeClipboard(url)}>Copy</Button>
+                <Button
+                  icon={copied ? <Check size={14} /> : <Copy size={14} />}
+                  onClick={() => {
+                    void window.shellhouse.writeClipboard(url).then(() => {
+                      setCopied(true)
+                    })
+                  }}
+                >
+                  {copied ? 'Copied' : 'Copy'}
+                </Button>
               </div>
             )}
           </>

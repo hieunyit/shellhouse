@@ -174,7 +174,9 @@ export function App(): React.JSX.Element {
             setOverlay({ kind: 'workspaces' })
           }}
         />
-        <div className="relative min-h-0 flex-1">
+        {/* overflow-hidden: panel ẩn (renderer "always") giữ kích thước cũ khi thu nhỏ cửa sổ —
+            không được làm cả trang tràn ngang. */}
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
           <Workspace />
           {multiExec && <MultiExecView />}
         </div>

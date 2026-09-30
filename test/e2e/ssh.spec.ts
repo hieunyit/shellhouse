@@ -67,11 +67,16 @@ test('host key bị đổi: cảnh báo đỏ, phải xác nhận 2 bước; hu�
 }) => {
   server = await startTestSshServer([{ username: 'alice', password: 'p' }])
   const port = server.port
-  await quickConnect(page, `alice@127.0.0.1:${port}`)
+  const first = await quickConnect(page, `alice@127.0.0.1:${port}`)
   await page.getByTestId('hostkey-accept').click()
   await page.getByTestId('prompt-input').fill('p')
   await page.getByTestId('prompt-submit').click()
   await expect(page.getByTestId('prompt-dialog')).toHaveCount(0)
+  // Đóng tab đầu: không thì nó tự kết nối lại khi server đổi, hiện thêm một hộp cảnh báo nữa.
+  await page
+    .locator(`[data-testid="tab"][data-tab-id="${first}"] [data-testid="tab-close"]`)
+    .click()
+  await expect(page.locator(`[data-testid="tab"][data-tab-id="${first}"]`)).toHaveCount(0)
 
   // Server khác (host key khác) trên cùng port — giống bị MITM hoặc cài lại server.
   await server.close()

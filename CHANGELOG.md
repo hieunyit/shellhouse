@@ -19,6 +19,22 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   type. If someone else changed the object in the meantime, it is not overwritten.
 - S3 right-click menu, **F2** to rename, **Del** to delete, **Ctrl+A** to select all.
 
+### Changed
+
+- The S3 browser adapts to narrow windows and split panes: toolbar buttons shrink to icons,
+  the Modified / Class columns hide, and the bucket list gets narrower — nothing is cut off.
+- S3 columns can be sorted (Name, Size, Modified; folders stay first), with natural number order.
+  Shift-click selects a range; arrow keys, **Enter** and **Backspace** navigate the list.
+- The S3 transfer list is compact and collapsible: a summary line (active / done / failed), a thin
+  progress bar only for running items, and the full source → destination on hover.
+- Clearer empty states (no bucket selected, empty folder, no filter matches), a drop overlay
+  when dragging files in, a dismissible error bar, a **Copied** confirmation for share links, and
+  the list of items in the delete confirmation.
+
+### Fixed
+
+- Shrinking the window while another tab was hidden could make the whole app scroll sideways.
+
 ## [1.2.0-beta.1] - 2026-09-30
 
 ### Changed
