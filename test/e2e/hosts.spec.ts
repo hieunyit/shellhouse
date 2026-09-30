@@ -351,7 +351,14 @@ test('chuột phải host → Open SFTP: trình quản lý file hai cột Local 
     await expect(manager).toHaveCount(0)
     await waitForText(page, await activeTab(page), 'welcome to test server')
   } finally {
-    rmSync(remote, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
-    rmSync(local, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    // Windows: sftp-server.exe (cwd = thư mục remote) còn sống tới lúc app đóng → EPERM; thư mục
+    // tạm để hệ điều hành dọn.
+    for (const dir of [remote, local]) {
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+      } catch {
+        // bỏ qua
+      }
+    }
   }
 })

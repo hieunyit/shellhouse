@@ -26,6 +26,11 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Fixed
 
+- Uploads could finish one chunk early and fail with "Size mismatch" (or the server file
+  was missing its last part) when the server acknowledged writes faster than the local disk
+  read the final chunk.
+- With a narrow window (split screen) the tab bar overflowed and pushed the Lock / Settings
+  buttons off-screen; it now shrinks, and less-used buttons move to the command palette.
 - A connection that drops while the vault is locked (auto-lock) now waits and reconnects as
   soon as you unlock, instead of stopping with "VaultLockedError". Enter also retries a tab
   that could not connect.

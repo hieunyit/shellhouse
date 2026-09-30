@@ -31,7 +31,8 @@ function QuickConnect(): React.JSX.Element {
   const [invalid, setInvalid] = useState(false)
   return (
     <form
-      className="flex items-center"
+      // Co lại khi cửa sổ hẹp (chia đôi màn hình) — không đẩy các nút bên phải ra khỏi cửa sổ.
+      className="flex min-w-32 shrink basis-60 items-center"
       onSubmit={(e) => {
         e.preventDefault()
         const target = parseQuickConnect(value)
@@ -46,13 +47,13 @@ function QuickConnect(): React.JSX.Element {
     >
       <div
         className={cx(
-          'flex h-7 items-center gap-1.5 rounded-md border bg-subtle px-2 transition-[border-color,box-shadow] duration-150',
+          'flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md border bg-subtle px-2 transition-[border-color,box-shadow] duration-150',
           invalid
             ? 'border-danger ring-3 ring-danger/15'
             : 'border-line focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/20'
         )}
       >
-        <Zap size={13} className="text-faint" />
+        <Zap size={13} className="shrink-0 text-faint" />
         <input
           type="text"
           spellCheck={false}
@@ -61,7 +62,7 @@ function QuickConnect(): React.JSX.Element {
           aria-label="Quick connect"
           aria-invalid={invalid}
           data-testid="quick-connect"
-          className="w-56 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-faint"
+          className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-faint"
           value={value}
           onChange={(e) => {
             setValue(e.target.value)
@@ -95,7 +96,7 @@ export function TabBar({
   const updateSettings = useSettings((s) => s.update)
 
   return (
-    <nav className="flex h-11 shrink-0 items-center gap-1 border-b border-line bg-surface px-2">
+    <nav className="@container flex h-11 min-w-0 shrink-0 items-center gap-1 overflow-hidden border-b border-line bg-surface px-2">
       <IconButton
         label={`${sidebarHidden ? 'Show' : 'Hide'} sidebar (${displayKeybinding(keybindingFor('sidebar.toggle', overrides, isMac))})`}
         data-testid="toggle-sidebar"
@@ -149,33 +150,38 @@ export function TabBar({
         <ChevronDown size={14} />
       </IconButton>
       {menu}
-      <div className="mx-1 h-4 w-px bg-line" />
-      <IconButton
-        label="Split right"
-        data-testid="split-right"
-        disabled={!hasTab}
-        onClick={() => split('right')}
-      >
-        <Columns2 size={15} />
-      </IconButton>
-      <IconButton
-        label="Split down"
-        data-testid="split-below"
-        disabled={!hasTab}
-        onClick={() => split('below')}
-      >
-        <Rows2 size={15} />
-      </IconButton>
-      <IconButton label="Snippets" data-testid="open-snippets" onClick={onOpenSnippets}>
-        <ScrollText size={15} />
-      </IconButton>
-      <IconButton
-        label="Workspaces: save or reopen a set of tabs"
-        data-testid="open-workspaces"
-        onClick={onOpenWorkspaces}
-      >
-        <LayoutGrid size={15} />
-      </IconButton>
+      {/* Cửa sổ hẹp: ẩn nút ít dùng (vẫn có trong bảng lệnh, phím tắt, menu chuột phải của tab). */}
+      <div className="hidden items-center gap-1 @2xl:flex">
+        <div className="mx-1 h-4 w-px bg-line" />
+        <IconButton
+          label="Split right"
+          data-testid="split-right"
+          disabled={!hasTab}
+          onClick={() => split('right')}
+        >
+          <Columns2 size={15} />
+        </IconButton>
+        <IconButton
+          label="Split down"
+          data-testid="split-below"
+          disabled={!hasTab}
+          onClick={() => split('below')}
+        >
+          <Rows2 size={15} />
+        </IconButton>
+      </div>
+      <div className="hidden items-center gap-1 @xl:flex">
+        <IconButton label="Snippets" data-testid="open-snippets" onClick={onOpenSnippets}>
+          <ScrollText size={15} />
+        </IconButton>
+        <IconButton
+          label="Workspaces: save or reopen a set of tabs"
+          data-testid="open-workspaces"
+          onClick={onOpenWorkspaces}
+        >
+          <LayoutGrid size={15} />
+        </IconButton>
+      </div>
       <IconButton
         label={
           broadcasting

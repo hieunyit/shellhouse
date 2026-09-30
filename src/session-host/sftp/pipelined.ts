@@ -218,7 +218,10 @@ export async function pipelinedUpload(
           fail(new Error('Cancelled'))
           return
         }
-        if (nextRead >= size && inFlight === 0) {
+        // Xong khi đã GHI hết: `nextRead` tăng ngay lúc bắt đầu đọc mảnh cuối — nếu không chờ
+        // `reading`, một lệnh ghi trước đó được xác nhận đúng lúc mảnh cuối còn đang đọc sẽ kết
+        // thúc sớm và bỏ mất mảnh cuối (file trên server bị thiếu đuôi).
+        if (nextRead >= size && inFlight === 0 && !reading) {
           done = true
           resolve()
           return

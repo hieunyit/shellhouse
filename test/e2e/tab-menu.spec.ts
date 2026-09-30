@@ -53,3 +53,23 @@ test('ẩn / hiện thanh bên bằng nút và phím tắt; tìm host thì tự 
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+Shift+K')
   await expect(search).toBeFocused()
 })
+
+test('cửa sổ hẹp (chia đôi màn hình): không cuộn ngang, nút Settings vẫn bấm được', async ({
+  app,
+  page
+}) => {
+  for (const width of [900, 760]) {
+    await app.evaluate(({ BrowserWindow }, w) => {
+      BrowserWindow.getAllWindows()[0]?.setSize(w, 600)
+    }, width)
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+        )
+      )
+      .toBeLessThanOrEqual(0)
+    await expect(page.getByTestId('open-settings')).toBeInViewport()
+    await expect(page.getByTestId('quick-connect')).toBeVisible()
+  }
+})

@@ -206,6 +206,11 @@ jobs:
           NOTE
               ;;
           esac
+          # Gắn lại tag sau khi rút (bản cũ lỗi): xoá bản nháp CŨ cùng tên — không bao giờ đụng
+          # bản đã phát hành.
+          if [ "$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq .isDraft 2>/dev/null)" = "true" ]; then
+            gh release delete "${GITHUB_REF_NAME}" --yes
+          fi
           gh release create "${GITHUB_REF_NAME}" --draft $prerelease \
             --title "Shellhouse ${GITHUB_REF_NAME#v}" \
             --notes-file notes.md \
