@@ -35,6 +35,7 @@ export function installTestHooks(): void {
       return term ? { cols: term.cols, rows: term.rows } : null
     },
     renderer: (tabId) => controllers.get(tabId)?.renderer ?? null,
+    suggestionState: (tabId) => controllers.get(tabId)?.suggestionDebug() ?? null,
     reconnect: (tabId) => {
       controllers.get(tabId)?.reconnect()
     },

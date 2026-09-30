@@ -337,6 +337,24 @@ export class TerminalController {
   private ghostRest: string | null = null
   private ghostFrame = 0
 
+  /** Chỉ cho test: trạng thái gợi ý lệnh hiện tại. */
+  suggestionDebug(): unknown {
+    const b = this.term.buffer.active
+    const row = b.baseY + b.cursorY
+    return {
+      start: this.inputStart,
+      awaitingStart: this.awaitingStart,
+      lineBuf: this.lineBuf,
+      dirty: this.lineDirty,
+      cursor: { row, col: b.cursorX },
+      beforeCursor: b.getLine(row)?.translateToString(false, 0, b.cursorX),
+      afterCursor: b.getLine(row)?.translateToString(true, b.cursorX),
+      typed: this.typedText(true),
+      ghost: this.ghostRest,
+      on: this.suggestionsOn()
+    }
+  }
+
   private suggestionsOn(): boolean {
     return (
       useSettings.getState().settings.terminal.commandSuggestions &&

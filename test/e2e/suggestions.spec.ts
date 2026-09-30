@@ -22,15 +22,26 @@ test('gợi ý lệnh từ lịch sử: chữ mờ sau con trỏ, → để nh�
 
   // Bước 1: lệnh đã vào lịch sử (tách riêng để biết lỗi ở khâu lưu hay khâu hiện gợi ý).
   const target = 'local:default'
+  const diagnose = async (what: string): Promise<never> => {
+    const screen = await page.evaluate((id) => window.__shellhouseTest.bufferText(id, 12), tab)
+    const state = await page.evaluate((id) => window.__shellhouseTest.suggestionState(id), tab)
+    const history = await page.evaluate((t) => window.shellhouse.commandHistory(t), target)
+    throw new Error(
+      `${what}\nstate: ${JSON.stringify(state)}\nhistory: ${JSON.stringify(history)}\nscreen: ${JSON.stringify(screen)}`
+    )
+  }
   await expect
     .poll(() => page.evaluate((t) => window.shellhouse.commandHistory(t), target), {
       timeout: 10_000
     })
     .toContain(first.command)
+    .catch(() => diagnose('command was not recorded'))
   // Bước 2: gõ phần đầu → gợi ý phần còn lại.
   const ghost = page.getByTestId('command-suggestion')
   await page.keyboard.type(first.command.slice(0, 8))
-  await expect(ghost).toHaveText(first.command.slice(8))
+  await expect(ghost)
+    .toHaveText(first.command.slice(8))
+    .catch(() => diagnose('no suggestion shown'))
   await page.keyboard.press('ArrowRight')
   await expect(ghost).toHaveCount(0)
   await page.keyboard.press('Enter')
