@@ -1,6 +1,7 @@
 # ADR-014: Khuôn module — chuyển S3 sang module, module Docker và Kubernetes
 
-- Trạng thái: Đề xuất (chưa làm)
+- Trạng thái: Đã triển khai (2026-10-01) — khuôn module, S3, Docker, Kubernetes; xem mục 11 cho
+  những chỗ khác thiết kế ban đầu và phần chưa làm
 - Ngày: 2026-09-30
 - Liên quan: ADR-002 (mô hình tiến trình), ADR-003 (giao thức stream), ADR-004 (secret),
   ADR-013 (đồng bộ)
@@ -668,3 +669,66 @@ Thứ tự này cho giá trị sớm: sau bước 2 không có tính năng mới
 2. K8s: có cần hỗ trợ Helm (danh sách release, rollback) ngay trong bản đầu không?
 3. Thứ tự các module sau K8s: systemd, database tunnel, hay trình quản lý file dạng S3 cho
    Azure Blob / Google Cloud Storage?
+
+## 11. Ghi chú triển khai (2026-10-01)
+
+Đã làm: khuôn module (mục 3, gồm trang Modules 3.12.1–3.12.5 trừ ý nêu dưới), chuyển S3 (mục 5),
+module Docker (mục 6), module Kubernetes (mục 7). Test: hợp đồng registry (`test/unit/modules-*`),
+test của từng module trong `src/modules/<id>/test` (Engine API giả, API server Kubernetes giả có
+TLS thật, SSH test server hỗ trợ streamlocal / direct-tcpip), E2E trang Modules, Docker, K8s.
+
+### 11.1. Khác thiết kế
+
+1. **Kiểu chia theo tiến trình.** `registry/types.ts` chỉ giữ phần dùng chung (manifest, quyền);
+   kiểu riêng ở `main-types.ts`, `host-types.ts`, `renderer-types.ts` (types.ts không được kéo
+   `node:stream` vào renderer). Danh sách module tĩnh tách thành `all-main.ts`, `all-host.ts`,
+   `all-renderer.ts`, `manifests.ts` (mỗi tiến trình chỉ import phần của nó).
+2. **Renderer kit.** Module renderer dùng `registry/renderer-kit.tsx` (bật / tắt, mở tab, IPC, sự
+   kiện, phiên tới Session Host, cài đặt riêng, host đã lưu, hộp prompt kết nối) và thành phần UI
+   dùng chung (`components/ui`, `ContextMenu`, `files/*`, `SortMenu`, `LogViewer`) — ESLint chặn
+   phần còn lại. Kit không import module nào (tránh vòng import): danh sách được đăng ký lúc khởi
+   động.
+3. **IPC một kênh.** `modules:invoke(id, name, args)` thay vì một kênh Electron cho mỗi
+   `module:<id>:<name>` (hợp đồng IPC của app là bảng tĩnh); main vẫn tra handler theo
+   `module:<id>:<name>` và validate bằng schema của module.
+4. **Thêm năng lực.** `ctx.fromMain(name, params)` (Session Host hỏi phần main của CHÍNH module —
+   kubeconfig đã import đi main → Session Host, không qua renderer), `ctx.readFile` ở main (đọc
+   kubeconfig theo quyền `read-file`), mẫu quyền `$DOCKER_HOST` / `$KUBECONFIG`, `env` cho chương
+   trình chạy trên máy (plugin xác thực cần `AWS_PROFILE`…). Đường dẫn được chuẩn hoá trước khi
+   so với mẫu (`~/.kube/../.ssh/id_rsa` không lọt).
+5. **SshCapability.** `exec` / `spawn` / `openPty` nhận **argv** (lõi quote) thay vì chuỗi lệnh;
+   `openTerminal` trả Promise.
+6. **Tab Docker / K8s qua SSH** mở kết nối SSH riêng (không shell) rồi `module-attach` — không
+   dùng chung kết nối của một tab terminal đang mở (vòng đời tab độc lập, hỏi mật khẩu / host key
+   ngay trong tab như tab SFTP).
+7. **Kubernetes không dùng `@kubernetes/client-node`.** Bản 2.x là ESM-only, kéo theo undici,
+   openid-client, jsonpath… và không cho chèn kết nối tự mở (kênh direct-tcpip qua bastion). Thay
+   bằng client tối giản như Docker (`session-host/client.ts`): HTTPS dựng trên kết nối thô (TCP
+   thẳng hoặc kênh SSH), TLS vẫn kiểm theo CA / `tls-server-name` của kubeconfig; `yaml` (đọc
+   kubeconfig, YAML) và `ws` (exec, port-forward) — hai thư viện nhỏ, không phụ thuộc thêm.
+   Hỗ trợ: token, tokenFile, chứng chỉ client, basic, exec plugin (aws, gcloud,
+   gke-gcloud-auth-plugin, kubelogin — hỏi trước khi chạy, cache tới gần hết hạn, làm mới khi
+   401), OIDC (làm mới bằng refresh token).
+8. **Kubeconfig** do main đọc: KUBECONFIG (nhiều file) hoặc `~/.kube/config`. "File bạn thêm" =
+   **Import** (dán YAML, mã hoá trong vault; chứng chỉ phải nhúng `…-data`). File tham chiếu trong
+   kubeconfig chỉ đọc được dưới `~/.kube/`, `~/.minikube/` hoặc trong KUBECONFIG (quyền hiển thị
+   đúng như vậy).
+9. **Port-forward K8s** hiện trong tab K8s (ô "Port forwards"), không trong Forwards panel của tab
+   SSH (panel đó gắn với một kết nối SSH).
+10. **Nút ＋ thanh bên** vẫn là "New host" (thói quen / test cũ); lối vào "Add module…" nằm dưới các
+    mục module. Màn chào có thẻ **Add tools**.
+11. **Tailwind** phải quét `src/modules` (`@source` trong styles.css) — gốc của Vite renderer là
+    `src/renderer`, class chỉ dùng trong module sẽ không được tạo.
+12. **Gợi ý (3.12.4)**: nhớ "đã dò host này" 7 ngày trên máy (localStorage); lần gợi ý / "Don't
+    suggest again" lưu trong `settings.modules.<id>`. E2E tắt gợi ý mặc định (không phụ thuộc máy
+    chạy có Docker hay không); `SHELLHOUSE_TEST_DETECT` (chỉ khi bật test hooks) giả danh sách file.
+
+### 11.2. Chưa làm
+
+- Nút **Enable** ngay trong thông báo có bản cập nhật (3.12.5) — chờ thông báo cập nhật mang danh
+  sách module mới. Nhãn NEW trên trang Modules vẫn có.
+- Docker: copy file vào / ra container (giai đoạn 2 theo 6.3); exec trên máy qua Engine API
+  hijack (hiện dùng `docker` CLI trong PTY).
+- Kubernetes: lịch sử rollout (danh sách ReplicaSet theo revision), Helm (câu hỏi mở 2), test với
+  kind trên CI (hiện dùng API server giả trên mọi nền tảng).
+- Đồng bộ (mục 4): manifest đã khai báo `syncRecordTypes`; `ctx.sync` làm cùng ADR-013.

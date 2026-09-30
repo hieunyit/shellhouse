@@ -1,6 +1,6 @@
-/** Bộ đệm log của tab (thuần — test được không cần giao diện). */
+/** Bộ đệm log của tab log (Docker, Kubernetes…) — thuần, test được không cần giao diện. */
 
-/** Giới hạn bộ đệm mỗi tab (ADR-014 mục 7.6 — áp cho cả Docker). */
+/** Giới hạn bộ đệm mỗi tab (ADR-014 mục 7.6). */
 export const MAX_LINES = 50_000
 
 export interface Line {
@@ -39,5 +39,37 @@ export class LineBuffer {
   clear(): void {
     this.lines = []
     this.partial = null
+  }
+}
+
+/** Nguồn log cho `LogViewer`: nơi nhận dữ liệu đẩy vào, giao diện đăng ký để vẽ lại. */
+export class LogFeed {
+  private readonly buffer = new LineBuffer()
+  private readonly listeners = new Set<() => void>()
+
+  push(text: string, err = false): void {
+    this.buffer.push(text, err)
+    for (const l of this.listeners) l()
+  }
+
+  clear(): void {
+    this.buffer.clear()
+    for (const l of this.listeners) l()
+  }
+
+  lines(): Line[] {
+    return this.buffer.all()
+  }
+
+  text(): string {
+    return this.buffer
+      .all()
+      .map((l) => l.text)
+      .join('\n')
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
   }
 }

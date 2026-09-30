@@ -96,7 +96,9 @@ export function describePermission(p: ModulePermission): string {
     case 'run-program':
       return `May run \`${p.binary}\` on this computer — asks first`
     case 'read-file':
-      return `Reads ${p.path}`
+      return p.path === '$KUBECONFIG'
+        ? 'Reads the files listed in KUBECONFIG'
+        : `Reads ${p.path.replace(/\/\*\*$/, '/')}`
     case 'network':
       return `Connects to ${p.hosts}`
     case 'secrets':

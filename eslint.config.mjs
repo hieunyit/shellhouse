@@ -49,6 +49,7 @@ const moduleZones = [
         './components/ContextMenu.tsx',
         './components/files',
         './components/SortMenu.tsx',
+        './components/LogViewer.tsx',
         './lib/format.ts',
         './lib/platform.ts'
       ],

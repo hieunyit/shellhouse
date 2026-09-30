@@ -8,6 +8,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Changed
 
+- **S3 is now a module** (on by default — nothing changes for existing accounts, tabs, pins or
+  saved workspaces). Its speed settings moved from Files to Settings → Modules → S3 storage.
 - **New look**: a new logo and app icon (a roof over the terminal prompt) and a teal accent color.
 - **Easier to read**: small text is now at least 12 px, and secondary text in both light and dark
   themes meets the WCAG AA contrast ratio (4.5:1) on every background.
@@ -21,6 +23,22 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Added
 
+- **Modules** (Settings → Modules): tools you can turn on and off. Search (by name, keyword or
+  a near-miss like "kubernets"), filter by category and status, see what each module adds and
+  exactly which permissions it uses before enabling it, and remove its data. Modules ship with
+  the app and are reviewed like the rest of it.
+- **Docker module**: containers, images, volumes, networks and Compose projects on this computer
+  and on any SSH host — through the SSH connection, with no port opened and nothing installed on
+  the server. Live CPU / memory, log tabs (follow, search, download), **Open shell** as a terminal
+  tab, pull / prune with a preview, and a read-only mode for production servers.
+- **Kubernetes module**: contexts from your kubeconfig (or imported into the vault), live
+  resource tables for pods, deployments, services, CRDs and more, pod logs, shells, port-forwards,
+  scale / rollout restart, secrets revealed only on request, and YAML edited in your own editor
+  (applied only if nobody changed the object meanwhile). Clusters behind a bastion go through one
+  of your SSH hosts; production contexts can be read-only or require typing the name to delete.
+  Sign-in helpers (`aws`, `gcloud`, `kubelogin`) run only after you allow them.
+- **Suggestions**: when Docker is found on a server you connect to, or a kubeconfig on this
+  computer, a one-line hint offers the matching module (at most once a month; can be turned off).
 - **Welcome screen** when no tab is open: add a host, import hosts, quick connect or open a local
   terminal. The sidebar shows a compact **Add your servers** card instead of a large empty box.
 - **Settings → About**: version, components, release notes, report a problem, copy details.

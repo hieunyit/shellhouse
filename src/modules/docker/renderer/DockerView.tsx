@@ -603,7 +603,8 @@ export function DockerTab({
           )}
         </div>
       </nav>
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* Container riêng: cột của bảng co giãn theo chỗ còn lại (khi có bảng chi tiết bên phải). */}
+      <div className="@container flex min-w-0 flex-1 flex-col">
         <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
           <div className="flex h-7 w-56 items-center gap-1.5 rounded-md border border-line bg-subtle px-2">
             <Search size={13} className="text-faint" />
@@ -689,7 +690,7 @@ export function DockerTab({
               ) : null
             }
             columns={containerColumns}
-            gridClass="grid-cols-[minmax(10rem,2fr)_5rem_auto] @lg:grid-cols-[minmax(10rem,2fr)_5rem_minmax(8rem,1.5fr)_auto] @xl:grid-cols-[minmax(10rem,2fr)_5rem_minmax(8rem,1.5fr)_7rem_auto] @2xl:grid-cols-[minmax(10rem,2fr)_5rem_minmax(8rem,1.5fr)_minmax(6rem,1fr)_7rem_auto]"
+            gridClass="grid-cols-[minmax(10rem,2fr)_5rem_5rem] @lg:grid-cols-[minmax(10rem,2fr)_5rem_minmax(8rem,1.5fr)_5rem] @xl:grid-cols-[minmax(10rem,2fr)_5rem_minmax(8rem,1.5fr)_7rem_5rem] @2xl:grid-cols-[minmax(10rem,2fr)_5rem_minmax(8rem,1.5fr)_minmax(6rem,1fr)_7rem_5rem]"
             nameSort={{ key: 'name', label: 'Name', kind: 'text' }}
             sort={sort}
             onSort={setSort}

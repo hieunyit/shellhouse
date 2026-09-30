@@ -6,7 +6,7 @@ import { parseLabels, parsePorts } from '../../session-host/cli-backend'
 import { execArgs, maskInspect } from '../../session-host/service'
 import { localSocketCandidates, WINDOWS_PIPE } from '../../session-host'
 import { DockerOp, isMutating, maskEnv } from '../../shared/ops'
-import { LineBuffer, MAX_LINES } from '../../shared/log-buffer'
+import { LineBuffer, MAX_LINES } from '@shared/log-buffer'
 
 function frame(stream: number, text: string): Buffer {
   const data = Buffer.from(text)

@@ -15,7 +15,7 @@ export const dockerManifest: ModuleManifest = {
   category: 'containers',
   keywords: ['docker', 'container', 'compose', 'podman', 'image', 'colima', 'orbstack', 'moby'],
   source: 'builtin',
-  since: '1.3.0',
+  since: '1.2.0',
   permissions: [
     {
       kind: 'ssh-socket',

@@ -1,4 +1,6 @@
 @import 'tailwindcss';
+/* Giao diện của module nằm ngoài src/renderer (ADR-014) — Tailwind phải quét cả thư mục đó. */
+@source '../../modules';
 /* Font tự host (CSP chỉ cho phép 'self'); variable font: một file cho mọi độ đậm. */
 @import '@fontsource-variable/inter';
 @import '@fontsource-variable/jetbrains-mono';
