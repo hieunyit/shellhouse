@@ -126,7 +126,7 @@ export function HostRow({
             <Star size={11} className="shrink-0 fill-warning text-warning" aria-label="Favorite" />
           )}
         </span>
-        <span className="block truncate font-mono text-[11px] text-faint">
+        <span className="block truncate font-mono text-xs text-faint">
           {groupPath && <span className="font-sans">{groupPath} · </span>}
           {address}
         </span>

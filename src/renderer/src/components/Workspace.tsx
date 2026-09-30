@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   DockviewReact,
   type DockviewApi,
@@ -11,12 +11,13 @@ import {
   Cloud,
   Columns2,
   Copy,
+  FileInput,
   RotateCw,
   Rows2,
   Server,
   SquareTerminal,
-  TerminalSquare,
-  X
+  X,
+  Zap
 } from 'lucide-react'
 import { useContextMenu } from './ContextMenu'
 import { controllers } from '../terminal/registry'
@@ -26,7 +27,9 @@ import { hostColorClass } from './hostColors'
 import { keybindingFor } from '@shared/commands'
 import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useSettings } from '../stores/settings'
-import { Button, connectionLabel, cx, Kbd, StatusDot } from './ui'
+import { connectionLabel, cx, Kbd, StatusDot } from './ui'
+import { Logo } from './Logo'
+import { focusQuickConnect, openSidebarDialog } from '../stores/ui-requests'
 import { useTabs } from '../stores/tabs'
 import { TerminalView } from '../terminal/TerminalView'
 import { S3View } from '../s3/S3View'
@@ -224,42 +227,99 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
   )
 }
 
+/** Một lựa chọn trên màn chào. */
+function StartCard({
+  icon,
+  title,
+  text,
+  hint,
+  testId,
+  onClick
+}: {
+  icon: React.ReactNode
+  title: string
+  text: string
+  hint?: string
+  testId: string
+  onClick: () => void
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      className="group flex items-start gap-3 rounded-xl border border-line bg-surface p-3.5 text-left shadow-xs transition-[border-color,box-shadow] duration-150 hover:border-accent/50 hover:shadow-md focus-visible:border-accent"
+      onClick={onClick}
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2 text-[13px] font-semibold text-fg">
+          {title}
+          {hint && <Kbd>{hint}</Kbd>}
+        </span>
+        <span className="mt-0.5 block text-xs text-muted">{text}</span>
+      </span>
+    </button>
+  )
+}
+
+/** Không còn tab nào: màn chào với các cách bắt đầu. */
 function Empty(): React.JSX.Element {
   const overrides = useSettings((s) => s.settings.keybindings)
+  const hasHosts = useHosts((s) => s.tree.hosts.length > 0)
   const key = (id: string): string => displayKeybinding(keybindingFor(id, overrides, isMac))
-  const hints = [
-    { id: 'tab.new', label: 'New terminal' },
-    { id: 'hosts.search', label: 'Search hosts' },
-    { id: 'palette.open', label: 'Command palette' }
-  ]
   return (
-    <div className="animate-fade-in flex h-full flex-col items-center justify-center gap-5 bg-canvas p-6 text-center">
-      <div className="flex size-12 items-center justify-center rounded-xl border border-line bg-surface text-muted shadow-xs">
-        <TerminalSquare size={22} />
-      </div>
-      <div>
-        <p className="text-sm font-semibold text-fg">No open sessions</p>
-        <p className="mt-1 text-xs text-muted">
-          Open a local terminal, double-click a saved host, or use quick connect.
+    <div
+      className="animate-fade-in flex h-full flex-col items-center justify-center gap-6 overflow-auto bg-canvas p-6"
+      data-testid="welcome"
+    >
+      <div className="flex flex-col items-center text-center">
+        <Logo size={52} className="drop-shadow-md" />
+        <h1 className="mt-3 text-lg font-semibold tracking-tight text-fg">
+          {hasHosts ? 'No open sessions' : 'Welcome to Shellhouse'}
+        </h1>
+        <p className="mt-1 max-w-sm text-[13px] text-muted">
+          {hasHosts
+            ? 'Double-click a host in the sidebar, or start something new.'
+            : 'SSH, SFTP, Telnet, serial and S3 in one place. How would you like to start?'}
         </p>
       </div>
-      <Button
-        variant="primary"
-        icon={<SquareTerminal size={14} />}
-        onClick={() => useTabs.getState().addLocal()}
-      >
-        New terminal
-      </Button>
-      <dl className="grid grid-cols-[auto_auto] items-center gap-x-4 gap-y-2 text-xs">
-        {hints.map((h) => (
-          <Fragment key={h.id}>
-            <dt className="text-right text-muted">{h.label}</dt>
-            <dd className="text-left">
-              <Kbd>{key(h.id)}</Kbd>
-            </dd>
-          </Fragment>
-        ))}
-      </dl>
+      <div className="grid w-full max-w-xl grid-cols-1 gap-2.5 sm:grid-cols-2">
+        <StartCard
+          icon={<Server size={18} />}
+          title="Add a host"
+          text="Save a server with its login — connect later in one click."
+          testId="welcome-add-host"
+          onClick={() => void openSidebarDialog('new-host')}
+        />
+        <StartCard
+          icon={<FileInput size={18} />}
+          title="Import hosts"
+          text="From ~/.ssh/config, MobaXterm, Termius or a CSV file."
+          testId="welcome-import"
+          onClick={() => void openSidebarDialog('import-hosts')}
+        />
+        <StartCard
+          icon={<Zap size={18} />}
+          title="Quick connect"
+          text="Type user@host:port — nothing is saved."
+          testId="welcome-quick-connect"
+          onClick={focusQuickConnect}
+        />
+        <StartCard
+          icon={<SquareTerminal size={18} />}
+          title="Local terminal"
+          text="Open a shell on this computer."
+          hint={key('tab.new')}
+          testId="welcome-new-terminal"
+          onClick={() => useTabs.getState().addLocal()}
+        />
+      </div>
+      <p className="text-xs text-faint">
+        Search hosts <Kbd>{key('hosts.search')}</Kbd> · Command palette{' '}
+        <Kbd>{key('palette.open')}</Kbd>
+      </p>
     </div>
   )
 }

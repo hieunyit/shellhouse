@@ -84,6 +84,22 @@ test('SFTP qua giao diện: tải lên, tạo thư mục, tải về, xoá', asy
   await panel.getByTestId('sftp-sort').click()
   await page.getByRole('menuitem', { name: 'Name' }).click()
 
+  // Chọn nhiều (Ctrl+bấm) rồi Del → hộp xoá liệt kê đủ, xoá cả hai.
+  writeFileSync(join(remote, 'xoa-1.tmp'), '1')
+  writeFileSync(join(remote, 'xoa-2.tmp'), '2')
+  await panel.getByRole('button', { name: 'Refresh' }).first().click()
+  await panel.locator('[data-testid="sftp-entry"][data-name="xoa-1.tmp"]').click()
+  await panel
+    .locator('[data-testid="sftp-entry"][data-name="xoa-2.tmp"]')
+    .click({ modifiers: ['Control'] })
+  await expect(panel.getByTestId('sftp-status')).toContainText('2 selected')
+  await page.keyboard.press('Delete')
+  await expect(page.getByTestId('sftp-dialog')).toContainText('Delete these 2 items')
+  await page.getByTestId('sftp-dialog-submit').click()
+  await expect(panel.locator('[data-testid="sftp-entry"][data-name="xoa-1.tmp"]')).toHaveCount(0)
+  await expect(panel.locator('[data-testid="sftp-entry"][data-name="xoa-2.tmp"]')).toHaveCount(0)
+  expect(existsSync(join(remote, 'xoa-1.tmp'))).toBe(false)
+
   // Tải lên (hộp thoại chọn file được thay bằng đường dẫn cố định).
   await app.evaluate(
     ({ dialog }, file) => {

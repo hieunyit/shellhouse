@@ -114,7 +114,7 @@ export function WorkspacesDialog({ onClose }: { onClose: () => void }): React.JS
               <LayoutGrid size={15} className="shrink-0 text-muted" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13px] text-fg">{w.name}</p>
-                <p className="flex items-center gap-1 text-[11px] text-faint">
+                <p className="flex items-center gap-1 text-xs text-faint">
                   {w.items.some((i) => i.target.kind !== 'local') ? (
                     <Server size={11} />
                   ) : (

@@ -1,18 +1,36 @@
 import { useState } from 'react'
-import { Ban, ChevronRight, CircleAlert, CircleCheck, Download, Upload, X } from 'lucide-react'
+import {
+  Ban,
+  ChevronRight,
+  CircleAlert,
+  CircleCheck,
+  Download,
+  RotateCcw,
+  Upload,
+  X
+} from 'lucide-react'
 import type { TransferStatus } from '@shared/sftp'
-import { cx, IconButton } from '../components/ui'
-import { formatSize } from './format'
+import { cx, IconButton } from '../ui'
+import { formatSize } from '../../lib/format'
 
-/** Danh sách truyền file của tab S3: gọn, thu lại được; chỉ lượt đang chạy mới có thanh tiến độ. */
-export function S3Transfers({
+/**
+ * Danh sách truyền file (S3 và SFTP): gọn, thu lại được; chỉ lượt đang chạy mới có thanh tiến độ.
+ * `onRetry` (SFTP): thử lại lượt lỗi / huỷ, tiếp tục từ chỗ dừng.
+ */
+export function TransferList({
   transfers,
   onCancel,
-  onClear
+  onClear,
+  onRetry,
+  testId,
+  rowTestId
 }: {
   transfers: TransferStatus[]
   onCancel: (id: string) => void
   onClear: () => void
+  onRetry?: (id: string) => void
+  testId: string
+  rowTestId: string
 }): React.JSX.Element | null {
   const [open, setOpen] = useState(true)
   if (transfers.length === 0) return null
@@ -32,7 +50,7 @@ export function S3Transfers({
     .join(' · ')
 
   return (
-    <div className="shrink-0 border-t border-line bg-surface" data-testid="s3-transfers">
+    <div className="shrink-0 border-t border-line bg-surface" data-testid={testId}>
       <div className="flex h-8 items-center gap-2 pr-2 pl-2.5 text-xs">
         <button
           type="button"
@@ -76,7 +94,7 @@ export function S3Transfers({
               <li
                 key={t.id}
                 className="rounded-md px-1.5 py-1 hover:bg-hover"
-                data-testid="s3-transfer"
+                data-testid={rowTestId}
                 data-state={t.state}
               >
                 <div className="flex items-center gap-2 text-xs">
@@ -101,14 +119,17 @@ export function S3Transfers({
                     {name}
                   </span>
                   {t.edit && (
-                    <span className="shrink-0 rounded bg-subtle px-1 text-[10px] text-faint">
+                    <span className="shrink-0 rounded bg-subtle px-1 text-[11px] text-faint">
                       edit
                     </span>
                   )}
                   <span className="shrink-0 text-faint tabular-nums">
                     {t.state === 'running' && `${pct}% · ${formatSize(t.bytesPerSecond)}/s`}
                     {t.state === 'queued' && 'Queued'}
-                    {t.state === 'done' && formatSize(t.size)}
+                    {t.state === 'done' &&
+                      (t.edit
+                        ? 'Saved to server'
+                        : `${formatSize(t.size)}${t.resumedFrom > 0 ? ' (resumed)' : ''}`)}
                     {t.state === 'cancelled' && 'Cancelled'}
                     {t.state === 'error' && 'Failed'}
                   </span>
@@ -123,6 +144,17 @@ export function S3Transfers({
                     >
                       <X size={12} />
                     </IconButton>
+                  ) : onRetry && (t.state === 'error' || t.state === 'cancelled') ? (
+                    <IconButton
+                      label="Retry (resumes where it stopped)"
+                      size="sm"
+                      className="size-5"
+                      onClick={() => {
+                        onRetry(t.id)
+                      }}
+                    >
+                      <RotateCcw size={12} />
+                    </IconButton>
                   ) : (
                     <span className="size-5 shrink-0" />
                   )}
@@ -136,7 +168,7 @@ export function S3Transfers({
                   </div>
                 )}
                 {t.error && (
-                  <p className="mt-0.5 ml-5 truncate text-[11px] text-danger" title={t.error}>
+                  <p className="mt-0.5 ml-5 truncate text-xs text-danger" title={t.error}>
                     {t.error}
                   </p>
                 )}

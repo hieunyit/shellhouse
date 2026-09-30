@@ -39,6 +39,7 @@ import { bestScore } from '@shared/fuzzy'
 import { countHostsRecursive, groupMoveProblem } from '@shared/group-tree'
 import type { GroupSummary, HostSummary } from '@shared/hosts'
 import { GroupForm, HostForm, ImportDialog } from '../lazy'
+import { Logo } from './Logo'
 import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
 import { S3Section } from '../s3/S3Section'
@@ -59,7 +60,8 @@ import {
   TagHostsDialog
 } from './sidebar/dialogs'
 import { DropLine, HostRow, type DropPos } from './sidebar/HostRow'
-import { cx, IconButton } from './ui'
+import { Button, cx, IconButton } from './ui'
+import { useUiRequests } from '../stores/ui-requests'
 
 // ---------- Kéo thả ----------
 
@@ -146,6 +148,19 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
   const anchor = useRef<string | null>(null)
   const [drop, setDrop] = useState<{ key: string; pos: DropPos } | null>(null)
   const [dialog, setDialog] = useState<Dialog | null>(null)
+  // Màn chào / bảng lệnh yêu cầu mở "New host" hoặc "Import".
+  useEffect(
+    () =>
+      useUiRequests.subscribe((state, prev) => {
+        if (!state.sidebar || state.sidebar === prev.sidebar) return
+        setDialog(
+          state.sidebar.kind === 'new-host'
+            ? { kind: 'host', host: null, groupId: null }
+            : { kind: 'import' }
+        )
+      }),
+    []
+  )
   const { menu, open: openMenu } = useContextMenu()
   const expandTimer = useRef<number | null>(null)
 
@@ -738,7 +753,7 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
           />
           <span className="min-w-0 flex-1 truncate font-medium">{group.name}</span>
           <span
-            className="rounded-full bg-subtle px-1.5 text-[10px] leading-4 text-faint tabular-nums group-hover:hidden"
+            className="rounded-full bg-subtle px-1.5 text-[11px] leading-4 text-faint tabular-nums group-hover:hidden"
             data-testid="group-count"
             title={`${plural(count, 'host')} including subgroups`}
           >
@@ -909,10 +924,7 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
         }}
       />
       <div className="flex h-11 items-center gap-2 border-b border-line px-3">
-        {/* Cùng kiểu với icon app (build/icon.png). */}
-        <div className="flex size-6 items-center justify-center rounded-md bg-gradient-to-b from-[#1c2230] to-[#0d0f12] text-[#4c8dff] ring-1 ring-black/10 dark:ring-white/10">
-          <span className="font-mono text-[11px] font-bold tracking-tighter">&gt;_</span>
-        </div>
+        <Logo size={24} className="shrink-0" />
         <span className="flex-1 text-sm font-semibold text-fg">Shellhouse</span>
         <IconButton
           label="New host"
@@ -1050,7 +1062,9 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
             {tree.children(null).map((g) => renderGroup(g))}
             <div
               className={cx(
-                'min-h-8 rounded-md',
+                // Chưa có host nào: không cần chừa chỗ thả (thẻ "Add your servers" nằm ngay dưới).
+                'rounded-md',
+                (hosts.length > 0 || groups.length > 0) && 'min-h-8',
                 drop?.key === 'root' && 'bg-accent-soft ring-1 ring-accent'
               )}
               data-testid="ungrouped"
@@ -1066,10 +1080,41 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
               ))}
             </div>
             {hosts.length === 0 && groups.length === 0 && (
-              <div className="mx-1 mt-2 rounded-lg border border-dashed border-line p-4 text-center">
-                <Server size={20} className="mx-auto mb-2 text-faint" />
-                <p className="text-xs text-muted">No hosts yet.</p>
-                <p className="mt-1 text-xs text-faint">Add one, or import from ~/.ssh/config.</p>
+              <div
+                className="mx-1 mt-1 rounded-lg border border-line bg-subtle/50 p-3"
+                data-testid="sidebar-get-started"
+              >
+                <p className="flex items-center gap-1.5 text-[13px] font-medium text-fg">
+                  <Server size={14} className="text-accent" /> Add your servers
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  Save a host once, then connect with a double-click.
+                </p>
+                <div className="mt-2.5 flex gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    icon={<Plus size={13} />}
+                    className="flex-1"
+                    data-testid="empty-add-host"
+                    onClick={() => {
+                      setDialog({ kind: 'host', host: null, groupId: null })
+                    }}
+                  >
+                    Add host
+                  </Button>
+                  <Button
+                    size="sm"
+                    icon={<FileInput size={13} />}
+                    className="flex-1"
+                    data-testid="empty-import"
+                    onClick={() => {
+                      setDialog({ kind: 'import' })
+                    }}
+                  >
+                    Import
+                  </Button>
+                </div>
               </div>
             )}
             <S3Section />

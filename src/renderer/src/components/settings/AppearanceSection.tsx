@@ -72,7 +72,7 @@ function Preview({ mode }: { mode: 'system' | 'light' | 'dark' }): React.JSX.Ele
         )}
       />
       <div className="flex-1 p-1.5">
-        <div className={cx('mb-1 h-1 w-3/4 rounded', dark ? 'bg-[#4c8dff]' : 'bg-[#2563eb]')} />
+        <div className={cx('mb-1 h-1 w-3/4 rounded', dark ? 'bg-[#2cc9b5]' : 'bg-[#0f766e]')} />
         <div className={cx('h-1 w-1/2 rounded', dark ? 'bg-[#353b45]' : 'bg-[#cdd2d9]')} />
       </div>
     </div>

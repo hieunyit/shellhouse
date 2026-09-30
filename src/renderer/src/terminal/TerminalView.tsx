@@ -147,7 +147,7 @@ export function TerminalView({
           </span>
           {protocol === 'telnet' && (
             <span
-              className="ml-2 shrink-0 rounded bg-warning-soft px-1.5 py-px text-[11px] font-medium text-warning"
+              className="ml-2 shrink-0 rounded bg-warning-soft px-1.5 py-px text-xs font-medium text-warning"
               data-testid="session-telnet"
               title="Telnet sends everything, including passwords, in clear text"
             >
@@ -156,7 +156,7 @@ export function TerminalView({
           )}
           {protocol === 'serial' && (
             <span
-              className="ml-2 shrink-0 rounded bg-subtle px-1.5 py-px text-[11px] font-medium text-muted"
+              className="ml-2 shrink-0 rounded bg-subtle px-1.5 py-px text-xs font-medium text-muted"
               data-testid="session-serial"
             >
               Serial
@@ -164,7 +164,7 @@ export function TerminalView({
           )}
           {legacy && (
             <span
-              className="ml-2 hidden shrink-0 rounded bg-warning-soft px-1.5 py-px text-[11px] font-medium text-warning @sm:inline"
+              className="ml-2 hidden shrink-0 rounded bg-warning-soft px-1.5 py-px text-xs font-medium text-warning @sm:inline"
               data-testid="session-legacy"
               title="Legacy algorithms are allowed for this host (weaker security)"
             >
@@ -174,7 +174,7 @@ export function TerminalView({
           {env?.path && (
             <span
               className={cx(
-                'ml-2 hidden min-w-0 truncate rounded px-1.5 py-px text-[11px] font-medium @md:inline',
+                'ml-2 hidden min-w-0 truncate rounded px-1.5 py-px text-xs font-medium @md:inline',
                 env.color ? hostTileClass[env.color] : 'bg-subtle text-muted'
               )}
               data-testid="session-group-path"

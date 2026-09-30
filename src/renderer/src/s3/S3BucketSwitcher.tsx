@@ -95,7 +95,7 @@ export function S3BucketSwitcher({
           className="absolute top-full left-0 z-40 mt-1.5 w-64 rounded-lg border border-line bg-surface p-1 shadow-lg"
           data-testid="s3-bucket-menu"
         >
-          <p className="px-2 pt-1 pb-1.5 text-[11px] font-medium text-faint">Switch bucket</p>
+          <p className="px-2 pt-1 pb-1.5 text-xs font-medium text-faint">Switch bucket</p>
           <label className="mx-1 mb-1 flex h-7 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent">
             <Search size={12} className="shrink-0 text-faint" />
             <input

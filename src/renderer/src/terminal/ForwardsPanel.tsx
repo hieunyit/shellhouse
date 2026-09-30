@@ -163,7 +163,7 @@ export function ForwardsPanel({
             >
               <div className="flex items-center gap-2">
                 <span className={cx('size-2 shrink-0 rounded-full', stateStyle[state])} />
-                <span className="rounded bg-subtle px-1.5 py-0.5 font-mono text-[10px] font-semibold text-muted">
+                <span className="rounded bg-subtle px-1.5 py-0.5 font-mono text-[11px] font-semibold text-muted">
                   -{row.spec.kind}
                 </span>
                 <span className="min-w-0 flex-1 font-mono text-xs break-all">
@@ -213,7 +213,7 @@ export function ForwardsPanel({
                   </Button>
                 )}
                 {row.saved?.autoStart && (
-                  <span className="rounded bg-subtle px-1.5 py-0.5 text-[11px] text-muted">
+                  <span className="rounded bg-subtle px-1.5 py-0.5 text-xs text-muted">
                     auto-start
                   </span>
                 )}

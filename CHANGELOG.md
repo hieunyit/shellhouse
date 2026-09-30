@@ -6,6 +6,26 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- **New look**: a new logo and app icon (a roof over the terminal prompt) and a teal accent color.
+- **Easier to read**: small text is now at least 12 px, and secondary text in both light and dark
+  themes meets the WCAG AA contrast ratio (4.5:1) on every background.
+- **SFTP panes rebuilt** to match the S3 browser: sortable Name / Size / Modified (and Permissions)
+  columns, multi-select (Ctrl / Shift-click, Ctrl+A, arrow keys), right-click menu (Open, Edit,
+  Download, Rename, Permissions, Copy path, Delete), F2 / Del / Enter / Backspace, a status bar,
+  downloading or deleting several items at once, dragging several items between Local and Remote,
+  and the compact transfer list.
+- **Toolbar**: split right / split down are grouped under **Layout ▾**; Layout, Workspaces,
+  Snippets and MultiExec show text labels when there is room.
+
+### Added
+
+- **Welcome screen** when no tab is open: add a host, import hosts, quick connect or open a local
+  terminal. The sidebar shows a compact **Add your servers** card instead of a large empty box.
+- **Settings → About**: version, components, release notes, report a problem, copy details.
+- Command palette: **New host**, **Import hosts** and **Quick connect**.
+
 ## [1.2.0-beta.2] - 2026-09-30
 
 ### Performance

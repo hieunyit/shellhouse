@@ -55,16 +55,18 @@
   --sh-line: #e2e5ea;
   --sh-line-strong: #cdd2d9;
   --sh-fg: #1a1d21;
-  --sh-muted: #59616c;
-  --sh-faint: #8a929c;
-  --sh-accent: #2563eb;
-  --sh-accent-hover: #1d4fd7;
+  /* Chữ phụ / chữ mờ: tương phản ≥ 4.5:1 (WCAG AA) trên mọi nền của theme, kể cả hover. */
+  --sh-muted: #4b5360;
+  --sh-faint: #606977;
+  /* Màu nhấn thương hiệu: xanh ngọc (teal) — gợi terminal, khác màu xanh dương đại trà. */
+  --sh-accent: #0f766e;
+  --sh-accent-hover: #115e59;
   --sh-accent-fg: #ffffff;
   /* Nền nút chính (chữ trắng, tương phản ≥ 4.5:1). */
-  --sh-accent-solid: #2563eb;
-  --sh-accent-solid-hover: #1d4fd7;
-  --sh-accent-soft: #e0eaff;
-  --sh-danger: #d4351c;
+  --sh-accent-solid: #0f766e;
+  --sh-accent-solid-hover: #115e59;
+  --sh-accent-soft: #dcf3ef;
+  --sh-danger: #c42e17;
   --sh-danger-solid: #c9311a;
   --sh-danger-soft: #fdecea;
   --sh-warning: #a15c07;
@@ -75,7 +77,7 @@
   --sh-terminal: #fbfbfc;
   --sh-shadow: 0 12px 32px rgb(16 24 40 / 0.14), 0 2px 6px rgb(16 24 40 / 0.08);
   --sh-overlay: rgb(15 20 30 / 0.2);
-  --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2359616c' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234b5360' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 [data-theme='dark'] {
@@ -88,14 +90,14 @@
   --sh-line: #262b33;
   --sh-line-strong: #353b45;
   --sh-fg: #e7e9ec;
-  --sh-muted: #9ba3ad;
-  --sh-faint: #6c7480;
-  --sh-accent: #4c8dff;
-  --sh-accent-hover: #6aa0ff;
+  --sh-muted: #a3abb5;
+  --sh-faint: #8a929e;
+  --sh-accent: #2cc9b5;
+  --sh-accent-hover: #5eead4;
   --sh-accent-fg: #ffffff;
-  --sh-accent-solid: #2f6fe0;
-  --sh-accent-solid-hover: #3b7cf5;
-  --sh-accent-soft: #1a2a47;
+  --sh-accent-solid: #0e7a70;
+  --sh-accent-solid-hover: #0f8a7e;
+  --sh-accent-soft: #12302d;
   --sh-danger: #ff7a6e;
   /* Nền nút nguy hiểm (chữ trắng, tương phản ≥ 4.5:1). */
   --sh-danger-solid: #c4382b;
@@ -107,7 +109,7 @@
   --sh-terminal: #0f1115;
   --sh-shadow: 0 16px 40px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.35);
   --sh-overlay: rgb(0 0 0 / 0.45);
-  --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ba3ad' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a3abb5' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 html,

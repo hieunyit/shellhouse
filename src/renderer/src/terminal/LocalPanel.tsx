@@ -1,25 +1,58 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
-import { ArrowRight, ArrowUp, Eye, EyeOff, File, Folder, Laptop, RefreshCw } from 'lucide-react'
+import {
+  ArrowRight,
+  ArrowUp,
+  Copy,
+  Eye,
+  EyeOff,
+  File,
+  Folder,
+  FolderOpen,
+  Laptop,
+  RefreshCw,
+  X
+} from 'lucide-react'
 import { DRAG_LOCAL, DRAG_REMOTE, joinLocal, type LocalListing } from '@shared/local-files'
 import type { TransferStatus } from '@shared/sftp'
-import { Button, cx, IconButton, Input, Notice } from '../components/ui'
+import { IconButton, Input, Notice } from '../components/ui'
 import type { LocalTarget, SftpActions } from './SftpPanel'
+import { useContextMenu } from '../components/ContextMenu'
 import { SortMenu, usePersistentSort } from '../components/SortMenu'
+import { FileTable, type FileColumn } from '../components/files/FileTable'
+import { Empty, ToolButton } from '../components/files/parts'
+import { cleanError, dateFormat, formatSize } from '../lib/format'
 import { FILE_SORT_KEYS, FILE_SORT_OPTIONS, nameOrder, type FileSort } from './file-sort'
 
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`
-  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`
-  if (n < 1000 * 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`
-  return `${(n / 1024 ** 4).toFixed(2)} TB`
-}
+type LocalEntry = LocalListing['entries'][number]
 
-function cleanError(e: unknown): string {
-  return (e instanceof Error ? e.message : String(e)).replace(
-    /^Error invoking remote method '[^']+': (Error: )?/,
-    ''
-  )
+const [NAME_SORT, SIZE_SORT, MTIME_SORT] = FILE_SORT_OPTIONS
+const GRID = 'grid-cols-[minmax(0,1fr)_4.5rem] @md:grid-cols-[minmax(0,1fr)_4.5rem_8.5rem]'
+const COLUMNS: FileColumn<LocalEntry, FileSort>[] = [
+  {
+    id: 'size',
+    label: 'Size',
+    sort: SIZE_SORT,
+    align: 'right',
+    render: (e) => (e.isDir ? '' : formatSize(e.size))
+  },
+  {
+    id: 'mtime',
+    label: 'Modified',
+    sort: MTIME_SORT,
+    className: 'hidden @md:block',
+    render: (e) => (e.mtime ? dateFormat.format(new Date(e.mtime)) : '')
+  }
+]
+
+/** Tên kéo từ khung Remote: mảng JSON (nhiều mục) hoặc một tên (bản cũ). */
+function remoteNames(data: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(data)
+    if (Array.isArray(parsed)) return parsed.filter((n): n is string => typeof n === 'string')
+  } catch {
+    // Không phải JSON: một tên.
+  }
+  return data ? [data] : []
 }
 
 /**
@@ -48,6 +81,7 @@ export function LocalPanel({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [dragOver, setDragOver] = useState(false)
   const lastDone = useRef(0)
+  const { menu, open: openMenu } = useContextMenu()
 
   const apply = useCallback(
     (result: LocalListing) => {
@@ -108,17 +142,22 @@ export function LocalPanel({
     })
   const pathsOf = (names: Iterable<string>): string[] =>
     listing ? [...names].map((n) => joinLocal(listing.path, n, listing.sep)) : []
+  const chosen = entries.filter((e) => selected.has(e.name))
+  const fileCount = entries.filter((e) => !e.isDir).length
+  const folderCount = entries.length - fileCount
+  const filesSize = entries.reduce((n, e) => n + (e.isDir ? 0 : e.size), 0)
 
-  const uploadSelected = (): void => {
-    void actionsRef.current?.upload(pathsOf(selected))
+  const uploadNames = (names: Iterable<string>): void => {
+    void actionsRef.current?.upload(pathsOf(names))
+  }
+  const open = (entry: LocalEntry): void => {
+    if (listing && entry.isDir) void load(joinLocal(listing.path, entry.name, listing.sep))
+    else uploadNames([entry.name])
   }
 
   return (
     <section
-      className={cx(
-        'flex min-w-0 flex-1 flex-col border-r border-line bg-surface',
-        dragOver && 'ring-2 ring-accent ring-inset'
-      )}
+      className="@container relative flex min-w-0 flex-1 flex-col border-r border-line bg-surface"
       data-testid="local-panel"
       aria-label="Local files"
       onDragOver={(e) => {
@@ -127,23 +166,23 @@ export function LocalPanel({
           setDragOver(true)
         }
       }}
-      onDragLeave={() => {
-        setDragOver(false)
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false)
       }}
       onDrop={(e) => {
         setDragOver(false)
-        const name = e.dataTransfer.getData(DRAG_REMOTE)
-        if (!name) return
+        const names = remoteNames(e.dataTransfer.getData(DRAG_REMOTE))
+        if (names.length === 0) return
         e.preventDefault()
-        void actionsRef.current?.downloadByName(name)
+        void actionsRef.current?.downloadByNames(names)
       }}
     >
-      <div className="flex items-center gap-1 border-b border-line p-2">
-        <span className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted">
-          <Laptop size={14} /> Local
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
+        <span className="flex shrink-0 items-center gap-1.5 px-1 text-xs font-medium text-muted">
+          <Laptop size={14} /> <span className="hidden @md:inline">Local</span>
         </span>
         <IconButton
-          label="Parent folder"
+          label="Parent folder (Backspace)"
           disabled={!listing?.parent}
           onClick={() => listing?.parent && void load(listing.parent)}
         >
@@ -159,6 +198,7 @@ export function LocalPanel({
           <Input
             mono
             className="h-7"
+            aria-label="Local path"
             data-testid="local-path"
             spellCheck={false}
             value={pathInput}
@@ -167,23 +207,6 @@ export function LocalPanel({
             }}
           />
         </form>
-        <IconButton label="Refresh" onClick={() => listing && void load(listing.path)}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-        </IconButton>
-      </div>
-      <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<ArrowRight size={13} />}
-          data-testid="local-upload"
-          disabled={selected.size === 0}
-          title="Upload the selected items to the remote folder"
-          onClick={uploadSelected}
-        >
-          Upload{selected.size > 1 ? ` ${selected.size}` : ''}
-        </Button>
-        <div className="flex-1" />
         <IconButton
           label={showHidden ? 'Hide hidden files' : 'Show hidden files'}
           size="sm"
@@ -197,65 +220,143 @@ export function LocalPanel({
           {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </IconButton>
         <SortMenu options={FILE_SORT_OPTIONS} sort={sort} onChange={setSort} testId="local-sort" />
+        <IconButton label="Refresh" onClick={() => listing && void load(listing.path)}>
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+        </IconButton>
+      </div>
+      <div
+        className="flex h-10 shrink-0 items-center gap-0.5 overflow-hidden border-b border-line px-2"
+        role="toolbar"
+        aria-label="Local actions"
+      >
+        <ToolButton
+          icon={<ArrowRight size={14} />}
+          label={selected.size > 1 ? `Upload ${selected.size}` : 'Upload'}
+          labelAt="md"
+          testId="local-upload"
+          disabled={selected.size === 0}
+          onClick={() => {
+            uploadNames(selected)
+          }}
+        />
+        <span className="flex-1" />
+        <span className="hidden truncate pr-1 text-xs text-faint @xl:inline">
+          Drag files to the remote side to upload
+        </span>
       </div>
       {error && (
-        <div className="border-b border-line p-2">
-          <Notice tone="danger" testId="local-error">
-            {error}
-          </Notice>
-        </div>
-      )}
-      <div className="min-h-0 flex-1 overflow-auto" role="listbox" aria-label="Local files">
-        {listing && entries.length === 0 && (
-          <p className="px-4 py-10 text-center text-xs text-faint">This folder is empty.</p>
-        )}
-        {entries.map((entry) => (
-          <div
-            key={entry.name}
-            role="option"
-            aria-selected={selected.has(entry.name)}
-            data-testid="local-entry"
-            data-name={entry.name}
-            draggable
-            className={cx(
-              'flex h-8 cursor-default items-center gap-2.5 px-3 text-[13px] transition-colors duration-75',
-              selected.has(entry.name) ? 'bg-accent-soft' : 'hover:bg-hover'
-            )}
-            onClick={(e) => {
-              // Ctrl/⌘ + click: chọn nhiều.
-              if (e.ctrlKey || e.metaKey) {
-                const next = new Set(selected)
-                if (next.has(entry.name)) next.delete(entry.name)
-                else next.add(entry.name)
-                setSelected(next)
-              } else setSelected(new Set([entry.name]))
-            }}
-            onDoubleClick={() => {
-              if (listing && entry.isDir)
-                void load(joinLocal(listing.path, entry.name, listing.sep))
-              else void actionsRef.current?.upload(pathsOf([entry.name]))
-            }}
-            onDragStart={(e) => {
-              const names = selected.has(entry.name) ? selected : [entry.name]
-              e.dataTransfer.setData(DRAG_LOCAL, JSON.stringify(pathsOf(names)))
-              e.dataTransfer.effectAllowed = 'copy'
+        <div className="flex shrink-0 items-start gap-1 border-b border-line p-2">
+          <div className="min-w-0 flex-1">
+            <Notice tone="danger" testId="local-error">
+              {error}
+            </Notice>
+          </div>
+          <IconButton
+            label="Dismiss"
+            size="sm"
+            onClick={() => {
+              setError(null)
             }}
           >
-            {entry.isDir ? (
-              <Folder size={15} className="shrink-0 text-accent" />
-            ) : (
-              <File size={15} className="shrink-0 text-muted" />
-            )}
-            <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            <span className="w-16 text-right text-xs text-faint tabular-nums">
-              {entry.isDir ? '' : formatSize(entry.size)}
-            </span>
-          </div>
-        ))}
-        {listing?.truncated && (
-          <p className="p-3 text-xs text-faint">Only the first 5000 items are shown.</p>
+            <X size={13} />
+          </IconButton>
+        </div>
+      )}
+      <FileTable
+        items={entries}
+        getKey={(e) => e.name}
+        icon={(e) =>
+          e.isDir ? (
+            <Folder size={15} className="shrink-0 text-accent" />
+          ) : (
+            <File size={15} className="shrink-0 text-muted" />
+          )
+        }
+        columns={COLUMNS}
+        gridClass={GRID}
+        nameSort={NAME_SORT}
+        sort={sort}
+        onSort={setSort}
+        selected={selected}
+        onSelect={setSelected}
+        onOpen={open}
+        onUp={() => {
+          if (listing?.parent) void load(listing.parent)
+        }}
+        onContextMenu={(e, list) => {
+          const single = list.length === 1 ? list[0] : undefined
+          openMenu(e, [
+            ...(single?.isDir
+              ? [
+                  {
+                    id: 'local-open',
+                    label: 'Open',
+                    icon: <FolderOpen size={14} />,
+                    onSelect: () => {
+                      open(single)
+                    }
+                  }
+                ]
+              : []),
+            {
+              id: 'local-upload',
+              label: list.length > 1 ? `Upload ${list.length} items` : 'Upload',
+              icon: <ArrowRight size={14} />,
+              onSelect: () => {
+                uploadNames(list.map((x) => x.name))
+              }
+            },
+            ...(single
+              ? [
+                  {
+                    id: 'local-copy-path',
+                    label: 'Copy path',
+                    icon: <Copy size={14} />,
+                    onSelect: () =>
+                      void window.shellhouse.writeClipboard(pathsOf([single.name])[0] ?? '')
+                  }
+                ]
+              : [])
+          ])
+        }}
+        rowProps={(entry) => ({
+          draggable: true,
+          onDragStart: (e) => {
+            const names = selected.has(entry.name) ? selected : [entry.name]
+            e.dataTransfer.setData(DRAG_LOCAL, JSON.stringify(pathsOf(names)))
+            e.dataTransfer.effectAllowed = 'copy'
+          }
+        })}
+        ariaLabel="Local files"
+        rowTestId="local-entry"
+      >
+        {listing && entries.length === 0 && (
+          <Empty
+            icon={<FolderOpen size={20} />}
+            title="This folder is empty"
+            text="Drop files from the remote side here to download them."
+            action={null}
+          />
         )}
-      </div>
+        {listing?.truncated && (
+          <p className="p-3 text-xs text-faint">Only the first 5,000 items are shown.</p>
+        )}
+      </FileTable>
+      {listing && (
+        <div className="flex h-7 shrink-0 items-center gap-3 overflow-hidden border-t border-line px-3 text-xs whitespace-nowrap text-faint">
+          <span className="min-w-0 flex-1 truncate">
+            {folderCount} folder{folderCount === 1 ? '' : 's'}, {fileCount} file
+            {fileCount === 1 ? '' : 's'} · {formatSize(filesSize)}
+            {chosen.length > 0 ? ` · ${chosen.length} selected` : ''}
+          </span>
+        </div>
+      )}
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent-soft/80">
+          <p className="text-sm font-medium text-fg">Drop to download here</p>
+        </div>
+      )}
+      {menu}
     </section>
   )
 }

@@ -11,6 +11,7 @@ import { useHosts } from './stores/hosts'
 import { useSettings } from './stores/settings'
 import { useShells } from './stores/shells'
 import { useTabs } from './stores/tabs'
+import { focusQuickConnect, openSidebarDialog } from './stores/ui-requests'
 import { parseMacro } from '@shared/macro'
 import { toggleMultiExec, useBroadcast } from './terminal/broadcast'
 import { MultiExecView } from './terminal/MultiExecView'
@@ -95,6 +96,15 @@ export function App(): React.JSX.Element {
         break
       case 'pane.splitDown':
         tabs.split('below')
+        break
+      case 'hosts.new':
+        void openSidebarDialog('new-host')
+        break
+      case 'hosts.import':
+        void openSidebarDialog('import-hosts')
+        break
+      case 'quickconnect.focus':
+        focusQuickConnect()
         break
       case 'hosts.search':
         // Thanh bên đang ẩn → hiện ra rồi mới focus ô tìm.

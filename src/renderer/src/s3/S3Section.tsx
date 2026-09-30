@@ -105,7 +105,7 @@ export function S3Section(): React.JSX.Element {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] text-fg">{a.name}</span>
-                <span className="block truncate font-mono text-[11px] text-faint">
+                <span className="block truncate font-mono text-xs text-faint">
                   {a.endpoint ? new URL(a.endpoint).host : `AWS ${a.region || 'us-east-1'}`}
                 </span>
               </span>

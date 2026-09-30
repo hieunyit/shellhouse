@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  Activity,
   Download,
   FolderOpen,
   Info,
@@ -18,6 +19,7 @@ import { SecuritySection } from './SecuritySection'
 import { ShortcutsSection } from './ShortcutsSection'
 import { TerminalSection } from './TerminalSection'
 import { UpdatesSection } from './UpdatesSection'
+import { AboutSection } from './AboutSection'
 
 const SECTIONS = [
   { id: 'appearance', title: 'Appearance', icon: Palette },
@@ -27,7 +29,8 @@ const SECTIONS = [
   { id: 'keys', title: 'SSH keys', icon: KeyRound },
   { id: 'shortcuts', title: 'Shortcuts', icon: Keyboard },
   { id: 'updates', title: 'Updates', icon: Download },
-  { id: 'diagnostics', title: 'Diagnostics', icon: Info }
+  { id: 'diagnostics', title: 'Diagnostics', icon: Activity },
+  { id: 'about', title: 'About', icon: Info }
 ] as const
 export type SettingsSectionId = (typeof SECTIONS)[number]['id']
 
@@ -79,6 +82,14 @@ export function SettingsDialog({
           {section === 'shortcuts' && <ShortcutsSection />}
           {section === 'updates' && <UpdatesSection />}
           {section === 'diagnostics' && <Diagnostics />}
+          {section === 'about' && (
+            <AboutSection
+              onCheckUpdates={() => {
+                setSection('updates')
+                void window.shellhouse.checkForUpdates()
+              }}
+            />
+          )}
         </div>
       </div>
     </Modal>

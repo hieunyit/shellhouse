@@ -11,4 +11,4 @@ export const FILE_SORT_OPTIONS = [
 
 export const FILE_SORT_KEYS: readonly FileSort[] = FILE_SORT_OPTIONS.map((o) => o.key)
 
-export const nameOrder = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
+export { nameOrder } from '../lib/format'

@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import {
+  Activity,
   ChevronDown,
   Columns2,
-  Info,
+  LayoutPanelLeft,
   LayoutGrid,
   Lock,
   PanelLeftClose,
@@ -25,6 +26,7 @@ import { useTabs } from '../stores/tabs'
 import { useContextMenu, type MenuEntry } from './ContextMenu'
 import { toggleMultiExec, useBroadcast } from '../terminal/broadcast'
 import { cx, IconButton } from './ui'
+import { ToolButton } from './files/parts'
 
 function QuickConnect(): React.JSX.Element {
   const [value, setValue] = useState('')
@@ -94,6 +96,7 @@ export function TabBar({
   const sidebarHidden = useSettings((s) => s.settings.appearance.sidebarHidden)
   const overrides = useSettings((s) => s.settings.keybindings)
   const updateSettings = useSettings((s) => s.update)
+  const key = (id: string): string => displayKeybinding(keybindingFor(id, overrides, isMac))
 
   return (
     <nav className="@container flex h-11 min-w-0 shrink-0 items-center gap-1 overflow-hidden border-b border-line bg-surface px-2">
@@ -150,53 +153,72 @@ export function TabBar({
         <ChevronDown size={14} />
       </IconButton>
       {menu}
-      {/* Cửa sổ hẹp: ẩn nút ít dùng (vẫn có trong bảng lệnh, phím tắt, menu chuột phải của tab). */}
-      <div className="hidden items-center gap-1 @2xl:flex">
-        <div className="mx-1 h-4 w-px bg-line" />
-        <IconButton
-          label="Split right"
-          data-testid="split-right"
+      <div className="mx-1 h-4 w-px shrink-0 bg-line" />
+      {/* Bố cục: chia màn hình gom vào một menu. Chữ chỉ hiện khi thanh đủ rộng; cửa sổ rất hẹp thì
+          ẩn hẳn (vẫn có phím tắt, bảng lệnh, menu chuột phải của tab). */}
+      <span className="hidden @lg:contents">
+        <ToolButton
+          icon={<LayoutPanelLeft size={15} />}
+          label="Layout"
+          labelAt="4xl"
+          testId="layout-menu"
+          trailing={<ChevronDown size={12} className="hidden text-faint @4xl:inline" />}
           disabled={!hasTab}
-          onClick={() => split('right')}
-        >
-          <Columns2 size={15} />
-        </IconButton>
-        <IconButton
-          label="Split down"
-          data-testid="split-below"
-          disabled={!hasTab}
-          onClick={() => split('below')}
-        >
-          <Rows2 size={15} />
-        </IconButton>
-      </div>
-      <div className="hidden items-center gap-1 @xl:flex">
-        <IconButton label="Snippets" data-testid="open-snippets" onClick={onOpenSnippets}>
-          <ScrollText size={15} />
-        </IconButton>
-        <IconButton
-          label="Workspaces: save or reopen a set of tabs"
-          data-testid="open-workspaces"
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect()
+            openMenu(
+              { clientX: rect.left, clientY: rect.bottom + 4, preventDefault: () => undefined },
+              [
+                {
+                  id: 'split-right',
+                  label: 'Split right',
+                  icon: <Columns2 size={14} />,
+                  hint: key('pane.splitRight'),
+                  onSelect: () => split('right')
+                },
+                {
+                  id: 'split-below',
+                  label: 'Split down',
+                  icon: <Rows2 size={14} />,
+                  hint: key('pane.splitDown'),
+                  onSelect: () => split('below')
+                }
+              ]
+            )
+          }}
+        />
+      </span>
+      <span className="hidden @xl:contents">
+        <ToolButton
+          icon={<LayoutGrid size={15} />}
+          label="Workspaces"
+          labelAt="4xl"
+          testId="open-workspaces"
           onClick={onOpenWorkspaces}
-        >
-          <LayoutGrid size={15} />
-        </IconButton>
-      </div>
-      <IconButton
-        label={
+        />
+        <ToolButton
+          icon={<ScrollText size={15} />}
+          label="Snippets"
+          labelAt="4xl"
+          testId="open-snippets"
+          onClick={onOpenSnippets}
+        />
+      </span>
+      <ToolButton
+        icon={<Radio size={15} />}
+        label={broadcasting ? 'Exit MultiExec' : 'MultiExec'}
+        labelAt="4xl"
+        testId="toggle-broadcast"
+        title={
           broadcasting
             ? 'Exit MultiExec'
             : 'MultiExec: show all terminals and type into them at once'
         }
-        data-testid="toggle-broadcast"
-        active={broadcasting}
-        aria-pressed={broadcasting}
+        pressed={broadcasting}
+        tone={broadcasting ? 'warning' : undefined}
         disabled={tabCount < 2 && !broadcasting}
-        className={broadcasting ? 'text-warning' : ''}
         onClick={toggleMultiExec}
-      >
-        <Radio size={15} />
-      </IconButton>
+      />
       <div className="flex-1" />
       <QuickConnect />
       <div className="mx-1 h-4 w-px bg-line" />
@@ -208,7 +230,7 @@ export function TabBar({
         <Lock size={15} />
       </IconButton>
       <IconButton label="Diagnostics" data-testid="toggle-diagnostics" onClick={onOpenDiagnostics}>
-        <Info size={15} />
+        <Activity size={15} />
       </IconButton>
       <IconButton label="Settings" data-testid="open-settings" onClick={onOpenSettings}>
         <Settings size={15} />

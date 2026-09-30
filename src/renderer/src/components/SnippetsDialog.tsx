@@ -98,7 +98,7 @@ export function SnippetsDialog({
                 }}
               >
                 <span className="block truncate text-[13px] text-fg">{s.name}</span>
-                <span className="block truncate font-mono text-[11px] text-faint">{s.body}</span>
+                <span className="block truncate font-mono text-xs text-faint">{s.body}</span>
               </button>
             ))}
             {results.length === 0 && <p className="p-3 text-xs text-faint">No snippets yet.</p>}

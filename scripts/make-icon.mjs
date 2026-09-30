@@ -1,5 +1,6 @@
 // Sinh build/icon.png (1024×1024) cho electron-builder — không cần thư viện ảnh.
-// Vẽ bằng signed distance field + khử răng cưa: nền vuông bo góc tối, dấu nhắc ">_" màu accent.
+// Vẽ bằng signed distance field + khử răng cưa: nền vuông bo góc tối, mái nhà + dấu nhắc ">_"
+// ("Shell" + "house") màu xanh ngọc của thương hiệu — cùng hình với Logo trong app (components/Logo.tsx).
 // Chạy: node scripts/make-icon.mjs
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { deflateSync } from 'node:zlib'
@@ -8,10 +9,12 @@ const SIZE = 1024
 const px = new Uint8Array(SIZE * SIZE * 4)
 
 const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
-const BG_TOP = hex('#1c2230')
-const BG_BOTTOM = hex('#0d0f12')
-const ACCENT = hex('#4c8dff')
-const BORDER = hex('#2b3445')
+const BG_TOP = hex('#1d2531')
+const BG_BOTTOM = hex('#0c0f14')
+// Nét vẽ chuyển màu chéo từ trên-trái xuống dưới-phải.
+const MARK_FROM = hex('#5eead4')
+const MARK_TO = hex('#14b8a6')
+const BORDER = hex('#2b3544')
 
 // Khoảng cách có dấu tới hình vuông bo góc tâm (c,c), nửa cạnh h, bán kính r.
 function sdRoundRect(x, y, c, h, r) {
@@ -34,7 +37,7 @@ const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t)
 const C = SIZE / 2
 const HALF = SIZE * 0.43 // chừa lề như icon macOS
 const RADIUS = SIZE * 0.2
-const STROKE = SIZE * 0.045
+const STROKE = SIZE * 0.037
 
 for (let y = 0; y < SIZE; y++) {
   for (let x = 0; x < SIZE; x++) {
@@ -47,13 +50,18 @@ for (let y = 0; y < SIZE; y++) {
     let color = mix(BG_TOP, BG_BOTTOM, Math.max(0, Math.min(1, t)))
     // Viền mảnh bên trong.
     color = mix(color, BORDER, cover(Math.abs(dBox + SIZE * 0.006) - SIZE * 0.004))
-    // ">" và "_"
-    const chevron = Math.min(
-      sdSegment(px0, py0, 300, 360, 470, 512, STROKE),
-      sdSegment(px0, py0, 470, 512, 300, 664, STROKE)
+    // Mái nhà, ">" và "_"
+    const roof = Math.min(
+      sdSegment(px0, py0, 250, 452, 512, 262, STROKE),
+      sdSegment(px0, py0, 512, 262, 774, 452, STROKE)
     )
-    const underscore = sdSegment(px0, py0, 540, 664, 720, 664, STROKE)
-    color = mix(color, ACCENT, cover(Math.min(chevron, underscore)))
+    const chevron = Math.min(
+      sdSegment(px0, py0, 318, 548, 448, 646, STROKE),
+      sdSegment(px0, py0, 448, 646, 318, 744, STROKE)
+    )
+    const underscore = sdSegment(px0, py0, 528, 744, 706, 744, STROKE)
+    const g = Math.max(0, Math.min(1, (px0 + py0 - 500) / 1100))
+    color = mix(color, mix(MARK_FROM, MARK_TO, g), cover(Math.min(roof, chevron, underscore)))
     const i = (y * SIZE + x) * 4
     px[i] = Math.round(color[0])
     px[i + 1] = Math.round(color[1])

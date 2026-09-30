@@ -35,7 +35,7 @@ import { Button, cx, IconButton, Notice } from '../components/ui'
 import { useContextMenu, type MenuEntry } from '../components/ContextMenu'
 import { S3StatsDialog, type StatsTarget } from './S3Stats'
 import { cleanError, formatSize } from './format'
-import { S3Transfers } from './S3Transfers'
+import { TransferList } from '../components/files/TransferList'
 import {
   BUCKET_SORT_KEYS,
   BUCKET_SORT_OPTIONS,
@@ -988,7 +988,7 @@ export function S3View({
           <div
             role="row"
             className={cx(
-              'sticky top-0 z-10 grid h-8 items-center gap-3 border-b border-line bg-surface px-3 text-[11px] font-medium text-faint',
+              'sticky top-0 z-10 grid h-8 items-center gap-3 border-b border-line bg-surface px-3 text-xs font-medium text-faint',
               columns
             )}
           >
@@ -1100,7 +1100,7 @@ export function S3View({
         ? buckets &&
           buckets.length > 0 && (
             <div
-              className="flex h-7 shrink-0 items-center gap-3 overflow-hidden border-t border-line px-3 text-[11px] whitespace-nowrap text-faint"
+              className="flex h-7 shrink-0 items-center gap-3 overflow-hidden border-t border-line px-3 text-xs whitespace-nowrap text-faint"
               data-testid="s3-status"
             >
               <span className="min-w-0 flex-1 truncate">
@@ -1112,7 +1112,7 @@ export function S3View({
           )
         : listing && (
             <div
-              className="flex h-7 shrink-0 items-center gap-3 overflow-hidden border-t border-line px-3 text-[11px] whitespace-nowrap text-faint"
+              className="flex h-7 shrink-0 items-center gap-3 overflow-hidden border-t border-line px-3 text-xs whitespace-nowrap text-faint"
               data-testid="s3-status"
             >
               <span className="min-w-0 flex-1 truncate">
@@ -1135,8 +1135,10 @@ export function S3View({
             </div>
           )}
 
-      <S3Transfers
+      <TransferList
         transfers={transfers}
+        testId="s3-transfers"
+        rowTestId="s3-transfer"
         onCancel={(id) => void act({ op: 'cancel', transferId: id })}
         onClear={() => void act({ op: 'clearDone' })}
       />

@@ -67,7 +67,7 @@ export function ServerStatsBar({ stats }: { stats: ServerStats }): React.JSX.Ele
   const disk = stats.diskPercent
   return (
     <div
-      className="@container flex h-6 shrink-0 items-center gap-4 overflow-hidden border-t border-line bg-surface px-3 text-[11px] whitespace-nowrap text-muted tabular-nums"
+      className="@container flex h-6 shrink-0 items-center gap-4 overflow-hidden border-t border-line bg-surface px-3 text-xs whitespace-nowrap text-muted tabular-nums"
       data-testid="server-stats"
       role="status"
       aria-label="Server statistics"

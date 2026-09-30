@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type RefObject } from 'react'
-import { SortMenu, usePersistentSort } from '../components/SortMenu'
-import { FILE_SORT_KEYS, FILE_SORT_OPTIONS, nameOrder, type FileSort } from './file-sort'
 import {
   ArrowUp,
+  Copy,
   Download,
   Eye,
   EyeOff,
@@ -16,7 +15,6 @@ import {
   Loader2,
   Pencil,
   RefreshCw,
-  RotateCcw,
   Server,
   ShieldCheck,
   Trash2,
@@ -38,39 +36,30 @@ import { Button, cx, IconButton, Input, Modal, Notice } from '../components/ui'
 import { replaceUnsafeFileChars } from '@shared/file-names'
 import { DRAG_LOCAL, DRAG_REMOTE, joinLocal } from '@shared/local-files'
 import { useSettings } from '../stores/settings'
+import { useContextMenu, type MenuEntry } from '../components/ContextMenu'
+import { SortMenu, usePersistentSort } from '../components/SortMenu'
+import { FileTable, type FileColumn } from '../components/files/FileTable'
+import { Empty, ToolButton } from '../components/files/parts'
+import { TransferList } from '../components/files/TransferList'
+import { cleanError, dateFormat, formatSize } from '../lib/format'
+import { FILE_SORT_KEYS, FILE_SORT_OPTIONS, nameOrder, type FileSort } from './file-sort'
 
 /** Sửa file lớn hơn thế này qua editor thường là nhầm (log, file nhị phân) — gợi ý tải về. */
 const MAX_EDIT_BYTES = 50 * 1024 * 1024
-
-/** Bỏ tiền tố "Error invoking remote method '…': Error: " của Electron. */
-function cleanError(e: unknown): string {
-  return (e instanceof Error ? e.message : String(e)).replace(
-    /^Error invoking remote method '[^']+': (Error: )?/,
-    ''
-  )
-}
-
-function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`
-  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`
-  if (n < 1000 * 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`
-  return `${(n / 1024 ** 4).toFixed(2)} TB`
-}
 
 type Dialog =
   | { kind: 'mkdir' }
   | { kind: 'rename'; entry: SftpEntry }
   | { kind: 'chmod'; entry: SftpEntry }
-  | { kind: 'delete'; entry: SftpEntry }
+  | { kind: 'delete'; entries: SftpEntry[] }
   | null
 
 /** Thao tác khung Local (SFTP hai cột) gọi sang khung Remote. */
 export interface SftpActions {
   /** Tải lên thư mục remote đang mở. */
   upload(localPaths: string[]): Promise<void>
-  /** Tải một mục của thư mục remote đang mở về thư mục local đang mở. */
-  downloadByName(name: string): Promise<void>
+  /** Tải các mục của thư mục remote đang mở về thư mục local đang mở. */
+  downloadByNames(names: string[]): Promise<void>
 }
 
 /** Thư mục local đang mở ở khung bên cạnh (SFTP hai cột): tải về thẳng vào đây, không hỏi chỗ lưu. */
@@ -79,6 +68,35 @@ export interface LocalTarget {
   sep: string
   names: ReadonlySet<string>
 }
+
+const [NAME_SORT, SIZE_SORT, MTIME_SORT] = FILE_SORT_OPTIONS
+
+/** Cột: Size luôn có; Modified / Permissions hiện khi khung đủ rộng. */
+const GRID =
+  'grid-cols-[minmax(0,1fr)_4.5rem] @md:grid-cols-[minmax(0,1fr)_4.5rem_8.5rem] @2xl:grid-cols-[minmax(0,1fr)_4.5rem_8.5rem_5.5rem]'
+
+const COLUMNS: FileColumn<SftpEntry, FileSort>[] = [
+  {
+    id: 'size',
+    label: 'Size',
+    sort: SIZE_SORT,
+    align: 'right',
+    render: (e) => (e.isDirLike ? '' : formatSize(e.size))
+  },
+  {
+    id: 'mtime',
+    label: 'Modified',
+    sort: MTIME_SORT,
+    className: 'hidden @md:block',
+    render: (e) => (e.mtime ? dateFormat.format(new Date(e.mtime)) : '')
+  },
+  {
+    id: 'mode',
+    label: 'Permissions',
+    className: 'hidden @2xl:block font-mono',
+    render: (e) => formatMode(e.mode)
+  }
+]
 
 export function SftpPanel({
   run,
@@ -106,13 +124,14 @@ export function SftpPanel({
     key: 'name',
     dir: 'asc'
   })
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [dialog, setDialog] = useState<Dialog>(null)
   const [dragOver, setDragOver] = useState(false)
   /** Tên file đang tải về để mở trong editor. */
   const [opening, setOpening] = useState<string | null>(null)
   const doubleClick = useSettings((s) => s.settings.files.doubleClick)
   const lastDone = useRef(0)
+  const { menu, open: openMenu } = useContextMenu()
 
   const load = useCallback(
     async (target: string) => {
@@ -123,9 +142,9 @@ export function SftpPanel({
         setListing(result)
         setPath(result.path)
         setPathInput(result.path)
-        setSelected(null)
+        setSelected(new Set())
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
+        setError(cleanError(e))
       } finally {
         setLoading(false)
       }
@@ -142,7 +161,7 @@ export function SftpPanel({
         if (!cancelled) void load(home as string)
       },
       (e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+        if (!cancelled) setError(cleanError(e))
       }
     )
     return () => {
@@ -162,7 +181,7 @@ export function SftpPanel({
       await run(op)
       return true
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      setError(cleanError(e))
       return false
     }
   }
@@ -181,15 +200,10 @@ export function SftpPanel({
     if (localPaths.length > 0) await load(path)
   }
 
-  /** Tải cả thư mục về máy; đích đã có thư mục cùng tên → hỏi gộp. */
-  const downloadFolder = async (entry: SftpEntry): Promise<void> => {
+  /** Tải cả thư mục về `parent`; đích đã có thư mục cùng tên → hỏi gộp. */
+  const downloadFolder = async (entry: SftpEntry, parent: string): Promise<void> => {
     if (!path) return
-    const parent =
-      localTarget?.dir ??
-      (await window.shellhouse.pickFolder('Choose where to save the folder', 'downloads'))
-    if (!parent) return
     const remotePath = joinRemote(path, entry.name)
-    setError(null)
     try {
       await run({ op: 'downloadFolder', remotePath, localParent: parent, overwrite: false })
     } catch (e) {
@@ -203,30 +217,49 @@ export function SftpPanel({
     }
   }
 
-  const download = async (entry: SftpEntry): Promise<void> => {
-    if (!path) return
-    if (entry.isDirLike) {
-      await downloadFolder(entry)
+  /**
+   * Tải về: hai cột → thẳng vào thư mục local đang mở; một file → hỏi chỗ lưu; nhiều mục / thư
+   * mục → hỏi thư mục đích một lần.
+   */
+  const download = async (list: SftpEntry[]): Promise<void> => {
+    if (!path || list.length === 0) return
+    setError(null)
+    const only = list[0]
+    if (!localTarget && list.length === 1 && only && !only.isDirLike) {
+      const target = await window.shellhouse.pickSaveLocation(only.name)
+      // The system save dialog already asked about overwriting.
+      if (target)
+        await act({
+          op: 'download',
+          remotePath: joinRemote(path, only.name),
+          localPath: target,
+          overwrite: true
+        })
       return
     }
-    let target: string | null
-    if (localTarget) {
-      // Hai cột: tải thẳng vào thư mục local đang mở.
+    const dir =
+      localTarget?.dir ?? (await window.shellhouse.pickFolder('Choose where to save', 'downloads'))
+    if (!dir) return
+    const sep = localTarget?.sep ?? (await window.shellhouse.listLocal(dir)).sep
+    const existing = localTarget?.names ?? new Set<string>()
+    for (const entry of list) {
+      if (entry.isDirLike) {
+        await downloadFolder(entry, dir)
+        continue
+      }
+      const safe = replaceUnsafeFileChars(entry.name)
       if (
-        localTarget.names.has(entry.name) &&
-        !window.confirm(`“${entry.name}” already exists in ${localTarget.dir}. Overwrite it?`)
+        existing.has(safe) &&
+        !window.confirm(`“${entry.name}” already exists in ${dir}. Overwrite it?`)
       )
-        return
-      target = joinLocal(localTarget.dir, replaceUnsafeFileChars(entry.name), localTarget.sep)
-    } else target = await window.shellhouse.pickSaveLocation(entry.name)
-    if (!target) return
-    // The system save dialog already asked about overwriting.
-    await act({
-      op: 'download',
-      remotePath: joinRemote(path, entry.name),
-      localPath: target,
-      overwrite: true
-    })
+        continue
+      await act({
+        op: 'download',
+        remotePath: joinRemote(path, entry.name),
+        localPath: joinLocal(dir, safe, sep),
+        overwrite: true
+      })
+    }
   }
 
   /** Mở bằng editor trên máy; mỗi lần lưu, session host tự tải lên (xem session-host/sftp/edit.ts). */
@@ -251,12 +284,18 @@ export function SftpPanel({
     }
   }
 
+  const open = (entry: SftpEntry): void => {
+    if (entry.isDirLike && path) void load(joinRemote(path, entry.name))
+    else if (doubleClick === 'edit') void edit(entry)
+    else void download([entry])
+  }
+
   // Khung Local gọi sang (nút "Upload →", kéo thả, bấm đúp).
   const actions: SftpActions = {
     upload,
-    downloadByName: async (name) => {
-      const entry = listing?.entries.find((e) => e.name === name)
-      if (entry) await download(entry)
+    downloadByNames: async (names) => {
+      const wanted = new Set(names)
+      await download((listing?.entries ?? []).filter((e) => wanted.has(e.name)))
     }
   }
   useEffect(() => {
@@ -289,38 +328,109 @@ export function SftpPanel({
             : 0
       return (by || nameOrder.compare(a.name, b.name)) * (sort.dir === 'asc' ? 1 : -1)
     })
-  const selectedEntry = entries.find((e) => e.name === selected) ?? null
+  const chosen = entries.filter((e) => selected.has(e.name))
+  const one = chosen.length === 1 ? chosen[0] : undefined
+  const fileCount = entries.filter((e) => !e.isDirLike).length
+  const folderCount = entries.length - fileCount
+  const filesSize = entries.reduce((n, e) => n + (e.isDirLike ? 0 : e.size), 0)
+
+  const entryMenu = (list: SftpEntry[]): MenuEntry[] => {
+    const single = list.length === 1 ? list[0] : undefined
+    const items: MenuEntry[] = []
+    if (single?.isDirLike)
+      items.push({
+        id: 'sftp-open',
+        label: 'Open',
+        icon: <FolderOpen size={14} />,
+        onSelect: () => {
+          open(single)
+        }
+      })
+    if (single && !single.isDirLike)
+      items.push({
+        id: 'sftp-edit',
+        label: 'Edit in local editor',
+        icon: <FilePen size={14} />,
+        onSelect: () => void edit(single)
+      })
+    items.push(
+      {
+        id: 'sftp-download',
+        label: list.length > 1 ? `Download ${list.length} items…` : 'Download…',
+        icon: <Download size={14} />,
+        onSelect: () => void download(list)
+      },
+      'separator'
+    )
+    if (single && path)
+      items.push(
+        {
+          id: 'sftp-rename',
+          label: 'Rename…',
+          icon: <Pencil size={14} />,
+          hint: 'F2',
+          onSelect: () => {
+            setDialog({ kind: 'rename', entry: single })
+          }
+        },
+        {
+          id: 'sftp-chmod',
+          label: 'Permissions…',
+          icon: <ShieldCheck size={14} />,
+          onSelect: () => {
+            setDialog({ kind: 'chmod', entry: single })
+          }
+        },
+        {
+          id: 'sftp-copy-path',
+          label: 'Copy path',
+          icon: <Copy size={14} />,
+          onSelect: () => void window.shellhouse.writeClipboard(joinRemote(path, single.name))
+        }
+      )
+    items.push('separator', {
+      id: 'sftp-delete',
+      label: 'Delete…',
+      icon: <Trash2 size={14} />,
+      hint: 'Del',
+      danger: true,
+      onSelect: () => {
+        setDialog({ kind: 'delete', entries: list })
+      }
+    })
+    return items
+  }
 
   return (
     <aside
       className={cx(
-        'flex flex-col bg-surface',
+        '@container relative flex min-w-0 flex-col bg-surface',
         layout === 'side'
           ? 'animate-slide-in-right w-96 shrink-0 border-l border-line'
-          : 'min-w-0 flex-1',
-        dragOver && 'ring-2 ring-accent ring-inset'
+          : 'min-w-0 flex-1'
       )}
       data-testid="sftp-panel"
+      aria-label="Remote files"
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes(DRAG_LOCAL)) {
           e.preventDefault()
           setDragOver(true)
         }
       }}
-      onDragLeave={() => {
-        setDragOver(false)
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false)
       }}
       onDrop={onDrop}
     >
-      <div className="flex items-center gap-1 border-b border-line p-2">
+      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
         {layout === 'pane' && (
-          <span className="flex items-center gap-1.5 px-1 text-xs font-medium text-muted">
-            <Server size={14} /> Remote
+          <span className="flex shrink-0 items-center gap-1.5 px-1 text-xs font-medium text-muted">
+            <Server size={14} /> <span className="hidden @md:inline">Remote</span>
           </span>
         )}
         <IconButton
-          label="Parent folder"
-          disabled={!path}
+          label="Parent folder (Backspace)"
+          disabled={!path || path === '/'}
           onClick={() => path && void load(parentRemote(path))}
         >
           <ArrowUp size={15} />
@@ -335,6 +445,7 @@ export function SftpPanel({
           <Input
             mono
             className="h-7"
+            aria-label="Remote path"
             data-testid="sftp-path"
             spellCheck={false}
             value={pathInput}
@@ -343,48 +454,6 @@ export function SftpPanel({
             }}
           />
         </form>
-        <IconButton label="Refresh" onClick={() => path && void load(path)}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-        </IconButton>
-      </div>
-      <div className="flex items-center gap-1 border-b border-line px-2 py-1.5">
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<Upload size={13} />}
-          data-testid="sftp-upload"
-          disabled={!path}
-          onClick={() => void window.shellhouse.pickFilesToUpload().then(upload)}
-        >
-          Upload
-        </Button>
-        <IconButton
-          label="Upload a folder"
-          size="sm"
-          className="size-7"
-          data-testid="sftp-upload-folder"
-          disabled={!path}
-          onClick={() =>
-            void window.shellhouse
-              .pickFolder('Choose a folder to upload', 'downloads')
-              .then((dir) => upload(dir ? [dir] : []))
-          }
-        >
-          <FolderUp size={14} />
-        </IconButton>
-        <Button
-          size="sm"
-          variant="ghost"
-          icon={<FolderPlus size={13} />}
-          data-testid="sftp-mkdir"
-          disabled={!path}
-          onClick={() => {
-            setDialog({ kind: 'mkdir' })
-          }}
-        >
-          New folder
-        </Button>
-        <div className="flex-1" />
         <IconButton
           label={showHidden ? 'Hide hidden files' : 'Show hidden files'}
           size="sm"
@@ -399,22 +468,188 @@ export function SftpPanel({
           {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </IconButton>
         <SortMenu options={FILE_SORT_OPTIONS} sort={sort} onChange={setSort} testId="sftp-sort" />
+        <IconButton label="Refresh" onClick={() => path && void load(path)}>
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+        </IconButton>
+      </div>
+
+      <div
+        className="flex h-10 shrink-0 items-center gap-0.5 overflow-hidden border-b border-line px-2"
+        role="toolbar"
+        aria-label="Remote actions"
+      >
+        <ToolButton
+          icon={<Upload size={14} />}
+          label="Upload"
+          labelAt="md"
+          testId="sftp-upload"
+          disabled={!path}
+          onClick={() => void window.shellhouse.pickFilesToUpload().then(upload)}
+        />
+        <ToolButton
+          icon={<FolderUp size={14} />}
+          label="Upload folder"
+          labelAt="5xl"
+          testId="sftp-upload-folder"
+          disabled={!path}
+          onClick={() =>
+            void window.shellhouse
+              .pickFolder('Choose a folder to upload', 'downloads')
+              .then((dir) => upload(dir ? [dir] : []))
+          }
+        />
+        <ToolButton
+          icon={<FolderPlus size={14} />}
+          label="New folder"
+          labelAt="xl"
+          testId="sftp-mkdir"
+          disabled={!path}
+          onClick={() => {
+            setDialog({ kind: 'mkdir' })
+          }}
+        />
+        <span className="flex-1" />
+        {chosen.length > 0 && (
+          <>
+            {one && !one.isDirLike && (
+              <ToolButton
+                icon={
+                  opening === one.name ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <FilePen size={14} />
+                  )
+                }
+                label={opening ? 'Opening…' : 'Edit'}
+                labelAt="3xl"
+                testId="sftp-edit"
+                disabled={opening !== null}
+                onClick={() => void edit(one)}
+              />
+            )}
+            <ToolButton
+              icon={<Download size={14} />}
+              label={chosen.length > 1 ? `Download ${chosen.length}` : 'Download'}
+              labelAt="xl"
+              testId="sftp-download"
+              onClick={() => void download(chosen)}
+            />
+            {one && (
+              <>
+                <ToolButton
+                  icon={<Pencil size={14} />}
+                  label="Rename"
+                  labelAt="5xl"
+                  testId="sftp-rename"
+                  onClick={() => {
+                    setDialog({ kind: 'rename', entry: one })
+                  }}
+                />
+                <ToolButton
+                  icon={<ShieldCheck size={14} />}
+                  label="Permissions"
+                  labelAt="5xl"
+                  testId="sftp-chmod"
+                  onClick={() => {
+                    setDialog({ kind: 'chmod', entry: one })
+                  }}
+                />
+              </>
+            )}
+            <span className="mx-1 h-4 w-px shrink-0 bg-line" />
+            <ToolButton
+              icon={<Trash2 size={14} />}
+              label="Delete"
+              labelAt="3xl"
+              testId="sftp-delete"
+              danger
+              onClick={() => {
+                setDialog({ kind: 'delete', entries: chosen })
+              }}
+            />
+          </>
+        )}
       </div>
 
       {error && (
-        <div className="border-b border-line p-2">
-          <Notice tone="danger" testId="sftp-error">
-            {error}
-          </Notice>
+        <div className="flex shrink-0 items-start gap-1 border-b border-line p-2">
+          <div className="min-w-0 flex-1">
+            <Notice tone="danger" testId="sftp-error">
+              {error}
+            </Notice>
+          </div>
+          <IconButton
+            label="Dismiss"
+            size="sm"
+            onClick={() => {
+              setError(null)
+            }}
+          >
+            <X size={13} />
+          </IconButton>
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto" role="listbox" aria-label="Files">
+      <FileTable
+        items={entries}
+        getKey={(e) => e.name}
+        icon={(e) =>
+          e.isDirLike ? (
+            <Folder size={15} className="shrink-0 text-accent" />
+          ) : e.type === 'link' ? (
+            <Link2 size={15} className="shrink-0 text-muted" />
+          ) : (
+            <File size={15} className="shrink-0 text-muted" />
+          )
+        }
+        badge={(e) =>
+          opening === e.name ? (
+            <Loader2 size={13} className="shrink-0 animate-spin text-muted" aria-label="Opening" />
+          ) : null
+        }
+        columns={COLUMNS}
+        gridClass={GRID}
+        nameSort={NAME_SORT}
+        sort={sort}
+        onSort={setSort}
+        selected={selected}
+        onSelect={setSelected}
+        onOpen={open}
+        onUp={() => {
+          if (path && path !== '/') void load(parentRemote(path))
+        }}
+        onRename={(e) => {
+          setDialog({ kind: 'rename', entry: e })
+        }}
+        onDelete={(list) => {
+          setDialog({ kind: 'delete', entries: list })
+        }}
+        onContextMenu={(e, list) => {
+          openMenu(e, entryMenu(list))
+        }}
+        rowProps={(entry) =>
+          layout === 'pane'
+            ? {
+                draggable: true,
+                onDragStart: (e) => {
+                  // Kéo nhiều mục đang chọn sang khung Local.
+                  const names = selected.has(entry.name) ? [...selected] : [entry.name]
+                  e.dataTransfer.setData(DRAG_REMOTE, JSON.stringify(names))
+                  e.dataTransfer.effectAllowed = 'copy'
+                }
+              }
+            : {}
+        }
+        ariaLabel="Remote files"
+        rowTestId="sftp-entry"
+      >
         {!connected && (
-          <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
-            <FolderOpen size={20} className="text-faint" />
-            <p className="text-xs text-muted">Waiting for the connection…</p>
-          </div>
+          <Empty
+            icon={<Server size={20} />}
+            title="Waiting for the connection…"
+            text="Files appear as soon as the server is connected."
+            action={null}
+          />
         )}
         {connected && loading && !listing && (
           <div aria-label="Loading" className="space-y-1 p-3">
@@ -430,195 +665,55 @@ export function SftpPanel({
           </div>
         )}
         {connected && listing && entries.length === 0 && (
-          <p className="px-4 py-10 text-center text-xs text-faint">This folder is empty.</p>
-        )}
-        {entries.map((entry) => (
-          <div
-            key={entry.name}
-            role="option"
-            aria-selected={selected === entry.name}
-            data-testid="sftp-entry"
-            data-name={entry.name}
-            draggable={layout === 'pane'}
-            onDragStart={(e) => {
-              e.dataTransfer.setData(DRAG_REMOTE, entry.name)
-              e.dataTransfer.effectAllowed = 'copy'
-            }}
-            className={cx(
-              'flex h-8 cursor-default items-center gap-2.5 px-3 text-[13px] transition-colors duration-75',
-              selected === entry.name ? 'bg-accent-soft' : 'hover:bg-hover'
-            )}
-            onClick={() => {
-              setSelected(entry.name)
-            }}
-            onDoubleClick={() => {
-              if (entry.isDirLike && path) void load(joinRemote(path, entry.name))
-              else if (doubleClick === 'edit') void edit(entry)
-              else void download(entry)
-            }}
-          >
-            <span className="text-muted">
-              {entry.isDirLike ? (
-                <Folder size={15} className="text-accent" />
-              ) : entry.type === 'link' ? (
-                <Link2 size={15} />
-              ) : (
-                <File size={15} />
-              )}
-            </span>
-            <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-            {opening === entry.name && (
-              <Loader2 size={13} className="animate-spin text-muted" aria-label="Opening" />
-            )}
-            <span className="w-16 text-right text-xs text-faint tabular-nums">
-              {entry.isDirLike ? '' : formatSize(entry.size)}
-            </span>
-            <span className="hidden w-20 font-mono text-[11px] text-faint lg:inline">
-              {formatMode(entry.mode)}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {selectedEntry && (
-        <div className="flex items-center gap-1 border-t border-line px-2 py-1.5">
-          {!selectedEntry.isDirLike && (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<FilePen size={13} />}
-              data-testid="sftp-edit"
-              title="Open in your editor — every save is uploaded to the server"
-              disabled={opening !== null}
-              onClick={() => void edit(selectedEntry)}
-            >
-              Edit
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<Download size={13} />}
-            data-testid="sftp-download"
-            title={selectedEntry.isDirLike ? 'Download the whole folder' : undefined}
-            onClick={() => void download(selectedEntry)}
-          >
-            Download
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<Pencil size={13} />}
-            onClick={() => {
-              setDialog({ kind: 'rename', entry: selectedEntry })
-            }}
-          >
-            Rename
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<ShieldCheck size={13} />}
-            onClick={() => {
-              setDialog({ kind: 'chmod', entry: selectedEntry })
-            }}
-          >
-            Permissions
-          </Button>
-          <div className="flex-1" />
-          <Button
-            size="sm"
-            variant="danger-ghost"
-            icon={<Trash2 size={13} />}
-            data-testid="sftp-delete"
-            onClick={() => {
-              setDialog({ kind: 'delete', entry: selectedEntry })
-            }}
-          >
-            Delete
-          </Button>
-        </div>
-      )}
-
-      {transfers.length > 0 && (
-        <div
-          className="max-h-52 overflow-auto border-t border-line p-2.5"
-          data-testid="sftp-transfers"
-        >
-          <div className="mb-1.5 flex items-center text-xs font-medium text-muted">
-            <span className="flex-1">Transfers</span>
-            <button
-              type="button"
-              className="rounded px-1.5 py-0.5 text-faint hover:bg-hover hover:text-fg"
-              onClick={() => void act({ op: 'clearDone' })}
-            >
-              Clear finished
-            </button>
-          </div>
-          {transfers.map((t) => {
-            const pct =
-              t.size > 0 ? Math.floor((t.transferred / t.size) * 100) : t.state === 'done' ? 100 : 0
-            return (
-              <div
-                key={t.id}
-                className="mb-2 text-xs"
-                data-testid="transfer-row"
-                data-state={t.state}
+          <Empty
+            icon={<FolderOpen size={20} />}
+            title="This folder is empty"
+            text="Drop files here, or upload from your computer."
+            action={
+              <Button
+                size="sm"
+                icon={<Upload size={13} />}
+                onClick={() => void window.shellhouse.pickFilesToUpload().then(upload)}
               >
-                <div className="flex items-center gap-1.5">
-                  {t.direction === 'upload' ? (
-                    <Upload size={12} className="text-muted" />
-                  ) : (
-                    <Download size={12} className="text-muted" />
-                  )}
-                  <span className="min-w-0 flex-1 truncate">{baseName(t.remotePath)}</span>
-                  <span className="text-faint">
-                    {t.state === 'running' && `${pct}% · ${formatSize(t.bytesPerSecond)}/s`}
-                    {t.state === 'queued' && 'Queued'}
-                    {t.state === 'done' &&
-                      (t.edit ? 'Saved to server' : `Done${t.resumedFrom > 0 ? ' (resumed)' : ''}`)}
-                    {t.state === 'cancelled' && 'Cancelled'}
-                    {t.state === 'error' && 'Failed'}
-                  </span>
-                  {(t.state === 'running' || t.state === 'queued') && (
-                    <IconButton
-                      label="Cancel"
-                      size="sm"
-                      onClick={() => void act({ op: 'cancel', transferId: t.id })}
-                    >
-                      <X size={12} />
-                    </IconButton>
-                  )}
-                  {(t.state === 'error' || t.state === 'cancelled') && (
-                    <IconButton
-                      label="Retry (resumes where it stopped)"
-                      size="sm"
-                      onClick={() => void act({ op: 'retry', transferId: t.id })}
-                    >
-                      <RotateCcw size={12} />
-                    </IconButton>
-                  )}
-                </div>
-                <div className="mt-1 h-1 overflow-hidden rounded-full bg-subtle">
-                  <div
-                    className={cx(
-                      'h-1 rounded-full transition-[width]',
-                      t.state === 'error'
-                        ? 'bg-danger'
-                        : t.state === 'done'
-                          ? 'bg-success'
-                          : 'bg-accent'
-                    )}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                {t.error && <p className="mt-1 text-danger">{t.error}</p>}
-              </div>
-            )
-          })}
+                Upload files
+              </Button>
+            }
+          />
+        )}
+      </FileTable>
+
+      {listing && (
+        <div
+          className="flex h-7 shrink-0 items-center gap-3 overflow-hidden border-t border-line px-3 text-xs whitespace-nowrap text-faint"
+          data-testid="sftp-status"
+        >
+          <span className="min-w-0 flex-1 truncate">
+            {folderCount} folder{folderCount === 1 ? '' : 's'}, {fileCount} file
+            {fileCount === 1 ? '' : 's'} · {formatSize(filesSize)}
+            {chosen.length > 0 ? ` · ${chosen.length} selected` : ''}
+          </span>
         </div>
       )}
 
+      <TransferList
+        transfers={transfers}
+        testId="sftp-transfers"
+        rowTestId="transfer-row"
+        onCancel={(id) => void act({ op: 'cancel', transferId: id })}
+        onRetry={(id) => void act({ op: 'retry', transferId: id })}
+        onClear={() => void act({ op: 'clearDone' })}
+      />
+
+      {dragOver && (
+        <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent-soft/80">
+          <p className="flex items-center gap-2 text-sm font-medium text-fg">
+            <Upload size={16} className="text-accent" />
+            Drop to upload
+          </p>
+        </div>
+      )}
+
+      {menu}
       {dialog && path && (
         <EntryDialog
           dialog={dialog}
@@ -626,7 +721,7 @@ export function SftpPanel({
             setDialog(null)
           }}
           onSubmit={async (value) => {
-            let ok = false
+            let ok = true
             if (dialog.kind === 'mkdir')
               ok = await act({ op: 'mkdir', path: joinRemote(path, value) })
             if (dialog.kind === 'rename')
@@ -642,15 +737,16 @@ export function SftpPanel({
                 mode: parseInt(value, 8)
               })
             if (dialog.kind === 'delete')
-              ok = await act({
-                op: 'remove',
-                path: joinRemote(path, dialog.entry.name),
-                recursive: dialog.entry.type === 'dir'
-              })
-            if (ok) {
-              setDialog(null)
-              await load(path)
-            }
+              for (const entry of dialog.entries) {
+                ok = await act({
+                  op: 'remove',
+                  path: joinRemote(path, entry.name),
+                  recursive: entry.type === 'dir'
+                })
+                if (!ok) break
+              }
+            if (ok) setDialog(null)
+            await load(path)
           }}
         />
       )}
@@ -674,6 +770,7 @@ function EntryDialog({
         ? (dialog.entry.mode & 0o777).toString(8).padStart(3, '0')
         : ''
   const [value, setValue] = useState(initial)
+  const [busy, setBusy] = useState(false)
   const titles = {
     mkdir: 'New folder',
     rename: 'Rename',
@@ -686,8 +783,13 @@ function EntryDialog({
       : dialog.kind !== 'delete' &&
         (!value.trim() || value.includes('/') || value === '.' || value === '..')
   const submit = (): void => {
-    if (!invalid) void onSubmit(value.trim())
+    if (invalid || busy) return
+    setBusy(true)
+    void onSubmit(value.trim()).finally(() => {
+      setBusy(false)
+    })
   }
+  const folders = dialog.kind === 'delete' ? dialog.entries.filter((e) => e.type === 'dir') : []
   return (
     <Modal
       title={titles[dialog.kind]}
@@ -699,11 +801,11 @@ function EntryDialog({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant={dialog.kind === 'delete' ? 'danger' : 'primary'}
-            disabled={invalid}
+            disabled={invalid || busy}
             data-testid="sftp-dialog-submit"
             onClick={submit}
           >
-            {dialog.kind === 'delete' ? 'Delete' : 'OK'}
+            {dialog.kind === 'delete' ? (busy ? 'Deleting…' : 'Delete') : 'OK'}
           </Button>
         </>
       }
@@ -716,10 +818,39 @@ function EntryDialog({
         }}
       >
         {dialog.kind === 'delete' ? (
-          <p className="text-[13px]">
-            Delete <strong>{dialog.entry.name}</strong>
-            {dialog.entry.type === 'dir' ? ' and EVERYTHING inside it' : ''}? This cannot be undone.
-          </p>
+          <>
+            <p className="text-[13px]">
+              {dialog.entries.length === 1 ? (
+                <>
+                  Delete <strong className="break-all">{dialog.entries[0]?.name}</strong>
+                  {folders.length > 0 ? ' and everything inside it' : ''}?
+                </>
+              ) : (
+                <>
+                  Delete these {dialog.entries.length} items
+                  {folders.length > 0 ? ', including everything inside the folders' : ''}?
+                </>
+              )}
+            </p>
+            {dialog.entries.length > 1 && (
+              <ul className="max-h-32 overflow-auto rounded-md border border-line bg-subtle px-2.5 py-1.5 font-mono text-xs text-muted">
+                {dialog.entries.slice(0, 50).map((e) => (
+                  <li key={e.name} className="flex items-center gap-1.5 truncate py-0.5">
+                    {e.isDirLike ? (
+                      <Folder size={12} className="shrink-0 text-accent" />
+                    ) : (
+                      <File size={12} className="shrink-0" />
+                    )}
+                    <span className="truncate">{e.name}</span>
+                  </li>
+                ))}
+                {dialog.entries.length > 50 && (
+                  <li className="py-0.5 text-faint">…and {dialog.entries.length - 50} more</li>
+                )}
+              </ul>
+            )}
+            <p className="text-xs text-danger">This cannot be undone.</p>
+          </>
         ) : (
           <Input
             autoFocus

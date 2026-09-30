@@ -226,7 +226,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                   </td>
                   <td className="px-3 py-2">
                     {c.group && c.group.length > 0 && (
-                      <span className="block text-[11px] text-faint">{c.group.join(' › ')}</span>
+                      <span className="block text-xs text-faint">{c.group.join(' › ')}</span>
                     )}
                     <span className="text-fg">{c.label ?? c.alias}</span>
                   </td>

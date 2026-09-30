@@ -56,12 +56,12 @@ export function KeysSection(): React.JSX.Element {
               <div className="flex items-center gap-2">
                 <KeyRound size={14} className="text-muted" />
                 <span className="text-[13px] font-medium">{k.name}</span>
-                <span className="rounded bg-subtle px-1.5 py-0.5 text-[11px] text-muted">
+                <span className="rounded bg-subtle px-1.5 py-0.5 text-xs text-muted">
                   {k.type}
                   {k.encrypted ? ' · passphrase' : ''}
                 </span>
               </div>
-              <p className="mt-1 font-mono text-[11px] break-all text-faint">{k.fingerprint}</p>
+              <p className="mt-1 font-mono text-xs break-all text-faint">{k.fingerprint}</p>
               <div className="mt-2 flex gap-1">
                 <Button
                   size="sm"

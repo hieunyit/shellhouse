@@ -5,7 +5,8 @@ test('workspace: lưu bố cục chia màn hình, đóng hết, mở lại đún
 }) => {
   // Tab local có sẵn + chia phải + thêm một tab trong khung bên phải.
   await expect(page.getByTestId('tab')).toHaveCount(1)
-  await page.getByTestId('split-right').click()
+  await page.getByTestId('layout-menu').click()
+  await page.getByTestId('menu-split-right').click()
   await expect(page.getByTestId('tab')).toHaveCount(2)
   await page.getByTestId('new-tab').click()
   await expect(page.getByTestId('tab')).toHaveCount(3)

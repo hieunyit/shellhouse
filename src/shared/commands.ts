@@ -17,6 +17,13 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: 'pane.splitRight', title: 'Split right', keys: ['Meta+D', 'Ctrl+Shift+D'] },
   { id: 'pane.splitDown', title: 'Split down', keys: ['Meta+E', 'Ctrl+Shift+E'] },
   { id: 'hosts.search', title: 'Search hosts', keys: ['Meta+K', 'Ctrl+Shift+K'] },
+  { id: 'hosts.new', title: 'New host', keys: [null, null] },
+  {
+    id: 'hosts.import',
+    title: 'Import hosts (ssh config, MobaXterm, Termius, CSV)',
+    keys: [null, null]
+  },
+  { id: 'quickconnect.focus', title: 'Quick connect', keys: [null, null] },
   { id: 'snippets.open', title: 'Open snippets', keys: ['Meta+S', 'Ctrl+Shift+S'] },
   { id: 'palette.open', title: 'Command palette', keys: ['Meta+Shift+P', 'Ctrl+Shift+P'] },
   { id: 'settings.open', title: 'Open settings', keys: ['Meta+,', 'Ctrl+,'] },

@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode, type SyntheticEvent } from 'react'
+import { Logo } from './Logo'
 import { KeyRound, LockKeyhole } from 'lucide-react'
 import { MIN_MASTER_PASSWORD, type VaultResult } from '@shared/ipc'
 import { useVault } from '../stores/vault'
@@ -33,11 +34,7 @@ function Card({
     <div className="shadow-elevated animate-dialog-in w-full max-w-sm rounded-2xl border border-line bg-elevated p-7">
       <div className="mb-6 flex flex-col items-center gap-4 text-center">
         <div className="relative">
-          <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-b from-[#1c2230] to-[#0d0f12] shadow-md ring-1 ring-black/10 dark:ring-white/10">
-            <span className="font-mono text-lg font-bold tracking-tighter text-[#4c8dff]">
-              &gt;_
-            </span>
-          </div>
+          <Logo size={56} className="drop-shadow-md" />
           <div className="absolute -right-1.5 -bottom-1.5 flex size-6 items-center justify-center rounded-full border-2 border-elevated bg-accent-solid text-white">
             {icon}
           </div>

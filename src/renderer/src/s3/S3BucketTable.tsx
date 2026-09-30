@@ -159,7 +159,7 @@ export function S3BucketTable({
       <div
         role="row"
         className={cx(
-          'sticky top-0 z-10 grid h-8 items-center gap-3 border-b border-line bg-surface px-3 text-[11px] font-medium text-faint',
+          'sticky top-0 z-10 grid h-8 items-center gap-3 border-b border-line bg-surface px-3 text-xs font-medium text-faint',
           columns
         )}
       >

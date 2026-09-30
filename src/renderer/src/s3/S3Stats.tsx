@@ -133,7 +133,7 @@ export function S3StatsDialog({
       <div className="max-h-[60vh] overflow-auto" role="table" aria-label="Statistics">
         <div
           role="row"
-          className="sticky top-0 grid grid-cols-[1fr_7rem_7rem_6rem] gap-2 border-b border-line bg-surface py-1.5 text-[11px] font-medium text-faint"
+          className="sticky top-0 grid grid-cols-[1fr_7rem_7rem_6rem] gap-2 border-b border-line bg-surface py-1.5 text-xs font-medium text-faint"
         >
           <span role="columnheader">{targets.length > 1 ? 'Bucket' : 'Location'}</span>
           <span role="columnheader" className="text-right">
@@ -190,7 +190,7 @@ export function S3StatsDialog({
                 </span>
               </div>
               {showClasses && (
-                <p className="mt-0.5 text-[11px] text-faint">
+                <p className="mt-0.5 text-xs text-faint">
                   {classes
                     .map(
                       ([cls, v]) =>

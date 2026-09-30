@@ -85,7 +85,7 @@ function HostKey({
           was reinstalled. <strong className="text-fg">Do not continue</strong> until you have
           verified the new fingerprint with the server administrator.
         </p>
-        <div className="rounded-md border border-danger/30 bg-danger-soft p-3 font-mono text-[11px] leading-relaxed break-all">
+        <div className="rounded-md border border-danger/30 bg-danger-soft p-3 font-mono text-xs leading-relaxed break-all">
           {changedFrom.map((k) => (
             <div key={k.fingerprint} className="text-muted">
               Previous: {k.keyType} {k.fingerprint}
@@ -140,7 +140,7 @@ function HostKey({
         administrator before trusting it.
       </p>
       <div className="flex gap-4">
-        <pre className="rounded-md border border-line bg-subtle p-2 font-mono text-[11px] leading-tight text-fg">
+        <pre className="rounded-md border border-line bg-subtle p-2 font-mono text-xs leading-tight text-fg">
           {key.randomart}
         </pre>
         <div className="flex min-w-0 flex-col justify-center gap-1 font-mono text-xs break-all">
