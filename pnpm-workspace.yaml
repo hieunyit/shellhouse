@@ -16,3 +16,11 @@ allowBuilds:
   electron-winstaller: false
   unrs-resolver: false
   '@serialport/bindings-cpp': false
+
+# Cảnh báo audit được chấp nhận có lý do (xem lại khi cập nhật dependency):
+# - GHSA-wm7h-9275-46v2 (dicer ≤0.3.1): chỉ qua s3rver — server S3 giả lập CHỈ dùng trong test
+#   (devDependency, không có trong app phát hành). Lỗi nằm ở phần nhận form upload multipart
+#   (HTML POST), test không dùng tới.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-wm7h-9275-46v2

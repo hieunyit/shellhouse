@@ -17,6 +17,8 @@ export interface ShellhouseTestHooks {
     tabId: string
   ): 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'exited' | null
   sendInput(tabId: string, data: string): void
+  /** Thêm lệnh vào lịch sử của đích (DB + cache gợi ý) mà không cần gõ. */
+  seedCommandHistory(target: string, command: string): Promise<void>
   /** Trạng thái gợi ý lệnh (chẩn đoán test trên shell khác nhau). */
   suggestionState(tabId: string): unknown
   /** Kết nối lại tab (như menu Reconnect) — dùng khi màn hình khoá đang che giao diện. */

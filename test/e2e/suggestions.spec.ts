@@ -1,4 +1,30 @@
-import { activeTab, echoComputed, expect, isWindows, test, waitForText } from './fixtures'
+import type { Page } from '@playwright/test'
+import { activeTab, echoComputed, expect, isWindows, sendLine, test, waitForText } from './fixtures'
+
+/** Đợi dấu nhắc lệnh mới in xong (gõ sớm hơn → shell vẽ lại dòng lung tung). */
+async function waitPrompt(page: Page, tab: string): Promise<void> {
+  await expect
+    .poll(async () => {
+      const st = (await page.evaluate(
+        (id) => window.__shellhouseTest.suggestionState(id),
+        tab
+      )) as { beforeCursor?: string } | null
+      return /[$#%>] $/.test(st?.beforeCursor ?? '')
+    })
+    .toBe(true)
+}
+
+/**
+ * Dấu nhắc ngắn "$ ": runner macOS dùng bash 3.2 với dấu nhắc ~72 ký tự trên 80 cột — mọi lệnh bị
+ * ngắt dòng và bash 3.2 vẽ lại sai. Trường hợp ngắt dòng có test riêng bên dưới.
+ */
+async function prepareShell(page: Page, tab: string): Promise<void> {
+  if (!isWindows) {
+    await sendLine(page, tab, "export PS1='$ '; echo ps1-ready")
+    await waitForText(page, tab, 'ps1-ready\n')
+  }
+  await waitPrompt(page, tab)
+}
 
 test('gợi ý lệnh từ lịch sử: chữ mờ sau con trỏ, → để nhận; lệnh bắt đầu bằng dấu cách không lưu', async ({
   page
@@ -6,7 +32,9 @@ test('gợi ý lệnh từ lịch sử: chữ mờ sau con trỏ, → để nh�
   const tab = await activeTab(page)
   const terminal = page.getByTestId(`terminal-${tab}`)
   await terminal.click()
+  await prepareShell(page, tab)
   const typeLine = async (line: string): Promise<void> => {
+    await waitPrompt(page, tab)
     await page.keyboard.type(line)
     await page.keyboard.press('Enter')
   }
@@ -38,6 +66,7 @@ test('gợi ý lệnh từ lịch sử: chữ mờ sau con trỏ, → để nh�
     .catch(() => diagnose('command was not recorded'))
   // Bước 2: gõ phần đầu → gợi ý phần còn lại.
   const ghost = page.getByTestId('command-suggestion')
+  await waitPrompt(page, tab)
   await page.keyboard.type(first.command.slice(0, 8))
   // PowerShell (PSReadLine) tự hiện gợi ý của nó ngay sau con trỏ → app không vẽ chồng lên;
   // → vẫn nhận gợi ý (của PSReadLine).
@@ -77,7 +106,9 @@ test('gợi ý lệnh từ lịch sử: chữ mờ sau con trỏ, → để nh�
   if (!isWindows) {
     await typeLine("read -s -p 'Secret: ' x; echo; echo read-done")
     await waitForText(page, tab, 'Secret: ')
-    await typeLine('topsecret-value')
+    // Đang ở dấu nhắc "Secret: " của read → gõ thẳng, không chờ dấu nhắc shell.
+    await page.keyboard.type('topsecret-value')
+    await page.keyboard.press('Enter')
     await waitForText(page, tab, 'read-done\n')
     await page.keyboard.type('tops')
     await page.waitForTimeout(300)
@@ -95,22 +126,26 @@ test('gợi ý lệnh với dòng lệnh dài bị ngắt xuống dòng (cửa s
   })
   const tab = await activeTab(page)
   await page.getByTestId(`terminal-${tab}`).click()
+  await prepareShell(page, tab)
   const ready = echoComputed('ready')
   await page.keyboard.type(ready.command)
   await page.keyboard.press('Enter')
   await waitForText(page, tab, ready.expected)
+  await waitPrompt(page, tab)
   const cols = await page.evaluate((id) => window.__shellhouseTest.size(id)?.cols ?? 80, tab)
   // Dài hơn một dòng terminal → chắc chắn bị ngắt.
   const long = `echo ${'dai-'.repeat(Math.ceil(cols / 4))}xong`
-  await page.keyboard.type(long)
+  await page.keyboard.type(long, { delay: 5 })
   await page.keyboard.press('Enter')
-  await waitForText(page, tab, 'xong\n')
+  // Output dài bị ngắt giữa chữ → đợi dấu nhắc mới thay vì tìm chữ trên màn hình.
+  await waitPrompt(page, tab)
   await expect
     .poll(() => page.evaluate(() => window.shellhouse.commandHistory('local:default')), {
       timeout: 10_000
     })
     .toContain(long)
-  await page.keyboard.type('echo dai-dai')
+  await waitPrompt(page, tab)
+  await page.keyboard.type('echo dai-dai', { delay: 5 })
   // Gợi ý = phần còn lại của lệnh (có thể bị cắt ở mép phải cửa sổ).
   const rest = long.slice('echo dai-dai'.length)
   await expect
@@ -125,6 +160,7 @@ test('gợi ý khi con trỏ đứng ngay mép phải: chữ gợi ý tràn sang
   test.skip(isWindows, 'PowerShell tự gợi ý (PSReadLine)')
   const tab = await activeTab(page)
   await page.getByTestId(`terminal-${tab}`).click()
+  await prepareShell(page, tab)
   const ready = echoComputed('ready')
   await page.keyboard.type(ready.command)
   await page.keyboard.press('Enter')
@@ -140,23 +176,12 @@ test('gợi ý khi con trỏ đứng ngay mép phải: chữ gợi ý tràn sang
   // Phần gõ vừa đủ để con trỏ chạm mép phải dòng.
   const prefix = `echo ${'m'.repeat(cols - state.cursor.col - 5)}`
   const command = `${prefix}-phan-con-lai`
-  // Gõ với tốc độ gần người thật: gõ tức thì đúng lúc chạm mép phải làm readline (bash) tự vẽ sai
-  // dòng — khi đó app đúng ra không lưu lệnh (không khớp màn hình).
-  await page.keyboard.type(command, { delay: 5 })
-  await page.keyboard.press('Enter')
-  await waitForText(page, tab, 'phan-con-lai\n')
-  await expect
-    .poll(() => page.evaluate(() => window.shellhouse.commandHistory('local:default')), {
-      timeout: 10_000
-    })
-    .toContain(command)
-    .catch(async () => {
-      const screen = (await page.evaluate((id) => window.__shellhouseTest.bufferText(id), tab))
-        .trimEnd()
-        .split('\n')
-        .slice(-6)
-      throw new Error(`long command not recorded; screen: ${JSON.stringify(screen)}`)
-    })
+  // Nạp sẵn lệnh dài vào lịch sử (việc ghi lệnh đã có test riêng): gõ tay lệnh dài đúng tới mép
+  // phải đôi khi làm readline (bash 3.2 trên macOS) vẽ sai dòng → app đúng ra không lưu lệnh.
+  await page.evaluate(([target, cmd]) => window.__shellhouseTest.seedCommandHistory(target, cmd), [
+    'local:default',
+    command
+  ] as const)
   await expect.poll(async () => /[$#%>] $/.test((await promptState()).beforeCursor)).toBe(true)
   await page.keyboard.type(prefix, { delay: 5 })
   await expect(page.getByTestId('command-suggestion'))

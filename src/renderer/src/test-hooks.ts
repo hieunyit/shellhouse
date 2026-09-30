@@ -1,6 +1,7 @@
 import { TEST_HOOKS_GLOBAL, type ShellhouseTestHooks } from '@shared/test-hooks'
 import { useTabs } from './stores/tabs'
 import { controllers } from './terminal/registry'
+import { forgetHistory } from './terminal/suggestions'
 
 let maxLongTask = 0
 
@@ -51,6 +52,10 @@ export function installTestHooks(): void {
     state: (tabId) => controllers.get(tabId)?.connectionState ?? null,
     sendInput: (tabId, data) => {
       controllers.get(tabId)?.sendInput(data)
+    },
+    seedCommandHistory: async (target, command) => {
+      await window.shellhouse.recordCommand(target, command)
+      forgetHistory(target)
     },
     measureEchoLatency: async (tabId, samples) => {
       const controller = controllers.get(tabId)
