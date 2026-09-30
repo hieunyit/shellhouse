@@ -34,7 +34,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - **Ctrl+Shift+V / Shift+Insert pasted twice** in the terminal (since the menu bar was removed
   in 1.1.0-beta.3). The app handles these keys itself and no longer lets Chromium paste again.
 - Command suggestions work for long command lines that wrap onto several lines (long prompts,
-  narrow windows).
+  narrow windows), and when the cursor sits at the right edge the suggestion continues on the
+  next line.
 
 ## [1.1.0-beta.3] - 2026-09-30
 

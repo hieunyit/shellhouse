@@ -525,12 +525,13 @@ export class TerminalController {
       return
     }
     const b = this.term.buffer.active
-    // Chỉ khi con trỏ ở cuối phần đã gõ và đang xem đáy màn hình.
+    // Chỉ khi con trỏ ở cuối phần đã gõ và đang xem đáy màn hình. Chỉ có khoảng trắng sau con trỏ
+    // vẫn tính là cuối dòng: readline (bash) in một dấu cách để ép xuống dòng khi dòng vừa đầy.
     const line = b.getLine(b.baseY + b.cursorY)
     const afterCursor = line?.translateToString(true, b.cursorX) ?? ''
     const typed = this.typedText(true)
     const rest =
-      typed !== null && afterCursor === '' && b.viewportY === b.baseY
+      typed !== null && afterCursor.trim() === '' && b.viewportY === b.baseY
         ? suggestRest(this.historyTarget, typed)
         : null
     if (!rest) {
@@ -541,7 +542,8 @@ export class TerminalController {
     if (!screen || !this.term.element) return
     const cellW = screen.clientWidth / this.term.cols
     const cellH = screen.clientHeight / this.term.rows
-    const room = this.term.cols - b.cursorX
+    // Chỗ còn lại tới đáy màn hình (gợi ý dài / con trỏ ở mép phải thì tràn sang dòng dưới).
+    const room = (this.term.rows - b.cursorY) * this.term.cols - b.cursorX
     if (!this.ghost) {
       this.ghost = document.createElement('span')
       this.ghost.className = 'sh-ghost'
@@ -552,9 +554,13 @@ export class TerminalController {
     const g = this.ghost
     const o = this.term.options
     g.textContent = rest.slice(0, Math.max(0, room))
-    g.style.left = `${screen.offsetLeft + b.cursorX * cellW}px`
+    // Khối rộng bằng cả dòng terminal, thụt đầu dòng tới con trỏ: chữ tự xuống dòng đúng cột như
+    // chữ gõ trong terminal (font đơn cách).
+    g.style.left = `${screen.offsetLeft}px`
     g.style.top = `${screen.offsetTop + b.cursorY * cellH}px`
-    g.style.height = `${cellH}px`
+    g.style.width = `${this.term.cols * cellW}px`
+    g.style.textIndent = `${b.cursorX * cellW}px`
+    g.style.maxHeight = `${(this.term.rows - b.cursorY) * cellH}px`
     g.style.lineHeight = `${cellH}px`
     g.style.fontFamily = o.fontFamily ?? 'monospace'
     g.style.fontSize = `${o.fontSize ?? 14}px`

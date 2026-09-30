@@ -327,7 +327,8 @@ select.sh-select option {
   position: absolute;
   z-index: 5;
   pointer-events: none;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-all;
   overflow: hidden;
   color: var(--sh-faint);
   opacity: 0.85;
