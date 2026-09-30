@@ -16,6 +16,10 @@ import { useSettings } from '../stores/settings'
 import { useShells } from '../stores/shells'
 import { useTabs } from '../stores/tabs'
 import { cx, useEscapeToClose, useFocusTrap } from './ui'
+import { MANIFESTS } from '../../../modules/registry/manifests'
+import { ModuleIcon, rendererModule, useModules } from '../../../modules/registry/renderer-kit'
+import { searchModules } from '../../../modules/registry/search'
+import { requestEnableModule } from '../stores/module-ui'
 
 interface Item {
   id: string
@@ -46,6 +50,7 @@ export function CommandPalette({
   const hosts = useHosts((s) => s.tree.hosts)
   const shells = useShells((s) => s.shells)
   const workspaces = useSettings((s) => s.settings.workspaces)
+  const moduleStates = useModules((s) => s.states)
 
   const items = useMemo<Item[]>(() => {
     const commands: Item[] = COMMANDS.filter((c) => c.id !== 'palette.open').map((c) => ({
@@ -93,14 +98,54 @@ export function CommandPalette({
         openWorkspace(w)
       }
     }))
-    const all = [...commands, ...layouts, ...terminals, ...connect]
+    // Module (ADR-014 mục 3.12.2): cùng bộ tìm của trang Modules — "container" tìm ra Docker.
+    const modules = MANIFESTS.map((manifest) => ({
+      manifest,
+      enabled: moduleStates[manifest.id]?.enabled === true
+    }))
+    const moduleCommands = (id: string): Item[] => {
+      const m = rendererModule(id)
+      return (m?.commands?.() ?? []).map((c) => ({
+        id: `module:${id}:${c.id}`,
+        title: `${m?.manifest.name ?? id}: ${c.title}`,
+        hint: '',
+        group: 'Commands' as const,
+        icon: <ModuleIcon name={m?.manifest.icon} size={14} />,
+        shortcut: false,
+        run: () => {
+          c.run()
+        }
+      }))
+    }
+    const enableItem = (m: (typeof MANIFESTS)[number]): Item => ({
+      id: `module-enable:${m.id}`,
+      title: `Modules: Enable ${m.name}`,
+      hint: m.summary,
+      group: 'Commands' as const,
+      icon: <ModuleIcon name={m.icon} size={14} />,
+      shortcut: false,
+      run: () => void requestEnableModule(m.id)
+    })
+    const enabledCommands = modules
+      .filter((m) => m.enabled)
+      .flatMap((m) => moduleCommands(m.manifest.id))
+    const all = [...commands, ...enabledCommands, ...layouts, ...terminals, ...connect]
     if (!query.trim()) return all
-    return all
-      .map((item) => ({ item, score: bestScore(query, [item.title, item.hint]) }))
-      .filter((r): r is { item: Item; score: number } => r.score !== null)
-      .sort((a, b) => b.score - a.score)
-      .map((r) => r.item)
-  }, [query, overrides, hosts, shells, workspaces, runCommand])
+    const matchedModules = searchModules(modules, query)
+    const moduleItems = matchedModules.flatMap((m) =>
+      m.enabled ? moduleCommands(m.manifest.id) : [enableItem(m.manifest)]
+    )
+    const seen = new Set(moduleItems.map((i) => i.id))
+    return [
+      ...moduleItems,
+      ...all
+        .filter((item) => !seen.has(item.id))
+        .map((item) => ({ item, score: bestScore(query, [item.title, item.hint]) }))
+        .filter((r): r is { item: Item; score: number } => r.score !== null)
+        .sort((a, b) => b.score - a.score)
+        .map((r) => r.item)
+    ]
+  }, [query, overrides, hosts, shells, workspaces, runCommand, moduleStates])
 
   // Giữ mục đang chọn trong vùng nhìn thấy khi di chuyển bằng phím mũi tên.
   useEffect(() => {

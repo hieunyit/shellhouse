@@ -74,14 +74,13 @@ const api: ShellhouseApi = {
   listLocal: (path) => invoke('local:list', path),
   listSerialPorts: () => invoke('serial:list'),
   commandHistory: (target) => invoke('history:list', target),
-  s3Accounts: () => invoke('s3:accounts'),
-  saveS3Account: (input) => invoke('s3:save', input),
-  deleteS3Account: (id) => invoke('s3:delete', id),
-  pinS3Location: (accountId, pin, pinned) => invoke('s3:pin', accountId, pin, pinned),
-  onS3Changed: (listener) =>
-    subscribe('s3:changed', () => {
-      listener()
-    }),
+  modules: () => invoke('modules:list'),
+  setModuleEnabled: (id, enabled) => invoke('modules:setEnabled', id, enabled),
+  removeModuleData: (id) => invoke('modules:removeData', id),
+  invokeModule: (id, name, args) => invoke('modules:invoke', id, name, args),
+  detectLocalModules: () => invoke('modules:detectLocal'),
+  onModulesChanged: (listener) => subscribe('modules:changed', listener),
+  onModuleEvent: (listener) => subscribe('modules:event', listener),
   recordCommand: (target, command) => invoke('history:record', target, command),
   clearCommandHistory: (target) => invoke('history:clear', target),
   pickFolder: (title, start) => invoke('dialog:pickFolder', title, start),

@@ -17,6 +17,8 @@ import { toggleMultiExec, useBroadcast } from './terminal/broadcast'
 import { MultiExecView } from './terminal/MultiExecView'
 import { TerminalMenu } from './terminal/TerminalMenu'
 import { controllers } from './terminal/registry'
+import { EnableModuleDialog } from './components/EnableModuleDialog'
+import { useModuleUi } from './stores/module-ui'
 
 type Overlay =
   | { kind: 'snippets' }
@@ -45,6 +47,16 @@ export function App(): React.JSX.Element {
     }
   }, [multiExec])
   const searchRef = useRef<HTMLInputElement>(null)
+
+  // Nơi khác (thanh bên, màn chào, gợi ý) yêu cầu mở trang Modules.
+  useEffect(
+    () =>
+      useModuleUi.subscribe((s, prev) => {
+        if (s.browse && s.browse !== prev.browse)
+          setOverlay({ kind: 'settings', section: 'modules' })
+      }),
+    []
+  )
 
   useEffect(() => {
     void useHosts.getState().reload()
@@ -132,6 +144,9 @@ export function App(): React.JSX.Element {
         break
       case 'workspaces.open':
         setOverlay({ kind: 'workspaces' })
+        break
+      case 'modules.browse':
+        setOverlay({ kind: 'settings', section: 'modules' })
         break
       case 'vault.lock':
         void window.shellhouse.lockVault()
@@ -225,6 +240,7 @@ export function App(): React.JSX.Element {
           {...(overlay.section ? { initial: overlay.section } : {})}
         />
       )}
+      <EnableModuleDialog />
     </div>
   )
 }

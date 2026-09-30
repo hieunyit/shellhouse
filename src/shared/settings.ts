@@ -80,10 +80,6 @@ const FileSettings = z.object({
   editor: z.string().max(1024).catch(''),
   /** Bấm đúp file trong SFTP: mở để sửa (tự tải lên khi lưu) hoặc tải về. */
   doubleClick: z.enum(['edit', 'download']).catch('edit'),
-  /** Số request S3 cùng lúc khi quét / thống kê / copy / xoá (dịch vụ nhỏ dễ báo SlowDown nếu quá cao). */
-  s3Requests: z.number().int().min(4).max(64).catch(16),
-  /** Số file S3 truyền cùng lúc. */
-  s3Transfers: z.number().int().min(1).max(16).catch(6),
   /** Số yêu cầu SFTP cùng lúc khi duyệt / tạo / xoá thư mục (sftp-server xử lý tuần tự: >16 ít lợi). */
   sftpRequests: z.number().int().min(2).max(16).catch(8),
   /** Số file SFTP truyền cùng lúc. */
@@ -104,6 +100,27 @@ const UpdateSettings = z.object({
   autoCheck: z.boolean().catch(true)
 })
 
+/**
+ * Trạng thái + cấu hình riêng của một module (ADR-014 mục 3.9). Trường cấu hình do schema của
+ * module đọc (`looseObject` giữ nguyên các trường lõi không biết).
+ */
+export const ModuleEntry = z.looseObject({
+  /** undefined = theo `enabledByDefault` của manifest. */
+  enabled: z.boolean().optional().catch(undefined),
+  /** Đã mở thẻ / trang chi tiết (bỏ nhãn NEW). */
+  seen: z.boolean().optional().catch(undefined),
+  /** Lần gợi ý bật gần nhất (ms) — tối đa 1 lần / 30 ngày. */
+  suggestedAt: z.number().optional().catch(undefined),
+  /** "Don't suggest again". */
+  neverSuggest: z.boolean().optional().catch(undefined)
+})
+export type ModuleEntry = z.infer<typeof ModuleEntry>
+
+const ModuleOptions = z.object({
+  /** Gợi ý bật module khi phát hiện dấu hiệu (Docker trên server…). */
+  suggest: z.boolean().catch(true)
+})
+
 export const AppSettings = z.object({
   appearance: AppearanceSettings.catch(AppearanceSettings.parse({})),
   terminal: TerminalSettings.catch(TerminalSettings.parse({})),
@@ -115,16 +132,47 @@ export const AppSettings = z.object({
   keybindings: z.record(z.string().max(64), z.string().max(64)).catch({}),
   customThemes: z.array(TerminalTheme).max(100).catch([]),
   /** Bố cục tab đã lưu (mở lại bằng bảng lệnh). */
-  workspaces: z.array(Workspace).max(50).catch([])
+  workspaces: z.array(Workspace).max(50).catch([]),
+  modules: z.record(z.string().regex(/^[a-z0-9-]{1,40}$/), ModuleEntry).catch({}),
+  moduleOptions: ModuleOptions.catch(ModuleOptions.parse({}))
 })
 export type AppSettings = z.infer<typeof AppSettings>
 
 export const DEFAULT_SETTINGS: AppSettings = AppSettings.parse({})
 
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/**
+ * Cài đặt cũ → mới. 1.2: `files.s3Requests / s3Transfers` → `modules.s3.requests / transfers`
+ * (ADR-014 mục 5.2 bước 5) — giữ giá trị người dùng đã chọn.
+ */
+function migrateLegacy(raw: object): object {
+  const files = (raw as { files?: unknown }).files
+  if (!isRecord(files) || (files['s3Requests'] === undefined && files['s3Transfers'] === undefined))
+    return raw
+  const modules = (raw as { modules?: unknown }).modules
+  const allModules = isRecord(modules) ? modules : {}
+  const s3 = isRecord(allModules['s3']) ? allModules['s3'] : {}
+  return {
+    ...raw,
+    modules: {
+      ...allModules,
+      s3: {
+        ...(files['s3Requests'] !== undefined ? { requests: files['s3Requests'] } : {}),
+        ...(files['s3Transfers'] !== undefined ? { transfers: files['s3Transfers'] } : {}),
+        ...s3
+      }
+    }
+  }
+}
+
 /** Đọc cài đặt từ JSON bất kỳ: trường hỏng rơi về mặc định, không làm mất trường khác. */
 export function parseSettings(raw: unknown): AppSettings {
   // Mảng cũng là "object" trong JS — phải loại ra (fuzz tìm ra: '[]' trong DB làm app crash).
-  const base = typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw : {}
+  const base = migrateLegacy(
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? raw : {}
+  )
   const parsed = AppSettings.safeParse(base)
   return parsed.success ? parsed.data : AppSettings.parse({})
 }
@@ -139,7 +187,10 @@ export const SettingsPatch = z.object({
   logging: LoggingSettings.partial().optional(),
   keybindings: z.record(z.string().max(64), z.string().max(64)).optional(),
   customThemes: z.array(TerminalTheme).max(100).optional(),
-  workspaces: z.array(Workspace).max(50).optional()
+  workspaces: z.array(Workspace).max(50).optional(),
+  /** Mỗi module: gộp nông với giá trị hiện có. */
+  modules: z.record(z.string().regex(/^[a-z0-9-]{1,40}$/), ModuleEntry).optional(),
+  moduleOptions: ModuleOptions.partial().optional()
 })
 export type SettingsPatch = z.infer<typeof SettingsPatch>
 
@@ -154,6 +205,18 @@ export function applyPatch(current: AppSettings, patch: SettingsPatch): AppSetti
     logging: { ...current.logging, ...patch.logging },
     keybindings: patch.keybindings ?? current.keybindings,
     customThemes: patch.customThemes ?? current.customThemes,
-    workspaces: patch.workspaces ?? current.workspaces
+    workspaces: patch.workspaces ?? current.workspaces,
+    modules: patch.modules
+      ? {
+          ...current.modules,
+          ...Object.fromEntries(
+            Object.entries(patch.modules).map(([id, entry]) => [
+              id,
+              { ...current.modules[id], ...entry }
+            ])
+          )
+        }
+      : current.modules,
+    moduleOptions: { ...current.moduleOptions, ...patch.moduleOptions }
   })
 }

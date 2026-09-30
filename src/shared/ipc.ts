@@ -3,7 +3,6 @@ import { NativeModuleStatus } from './session-host-protocol'
 import { SessionSpec } from './stream-protocol'
 import { LocalListing } from './local-files'
 import { SerialPortInfo } from './serial'
-import { S3AccountInput, S3AccountSummary, S3Pin } from './s3'
 import {
   GroupInput,
   HostInput,
@@ -76,6 +75,10 @@ export const AppInfo = z.object({
   windowsBuild: z.number().int().nullable()
 })
 export type AppInfo = z.infer<typeof AppInfo>
+
+const ModuleIdArg = z.string().regex(/^[a-z0-9-]{1,40}$/)
+const ModuleStateSchema = z.object({ id: z.string(), enabled: z.boolean(), seen: z.boolean() })
+export type ModuleStateInfo = z.infer<typeof ModuleStateSchema>
 
 /**
  * Hợp đồng IPC renderer ↔ main. Mỗi kênh khai báo schema tham số và kết quả;
@@ -172,10 +175,29 @@ export const invokeContract = {
   /** Hộp thoại của hệ điều hành — renderer không tự chọn đường dẫn trên máy. */
   'dialog:openFiles': { args: z.tuple([]), result: z.array(z.string()) },
   'dialog:saveFile': { args: z.tuple([z.string().max(255)]), result: z.string().nullable() },
-  's3:accounts': { args: z.tuple([]), result: z.array(S3AccountSummary) },
-  's3:save': { args: z.tuple([S3AccountInput]), result: MutationResult },
-  's3:delete': { args: z.tuple([z.string().max(64)]), result: z.void() },
-  's3:pin': { args: z.tuple([z.string().max(64), S3Pin, z.boolean()]), result: z.void() },
+  /** Trạng thái các module (ADR-014). */
+  'modules:list': { args: z.tuple([]), result: z.array(ModuleStateSchema) },
+  /** Bật / tắt module — có hiệu lực ngay; lỗi bật (migration…) trả về dạng Error. */
+  'modules:setEnabled': {
+    args: z.tuple([ModuleIdArg, z.boolean()]),
+    result: z.array(ModuleStateSchema)
+  },
+  /** Xoá toàn bộ dữ liệu của module (đã tắt). */
+  'modules:removeData': { args: z.tuple([ModuleIdArg]), result: z.void() },
+  /**
+   * Gọi handler `module:<id>:<name>` — tham số do schema của module kiểm ở main. Kết quả là JSON
+   * (kiểu `unknown` ở đây làm TS mất suy luận kiểu literal của mọi handler khác).
+   */
+  'modules:invoke': {
+    args: z.tuple([
+      ModuleIdArg,
+      z.string().regex(/^[a-zA-Z][\w-]{0,40}$/),
+      z.array(z.unknown()).max(16)
+    ]),
+    result: z.json().optional()
+  },
+  /** Dấu hiệu trên máy (kubeconfig, socket Docker…) của module đang tắt — gợi ý bật (3.12.4). */
+  'modules:detectLocal': { args: z.tuple([]), result: z.array(ModuleIdArg) },
   /** Lịch sử lệnh của một đích (gợi ý khi gõ), mới nhất trước. */
   'history:list': { args: z.tuple([z.string().min(1).max(300)]), result: z.array(z.string()) },
   'history:record': {
@@ -250,8 +272,10 @@ export const eventContract = {
   'hosts:changed': z.null(),
   'settings:changed': AppSettings,
   'updates:status': z.custom<UpdateStatus>(),
-  /** Danh sách tài khoản S3 thay đổi. */
-  's3:changed': z.null()
+  /** Module bật / tắt. */
+  'modules:changed': z.array(ModuleStateSchema),
+  /** Sự kiện của module (`ctx.events.emit`). */
+  'modules:event': z.object({ module: z.string(), name: z.string(), data: z.unknown() })
 } as const
 
 export type EventChannel = keyof typeof eventContract
@@ -303,12 +327,16 @@ export interface ShellhouseApi {
   listLocal(path: string | null): Promise<LocalListing>
   listSerialPorts(): Promise<SerialPortInfo[]>
   commandHistory(target: string): Promise<string[]>
-  s3Accounts(): Promise<S3AccountSummary[]>
-  saveS3Account(input: S3AccountInput): Promise<MutationResult>
-  deleteS3Account(id: string): Promise<void>
-  /** Ghim / bỏ ghim bucket hoặc thư mục lên thanh bên. */
-  pinS3Location(accountId: string, pin: S3Pin, pinned: boolean): Promise<void>
-  onS3Changed(listener: () => void): () => void
+  modules(): Promise<ModuleStateInfo[]>
+  setModuleEnabled(id: string, enabled: boolean): Promise<ModuleStateInfo[]>
+  removeModuleData(id: string): Promise<void>
+  /** Gọi IPC của module (`module:<id>:<name>`). */
+  invokeModule(id: string, name: string, args: unknown[]): Promise<unknown>
+  detectLocalModules(): Promise<string[]>
+  onModulesChanged(listener: (states: ModuleStateInfo[]) => void): () => void
+  onModuleEvent(
+    listener: (event: { module: string; name: string; data: unknown }) => void
+  ): () => void
   recordCommand(target: string, command: string): Promise<void>
   clearCommandHistory(target: string | null): Promise<void>
   pickFolder(title: string, start: 'logs' | 'downloads'): Promise<string | null>

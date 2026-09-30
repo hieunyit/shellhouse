@@ -2,7 +2,6 @@ import { z } from 'zod'
 import { Hostname, Username } from './hosts'
 import { ForwardSpec, type ForwardStatus } from './forwards'
 import type { ServerStats } from './server-stats'
-import { S3Op } from './s3'
 import { SerialSettings } from './serial'
 import { SftpOp, type TransferStatus } from './sftp'
 
@@ -26,6 +25,9 @@ export const STREAM_LIMITS = {
   maxRows: 500
 } as const
 
+/** Id module: chữ thường, số, '-'. */
+export const ModuleId = z.string().regex(/^[a-z0-9-]{1,40}$/)
+
 /** Renderer → Session Host. Tần suất thấp nên validate đầy đủ bằng zod. */
 export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('input'), d: z.string().max(1024 * 1024) }),
@@ -37,7 +39,12 @@ export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('ack'), n: z.number().int().nonnegative() }),
   /** Trả lời prompt. `ok: false` = huỷ / từ chối. */
   z.object({ t: z.literal('sftp'), id: z.number().int(), op: SftpOp }),
-  z.object({ t: z.literal('s3'), id: z.number().int(), op: S3Op }),
+  /** Thao tác của module (ADR-014 mục 3.5); `op` do schema của module kiểm. */
+  z.object({ t: z.literal('module'), id: z.number().int(), module: ModuleId, op: z.unknown() }),
+  /** Huỷ thao tác dài đang chạy (AbortSignal). */
+  z.object({ t: z.literal('module-cancel'), id: z.number().int() }),
+  /** Gắn module vào kết nối SSH của tab (Docker / K8s qua SSH). */
+  z.object({ t: z.literal('module-attach'), module: ModuleId }),
   /** Thêm public key vào ~/.ssh/authorized_keys của server (như ssh-copy-id). */
   z.object({
     t: z.literal('deploy-key'),
@@ -113,8 +120,9 @@ export type ServerMessage =
   | { t: 'sftp-result'; id: number; ok: true; result: unknown }
   | { t: 'sftp-result'; id: number; ok: false; error: string }
   | { t: 'transfers'; list: TransferStatus[] }
-  | { t: 's3-result'; id: number; ok: true; result: unknown }
-  | { t: 's3-result'; id: number; ok: false; error: string }
+  | { t: 'module-result'; id: number; ok: true; result: unknown }
+  | { t: 'module-result'; id: number; ok: false; error: string }
+  | { t: 'module-event'; module: string; event: string; data: unknown }
   | { t: 'stats'; stats: ServerStats }
   | { t: 'stats-unsupported'; reason: string }
   | {
@@ -155,8 +163,10 @@ export function isServerMessage(value: unknown): value is ServerMessage {
     case 'stats-unsupported':
       return typeof m['reason'] === 'string'
     case 'sftp-result':
-    case 's3-result':
+    case 'module-result':
       return typeof m['id'] === 'number' && typeof m['ok'] === 'boolean'
+    case 'module-event':
+      return typeof m['module'] === 'string' && typeof m['event'] === 'string'
     default:
       return false
   }
@@ -188,6 +198,13 @@ export const ParallelLimits = z.object({
 })
 export type ParallelLimits = z.infer<typeof ParallelLimits>
 
+/**
+ * Tab terminal của module chạy trên kết nối SSH (shell vào container / pod — ADR-014 mục 3.7): thay
+ * cho shell, Session Host gắn module rồi mở terminal module cấp.
+ */
+export const ModuleTerminal = z.object({ module: ModuleId, params: z.unknown() })
+export type ModuleTerminal = z.infer<typeof ModuleTerminal>
+
 /** Kết nối SSH tới một đích (kết nối nhanh). Host đã lưu dùng `hostId` (tuần 6). */
 export const SshSessionSpec = z.object({
   kind: z.literal('ssh'),
@@ -201,7 +218,8 @@ export const SshSessionSpec = z.object({
   /** true = chỉ SFTP, không mở shell trên server. */
   noShell: z.boolean().optional(),
   /** Mức song song của SFTP — main điền từ cài đặt. */
-  sftpLimits: ParallelLimits.optional()
+  sftpLimits: ParallelLimits.optional(),
+  moduleTerminal: ModuleTerminal.optional()
 })
 export type SshSessionSpec = z.infer<typeof SshSessionSpec>
 
@@ -211,37 +229,36 @@ export const SavedHostSessionSpec = z.object({
   cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
   rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows),
   hostId: z.string().min(1).max(64),
-  noShell: z.boolean().optional()
+  noShell: z.boolean().optional(),
+  moduleTerminal: ModuleTerminal.optional()
 })
 export type SavedHostSessionSpec = z.infer<typeof SavedHostSessionSpec>
 
-/** Trình quản lý S3 (tài khoản đã lưu) — main giải mã secret, renderer không bao giờ thấy. */
-export const S3SessionSpec = z.object({
-  kind: z.literal('s3'),
+/**
+ * Phiên riêng của module (tab S3, Docker trên máy này…). `params` do module kiểm; main phân giải
+ * thành `config` (có thể chứa secret) — config chỉ đi thẳng sang Session Host.
+ */
+export const ModuleSessionSpec = z.object({
+  kind: z.literal('module'),
+  module: ModuleId,
+  sessionKind: z.string().regex(/^[a-z0-9-]{1,40}$/),
   cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
   rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows),
-  accountId: z.string().min(1).max(64)
+  params: z.unknown(),
+  /** Có = tab terminal của module (3.7): mở terminal với tham số này. */
+  terminal: z.unknown().optional()
 })
+export type ModuleSessionSpec = z.infer<typeof ModuleSessionSpec>
 
-export const ResolvedS3SessionSpec = z.object({
-  kind: z.literal('s3'),
-  cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
-  rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows),
-  connection: z.object({
-    endpoint: z.string().max(500),
-    region: z.string().max(64),
-    accessKeyId: z.string().max(256),
-    secretAccessKey: z.string().max(1024),
-    forcePathStyle: z.boolean()
-  }),
-  limits: ParallelLimits.optional()
+export const ResolvedModuleSessionSpec = ModuleSessionSpec.omit({ params: true }).extend({
+  config: z.unknown()
 })
 
 export const SessionSpec = z.discriminatedUnion('kind', [
   LocalSessionSpec,
   SshSessionSpec,
   SavedHostSessionSpec,
-  S3SessionSpec
+  ModuleSessionSpec
 ])
 
 const SshTargetSchema = z.object({
@@ -290,7 +307,7 @@ export const ResolvedSessionSpec = z.discriminatedUnion('kind', [
   SystemSshSessionSpec,
   TelnetSessionSpec,
   SerialSessionSpec,
-  ResolvedS3SessionSpec
+  ResolvedModuleSessionSpec
 ])
 export type ResolvedSessionSpec = z.infer<typeof ResolvedSessionSpec>
 export type SessionSpec = z.infer<typeof SessionSpec>

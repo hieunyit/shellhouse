@@ -74,6 +74,16 @@ export const HostRequest = z.discriminatedUnion('type', [
     result: HostKeyCheck
   }),
   z.object({ type: z.literal('session:close'), sessionId: z.uuid() }),
+  /** Module đang bật (ADR-014) — gửi lúc khởi động và mỗi khi đổi. */
+  z.object({
+    type: z.literal('modules:enabled'),
+    ids: z.array(z.string().regex(/^[a-z0-9-]{1,40}$/)).max(100)
+  }),
+  z.object({
+    type: z.literal('module:grant-result'),
+    requestId: z.number().int(),
+    allowed: z.boolean()
+  }),
   /** Chỉ dùng trong dev/E2E để kiểm tra cơ chế tự phục hồi. */
   z.object({ type: z.literal('crash') })
 ])
@@ -109,6 +119,15 @@ export const HostEvent = z.discriminatedUnion('type', [
     host: z.string(),
     port: z.number().int(),
     key: z.base64()
+  }),
+  /** Module muốn chạy chương trình trên máy → main hỏi người dùng (hoặc dùng lựa chọn đã nhớ). */
+  z.object({
+    type: z.literal('module:grant'),
+    requestId: z.number().int(),
+    module: z.string().max(40),
+    binary: z.string().max(64),
+    path: z.string().max(4096),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/)
   }),
   z.object({
     type: z.literal('log'),

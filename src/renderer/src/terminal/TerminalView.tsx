@@ -57,7 +57,13 @@ export function TerminalView({
     () => useTabs.getState().tabs.find((t) => t.id === tabId)?.initialPanel ?? null
   )
   // Màu môi trường + đường dẫn nhóm (host đã lưu): nhắc người dùng đang ở server nào.
-  const hostId = target.kind === 'host' ? target.hostId : null
+  // Terminal của module qua SSH (shell vào container…) cũng mang màu của host đi qua.
+  const hostId =
+    target.kind === 'host'
+      ? target.hostId
+      : target.kind === 'module-terminal'
+        ? (target.hostId ?? null)
+        : null
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
   const envPath = useHosts((s) => {
     const groupId = hostId ? s.tree.hosts.find((h) => h.id === hostId)?.groupId : null
@@ -73,7 +79,8 @@ export function TerminalView({
   const protocol = useHosts((s) =>
     hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.protocol ?? 'ssh') : 'ssh'
   )
-  const isSsh = protocol === 'ssh'
+  // Terminal của module: không có SFTP / forwarding / deploy key trên kênh này.
+  const isSsh = protocol === 'ssh' && target.kind !== 'module-terminal'
   const multiExec = useBroadcast((s) => s.enabled)
   const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
   const runSftp = useCallback(

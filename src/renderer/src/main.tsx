@@ -7,6 +7,12 @@ import { installTestHooks } from './test-hooks'
 import './styles.css'
 // Áp theme sáng/tối lên <html> ngay khi có cài đặt.
 import './stores/appearance'
+import { registerRendererModules, startModules } from '../../modules/registry/renderer-kit'
+import { RENDERER_MODULES } from '../../modules/registry/all-renderer'
+
+// Module chính thức (ADR-014): đăng ký trước lần vẽ đầu, trạng thái bật / tắt lấy từ main.
+registerRendererModules(RENDERER_MODULES)
+startModules()
 
 const root = document.getElementById('root')
 if (!root) throw new Error('Missing #root')

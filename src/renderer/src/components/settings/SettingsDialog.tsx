@@ -7,6 +7,7 @@ import {
   Keyboard,
   KeyRound,
   Palette,
+  Puzzle,
   Shield,
   SquareTerminal
 } from 'lucide-react'
@@ -20,11 +21,13 @@ import { ShortcutsSection } from './ShortcutsSection'
 import { TerminalSection } from './TerminalSection'
 import { UpdatesSection } from './UpdatesSection'
 import { AboutSection } from './AboutSection'
+import { ModulesSection } from './ModulesSection'
 
 const SECTIONS = [
   { id: 'appearance', title: 'Appearance', icon: Palette },
   { id: 'terminal', title: 'Terminal', icon: SquareTerminal },
   { id: 'files', title: 'Files', icon: FolderOpen },
+  { id: 'modules', title: 'Modules', icon: Puzzle },
   { id: 'security', title: 'Security', icon: Shield },
   { id: 'keys', title: 'SSH keys', icon: KeyRound },
   { id: 'shortcuts', title: 'Shortcuts', icon: Keyboard },
@@ -77,6 +80,7 @@ export function SettingsDialog({
           {section === 'appearance' && <AppearanceSection />}
           {section === 'terminal' && <TerminalSection />}
           {section === 'files' && <FilesSection />}
+          {section === 'modules' && <ModulesSection />}
           {section === 'security' && <SecuritySection />}
           {section === 'keys' && <KeysSection />}
           {section === 'shortcuts' && <ShortcutsSection />}

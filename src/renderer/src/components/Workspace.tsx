@@ -8,10 +8,10 @@ import {
 } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
 import {
-  Cloud,
   Columns2,
   Copy,
   FileInput,
+  Puzzle,
   RotateCw,
   Rows2,
   Server,
@@ -30,9 +30,10 @@ import { useSettings } from '../stores/settings'
 import { connectionLabel, cx, Kbd, StatusDot } from './ui'
 import { Logo } from './Logo'
 import { focusQuickConnect, openSidebarDialog } from '../stores/ui-requests'
+import { browseModules } from '../stores/module-ui'
 import { useTabs } from '../stores/tabs'
 import { TerminalView } from '../terminal/TerminalView'
-import { S3View } from '../s3/S3View'
+import { ModuleTabView, TabIcon } from './ModuleTabView'
 import { layoutToItems, type WorkspaceItem } from '@shared/workspaces'
 
 interface PanelParams {
@@ -60,18 +61,8 @@ function TerminalPanel(props: IDockviewPanelProps<PanelParams>): React.JSX.Eleme
   }, [props.api])
 
   if (!tab) return null
-  if (tab.target.kind === 's3')
-    return (
-      <S3View
-        tabId={tab.id}
-        accountId={tab.target.accountId}
-        initialLocation={
-          tab.target.bucket
-            ? { bucket: tab.target.bucket, prefix: tab.target.prefix ?? '' }
-            : undefined
-        }
-      />
-    )
+  if (tab.target.kind === 'module')
+    return <ModuleTabView tabId={tab.id} target={tab.target} active={active} visible={visible} />
   return <TerminalView tabId={tab.id} target={tab.target} active={active} visible={visible} />
 }
 
@@ -92,14 +83,14 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
     }
   }, [props.api])
   const tabId = props.params.tabId
-  const kind = useTabs((s) => s.tabs.find((t) => t.id === tabId)?.target.kind ?? 'local')
+  const target = useTabs((s) => s.tabs.find((t) => t.id === tabId)?.target)
+  const kind = target?.kind ?? 'local'
   const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
   const hostId = useTabs((s) => {
     const t = s.tabs.find((x) => x.id === tabId)?.target
     return t?.kind === 'host' ? t.hostId : null
   })
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
-  const Icon = kind === 'local' ? SquareTerminal : kind === 's3' ? Cloud : Server
   const overrides = useSettings((s) => s.settings.keybindings)
   const { menu, open: openMenu } = useContextMenu()
   const key = (id: string): string => displayKeybinding(keybindingFor(id, overrides, isMac))
@@ -192,7 +183,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
           />
         )}
         <span className="relative flex shrink-0">
-          <Icon size={13} className={active ? 'text-fg' : 'text-faint'} />
+          <TabIcon target={target} size={13} className={active ? 'text-fg' : 'text-faint'} />
           {/* Terminal local luôn "connected" — chỉ hiện chấm khi là phiên từ xa hoặc đã kết thúc. */}
           {(kind !== 'local' || state === 'exited') && (
             <StatusDot
@@ -234,6 +225,7 @@ function StartCard({
   text,
   hint,
   testId,
+  className,
   onClick
 }: {
   icon: React.ReactNode
@@ -241,13 +233,17 @@ function StartCard({
   text: string
   hint?: string
   testId: string
+  className?: string
   onClick: () => void
 }): React.JSX.Element {
   return (
     <button
       type="button"
       data-testid={testId}
-      className="group flex items-start gap-3 rounded-xl border border-line bg-surface p-3.5 text-left shadow-xs transition-[border-color,box-shadow] duration-150 hover:border-accent/50 hover:shadow-md focus-visible:border-accent"
+      className={cx(
+        className,
+        'group flex items-start gap-3 rounded-xl border border-line bg-surface p-3.5 text-left shadow-xs transition-[border-color,box-shadow] duration-150 hover:border-accent/50 hover:shadow-md focus-visible:border-accent'
+      )}
       onClick={onClick}
     >
       <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
@@ -282,7 +278,7 @@ function Empty(): React.JSX.Element {
         <p className="mt-1 max-w-sm text-[13px] text-muted">
           {hasHosts
             ? 'Double-click a host in the sidebar, or start something new.'
-            : 'SSH, SFTP, Telnet, serial and S3 in one place. How would you like to start?'}
+            : 'SSH, SFTP, Telnet, serial and more in one place. How would you like to start?'}
         </p>
       </div>
       <div className="grid w-full max-w-xl grid-cols-1 gap-2.5 sm:grid-cols-2">
@@ -314,6 +310,16 @@ function Empty(): React.JSX.Element {
           hint={key('tab.new')}
           testId="welcome-new-terminal"
           onClick={() => useTabs.getState().addLocal()}
+        />
+        <StartCard
+          icon={<Puzzle size={18} />}
+          title="Add tools"
+          text="S3 storage and more — turn on the modules you need."
+          testId="welcome-add-tools"
+          className="sm:col-span-2"
+          onClick={() => {
+            browseModules()
+          }}
         />
       </div>
       <p className="text-xs text-faint">

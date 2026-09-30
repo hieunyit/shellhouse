@@ -14,7 +14,6 @@ import { ForwardManager } from '../forward/manager'
 import { SftpService } from '../sftp/service'
 import { deployPublicKey } from '../ssh/deploy-key'
 import { StatsMonitor } from '../ssh/stats-monitor'
-import { S3Service } from '../s3/service'
 import { RemoteEdits } from '../sftp/edit'
 import { downloadFolder, uploadFolder } from '../sftp/folders'
 import { TransferQueue } from '../sftp/transfers'
@@ -30,6 +29,9 @@ import { serialSummary } from '@shared/serial'
 import { homedir } from 'node:os'
 import type { PromptReply, Transport, TransportContext, TransportExit } from '../transport/types'
 import { classifyConnectError } from './exit-reason'
+import type { HostModuleSession } from '../../modules/registry/host-types'
+import type { HostModuleRegistry, ModuleSink } from '../../modules/registry/session-host'
+import { createSshCapability } from '../modules/ssh-capability'
 import { SessionLog, type SessionLogOptions } from './session-log'
 
 const MAX_PENDING_INPUT = 64 * 1024
@@ -70,6 +72,8 @@ export interface SessionDeps {
   appVersion: string
   hostKeys: HostKeyService
   onEnded(id: string): void
+  /** Module chính thức (ADR-014). */
+  modules: HostModuleRegistry
   /** Cho test. */
   sshOverrides?: { agent?: string | null; keyFiles?: readonly string[] }
 }
@@ -96,7 +100,12 @@ export class Session {
   private edits: RemoteEdits | null = null
   private log: SessionLog | null = null
   private stats: StatsMonitor | null = null
-  private s3: S3Service | null = null
+  /** Phiên riêng của module (spec `module`). */
+  private moduleSession: { id: string; session: HostModuleSession } | null = null
+  /** Module gắn vào kết nối SSH của tab (đang gắn = promise chưa xong). */
+  private readonly attached = new Map<string, Promise<HostModuleSession>>()
+  /** Thao tác module đang chạy → huỷ được. */
+  private readonly moduleOps = new Map<number, AbortController>()
   private wantStats = false
   /** Yêu cầu forward đến trước khi kết nối xong. */
   private pendingForwards: ForwardSpec[] = []
@@ -159,17 +168,32 @@ export class Session {
         const launch = resolveLocalShell(this.deps.appVersion, this.spec.shell)
         this.transport = new LocalPty(launch, this.spec.cols, this.spec.rows, callbacks)
         this.deps.log('info', `Session ${this.id}: started ${launch.file}`)
-      } else if (this.spec.kind === 's3') {
-        // Không có terminal: chỉ thao tác S3 + truyền file qua port của tab.
-        this.s3 = new S3Service(
-          this.spec.connection,
-          (list) => {
-            this.post({ t: 'transfers', list })
-          },
-          this.spec.limits
+      } else if (this.spec.kind === 'module') {
+        const { module, sessionKind } = this.spec
+        const session = this.deps.modules.createSession(
+          module,
+          sessionKind,
+          this.spec.config,
+          this.moduleSink(module)
         )
-        this.post({ t: 'status', phase: 'connected', detail: 'S3 ready' })
-        this.deps.log('info', `Session ${this.id}: S3 ${this.spec.connection.endpoint || 'AWS'}`)
+        this.moduleSession = { id: module, session }
+        if (this.spec.terminal !== undefined) {
+          // Tab terminal của module (shell vào container…): dùng lại toàn bộ đường terminal.
+          if (!session.openTerminal) throw new Error(`Module ${module} has no terminal`)
+          const transport = await session.openTerminal(
+            this.spec.terminal,
+            { cols: this.spec.cols, rows: this.spec.rows },
+            callbacks
+          )
+          if (this.closed) {
+            transport.close()
+            return
+          }
+          this.transport = transport
+          this.flushPendingInput()
+        }
+        this.post({ t: 'status', phase: 'connected', detail: 'Ready' })
+        this.deps.log('info', `Session ${this.id}: module ${module} (${sessionKind})`)
       } else if (this.spec.kind === 'telnet') {
         const { host, port } = this.spec.target
         this.post({
@@ -237,7 +261,8 @@ export class Session {
           ...(this.extras.jumps ? { jumps: this.extras.jumps } : {}),
           cols: this.spec.cols,
           rows: this.spec.rows,
-          ...(this.spec.noShell ? { shell: false } : {}),
+          ...(this.spec.noShell || this.spec.moduleTerminal ? { shell: false } : {}),
+          ...(this.spec.moduleTerminal ? { noShellStatus: 'Authenticated' } : {}),
           callbacks,
           ctx: this.context(),
           ...this.deps.sshOverrides
@@ -247,7 +272,24 @@ export class Session {
           return
         }
         this.ssh = transport
-        this.transport = transport
+        const moduleTerminal = this.spec.moduleTerminal
+        if (moduleTerminal) {
+          const session = await this.attachModule(moduleTerminal.module)
+          if (!session.openTerminal)
+            throw new Error(`Module ${moduleTerminal.module} has no terminal`)
+          const pty = await session.openTerminal(
+            moduleTerminal.params,
+            { cols: this.spec.cols, rows: this.spec.rows },
+            callbacks
+          )
+          if (this.isClosed()) {
+            pty.close()
+            return
+          }
+          this.transport = pty
+        } else {
+          this.transport = transport
+        }
         this.forwards = new ForwardManager(transport.client, (list) => {
           this.post({ t: 'forwards', list })
         })
@@ -277,6 +319,7 @@ export class Session {
   close(): void {
     if (this.closed) return
     this.transport?.close()
+    if (this.ssh && this.ssh !== this.transport) this.ssh.close()
     this.end()
   }
 
@@ -307,8 +350,20 @@ export class Session {
     this.log = null
     this.stats?.stop()
     this.stats = null
-    this.s3?.dispose()
-    this.s3 = null
+    for (const controller of this.moduleOps.values()) controller.abort()
+    this.moduleOps.clear()
+    this.moduleSession?.session.dispose()
+    this.moduleSession = null
+    for (const pending of this.attached.values())
+      void pending.then(
+        (session) => {
+          session.dispose()
+        },
+        () => undefined
+      )
+    this.attached.clear()
+    // Terminal của module chạy trên kết nối SSH: đóng cả kết nối.
+    if (this.ssh && this.ssh !== this.transport) this.ssh.close()
     this.pump.dispose()
     this.forwards?.dispose()
     this.forwards = null
@@ -460,6 +515,73 @@ export class Session {
     }
   }
 
+  /** Đọc qua hàm để TS không thu hẹp kiểu qua `await` (giá trị đổi trong lúc chờ). */
+  private isClosed(): boolean {
+    return this.closed
+  }
+
+  private moduleSink(module: string): ModuleSink {
+    return {
+      emit: (event, data) => {
+        this.post({ t: 'module-event', module, event, data })
+      },
+      transfers: (list) => {
+        this.post({ t: 'transfers', list })
+      }
+    }
+  }
+
+  /** Gắn module vào kết nối SSH tích hợp của tab (chờ nếu kết nối đang mở). */
+  private attachModule(module: string): Promise<HostModuleSession> {
+    const existing = this.attached.get(module)
+    if (existing) return existing
+    const pending = (async () => {
+      const ssh = await this.waitForSsh()
+      if (!ssh || this.closed) throw new Error('Only available on a connected built-in SSH session')
+      const { host, username } =
+        this.spec.kind === 'ssh' ? this.spec.target : { host: '', username: '' }
+      const capability = createSshCapability(ssh.client, `${username}@${host}`)
+      const session = this.deps.modules.attach(module, capability, this.moduleSink(module))
+      if (this.isClosed()) {
+        session.dispose()
+        throw new Error('The session has ended')
+      }
+      this.deps.log('info', `Session ${this.id}: attached module ${module}`)
+      return session
+    })()
+    this.attached.set(module, pending)
+    // Gắn lỗi → lần sau thử lại (ví dụ kết nối lại xong).
+    pending.catch(() => {
+      if (this.attached.get(module) === pending) this.attached.delete(module)
+    })
+    return pending
+  }
+
+  private async runModuleOp(id: number, module: string, op: unknown): Promise<void> {
+    const controller = new AbortController()
+    this.moduleOps.set(id, controller)
+    try {
+      const session =
+        this.moduleSession?.id === module
+          ? this.moduleSession.session
+          : this.spec.kind === 'ssh'
+            ? await this.attachModule(module)
+            : null
+      if (!session) throw new Error(`Module ${module} is not available in this tab`)
+      const result = await session.run(op, controller.signal)
+      this.post({ t: 'module-result', id, ok: true, result })
+    } catch (error) {
+      this.post({
+        t: 'module-result',
+        id,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    } finally {
+      this.moduleOps.delete(id)
+    }
+  }
+
   private rejectForward(spec: ForwardSpec, error: string): void {
     this.post({
       t: 'forwards',
@@ -522,28 +644,16 @@ export class Session {
       case 'sftp':
         void this.handleSftp(message.id, message.op)
         break
-      case 's3': {
-        const { id, op } = message
-        const s3 = this.s3
-        if (!s3) {
-          this.post({ t: 's3-result', id, ok: false, error: 'Not an S3 session' })
-          break
-        }
-        void s3.run(op).then(
-          (result) => {
-            this.post({ t: 's3-result', id, ok: true, result })
-          },
-          (error: unknown) => {
-            this.post({
-              t: 's3-result',
-              id,
-              ok: false,
-              error: error instanceof Error ? error.message : String(error)
-            })
-          }
-        )
+      case 'module':
+        void this.runModuleOp(message.id, message.module, message.op)
         break
-      }
+      case 'module-cancel':
+        this.moduleOps.get(message.id)?.abort()
+        break
+      case 'module-attach':
+        // Lỗi gắn được báo qua kết quả của thao tác kế tiếp.
+        this.attachModule(message.module).catch(() => undefined)
+        break
       case 'deploy-key': {
         const { id, publicKey } = message
         void this.waitForSsh().then(async (ssh) => {

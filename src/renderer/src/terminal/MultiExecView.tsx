@@ -5,7 +5,7 @@ import { Button, connectionLabel, cx, StatusDot } from '../components/ui'
 import { useHosts } from '../stores/hosts'
 import { useTabStatus } from '../stores/tab-status'
 import { useTabs } from '../stores/tabs'
-import { useBroadcast } from './broadcast'
+import { joinsMultiExec, useBroadcast } from './broadcast'
 import { PromptDialog } from './PromptDialog'
 import { controllers } from './registry'
 
@@ -14,9 +14,9 @@ import { controllers } from './registry'
  * không được tạo lại — phần tử xterm của từng tab được chuyển vào ô lưới và trả về khi thoát.
  */
 export function MultiExecView(): React.JSX.Element {
-  // Chỉ tab có terminal (tab S3 không gõ lệnh được).
+  // Chỉ tab có terminal (tab trình quản lý của module không gõ lệnh được).
   const allTabs = useTabs((s) => s.tabs)
-  const tabs = useMemo(() => allTabs.filter((t) => t.target.kind !== 's3'), [allTabs])
+  const tabs = useMemo(() => allTabs.filter((t) => joinsMultiExec(t.target)), [allTabs])
   const included = useBroadcast((s) => s.tabIds)
   const n = tabs.length
   const cols = Math.max(1, Math.ceil(Math.sqrt(n)))
@@ -96,7 +96,7 @@ function Cell({ tabId, included }: { tabId: string; included: boolean }): React.
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
   const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
   const prompt = useTabStatus((s) => s.prompts[tabId])
-  const Icon = kind === 'local' ? SquareTerminal : Server
+  const Icon = kind === 'local' || kind === 'module-terminal' ? SquareTerminal : Server
 
   // Chuyển terminal của tab vào ô này; trả về khi ô biến mất (thoát MultiExec / đóng tab).
   useLayoutEffect(() => {

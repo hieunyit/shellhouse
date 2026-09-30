@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { release } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -15,14 +15,16 @@ import {
 } from 'electron'
 import log from 'electron-log/main'
 import { SESSION_PORT_CHANNEL } from '@shared/constants'
-import type { EventChannel, EventPayload } from '@shared/ipc'
+import type { EventChannel, EventPayload, InvokeResult } from '@shared/ipc'
 import { toForwardSpec } from '@shared/forwards'
 import { checkMainNativeModules } from './diagnostics'
 import { handle } from './ipc/router'
 import { installAppMenu, installDevToolsShortcut } from './app-menu'
 import { installEditContextMenu } from './context-menu'
 import { CommandHistory } from './command-history'
-import { S3Accounts } from './s3-accounts'
+import { MainModuleRegistry } from '../modules/registry/main'
+import { MAIN_MODULES } from '../modules/registry/all-main'
+import { ModuleProgramGrants } from './module-grants'
 import { listLocal } from './local-files'
 import { openInEditor, RemoteEditFiles } from './remote-edit'
 import { sessionLogFor } from './session-log-path'
@@ -93,11 +95,12 @@ let knownHosts: KnownHosts | null = null
 let hosts: HostService | null = null
 let snippets: SnippetService | null = null
 let history: CommandHistory | null = null
-let s3Accounts: S3Accounts | null = null
+let modules: MainModuleRegistry | null = null
+let programGrants: ModuleProgramGrants | null = null
 
-function requireS3(): S3Accounts {
-  if (!s3Accounts) throw new Error('Data is not ready yet')
-  return s3Accounts
+function requireModules(): MainModuleRegistry {
+  if (!modules) throw new Error('Data is not ready yet')
+  return modules
 }
 let settings: SettingsService | null = null
 let vaultController: VaultController | null = null
@@ -187,6 +190,38 @@ async function openStoreInteractive(): Promise<Db | null> {
   }
 }
 
+/** Module muốn chạy chương trình trên máy: dùng lựa chọn đã nhớ, không thì hỏi người dùng. */
+async function decideProgramGrant(request: {
+  module: string
+  binary: string
+  path: string
+  sha256: string
+}): Promise<boolean> {
+  const grants = programGrants
+  const manifest = modules?.manifests().find((m) => m.id === request.module)
+  if (!grants || !manifest) return false
+  const known = grants.decision(request.module, request.path, request.sha256)
+  if (known !== null) return known
+  const options = {
+    type: 'question' as const,
+    title: 'Allow program',
+    message: `Allow the ${manifest.name} module to run “${request.binary}”?`,
+    detail:
+      `${request.path}\n\nShellhouse asks once for each program. If the program file changes, ` +
+      'you will be asked again.',
+    buttons: ['Allow', "Don't allow"],
+    defaultId: 0,
+    cancelId: 1
+  }
+  const { response } = mainWindow
+    ? await dialog.showMessageBox(mainWindow, options)
+    : await dialog.showMessageBox(options)
+  const allowed = response === 0
+  grants.remember(request.module, request.path, request.sha256, allowed)
+  log.info(`Module ${request.module}: ${allowed ? 'allowed' : 'denied'} ${request.path}`)
+  return allowed
+}
+
 function registerIpc(): void {
   handle('app:getInfo', isTrustedSender, () => ({
     name: app.getName(),
@@ -226,26 +261,24 @@ function registerIpc(): void {
     const logFor = (kind: 'local' | 'ssh', label: string) =>
       sessionLogFor(requireSettings().get().logging, { kind, label }, defaultLogDirectory()) ??
       undefined
-    if (spec.kind === 's3') {
-      // Secret key giải mã tại main, chỉ đi thẳng sang Session Host.
-      const account = requireS3().resolve(spec.accountId)
+    // Terminal của module trên kết nối SSH: module phải đang bật và chạy được trên SSH.
+    const moduleTerminal =
+      spec.kind === 'host' || spec.kind === 'ssh' ? spec.moduleTerminal : undefined
+    if (moduleTerminal && !requireModules().isEnabled(moduleTerminal.module))
+      throw new Error(`The ${moduleTerminal.module} module is turned off`)
+    if (spec.kind === 'module') {
+      // Module kiểm tham số và giải mã secret tại main; config chỉ đi thẳng sang Session Host.
+      const config = requireModules().resolveSession(spec.module, spec.sessionKind, spec.params)
       supervisor.openSession(
         sessionId,
         {
-          kind: 's3',
+          kind: 'module',
+          module: spec.module,
+          sessionKind: spec.sessionKind,
           cols: spec.cols,
           rows: spec.rows,
-          connection: {
-            endpoint: account.endpoint,
-            region: account.region,
-            accessKeyId: account.accessKeyId,
-            secretAccessKey: account.secretAccessKey,
-            forcePathStyle: account.forcePathStyle
-          },
-          limits: {
-            requests: requireSettings().get().files.s3Requests,
-            transfers: requireSettings().get().files.s3Transfers
-          }
+          config,
+          ...(spec.terminal !== undefined ? { terminal: spec.terminal } : {})
         },
         port1
       )
@@ -351,6 +384,7 @@ function registerIpc(): void {
             ...size,
             target,
             ...(noShell ? { noShell: true } : {}),
+            ...(moduleTerminal ? { moduleTerminal } : {}),
             sftpLimits: {
               requests: requireSettings().get().files.sftpRequests,
               transfers: requireSettings().get().files.sftpTransfers
@@ -450,24 +484,23 @@ function registerIpc(): void {
     if (!history) throw new Error('Data is not ready yet')
     return history
   }
-  handle('s3:accounts', isTrustedSender, () => requireS3().list())
-  handle('s3:save', isTrustedSender, (input) => {
-    try {
-      const id = requireS3().save(input)
-      send('s3:changed', null)
-      return { ok: true, id }
-    } catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : String(error) }
-    }
+  handle('modules:list', isTrustedSender, () => requireModules().states())
+  handle('modules:setEnabled', isTrustedSender, (id, enabled) =>
+    requireModules().setEnabled(id, enabled)
+  )
+  handle('modules:removeData', isTrustedSender, (id) => {
+    requireModules().removeData(id)
+    programGrants?.forget(id)
   })
-  handle('s3:delete', isTrustedSender, (id) => {
-    requireS3().delete(id)
-    send('s3:changed', null)
-  })
-  handle('s3:pin', isTrustedSender, (id, pin, pinned) => {
-    requireS3().setPin(id, pin, pinned)
-    send('s3:changed', null)
-  })
+  handle(
+    'modules:invoke',
+    isTrustedSender,
+    (id, name, args) =>
+      requireModules().invoke(id, name, args) as Promise<InvokeResult<'modules:invoke'>>
+  )
+  handle('modules:detectLocal', isTrustedSender, () =>
+    requireModules().detectLocal(existsSync, app.getPath('home'))
+  )
   handle('history:list', isTrustedSender, (target) => requireHistory().list(target))
   handle('history:record', isTrustedSender, (target, command) => {
     // Tắt gợi ý trong cài đặt = không ghi nữa.
@@ -610,8 +643,27 @@ if (!app.requestSingleInstanceLock()) {
     hosts = new HostService(db, vault)
     snippets = new SnippetService(db)
     history = new CommandHistory(db)
-    s3Accounts = new S3Accounts(db, vault)
     settings = new SettingsService(db)
+    programGrants = new ModuleProgramGrants(db)
+    modules = new MainModuleRegistry(MAIN_MODULES, {
+      db,
+      vault,
+      settings,
+      emit: (module, name, data) => {
+        send('modules:event', { module, name, data })
+      },
+      onStatesChanged: (states) => {
+        send('modules:changed', states)
+        supervisor.send({
+          type: 'modules:enabled',
+          ids: states.filter((m) => m.enabled).map((m) => m.id)
+        })
+      },
+      log: (level, message) => {
+        log[level](`[modules] ${message}`)
+      }
+    })
+    modules.start()
     // Hộp thoại hệ thống, thanh cuộn, nền cửa sổ theo cài đặt Appearance.
     nativeTheme.themeSource = settings.get().appearance.theme
     settings.onChange((s) => {
@@ -647,7 +699,23 @@ if (!app.requestSingleInstanceLock()) {
       } else if (event.type === 'hostkey:trust') {
         hostKeys.trust(event.host, event.port, Buffer.from(event.key, 'base64'))
         log.info(`Trusted a new host key for ${event.host}:${event.port}`)
+      } else if (event.type === 'module:grant') {
+        void decideProgramGrant(event).then((allowed) => {
+          supervisor.send({ type: 'module:grant-result', requestId: event.requestId, allowed })
+        })
       }
+    })
+    // Session Host (khởi động lại) cần biết module nào đang bật.
+    const modulesRef = modules
+    supervisor.onStatus((status) => {
+      if (status.state === 'running')
+        supervisor.send({
+          type: 'modules:enabled',
+          ids: modulesRef
+            .states()
+            .filter((m) => m.enabled)
+            .map((m) => m.id)
+        })
     })
 
     updater = new Updater()
@@ -702,6 +770,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   app.on('before-quit', () => {
+    modules?.stop()
     supervisor.stop()
     vault?.lock()
   })

@@ -21,6 +21,8 @@ export interface SessionClientHandlers {
   transfers(list: TransferStatus[]): void
   /** Thanh theo dõi server: số liệu mới, hoặc server không hỗ trợ (null). */
   stats(stats: ServerStats | null): void
+  /** Sự kiện của module (log stream, watch…). */
+  moduleEvent?(module: string, event: string, data: unknown): void
 }
 
 /** Đầu renderer của một MessagePort session: nhận output + ack, gửi input/resize. */
@@ -85,6 +87,10 @@ export class SessionClient {
           pending?.({ status: message.status, message: message.message })
           break
         }
+        case 'module-event':
+          handlers.moduleEvent?.(message.module, message.event, message.data)
+          break
+        case 'module-result':
         case 'sftp-result': {
           const pending = this.sftpPending.get(message.id)
           this.sftpPending.delete(message.id)
@@ -110,6 +116,35 @@ export class SessionClient {
       this.sftpPending.set(id, { resolve, reject })
       this.send({ t: 'sftp', id, op })
     })
+  }
+
+  /** Thao tác của module (ADR-014); `signal` huỷ thao tác dài ở Session Host. */
+  module(module: string, op: unknown, signal?: AbortSignal): Promise<unknown> {
+    if (this.closed) return Promise.reject(new Error('The session is closed'))
+    if (signal?.aborted) return Promise.reject(new Error('Cancelled'))
+    const id = this.nextSftpId++
+    return new Promise((resolve, reject) => {
+      const onAbort = (): void => {
+        this.send({ t: 'module-cancel', id })
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      this.sftpPending.set(id, {
+        resolve: (v) => {
+          signal?.removeEventListener('abort', onAbort)
+          resolve(v)
+        },
+        reject: (e) => {
+          signal?.removeEventListener('abort', onAbort)
+          reject(e)
+        }
+      })
+      this.send({ t: 'module', id, module, op })
+    })
+  }
+
+  /** Gắn module vào kết nối SSH của phiên này. */
+  attachModule(module: string): void {
+    this.send({ t: 'module-attach', module })
   }
 
   deployKey(

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { HostModuleRegistry } from '../../src/modules/registry/session-host'
 import type { HostKeyCheck } from '@shared/session-host-protocol'
 import type { ServerMessage } from '@shared/stream-protocol'
 import {
@@ -87,6 +88,10 @@ function sshSession(
       appVersion: 'test',
       hostKeys: keys,
       onEnded: (id) => ended.push(id),
+      modules: new HostModuleRegistry([], {
+        log: () => undefined,
+        requestProgramGrant: () => Promise.resolve(false)
+      }),
       sshOverrides: { agent: null, keyFiles: [] }
     }
   )

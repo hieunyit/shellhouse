@@ -14,3 +14,8 @@ export function windowsPty(): { backend: 'conpty'; buildNumber?: number } | unde
     ? { backend: 'conpty', buildNumber: info.windowsBuild }
     : { backend: 'conpty' }
 }
+
+/** Phiên bản app không kèm hậu tố beta ("1.3.0-beta.1" → "1.3.0") — để so với `since` của module. */
+export function appRelease(): string {
+  return (info?.version ?? '0.0.0').replace(/-.*$/, '')
+}

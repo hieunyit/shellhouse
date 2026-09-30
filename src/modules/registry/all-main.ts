@@ -1,0 +1,8 @@
+import type { MainModule } from './main-types'
+import { s3Main } from '../s3/main'
+
+/**
+ * Module chính thức — import tĩnh (ADR-014 mục 3.9): không nạp code từ đĩa lúc chạy. Thứ tự ở đây
+ * là thứ tự mặc định trên thanh bên.
+ */
+export const MAIN_MODULES: readonly MainModule[] = [s3Main]

@@ -13,6 +13,8 @@ import {
 import { checkSessionHostNativeModules } from './selfcheck'
 import { SessionRegistry } from './session/registry'
 import type { SessionPort } from './session/session'
+import { HostModuleRegistry } from '../modules/registry/session-host'
+import { HOST_MODULES } from '../modules/registry/all-host'
 
 const port = process.parentPort
 const appVersion =
@@ -40,9 +42,24 @@ process.on('unhandledRejection', (reason) => {
 let nextHostKeyRequest = 1
 const hostKeyRequests = new Map<number, (result: HostKeyCheck) => void>()
 
+// Module muốn chạy chương trình trên máy → hỏi main (người dùng), chờ theo requestId.
+let nextGrantRequest = 1
+const grantRequests = new Map<number, (allowed: boolean) => void>()
+
+const modules = new HostModuleRegistry(HOST_MODULES, {
+  log,
+  requestProgramGrant: (module, binary, path, sha256) =>
+    new Promise((resolve) => {
+      const requestId = nextGrantRequest++
+      grantRequests.set(requestId, resolve)
+      post({ type: 'module:grant', requestId, module, binary, path, sha256 })
+    })
+})
+
 const sessions = new SessionRegistry({
   log,
   appVersion,
+  modules,
   hostKeys: {
     check: (host, portNumber, key) =>
       new Promise((resolve) => {
@@ -131,6 +148,15 @@ port.on('message', (event) => {
     case 'session:close':
       sessions.close(request.sessionId)
       break
+    case 'modules:enabled':
+      modules.setEnabled(request.ids)
+      break
+    case 'module:grant-result': {
+      const resolve = grantRequests.get(request.requestId)
+      grantRequests.delete(request.requestId)
+      resolve?.(request.allowed)
+      break
+    }
     case 'crash':
       log('warn', 'Received crash command (test)')
       process.exit(70)

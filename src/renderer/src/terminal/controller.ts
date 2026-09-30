@@ -326,6 +326,7 @@ export class TerminalController {
     const t = this.target
     if (t.kind === 'host') return t.hostId
     if (t.kind === 'ssh') return `ssh:${t.username}@${t.host}:${t.port}`
+    if (t.kind === 'module-terminal') return `module:${t.module}`
     return `local:${t.shellId ?? 'default'}`
   }
 
@@ -747,6 +748,7 @@ export class TerminalController {
   private syncStats(): void {
     const on =
       this.target.kind !== 'local' &&
+      this.target.kind !== 'module-terminal' &&
       this.visibleInPanel &&
       !this.inMultiExec &&
       useSettings.getState().settings.terminal.serverStats
@@ -935,6 +937,13 @@ export class TerminalController {
         ...size,
         ...(this.target.shellId ? { shellId: this.target.shellId } : {})
       }
+    if (this.target.kind === 'module-terminal') {
+      // Shell vào container / pod: qua kết nối SSH tới host đã lưu, hoặc phiên module trên máy này.
+      const { module, params, hostId } = this.target
+      return hostId
+        ? { kind: 'host', ...size, hostId, moduleTerminal: { module, params } }
+        : { kind: 'module', module, sessionKind: 'terminal', ...size, params, terminal: params }
+    }
     const noShell = this.withoutShell() ? { noShell: true } : {}
     if (this.target.kind === 'host')
       return { kind: 'host', ...size, hostId: this.target.hostId, ...noShell }

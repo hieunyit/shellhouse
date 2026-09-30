@@ -5,7 +5,18 @@ import { z } from 'zod'
  * Chỉ lưu đích kết nối (id host đã lưu, user@host, loại shell) — không có bí mật.
  */
 
-export const WorkspaceTarget = z.discriminatedUnion('kind', [
+const ModuleId = z.string().regex(/^[a-z0-9-]{1,40}$/)
+
+/** Tham số của tab module: JSON nhỏ do module định nghĩa (module tự kiểm khi mở lại). */
+const ModuleParams = z.unknown().refine((v) => {
+  try {
+    return JSON.stringify(v ?? null).length <= 4096
+  } catch {
+    return false
+  }
+}, 'Tab parameters are too large')
+
+const CurrentTarget = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('local'), shellId: z.string().max(80).optional() }),
   z.object({
     kind: z.literal('ssh'),
@@ -14,14 +25,42 @@ export const WorkspaceTarget = z.discriminatedUnion('kind', [
     username: z.string().min(1).max(128)
   }),
   z.object({ kind: z.literal('host'), hostId: z.string().min(1).max(64) }),
+  /** Tab của module (ADR-014). */
   z.object({
+    kind: z.literal('module'),
+    module: ModuleId,
+    tab: z.string().regex(/^[a-z0-9-]{1,40}$/),
+    params: ModuleParams
+  }),
+  z.object({
+    kind: z.literal('module-terminal'),
+    module: ModuleId,
+    params: ModuleParams,
+    hostId: z.string().min(1).max(64).optional()
+  })
+])
+
+/** Bản ≤ 1.2: tab S3 là loại riêng → đọc thành tab của module `s3`. */
+const LegacyS3Target = z
+  .object({
     kind: z.literal('s3'),
     accountId: z.string().min(1).max(64),
     bucket: z.string().min(1).max(255).optional(),
     prefix: z.string().max(1024).optional()
   })
-])
-export type WorkspaceTarget = z.infer<typeof WorkspaceTarget>
+  .transform((t) => ({
+    kind: 'module' as const,
+    module: 's3',
+    tab: 'browser',
+    params: {
+      accountId: t.accountId,
+      ...(t.bucket ? { bucket: t.bucket } : {}),
+      ...(t.prefix !== undefined ? { prefix: t.prefix } : {})
+    }
+  }))
+
+export const WorkspaceTarget = z.union([CurrentTarget, LegacyS3Target])
+export type WorkspaceTarget = z.output<typeof WorkspaceTarget>
 
 export const WorkspaceItem = z.object({
   target: WorkspaceTarget,

@@ -96,6 +96,8 @@ export interface SshOpenOptions {
   destination: HopConfig
   /** false = chỉ kết nối + xác thực, không mở shell (tab SFTP). Mặc định true. */
   shell?: boolean
+  /** Dòng trạng thái khi không mở shell (mặc định: chỉ truyền file). */
+  noShellStatus?: string
   /** Các jump host theo thứ tự (ProxyJump). */
   jumps?: readonly HopConfig[]
   cols: number
@@ -337,7 +339,10 @@ export async function openSshShell(options: SshOpenOptions): Promise<SshShell> {
     if (options.shell === false) {
       // Chỉ truyền file: không mở shell (server không ghi nhận phiên đăng nhập shell, không chạy
       // .bashrc / motd).
-      ctx.status('connected', 'Authenticated — file transfer only (no shell opened)')
+      ctx.status(
+        'connected',
+        options.noShellStatus ?? 'Authenticated — file transfer only (no shell opened)'
+      )
       return new SshShell(last, clients, null, options.callbacks)
     }
     ctx.status('connected', 'Authenticated, opening shell…')

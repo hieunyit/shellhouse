@@ -1,6 +1,13 @@
 import { create } from 'zustand'
 import { useTabs } from '../stores/tabs'
 import { controllers } from './registry'
+import type { TabTarget } from '../stores/tabs'
+import { moduleTab } from '../../../modules/registry/renderer-kit'
+
+/** Tab gõ lệnh được: terminal (kể cả terminal của module) và tab module khai báo `multiExec`. */
+export function joinsMultiExec(target: TabTarget): boolean {
+  return target.kind !== 'module' || moduleTab(target.module, target.tab)?.multiExec === true
+}
 
 /**
  * MultiExec (như MobaXterm): mọi terminal đang mở được xếp đều thành lưới trên một màn hình; phím
@@ -54,7 +61,7 @@ export function toggleMultiExec(): void {
   }
   const ids = useTabs
     .getState()
-    .tabs.filter((t) => t.target.kind !== 's3')
+    .tabs.filter((t) => joinsMultiExec(t.target))
     .map((t) => t.id)
   if (ids.length > 0) b.start(ids)
 }

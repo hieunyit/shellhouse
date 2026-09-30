@@ -1,0 +1,277 @@
+import type { ZodType } from 'zod'
+import type { AppSettings, ModuleEntry, SettingsPatch } from '@shared/settings'
+import type { Db } from '../../main/store/db'
+import type { Vault } from '../../main/vault/vault'
+import { createModuleDb, migrateModule, removeModuleData } from './main-db'
+import type { MainModule, MainModuleApi, MainModuleContext, ModuleLog } from './main-types'
+import { tablePrefix, type ModuleManifest, type ModuleState } from './types'
+
+/**
+ * Registry của main (ADR-014 mục 3.3, 3.9): bật / tắt module lúc chạy, cấp `ctx` hẹp cho từng
+ * module, định tuyến IPC `module:<id>:<name>`, phân giải phiên module.
+ */
+
+export interface MainRegistryDeps {
+  db: Db
+  vault: Pick<Vault, 'encryptString' | 'decrypt'>
+  settings: {
+    get(): AppSettings
+    update(patch: SettingsPatch): AppSettings
+    onChange(listener: (s: AppSettings) => void): () => void
+  }
+  /** Sự kiện module → renderer. */
+  emit(module: string, name: string, data: unknown): void
+  /** Danh sách / trạng thái module đổi → renderer, Session Host. */
+  onStatesChanged(states: ModuleState[]): void
+  log: (level: 'info' | 'warn' | 'error', message: string) => void
+  now?: () => number
+}
+
+interface Active {
+  module: MainModule
+  api: MainModuleApi
+  handlers: Map<string, { args: ZodType; handler: (...args: unknown[]) => unknown }>
+  settingsListeners: Set<(value: unknown) => void>
+}
+
+export class ModuleNotEnabledError extends Error {
+  constructor(id: string) {
+    super(`The ${id} module is turned off — enable it in Settings → Modules`)
+    this.name = 'ModuleNotEnabledError'
+  }
+}
+
+export function isModuleEnabled(manifest: ModuleManifest, entry: ModuleEntry | undefined): boolean {
+  return entry?.enabled ?? manifest.enabledByDefault
+}
+
+export class MainModuleRegistry {
+  private readonly modules = new Map<string, MainModule>()
+  private readonly active = new Map<string, Active>()
+  /** Lỗi bật module gần nhất (hiện cho người dùng). */
+  private readonly failures = new Map<string, string>()
+  private unsubscribe: (() => void) | null = null
+  private lastStates = ''
+
+  constructor(
+    modules: readonly MainModule[],
+    private readonly deps: MainRegistryDeps
+  ) {
+    for (const m of modules) {
+      if (!/^[a-z0-9-]{1,40}$/.test(m.manifest.id))
+        throw new Error(`Invalid module id: ${m.manifest.id}`)
+      if (this.modules.has(m.manifest.id)) throw new Error(`Duplicate module: ${m.manifest.id}`)
+      this.modules.set(m.manifest.id, m)
+    }
+  }
+
+  /** Bật các module đang bật trong cài đặt; theo dõi cài đặt để bật / tắt lúc chạy. */
+  start(): void {
+    this.sync(this.deps.settings.get())
+    this.unsubscribe = this.deps.settings.onChange((s) => {
+      this.sync(s)
+    })
+  }
+
+  stop(): void {
+    this.unsubscribe?.()
+    this.unsubscribe = null
+    for (const id of [...this.active.keys()]) this.deactivate(id)
+  }
+
+  manifests(): ModuleManifest[] {
+    return [...this.modules.values()].map((m) => m.manifest)
+  }
+
+  states(): ModuleState[] {
+    const entries = this.deps.settings.get().modules
+    return [...this.modules.values()].map((m) => ({
+      id: m.manifest.id,
+      enabled: this.active.has(m.manifest.id),
+      seen: entries[m.manifest.id]?.seen === true
+    }))
+  }
+
+  isEnabled(id: string): boolean {
+    return this.active.has(id)
+  }
+
+  setEnabled(id: string, enabled: boolean): ModuleState[] {
+    if (!this.modules.has(id)) throw new Error(`Unknown module: ${id}`)
+    // Cài đặt đổi → sync() bật / tắt thật.
+    this.deps.settings.update({ modules: { [id]: { enabled } } })
+    const active = this.isEnabled(id)
+    if (active !== enabled) {
+      const error = this.failures.get(id)
+      throw new Error(error ?? `Could not ${enabled ? 'enable' : 'disable'} the module`)
+    }
+    return this.states()
+  }
+
+  /** Xoá toàn bộ dữ liệu của module (phải tắt trước). */
+  removeData(id: string): void {
+    if (!this.modules.has(id)) throw new Error(`Unknown module: ${id}`)
+    if (this.active.has(id)) throw new Error('Turn the module off before removing its data')
+    const tables = removeModuleData(this.deps.db, id)
+    this.deps.log('info', `Module ${id}: removed data (${tables.join(', ') || 'no tables'})`)
+  }
+
+  invoke(id: string, name: string, args: readonly unknown[]): unknown {
+    const active = this.active.get(id)
+    if (!active) throw new ModuleNotEnabledError(id)
+    const entry = active.handlers.get(name)
+    if (!entry) throw new Error(`Module ${id} has no handler "${name}"`)
+    const parsed = entry.args.safeParse(args)
+    if (!parsed.success) {
+      this.deps.log('warn', `IPC module:${id}:${name}: invalid arguments`)
+      throw new Error('Invalid arguments')
+    }
+    return entry.handler(...(parsed.data as unknown[]))
+  }
+
+  /**
+   * Module đang TẮT có dấu hiệu trên máy này (kubeconfig, socket Docker…) — để gợi ý bật (3.12.4).
+   * Chỉ kiểm file có tồn tại, không đọc nội dung.
+   */
+  detectLocal(exists: (path: string) => boolean, home: string): string[] {
+    const expand = (p: string): string => (p.startsWith('~/') ? `${home}${p.slice(1)}` : p)
+    return [...this.modules.values()]
+      .filter((m) => !this.active.has(m.manifest.id))
+      .filter((m) =>
+        (m.manifest.detect ?? []).some((d) => d.on === 'startup' && exists(expand(d.path)))
+      )
+      .map((m) => m.manifest.id)
+  }
+
+  resolveSession(id: string, sessionKind: string, params: unknown): unknown {
+    const active = this.active.get(id)
+    if (!active) throw new ModuleNotEnabledError(id)
+    if (!active.module.manifest.contributes.sessionKinds?.includes(sessionKind))
+      throw new Error(`Module ${id} has no session kind "${sessionKind}"`)
+    if (!active.api.resolveSession) throw new Error(`Module ${id} does not open sessions`)
+    return active.api.resolveSession(sessionKind, params)
+  }
+
+  private sync(settings: AppSettings): void {
+    for (const [id, module] of this.modules) {
+      const want = isModuleEnabled(module.manifest, settings.modules[id])
+      if (want && !this.active.has(id)) this.activate(module)
+      else if (!want && this.active.has(id)) this.deactivate(id)
+      else if (want) this.notifySettings(id, settings)
+    }
+    const states = this.states()
+    const key = JSON.stringify(states)
+    if (key !== this.lastStates) {
+      this.lastStates = key
+      this.deps.onStatesChanged(states)
+    }
+  }
+
+  private activate(module: MainModule): void {
+    const id = module.manifest.id
+    try {
+      migrateModule(this.deps.db, id, module.migrations, this.deps.now)
+      const handlers: Active['handlers'] = new Map()
+      const settingsListeners: Active['settingsListeners'] = new Set()
+      const api = module.activate(this.context(module, handlers, settingsListeners))
+      this.active.set(id, { module, api, handlers, settingsListeners })
+      this.failures.delete(id)
+      this.deps.log('info', `Module ${id}: enabled`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.failures.set(id, message)
+      this.deps.log('error', `Module ${id}: could not enable — ${message}`)
+    }
+  }
+
+  private deactivate(id: string): void {
+    const active = this.active.get(id)
+    if (!active) return
+    this.active.delete(id)
+    try {
+      active.api.dispose?.()
+    } catch (error) {
+      this.deps.log('warn', `Module ${id}: dispose failed — ${String(error)}`)
+    }
+    this.deps.log('info', `Module ${id}: disabled`)
+  }
+
+  private moduleSettings(module: MainModule, settings: AppSettings): unknown {
+    const entry = settings.modules[module.manifest.id] ?? {}
+    return module.settings ? module.settings.parse(entry) : entry
+  }
+
+  private notifySettings(id: string, settings: AppSettings): void {
+    const active = this.active.get(id)
+    if (!active || active.settingsListeners.size === 0) return
+    const value = this.moduleSettings(active.module, settings)
+    for (const l of active.settingsListeners) l(value)
+  }
+
+  private context(
+    module: MainModule,
+    handlers: Active['handlers'],
+    settingsListeners: Active['settingsListeners']
+  ): MainModuleContext {
+    const id = module.manifest.id
+    const prefix = tablePrefix(id)
+    const hasSecrets = module.manifest.permissions.some((p) => p.kind === 'secrets')
+    const checkTable = (table: string): void => {
+      if (!hasSecrets) throw new Error(`Module ${id} did not declare the "secrets" permission`)
+      if (!table.startsWith(prefix))
+        throw new Error(`Module ${id} can only encrypt fields of its own tables (${prefix}*)`)
+    }
+    const log: ModuleLog = {
+      info: (m) => {
+        this.deps.log('info', `[${id}] ${m}`)
+      },
+      warn: (m) => {
+        this.deps.log('warn', `[${id}] ${m}`)
+      },
+      error: (m) => {
+        this.deps.log('error', `[${id}] ${m}`)
+      }
+    }
+    return {
+      db: createModuleDb(id, this.deps.db),
+      secrets: {
+        seal: (table, rowId, field, value) => {
+          checkTable(table)
+          return this.deps.vault.encryptString({ table, id: rowId, field }, value)
+        },
+        open: (table, rowId, field, sealed) => {
+          checkTable(table)
+          const secret = this.deps.vault.decrypt({ table, id: rowId, field }, sealed)
+          try {
+            return secret.revealString()
+          } finally {
+            secret.dispose()
+          }
+        }
+      },
+      settings: {
+        get: () => this.moduleSettings(module, this.deps.settings.get()),
+        onChange: (listener) => {
+          settingsListeners.add(listener)
+          return () => settingsListeners.delete(listener)
+        }
+      },
+      ipc: {
+        handle: (name, args, handler) => {
+          if (!/^[a-zA-Z][\w-]{0,40}$/.test(name)) throw new Error(`Invalid IPC name: ${name}`)
+          if (handlers.has(name)) throw new Error(`Duplicate IPC handler module:${id}:${name}`)
+          handlers.set(name, {
+            args,
+            handler: handler as (...a: unknown[]) => unknown
+          })
+        }
+      },
+      events: {
+        emit: (name, data) => {
+          if (this.active.has(id)) this.deps.emit(id, name, data)
+        }
+      },
+      log
+    }
+  }
+}

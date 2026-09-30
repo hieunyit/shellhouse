@@ -2,22 +2,36 @@ import { create } from 'zustand'
 import type { WorkspaceItem } from '@shared/workspaces'
 import { shellName } from './shells'
 
-/** Tab có terminal (local / SSH / host đã lưu). */
+/**
+ * Terminal của module (shell vào container / pod — ADR-014 mục 3.7). `hostId` = chạy trên kết nối
+ * SSH tới host đã lưu; không có = trên máy này.
+ */
+export interface ModuleTerminalTarget {
+  kind: 'module-terminal'
+  module: string
+  params: unknown
+  hostId?: string | undefined
+}
+
+/** Tab có terminal (local / SSH / host đã lưu / terminal của module). */
 export type TerminalTarget =
   | { kind: 'local'; shellId?: string }
   | { kind: 'ssh'; host: string; port: number; username: string }
   | { kind: 'host'; hostId: string }
+  | ModuleTerminalTarget
 
-/** Tab trình quản lý S3 (không có terminal). */
-export interface S3Target {
-  kind: 's3'
-  accountId: string
-  /** Vị trí đang xem (không có = bảng bucket). Nhân bản tab / workspace mở lại đúng chỗ này. */
-  bucket?: string
-  prefix?: string
+/**
+ * Tab của module (trình quản lý S3, Docker…). `params` do module định nghĩa (vị trí đang xem…) —
+ * nhân bản tab / workspace mở lại đúng chỗ này.
+ */
+export interface ModuleTabTarget {
+  kind: 'module'
+  module: string
+  tab: string
+  params: unknown
 }
 
-export type TabTarget = TerminalTarget | S3Target
+export type TabTarget = TerminalTarget | ModuleTabTarget
 
 export interface Tab {
   id: string
@@ -46,17 +60,10 @@ interface TabsState {
   addLocal: (shellId?: string) => string
   addSsh: (target: { host: string; port: number; username: string }) => string
   addHost: (host: { id: string; label: string }, options?: OpenHostOptions) => string
-  /** Mở trình quản lý S3 của một tài khoản. */
-  addS3: (
-    account: { id: string; name: string },
-    location?: { bucket: string; prefix: string }
-  ) => string
-  /** Tab S3 đổi vị trí đang xem: cập nhật đích (để nhân bản / lưu workspace) và tiêu đề. */
-  setS3Location: (
-    id: string,
-    location: { bucket: string; prefix: string } | null,
-    title: string
-  ) => void
+  /** Mở tab của module (dùng `openModuleTab` của registry — nó kiểm tham số, đặt tiêu đề). */
+  addTarget: (title: string, target: TabTarget) => string
+  /** Tab module đổi tham số (vị trí đang xem…): cập nhật đích và tiêu đề. */
+  setModuleParams: (id: string, params: unknown, title: string) => void
   /** Mở nhiều host: thành các tab, hoặc xếp lưới (chia màn hình) trong một khung. */
   openHosts: (hosts: readonly { id: string; label: string }[], layout: 'tabs' | 'grid') => string[]
   /** Mở lại một workspace đã lưu (thêm vào các tab đang mở). */
@@ -76,14 +83,6 @@ interface TabsState {
 }
 
 let localCounter = 0
-
-/** Tiêu đề tab S3 theo vị trí: "bucket" hoặc "bucket/…/thư-mục-cuối". */
-export function s3LocationTitle(bucket: string, prefix: string): string {
-  const parts = prefix.split('/').filter(Boolean)
-  if (parts.length === 0) return bucket
-  if (parts.length === 1) return `${bucket}/${parts[0] ?? ''}`
-  return `${bucket}/…/${parts.at(-1) ?? ''}`
-}
 
 export const useTabs = create<TabsState>((set, get) => {
   const add = (
@@ -131,13 +130,7 @@ export const useTabs = create<TabsState>((set, get) => {
         options?.view
       )
     },
-    addS3: (account, location) =>
-      add(
-        location ? s3LocationTitle(location.bucket, location.prefix) : account.name,
-        location
-          ? { kind: 's3', accountId: account.id, bucket: location.bucket, prefix: location.prefix }
-          : { kind: 's3', accountId: account.id }
-      ),
+    addTarget: (title, target) => add(title, target),
     openHosts: (hosts, layout) => {
       const ids: string[] = []
       // Lưới gần vuông: 4 host → 2×2, 6 → 3×2. Hàng đầu chia phải, các hàng sau chia xuống từ ô phía trên.
@@ -233,15 +226,13 @@ export const useTabs = create<TabsState>((set, get) => {
     setTitle: (id, title) => {
       set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { ...t, title } : t)) }))
     },
-    setS3Location: (id, location, title) => {
+    setModuleParams: (id, params, title) => {
       set((s) => ({
-        tabs: s.tabs.map((t) => {
-          if (t.id !== id || t.target.kind !== 's3') return t
-          const target: S3Target = location
-            ? { ...t.target, bucket: location.bucket, prefix: location.prefix }
-            : { kind: 's3', accountId: t.target.accountId }
-          return { ...t, target, title }
-        })
+        tabs: s.tabs.map((t) =>
+          t.id === id && t.target.kind === 'module'
+            ? { ...t, target: { ...t.target, params }, title }
+            : t
+        )
       }))
     }
   }

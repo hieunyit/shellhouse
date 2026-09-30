@@ -42,7 +42,7 @@ import { GroupForm, HostForm, ImportDialog } from '../lazy'
 import { Logo } from './Logo'
 import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
-import { S3Section } from '../s3/S3Section'
+import { ModuleSections } from './sidebar/ModuleSections'
 import { useContextMenu, type MenuEntry } from './ContextMenu'
 import { hostTextClass } from './hostColors'
 import {
@@ -1117,7 +1117,7 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
                 </div>
               </div>
             )}
-            <S3Section />
+            <ModuleSections />
           </>
         )}
       </div>
