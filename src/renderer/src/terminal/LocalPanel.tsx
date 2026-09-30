@@ -4,6 +4,8 @@ import { DRAG_LOCAL, DRAG_REMOTE, joinLocal, type LocalListing } from '@shared/l
 import type { TransferStatus } from '@shared/sftp'
 import { Button, cx, IconButton, Input, Notice } from '../components/ui'
 import type { LocalTarget, SftpActions } from './SftpPanel'
+import { SortMenu, usePersistentSort } from '../components/SortMenu'
+import { FILE_SORT_KEYS, FILE_SORT_OPTIONS, nameOrder, type FileSort } from './file-sort'
 
 function formatSize(n: number): string {
   if (n < 1024) return `${n} B`
@@ -39,6 +41,10 @@ export function LocalPanel({
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [showHidden, setShowHidden] = useState(false)
+  const [sort, setSort] = usePersistentSort<FileSort>('sftp-local', FILE_SORT_KEYS, {
+    key: 'name',
+    dir: 'asc'
+  })
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [dragOver, setDragOver] = useState(false)
   const lastDone = useRef(0)
@@ -88,7 +94,18 @@ export function LocalPanel({
     lastDone.current = doneDownloads
   }, [doneDownloads, listing, load])
 
-  const entries = (listing?.entries ?? []).filter((e) => showHidden || !e.name.startsWith('.'))
+  const entries = (listing?.entries ?? [])
+    .filter((e) => showHidden || !e.name.startsWith('.'))
+    .sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+      const by =
+        sort.key === 'size' && !a.isDir
+          ? a.size - b.size
+          : sort.key === 'mtime'
+            ? a.mtime - b.mtime
+            : 0
+      return (by || nameOrder.compare(a.name, b.name)) * (sort.dir === 'asc' ? 1 : -1)
+    })
   const pathsOf = (names: Iterable<string>): string[] =>
     listing ? [...names].map((n) => joinLocal(listing.path, n, listing.sep)) : []
 
@@ -179,6 +196,7 @@ export function LocalPanel({
         >
           {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </IconButton>
+        <SortMenu options={FILE_SORT_OPTIONS} sort={sort} onChange={setSort} testId="local-sort" />
       </div>
       {error && (
         <div className="border-b border-line p-2">

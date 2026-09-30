@@ -79,7 +79,15 @@ const FileSettings = z.object({
   /** Chương trình mở file khi sửa file trên server; '' = ứng dụng mặc định của hệ điều hành. */
   editor: z.string().max(1024).catch(''),
   /** Bấm đúp file trong SFTP: mở để sửa (tự tải lên khi lưu) hoặc tải về. */
-  doubleClick: z.enum(['edit', 'download']).catch('edit')
+  doubleClick: z.enum(['edit', 'download']).catch('edit'),
+  /** Số request S3 cùng lúc khi quét / thống kê / copy / xoá (dịch vụ nhỏ dễ báo SlowDown nếu quá cao). */
+  s3Requests: z.number().int().min(4).max(64).catch(16),
+  /** Số file S3 truyền cùng lúc. */
+  s3Transfers: z.number().int().min(1).max(16).catch(6),
+  /** Số yêu cầu SFTP cùng lúc khi duyệt / tạo / xoá thư mục (sftp-server xử lý tuần tự: >16 ít lợi). */
+  sftpRequests: z.number().int().min(2).max(16).catch(8),
+  /** Số file SFTP truyền cùng lúc. */
+  sftpTransfers: z.number().int().min(1).max(8).catch(4)
 })
 
 const LoggingSettings = z.object({

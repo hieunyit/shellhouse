@@ -146,3 +146,82 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
     rmSync(local, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 })
+
+test('sắp xếp: menu Sort (dung lượng, thời gian, đảo chiều), nhớ cho tab sau; cài đặt số luồng', async ({
+  app,
+  page
+}) => {
+  server = await startS3TestServer(['demo', 'logs'])
+  const local = mkdtempSync(join(tmpdir(), 'sh-s3-sort-'))
+  try {
+    // Kích thước khác nhau; tên đặt ngược thứ tự dung lượng để thấy rõ khác biệt.
+    writeFileSync(join(local, 'a-nho.txt'), 'x'.repeat(10))
+    writeFileSync(join(local, 'b-vua.txt'), 'x'.repeat(2000))
+    writeFileSync(join(local, 'c-lon.txt'), 'x'.repeat(50_000))
+
+    // Cài đặt số luồng: đổi rồi đọc lại.
+    await page.getByTestId('open-settings').click()
+    await page.getByTestId('settings-nav-files').click()
+    await page.getByTestId('setting-s3-requests').selectOption('32')
+    await page.getByTestId('setting-sftp-transfers').selectOption('2')
+    await expect
+      .poll(() => page.evaluate(() => window.shellhouse.getSettings().then((s) => s.files)))
+      .toMatchObject({ s3Requests: 32, sftpTransfers: 2, s3Transfers: 6, sftpRequests: 8 })
+    await page.keyboard.press('Escape')
+
+    await page.getByTestId('s3-add-account').click()
+    const form = page.getByTestId('s3-account-form')
+    await form.getByTestId('s3-account-name').fill('Sort test')
+    await form.getByTestId('s3-account-endpoint').fill(server.endpoint)
+    await form.getByTestId('s3-account-key').fill(server.accessKeyId)
+    await form.getByTestId('s3-account-secret').fill(server.secretAccessKey)
+    await form.getByTestId('s3-account-path-style').check()
+    await form.getByTestId('s3-account-save').click()
+    const account = page.locator('[data-testid="s3-account"][data-name="Sort test"]')
+    await account.dblclick()
+    const view = page.getByTestId('s3-view').last()
+    await view.locator('[data-testid="s3-bucket"][data-name="demo"]').dblclick()
+    await app.evaluate(
+      ({ dialog }, files) => {
+        dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: files })
+      },
+      ['a-nho.txt', 'b-vua.txt', 'c-lon.txt'].map((f) => join(local, f))
+    )
+    await view.getByTestId('s3-upload').click()
+    const names = view.getByTestId('s3-entry')
+    await expect(names).toHaveCount(3)
+    const order = (): Promise<(string | null)[]> =>
+      names.evaluateAll((els) => els.map((e) => e.getAttribute('data-name')))
+    await expect.poll(order).toEqual(['a-nho.txt', 'b-vua.txt', 'c-lon.txt'])
+
+    // Size → mặc định lớn trước; đảo chiều → nhỏ trước.
+    await view.getByTestId('s3-sort').click()
+    await page.getByRole('menuitem', { name: 'Size' }).click()
+    await expect.poll(order).toEqual(['c-lon.txt', 'b-vua.txt', 'a-nho.txt'])
+    await view.getByTestId('s3-sort').click()
+    await page.getByRole('menuitem', { name: 'Smallest first' }).click()
+    await expect.poll(order).toEqual(['a-nho.txt', 'b-vua.txt', 'c-lon.txt'])
+    // Bấm tiêu đề cột Name → A → Z.
+    await view.getByRole('columnheader', { name: 'Name' }).click()
+    await view.getByRole('columnheader', { name: 'Name' }).click()
+    await expect.poll(order).toEqual(['c-lon.txt', 'b-vua.txt', 'a-nho.txt'])
+
+    // Size lớn trước rồi mở tab mới: vẫn giữ kiểu sắp xếp.
+    await view.getByTestId('s3-sort').click()
+    await page.getByRole('menuitem', { name: 'Size' }).click()
+    await view.getByTestId('s3-sort').click()
+    await page.getByRole('menuitem', { name: 'Largest first' }).click()
+    await account.dblclick()
+    const second = page.getByTestId('s3-view').last()
+    await second.locator('[data-testid="s3-bucket"][data-name="demo"]').dblclick()
+    await expect
+      .poll(() =>
+        second
+          .getByTestId('s3-entry')
+          .evaluateAll((els) => els.map((e) => e.getAttribute('data-name')))
+      )
+      .toEqual(['c-lon.txt', 'b-vua.txt', 'a-nho.txt'])
+  } finally {
+    rmSync(local, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  }
+})

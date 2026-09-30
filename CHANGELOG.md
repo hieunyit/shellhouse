@@ -19,6 +19,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
     (up to 8 requests at once on the same connection).
   - More files transfer at the same time: 6 for S3 (large files are still split into parallel
     parts), 4 for SFTP (each with pipelined reads and writes).
+  - All of this is adjustable in **Settings → Files → Transfers & performance** (S3 requests 4–64,
+    default 16; SFTP requests 2–16, default 8; files at once for each). S3 backs off automatically
+    when a server answers "SlowDown" / 503.
+- **Sort menu** (⇅ button) in the S3 browser and in both SFTP panes: name, size, or modified
+  date / created date, ascending or descending — the SFTP local pane can now be sorted too, and the
+  remote pane can finally reverse the order. The choice is remembered.
 
 ### Added
 

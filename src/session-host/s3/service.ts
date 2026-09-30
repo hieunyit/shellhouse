@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto'
+import { Agent as HttpAgent } from 'node:http'
+import { Agent as HttpsAgent } from 'node:https'
 import { createReadStream, createWriteStream, existsSync } from 'node:fs'
 import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
@@ -47,16 +49,15 @@ export interface S3Connection {
 /** Mỗi lần liệt kê hiện tối đa chừng này mục (thư mục khổng lồ: báo truncated). */
 const MAX_LIST = 5000
 const MAX_TREE = 10_000
-/** Số file truyền cùng lúc (mỗi file lớn còn tự chia nhiều phần song song). */
-const MAX_PARALLEL = 6
+
 const PART_SUFFIX = '.shellhouse-part'
 const PROGRESS_MS = 250
-/** Số request liệt kê cùng lúc khi duyệt cây (thống kê, tải / xoá / copy cả thư mục). */
-const SCAN_PARALLEL = 8
+/** Mặc định (chỉnh trong Settings → Files): request cùng lúc khi quét / copy / xoá, file cùng lúc. */
+export const DEFAULT_S3_LIMITS = { requests: 16, transfers: 6 } as const
+/** Mỗi file lớn tự chia phần gửi song song (lib-storage). */
+const UPLOAD_QUEUE = 4
 /** Hai cấp đầu liệt kê theo "thư mục" để chia việc; sâu hơn liệt kê phẳng (ít request nhất). */
 const SPLIT_DEPTH = 2
-const DELETE_PARALLEL = 4
-const COPY_PARALLEL = 8
 /** CopyObject một phát chỉ tới 5 GiB; lớn hơn phải copy từng phần (UploadPartCopy). */
 const MAX_SINGLE_COPY = 5 * 1024 ** 3
 const COPY_PART = 512 * 1024 ** 2
@@ -120,11 +121,26 @@ export class S3Service {
     { progress: S3StatsProgress; abort: AbortController }
   >()
 
+  private readonly requests: number
+  private readonly maxTransfers: number
+
   constructor(
     connection: S3Connection,
-    private readonly onTransfers: (list: TransferStatus[]) => void
+    private readonly onTransfers: (list: TransferStatus[]) => void,
+    limits: { requests: number; transfers: number } = DEFAULT_S3_LIMITS
   ) {
+    this.requests = limits.requests
+    this.maxTransfers = limits.transfers
+    // Đủ socket cho mọi request song song (quét + các phần của file đang truyền); giữ kết nối để
+    // không bắt tay TLS lại mỗi request. retryMode adaptive: gặp SlowDown / 503 thì tự giảm tốc.
+    const agent = {
+      keepAlive: true,
+      maxSockets: this.requests + this.maxTransfers * UPLOAD_QUEUE + 4
+    }
     this.client = new S3Client({
+      maxAttempts: 5,
+      retryMode: 'adaptive',
+      requestHandler: { httpAgent: new HttpAgent(agent), httpsAgent: new HttpsAgent(agent) },
       region: connection.region || 'us-east-1',
       ...(connection.endpoint ? { endpoint: connection.endpoint } : {}),
       forcePathStyle: connection.forcePathStyle,
@@ -280,7 +296,7 @@ export class S3Service {
   ): Promise<void> {
     return runQueue(
       [{ prefix, depth: 0 }],
-      SCAN_PARALLEL,
+      this.requests,
       async (task, push) => {
         const split = task.depth < SPLIT_DEPTH
         let token: string | undefined
@@ -323,11 +339,16 @@ export class S3Service {
   }
 
   /** Xoá object và cả "thư mục" (key kết thúc "/"). Trả về số object đã xoá. */
+  /** Mỗi lô xoá là 1000 object — vài lô cùng lúc là đủ. */
+  private get deleteParallel(): number {
+    return Math.max(2, Math.floor(this.requests / 4))
+  }
+
   private async remove(bucket: string, keys: readonly string[]): Promise<number> {
     const all = new Set<string>(keys)
     const trees = await mapLimit(
       keys.filter((k) => k.endsWith('/')),
-      DELETE_PARALLEL,
+      this.deleteParallel,
       (key) => this.allKeys(bucket, key)
     )
     for (const tree of trees) for (const k of tree) all.add(k.key)
@@ -339,7 +360,7 @@ export class S3Service {
   private async deleteExact(bucket: string, list: readonly string[]): Promise<void> {
     const batches: string[][] = []
     for (let i = 0; i < list.length; i += 1000) batches.push(list.slice(i, i + 1000))
-    await mapLimit(batches, DELETE_PARALLEL, async (batch) => {
+    await mapLimit(batches, this.deleteParallel, async (batch) => {
       const out = await this.client.send(
         new DeleteObjectsCommand({
           Bucket: bucket,
@@ -511,7 +532,7 @@ export class S3Service {
         if (pair) await this.copyObject(bucket, destBucket, pair)
       }
     }
-    await Promise.all(Array.from({ length: Math.min(COPY_PARALLEL, pairs.length) }, worker))
+    await Promise.all(Array.from({ length: Math.min(this.requests, pairs.length) }, worker))
     if (move) await this.deleteExact(bucket, [...new Set(pairs.map((p) => p.from))])
     return pairs.length
   }
@@ -698,7 +719,7 @@ export class S3Service {
         ...(contentType ? { ContentType: contentType } : {})
       },
       abortController: job.abort,
-      queueSize: 4,
+      queueSize: UPLOAD_QUEUE,
       partSize: 8 * 1024 * 1024
     })
     const meter = this.meter(job)
@@ -795,7 +816,7 @@ export class S3Service {
   private pump(): void {
     if (this.disposed) return
     for (const job of this.jobs.values()) {
-      if (this.running >= MAX_PARALLEL) return
+      if (this.running >= this.maxTransfers) return
       if (job.status.state !== 'queued') continue
       if (job.abort.signal.aborted) {
         job.status.state = 'cancelled'

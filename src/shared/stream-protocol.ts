@@ -181,6 +181,13 @@ export const ResolvedLocalSessionSpec = LocalSessionSpec.extend({
     .optional()
 })
 
+/** Mức song song (từ cài đặt): số request cùng lúc và số file truyền cùng lúc. */
+export const ParallelLimits = z.object({
+  requests: z.number().int().min(1).max(64),
+  transfers: z.number().int().min(1).max(16)
+})
+export type ParallelLimits = z.infer<typeof ParallelLimits>
+
 /** Kết nối SSH tới một đích (kết nối nhanh). Host đã lưu dùng `hostId` (tuần 6). */
 export const SshSessionSpec = z.object({
   kind: z.literal('ssh'),
@@ -192,7 +199,9 @@ export const SshSessionSpec = z.object({
     username: Username
   }),
   /** true = chỉ SFTP, không mở shell trên server. */
-  noShell: z.boolean().optional()
+  noShell: z.boolean().optional(),
+  /** Mức song song của SFTP — main điền từ cài đặt. */
+  sftpLimits: ParallelLimits.optional()
 })
 export type SshSessionSpec = z.infer<typeof SshSessionSpec>
 
@@ -224,7 +233,8 @@ export const ResolvedS3SessionSpec = z.object({
     accessKeyId: z.string().max(256),
     secretAccessKey: z.string().max(1024),
     forcePathStyle: z.boolean()
-  })
+  }),
+  limits: ParallelLimits.optional()
 })
 
 export const SessionSpec = z.discriminatedUnion('kind', [

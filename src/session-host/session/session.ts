@@ -161,9 +161,13 @@ export class Session {
         this.deps.log('info', `Session ${this.id}: started ${launch.file}`)
       } else if (this.spec.kind === 's3') {
         // Không có terminal: chỉ thao tác S3 + truyền file qua port của tab.
-        this.s3 = new S3Service(this.spec.connection, (list) => {
-          this.post({ t: 'transfers', list })
-        })
+        this.s3 = new S3Service(
+          this.spec.connection,
+          (list) => {
+            this.post({ t: 'transfers', list })
+          },
+          this.spec.limits
+        )
         this.post({ t: 'status', phase: 'connected', detail: 'S3 ready' })
         this.deps.log('info', `Session ${this.id}: S3 ${this.spec.connection.endpoint || 'AWS'}`)
       } else if (this.spec.kind === 'telnet') {
@@ -395,11 +399,16 @@ export class Session {
   private async runSftp(op: SftpOp): Promise<unknown> {
     const ssh = await this.waitForSsh()
     if (!ssh) throw new Error('SFTP is only available on a connected built-in SSH session')
-    this.sftp ??= new SftpService(ssh.client)
+    const limits = this.spec.kind === 'ssh' ? this.spec.sftpLimits : undefined
+    this.sftp ??= new SftpService(ssh.client, limits?.requests)
     const sftp = this.sftp
-    this.transfers ??= new TransferQueue(sftp, (list) => {
-      this.post({ t: 'transfers', list })
-    })
+    this.transfers ??= new TransferQueue(
+      sftp,
+      (list) => {
+        this.post({ t: 'transfers', list })
+      },
+      limits?.transfers
+    )
     const transfers = this.transfers
     switch (op.op) {
       case 'realpath':

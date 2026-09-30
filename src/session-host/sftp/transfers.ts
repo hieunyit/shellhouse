@@ -14,7 +14,8 @@ import type { SftpService } from './service'
 export const PART_SUFFIX = '.shellhouse-part'
 /** Resume chỉ khi phần đuôi của file dở dang khớp với nguồn. */
 const TAIL_CHECK_BYTES = 4096
-const MAX_PARALLEL = 4
+/** Mặc định số file truyền cùng lúc (chỉnh trong Settings → Files). */
+export const DEFAULT_SFTP_TRANSFERS = 4
 const PROGRESS_INTERVAL_MS = 250
 
 interface Job {
@@ -85,7 +86,8 @@ export class TransferQueue {
 
   constructor(
     private readonly sftp: SftpService,
-    private readonly onChange: (list: TransferStatus[]) => void
+    private readonly onChange: (list: TransferStatus[]) => void,
+    private readonly maxParallel = DEFAULT_SFTP_TRANSFERS
   ) {}
 
   list(): TransferStatus[] {
@@ -182,7 +184,7 @@ export class TransferQueue {
   private pump(): void {
     if (this.disposed) return
     for (const job of this.jobs.values()) {
-      if (this.running >= MAX_PARALLEL) return
+      if (this.running >= this.maxParallel) return
       if (job.status.state !== 'queued') continue
       this.running++
       job.status.state = 'running'

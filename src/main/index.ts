@@ -241,6 +241,10 @@ function registerIpc(): void {
             accessKeyId: account.accessKeyId,
             secretAccessKey: account.secretAccessKey,
             forcePathStyle: account.forcePathStyle
+          },
+          limits: {
+            requests: requireSettings().get().files.s3Requests,
+            transfers: requireSettings().get().files.s3Transfers
           }
         },
         port1
@@ -342,7 +346,16 @@ function registerIpc(): void {
         const noShell = spec.noShell === true
         supervisor.openSession(
           sessionId,
-          { kind: 'ssh', ...size, target, ...(noShell ? { noShell: true } : {}) },
+          {
+            kind: 'ssh',
+            ...size,
+            target,
+            ...(noShell ? { noShell: true } : {}),
+            sftpLimits: {
+              requests: requireSettings().get().files.sftpRequests,
+              transfers: requireSettings().get().files.sftpTransfers
+            }
+          },
           port1,
           ssh,
           // Không có shell thì không có gì để ghi log.

@@ -4,8 +4,8 @@ import { joinRemote } from '@shared/sftp'
 import { createLimiter } from '../../node-shared/pool'
 
 const MAX_RECURSIVE_DELETE = 10_000
-/** Số yêu cầu SFTP cùng lúc khi xoá đệ quy (một kênh SFTP xử lý nhiều yêu cầu song song). */
-const DELETE_PARALLEL = 8
+/** Mặc định số yêu cầu SFTP cùng lúc khi duyệt / xoá thư mục (chỉnh trong Settings → Files). */
+export const DEFAULT_SFTP_PARALLEL = 8
 
 /**
  * Tín hiệu "kết nối đã chết". ssh2 chỉ huỷ các yêu cầu SFTP đang chờ khi kênh nhận EOF bình thường;
@@ -32,7 +32,11 @@ export class SftpService implements LossGuard {
   private lost: Error | null = null
   private readonly lossListeners = new Set<(error: Error) => void>()
 
-  constructor(private readonly client: Client) {
+  constructor(
+    private readonly client: Client,
+    /** Số yêu cầu cùng lúc khi duyệt / tạo / xoá cây thư mục. */
+    readonly parallel = DEFAULT_SFTP_PARALLEL
+  ) {
     const die = (): void => {
       this.markLost(new Error('Connection lost'))
     }
@@ -232,8 +236,8 @@ export class SftpService implements LossGuard {
     if (recursive) {
       let budget = MAX_RECURSIVE_DELETE
       // Mọi yêu cầu mạng đi qua bộ giới hạn: các thư mục con / file được xử lý song song, nhưng
-      // không quá DELETE_PARALLEL yêu cầu cùng lúc. Thư mục chỉ rmdir sau khi mọi thứ bên trong xong.
-      const limit = createLimiter(DELETE_PARALLEL)
+      // không quá `parallel` yêu cầu cùng lúc. Thư mục chỉ rmdir sau khi mọi thứ bên trong xong.
+      const limit = createLimiter(this.parallel)
       const walk = async (dir: string): Promise<void> => {
         const entries = await limit(() =>
           this.guarded<{ filename: string; attrs: Stats }[]>((cb) => {

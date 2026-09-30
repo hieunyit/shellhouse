@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef } from 'react'
 import { ChevronDown, ChevronUp, Database, Pin, RefreshCw } from 'lucide-react'
 import type { S3Bucket } from '@shared/s3'
 import { cx } from '../components/ui'
+import type { SortOption, SortState } from '../components/SortMenu'
 import { formatSize } from './format'
 import { collator, dateFormat } from './parts'
 
@@ -13,7 +14,16 @@ export interface BucketStats {
   error?: string
 }
 
-type BucketSortKey = 'name' | 'region' | 'created' | 'objects' | 'size'
+export type BucketSortKey = 'name' | 'region' | 'created' | 'objects' | 'size'
+
+export const BUCKET_SORT_OPTIONS = [
+  { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'region', label: 'Region', kind: 'text' },
+  { key: 'created', label: 'Created', kind: 'date' },
+  { key: 'objects', label: 'Objects', kind: 'number' },
+  { key: 'size', label: 'Size', kind: 'number' }
+] as const satisfies readonly SortOption<BucketSortKey>[]
+export const BUCKET_SORT_KEYS: readonly BucketSortKey[] = BUCKET_SORT_OPTIONS.map((o) => o.key)
 
 const monthYear = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit' })
 
@@ -33,6 +43,8 @@ export function S3BucketTable({
   buckets,
   filter,
   stats,
+  sort,
+  onSort,
   selected,
   isPinned,
   onSelect,
@@ -43,6 +55,8 @@ export function S3BucketTable({
   buckets: S3Bucket[]
   filter: string
   stats: Readonly<Record<string, BucketStats>>
+  sort: SortState<BucketSortKey>
+  onSort: (sort: SortState<BucketSortKey>) => void
   selected: string | null
   isPinned: (bucket: string) => boolean
   onSelect: (name: string) => void
@@ -50,10 +64,6 @@ export function S3BucketTable({
   onCalculate: (name: string) => void
   onContextMenu: (event: React.MouseEvent, name: string) => void
 }): React.JSX.Element {
-  const [sort, setSort] = useState<{ key: BucketSortKey; dir: 'asc' | 'desc' }>({
-    key: 'name',
-    dir: 'asc'
-  })
   const listRef = useRef<HTMLDivElement | null>(null)
   const withRegion = buckets.some((b) => b.region)
   const columns = withRegion ? COLUMNS.region : COLUMNS.plain
@@ -97,7 +107,7 @@ export function S3BucketTable({
           className
         )}
         onClick={() => {
-          setSort(
+          onSort(
             active
               ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
               : { key, dir: key === 'name' || key === 'region' ? 'asc' : 'desc' }

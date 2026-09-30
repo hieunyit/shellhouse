@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type RefObject } from 'react'
+import { SortMenu, usePersistentSort } from '../components/SortMenu'
+import { FILE_SORT_KEYS, FILE_SORT_OPTIONS, nameOrder, type FileSort } from './file-sort'
 import {
   ArrowUp,
   Download,
@@ -32,7 +34,7 @@ import {
   type SftpOp,
   type TransferStatus
 } from '@shared/sftp'
-import { Button, cx, IconButton, Input, Modal, Notice, Select } from '../components/ui'
+import { Button, cx, IconButton, Input, Modal, Notice } from '../components/ui'
 import { replaceUnsafeFileChars } from '@shared/file-names'
 import { DRAG_LOCAL, DRAG_REMOTE, joinLocal } from '@shared/local-files'
 import { useSettings } from '../stores/settings'
@@ -55,8 +57,6 @@ function formatSize(n: number): string {
   if (n < 1000 * 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`
   return `${(n / 1024 ** 4).toFixed(2)} TB`
 }
-
-type Sort = 'name' | 'size' | 'mtime'
 
 type Dialog =
   | { kind: 'mkdir' }
@@ -102,7 +102,10 @@ export function SftpPanel({
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [showHidden, setShowHidden] = useState(false)
-  const [sort, setSort] = useState<Sort>('name')
+  const [sort, setSort] = usePersistentSort<FileSort>('sftp-remote', FILE_SORT_KEYS, {
+    key: 'name',
+    dir: 'asc'
+  })
   const [selected, setSelected] = useState<string | null>(null)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -278,9 +281,13 @@ export function SftpPanel({
     .filter((e) => showHidden || !e.name.startsWith('.'))
     .sort((a, b) => {
       if (a.isDirLike !== b.isDirLike) return a.isDirLike ? -1 : 1
-      if (sort === 'size') return b.size - a.size
-      if (sort === 'mtime') return b.mtime - a.mtime
-      return a.name.localeCompare(b.name)
+      const by =
+        sort.key === 'size' && !a.isDirLike
+          ? a.size - b.size
+          : sort.key === 'mtime'
+            ? a.mtime - b.mtime
+            : 0
+      return (by || nameOrder.compare(a.name, b.name)) * (sort.dir === 'asc' ? 1 : -1)
     })
   const selectedEntry = entries.find((e) => e.name === selected) ?? null
 
@@ -391,18 +398,7 @@ export function SftpPanel({
         >
           {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </IconButton>
-        <Select
-          className="h-7 w-28 text-xs"
-          value={sort}
-          onChange={(e) => {
-            setSort(e.target.value as Sort)
-          }}
-          aria-label="Sort by"
-        >
-          <option value="name">Name</option>
-          <option value="size">Size</option>
-          <option value="mtime">Modified</option>
-        </Select>
+        <SortMenu options={FILE_SORT_OPTIONS} sort={sort} onChange={setSort} testId="sftp-sort" />
       </div>
 
       {error && (

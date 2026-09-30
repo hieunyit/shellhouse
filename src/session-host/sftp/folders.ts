@@ -9,9 +9,6 @@ import type { TransferQueue } from './transfers'
 
 /** Giới hạn số mục một lần tải thư mục — tránh vô tình kéo cả ổ đĩa. */
 export const MAX_FOLDER_ENTRIES = 10_000
-/** Số yêu cầu SFTP cùng lúc khi duyệt / tạo cây thư mục. */
-const WALK_PARALLEL = 8
-
 const byPath =
   <T>(key: (x: T) => string) =>
   (a: T, b: T): number =>
@@ -37,8 +34,8 @@ export async function downloadFolder(
   const files: { remote: string; local: string }[] = []
   const dirs: string[] = [root]
   let budget = MAX_FOLDER_ENTRIES
-  // Duyệt song song: các thư mục con được đọc cùng lúc, tối đa WALK_PARALLEL yêu cầu.
-  const limit = createLimiter(WALK_PARALLEL)
+  // Duyệt song song: các thư mục con được đọc cùng lúc, tối đa `sftp.parallel` yêu cầu.
+  const limit = createLimiter(sftp.parallel)
   const walk = async (remote: string, local: string): Promise<void> => {
     const entries = await limit(() => sftp.readdir(remote))
     budget -= entries.length
@@ -102,7 +99,7 @@ export async function uploadFolder(
     levels.set(depth, [...(levels.get(depth) ?? []), dir])
   }
   for (const depth of [...levels.keys()].sort((a, b) => a - b))
-    await mapLimit(levels.get(depth) ?? [], WALK_PARALLEL, async (dir) => {
+    await mapLimit(levels.get(depth) ?? [], sftp.parallel, async (dir) => {
       if (!(await sftp.statOrNull(dir))) await sftp.mkdir(dir)
     })
   files.sort(byPath((f) => f.remote))

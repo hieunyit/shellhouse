@@ -1,5 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  utimesSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -58,6 +65,24 @@ test('SFTP qua giao diện: tải lên, tạo thư mục, tải về, xoá', asy
     isWindows ? `/${real.replaceAll('\\', '/')}` : real
   )
   await expect(panel.locator('[data-testid="sftp-entry"][data-name="co-san.txt"]')).toBeVisible()
+
+  // Menu Sort: Modified mới trước / cũ trước.
+  writeFileSync(join(remote, 'moi-hon.txt'), 'x')
+  utimesSync(join(remote, 'co-san.txt'), new Date(2020, 0, 1), new Date(2020, 0, 1))
+  await panel.getByRole('button', { name: 'Refresh' }).first().click()
+  const order = (): Promise<(string | null)[]> =>
+    panel
+      .getByTestId('sftp-entry')
+      .evaluateAll((els) => els.map((e) => e.getAttribute('data-name')))
+  await expect.poll(order).toEqual(['co-san.txt', 'moi-hon.txt'])
+  await panel.getByTestId('sftp-sort').click()
+  await page.getByRole('menuitem', { name: 'Modified' }).click()
+  await expect.poll(order).toEqual(['moi-hon.txt', 'co-san.txt'])
+  await panel.getByTestId('sftp-sort').click()
+  await page.getByRole('menuitem', { name: 'Oldest first' }).click()
+  await expect.poll(order).toEqual(['co-san.txt', 'moi-hon.txt'])
+  await panel.getByTestId('sftp-sort').click()
+  await page.getByRole('menuitem', { name: 'Name' }).click()
 
   // Tải lên (hộp thoại chọn file được thay bằng đường dẫn cố định).
   await app.evaluate(

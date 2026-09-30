@@ -36,7 +36,14 @@ import { useContextMenu, type MenuEntry } from '../components/ContextMenu'
 import { S3StatsDialog, type StatsTarget } from './S3Stats'
 import { cleanError, formatSize } from './format'
 import { S3Transfers } from './S3Transfers'
-import { S3BucketTable, type BucketStats } from './S3BucketTable'
+import {
+  BUCKET_SORT_KEYS,
+  BUCKET_SORT_OPTIONS,
+  S3BucketTable,
+  type BucketSortKey,
+  type BucketStats
+} from './S3BucketTable'
+import { SortMenu, usePersistentSort } from '../components/SortMenu'
 import { S3BucketSwitcher } from './S3BucketSwitcher'
 import { S3Dialog, type S3DialogState } from './S3Dialogs'
 import {
@@ -44,6 +51,8 @@ import {
   columns,
   dateFormat,
   Empty,
+  OBJECT_SORT_KEYS,
+  OBJECT_SORT_OPTIONS,
   storageClassLabel,
   ToolButton,
   type SortKey
@@ -91,10 +100,15 @@ export function S3View({
   const [calculating, setCalculating] = useState(false)
   const stopCalc = useRef(false)
   const [opening, setOpening] = useState<string | null>(null)
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
+  const [sort, setSort] = usePersistentSort<SortKey>('s3-objects', OBJECT_SORT_KEYS, {
     key: 'name',
     dir: 'asc'
   })
+  const [bucketSort, setBucketSort] = usePersistentSort<BucketSortKey>(
+    's3-buckets',
+    BUCKET_SORT_KEYS,
+    { key: 'name', dir: 'asc' }
+  )
   const { menu, open: openMenu } = useContextMenu()
   const listRef = useRef<HTMLDivElement | null>(null)
   /** Mục "con trỏ" cho phím mũi tên và Shift+bấm. */
@@ -704,6 +718,20 @@ export function S3View({
             </button>
           )}
         </label>
+        {bucket === null ? (
+          <SortMenu
+            options={
+              buckets?.some((b) => b.region)
+                ? BUCKET_SORT_OPTIONS
+                : BUCKET_SORT_OPTIONS.filter((o) => o.key !== 'region')
+            }
+            sort={bucketSort}
+            onChange={setBucketSort}
+            testId="s3-sort"
+          />
+        ) : (
+          <SortMenu options={OBJECT_SORT_OPTIONS} sort={sort} onChange={setSort} testId="s3-sort" />
+        )}
         {bucket !== null && (
           <IconButton
             label={herePinned ? 'Unpin from sidebar' : 'Pin this location to the sidebar'}
@@ -935,6 +963,8 @@ export function S3View({
             buckets={buckets}
             filter={filter}
             stats={bucketStats}
+            sort={bucketSort}
+            onSort={setBucketSort}
             selected={selectedBucket}
             isPinned={(b) => isPinned(b, '')}
             onSelect={setSelectedBucket}

@@ -4,7 +4,8 @@ import { Button, Checkbox, Field, Input, Notice, SectionTitle, Select } from '..
 
 export function FilesSection(): React.JSX.Element {
   const { settings, update } = useSettings()
-  const { editor, doubleClick } = settings.files
+  const files = settings.files
+  const { editor, doubleClick } = files
   const logging = settings.logging
 
   return (
@@ -52,6 +53,68 @@ export function FilesSection(): React.JSX.Element {
           <option value="download">Download</option>
         </Select>
       </Field>
+
+      <SectionTitle description="How many requests run at the same time. Higher is faster on fast links and big folders; lower is gentler on small or self-hosted servers. Applies to newly opened tabs.">
+        Transfers &amp; performance
+      </SectionTitle>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="S3 parallel requests" hint="Listing, sizes, copy and delete">
+          <Select
+            data-testid="setting-s3-requests"
+            value={String(files.s3Requests)}
+            onChange={(e) => void update({ files: { s3Requests: Number(e.target.value) } })}
+          >
+            {[4, 8, 16, 32, 64].map((n) => (
+              <option key={n} value={n}>
+                {n}
+                {n === 16 ? ' (default)' : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="S3 files at once" hint="Large files also upload in parallel parts">
+          <Select
+            data-testid="setting-s3-transfers"
+            value={String(files.s3Transfers)}
+            onChange={(e) => void update({ files: { s3Transfers: Number(e.target.value) } })}
+          >
+            {[1, 2, 4, 6, 8, 12, 16].map((n) => (
+              <option key={n} value={n}>
+                {n}
+                {n === 6 ? ' (default)' : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="SFTP parallel requests" hint="Browsing, creating and deleting folders">
+          <Select
+            data-testid="setting-sftp-requests"
+            value={String(files.sftpRequests)}
+            onChange={(e) => void update({ files: { sftpRequests: Number(e.target.value) } })}
+          >
+            {[2, 4, 8, 12, 16].map((n) => (
+              <option key={n} value={n}>
+                {n}
+                {n === 8 ? ' (default)' : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="SFTP files at once" hint="Each file is also sent in pipelined chunks">
+          <Select
+            data-testid="setting-sftp-transfers"
+            value={String(files.sftpTransfers)}
+            onChange={(e) => void update({ files: { sftpTransfers: Number(e.target.value) } })}
+          >
+            {[1, 2, 3, 4, 6, 8].map((n) => (
+              <option key={n} value={n}>
+                {n}
+                {n === 4 ? ' (default)' : ''}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
 
       <SectionTitle description="Save everything a session prints to a text file, one folder per host.">
         Session logs

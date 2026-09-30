@@ -1,6 +1,15 @@
 import { cx } from '../components/ui'
 
+import type { SortOption } from '../components/SortMenu'
+
 export type SortKey = 'name' | 'size' | 'modified'
+
+export const OBJECT_SORT_OPTIONS = [
+  { key: 'name', label: 'Name', kind: 'text' },
+  { key: 'size', label: 'Size', kind: 'number' },
+  { key: 'modified', label: 'Modified', kind: 'date' }
+] as const satisfies readonly SortOption<SortKey>[]
+export const OBJECT_SORT_KEYS: readonly SortKey[] = OBJECT_SORT_OPTIONS.map((o) => o.key)
 
 export const collator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 /** Ngày giờ dạng số theo thói quen máy người dùng (không có chữ → giao diện vẫn thuần tiếng Anh). */
