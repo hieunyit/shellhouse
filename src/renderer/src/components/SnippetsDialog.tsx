@@ -7,7 +7,7 @@ import {
   snippetVariables,
   type SnippetSummary
 } from '@shared/snippets'
-import { Button, cx, Field, Input, Modal, Notice, TextArea } from './ui'
+import { Button, Checkbox, cx, Field, Input, Modal, Notice, TextArea } from './ui'
 
 type Mode =
   { kind: 'run'; snippet: SnippetSummary } | { kind: 'edit'; snippet: SnippetSummary | null }
@@ -18,7 +18,8 @@ export function SnippetsDialog({
   canInsert
 }: {
   onClose: () => void
-  onInsert: (text: string, run: boolean) => void
+  /** macro = chạy từng dòng, chờ dấu nhắc (MultiExec: trên mọi terminal đang bật). */
+  onInsert: (text: string, run: boolean, macro: boolean) => void
   canInsert: boolean
 }): React.JSX.Element {
   const [snippets, setSnippets] = useState<SnippetSummary[]>([])
@@ -122,7 +123,7 @@ export function SnippetsDialog({
                 setMode({ kind: 'edit', snippet: mode.snippet })
               }}
               onInsert={(text, run) => {
-                onInsert(text, run)
+                onInsert(text, run, mode.snippet.mode === 'macro')
                 onClose()
               }}
             />
@@ -210,6 +211,12 @@ function RunForm({
           />
         </Field>
       ))}
+      {snippet.mode === 'macro' && (
+        <Notice testId="snippet-macro-note">
+          Macro: each line is sent after the previous one returns to the prompt. In MultiExec it
+          runs in every selected terminal. Press Ctrl+C in a terminal to stop it there.
+        </Notice>
+      )}
       <pre
         className="min-h-0 flex-1 overflow-auto rounded-md border border-line bg-subtle p-2.5 font-mono text-xs whitespace-pre-wrap text-fg"
         data-testid="snippet-preview"
@@ -219,17 +226,19 @@ function RunForm({
       {error && <Notice tone="danger">{error}</Notice>}
       {!canInsert && <Notice tone="warning">No connected terminal tab.</Notice>}
       <div className="flex justify-end gap-2">
-        <Button
-          disabled={!canInsert}
-          data-testid="snippet-insert"
-          onClick={() => {
-            submit(false)
-          }}
-        >
-          Insert
-        </Button>
+        {snippet.mode !== 'macro' && (
+          <Button
+            disabled={!canInsert}
+            data-testid="snippet-insert"
+            onClick={() => {
+              submit(false)
+            }}
+          >
+            Insert
+          </Button>
+        )}
         <Button type="submit" variant="primary" disabled={!canInsert} data-testid="snippet-run">
-          Insert and run
+          {snippet.mode === 'macro' ? 'Run macro' : 'Insert and run'}
         </Button>
       </div>
     </form>
@@ -246,6 +255,7 @@ function EditForm({
   const [name, setName] = useState(snippet?.name ?? '')
   const [body, setBody] = useState(snippet?.body ?? '')
   const [tags, setTags] = useState(snippet?.tags.join(', ') ?? '')
+  const [macro, setMacro] = useState(snippet?.mode === 'macro')
   const [error, setError] = useState<string | null>(null)
   return (
     <form
@@ -259,7 +269,8 @@ function EditForm({
           tags: tags
             .split(',')
             .map((t) => t.trim())
-            .filter(Boolean)
+            .filter(Boolean),
+          mode: macro ? 'macro' : 'paste'
         })
         if (!parsed.success) {
           setError(parsed.error.issues[0]?.message ?? 'Invalid input')
@@ -273,6 +284,7 @@ function EditForm({
               name: parsed.data.name,
               body: parsed.data.body,
               tags: parsed.data.tags,
+              mode: parsed.data.mode ?? 'paste',
               updatedAt: Date.now()
             })
         })
@@ -302,6 +314,15 @@ function EditForm({
         value={tags}
         onChange={(e) => {
           setTags(e.target.value)
+        }}
+      />
+      <Checkbox
+        label="Macro: send line by line, waiting for the prompt"
+        description="For multi-step jobs on several servers (MultiExec). Special lines: “# wait 5” pauses 5 s, “# expect Password:” waits for that text."
+        checked={macro}
+        data-testid="snippet-macro"
+        onChange={(e) => {
+          setMacro(e.target.checked)
         }}
       />
       {error && <Notice tone="danger">{error}</Notice>}

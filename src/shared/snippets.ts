@@ -5,6 +5,8 @@ export const SnippetSummary = z.object({
   name: z.string(),
   body: z.string(),
   tags: z.array(z.string()),
+  /** 'macro' = gửi từng dòng, chờ dấu nhắc lệnh giữa các dòng. */
+  mode: z.enum(['paste', 'macro']),
   updatedAt: z.number()
 })
 export type SnippetSummary = z.infer<typeof SnippetSummary>
@@ -16,7 +18,9 @@ export const SnippetInput = z.object({
     .string()
     .min(1, 'The snippet is empty')
     .max(64 * 1024),
-  tags: z.array(z.string().trim().min(1).max(40)).max(20)
+  tags: z.array(z.string().trim().min(1).max(40)).max(20),
+  /** Không có = 'paste'. */
+  mode: z.enum(['paste', 'macro']).optional()
 })
 export type SnippetInput = z.infer<typeof SnippetInput>
 

@@ -104,3 +104,45 @@ test('snippet nhiều dòng được dán (bracketed paste), không tự chạy 
   const text = await page.evaluate((id) => window.__shellhouseTest.bufferText(id), tab)
   expect(text).not.toContain('dong-mot-2\n') // chưa chạy vì chỉ "chèn"
 })
+
+test('macro trong MultiExec: chạy từng dòng trên mọi terminal, chờ dấu nhắc giữa các dòng', async ({
+  page
+}) => {
+  const first = await activeTab(page)
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('tab')).toHaveCount(2)
+  const second = await activeTab(page)
+  // Chờ cả hai shell sẵn sàng.
+  for (const tab of [first, second]) {
+    const { command, expected } = echoComputed(`ready-${tab.slice(0, 4)}`)
+    await sendLine(page, tab, command)
+    await waitForText(page, tab, expected)
+  }
+
+  await page.getByTestId('open-snippets').click()
+  const dialog = page.getByTestId('snippets-dialog')
+  await dialog.getByTestId('snippet-new').click()
+  await dialog.getByTestId('snippet-name').fill('hai buoc')
+  const a = echoComputed('macro-a')
+  const b = echoComputed('macro-b')
+  await dialog.getByTestId('snippet-body').fill(`# bước 1\n${a.command}\n# wait 0.3\n${b.command}`)
+  await dialog.getByTestId('snippet-macro').check()
+  await dialog.getByTestId('snippet-save').click()
+  await page.keyboard.press('Escape')
+
+  await page.getByTestId('toggle-broadcast').click()
+  await expect(page.getByTestId('multiexec')).toBeVisible()
+  await page.getByTestId('open-snippets').click()
+  await dialog.locator('[data-testid="snippet-item"][data-name="hai buoc"]').click()
+  await expect(dialog.getByTestId('snippet-macro-note')).toBeVisible()
+  await dialog.getByTestId('snippet-run').click()
+
+  for (const tab of [first, second]) {
+    await waitForText(page, tab, b.expected)
+    const text = await page.evaluate((id) => window.__shellhouseTest.bufferText(id), tab)
+    expect(text.indexOf(a.expected)).toBeGreaterThan(-1)
+    expect(text.indexOf(a.expected)).toBeLessThan(text.indexOf(b.expected))
+    // Mỗi dòng chỉ chạy một lần trên mỗi terminal (không bị phát lại qua MultiExec).
+    expect(text.split(b.expected).length - 1).toBe(1)
+  }
+})

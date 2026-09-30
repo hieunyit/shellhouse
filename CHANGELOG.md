@@ -21,6 +21,9 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - **Serial (COM)** hosts for device consoles: pick the port (detected list or type it), speed,
   data bits, parity, stop bits and flow control (9600 8N1 by default). A disconnected USB-serial
   cable is reported and the tab reconnects when it is plugged back in.
+- **Macros**: a snippet can run line by line, waiting for the prompt before each next line
+  (`# wait 5` pauses, `# expect Password:` waits for text). With MultiExec the macro runs in
+  every selected terminal, each at its own pace. Ctrl+C in a terminal stops it there.
 
 ## [1.1.0-beta.3] - 2026-09-30
 

@@ -22,6 +22,7 @@ import { useVault } from '../stores/vault'
 import { SessionClient } from './session-client'
 import { broadcastInput } from './broadcast'
 import { tabTitle } from '@shared/tab-title'
+import { looksLikePrompt, MACRO_STEP_TIMEOUT_MS, type MacroStep } from '@shared/macro'
 import { windowsPty } from '../lib/platform'
 
 export interface ActivePrompt {
@@ -104,6 +105,8 @@ export class TerminalController {
   private webglUnavailable = false
   private visibleInPanel = true
   private inMultiExec = false
+  /** Lần cuối nhận output (performance.now) — macro chờ output ngừng mới gửi dòng tiếp. */
+  private lastOutputAt = 0
   /** Đã từng xem terminal → mọi phiên sau đều mở shell. */
   private shellWanted = false
   /** Đã yêu cầu session đo số liệu server. */
@@ -309,6 +312,86 @@ export class TerminalController {
    * Chèn văn bản như dán (bracketed paste nếu shell bật): nhiều dòng không bị chạy từng dòng.
    * `run` = gửi thêm Enter.
    */
+  /** Đang chạy macro (Ctrl+C trong tab thì dừng). */
+  private macro: { cancelled: boolean } | null = null
+
+  get macroRunning(): boolean {
+    return this.macro !== null
+  }
+
+  /** Dòng đang có con trỏ (đã bỏ khoảng trắng cuối). */
+  private cursorLineText(): string {
+    const b = this.term.buffer.active
+    return b.getLine(b.baseY + b.cursorY)?.translateToString(true) ?? ''
+  }
+
+  /** Vài dòng cuối màn hình (để `# expect`). */
+  private screenTail(lines = 8): string {
+    const b = this.term.buffer.active
+    const out: string[] = []
+    for (let i = Math.max(0, b.baseY + b.cursorY - lines + 1); i <= b.baseY + b.cursorY; i++)
+      out.push(b.getLine(i)?.translateToString(true) ?? '')
+    return out.join('\n')
+  }
+
+  /**
+   * Chạy macro: gửi từng dòng, chờ dấu nhắc lệnh (output ngừng + dòng cuối giống dấu nhắc) rồi mới
+   * gửi dòng tiếp. Dừng khi Ctrl+C, mất kết nối, hoặc quá thời gian chờ một bước.
+   */
+  async runMacro(steps: readonly MacroStep[]): Promise<void> {
+    if (this.macro) throw new Error('A macro is already running in this tab')
+    const run = { cancelled: false }
+    this.macro = run
+    // Đọc qua hàm: `cancelled` đổi từ nơi khác (Ctrl+C) trong lúc chờ — TS không được thu hẹp kiểu.
+    const cancelled = (): boolean => run.cancelled
+    const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+    const stop = (why: string): void => {
+      this.term.write(`\r\n${YELLOW}[Macro stopped: ${why}]${RESET}\r\n`)
+    }
+    const waitFor = async (done: () => boolean, what: string): Promise<boolean> => {
+      const deadline = Date.now() + MACRO_STEP_TIMEOUT_MS
+      for (;;) {
+        if (cancelled() || !this.client) return false
+        if (done()) return true
+        if (Date.now() > deadline) {
+          stop(`no ${what} after ${MACRO_STEP_TIMEOUT_MS / 1000} s`)
+          return false
+        }
+        await sleep(100)
+      }
+    }
+    try {
+      for (const [i, step] of steps.entries()) {
+        if (cancelled() || !this.client) return
+        if (step.kind === 'wait') {
+          const until = Date.now() + step.ms
+          while (Date.now() < until && !cancelled())
+            await sleep(Math.min(100, until - Date.now()))
+          continue
+        }
+        if (step.kind === 'expect') {
+          if (!(await waitFor(() => this.screenTail().includes(step.text), `“${step.text}”`)))
+            return
+          continue
+        }
+        // Chờ dấu nhắc TRƯỚC khi gửi (bước đầu: phiên có thể còn đang in banner).
+        const quiet = (): boolean => performance.now() - this.lastOutputAt > 300
+        if (!(await waitFor(() => quiet() && looksLikePrompt(this.cursorLineText()), 'prompt')))
+          return
+        this.client.input(`${step.line}\r`)
+        // Chờ lệnh bắt đầu in (echo) trước khi xét dấu nhắc lần sau.
+        await sleep(i === steps.length - 1 ? 0 : 150)
+      }
+    } finally {
+      if (cancelled()) stop('cancelled')
+      this.macro = null
+    }
+  }
+
+  cancelMacro(): void {
+    if (this.macro) this.macro.cancelled = true
+  }
+
   insertText(text: string, run: boolean): void {
     if (!this.client) return
     this.term.paste(text)
@@ -463,6 +546,7 @@ export class TerminalController {
       this.hostEpoch = host.restarts
       this.client = new SessionClient(sessionId, port, {
         write: (data, done) => {
+          this.lastOutputAt = performance.now()
           this.term.write(data, () => {
             done()
             this.resolveEcho(data)
@@ -678,6 +762,8 @@ export class TerminalController {
   }
 
   private handleInput(data: string): void {
+    // Ctrl+C trong lúc macro chạy → dừng macro (và vẫn gửi Ctrl+C cho lệnh đang chạy).
+    if (data === '\x03') this.cancelMacro()
     if (
       (this.state === 'exited' || this.state === 'reconnecting' || this.state === 'disconnected') &&
       data === '\r'

@@ -11,6 +11,7 @@ import { useHosts } from './stores/hosts'
 import { useSettings } from './stores/settings'
 import { useShells } from './stores/shells'
 import { useTabs } from './stores/tabs'
+import { parseMacro } from '@shared/macro'
 import { toggleMultiExec, useBroadcast } from './terminal/broadcast'
 import { MultiExecView } from './terminal/MultiExecView'
 import { TerminalMenu } from './terminal/TerminalMenu'
@@ -183,8 +184,22 @@ export function App(): React.JSX.Element {
         <SnippetsDialog
           canInsert={activeId !== null && controllers.has(activeId)}
           onClose={closeOverlay}
-          onInsert={(text, run) => {
-            if (activeId) controllers.get(activeId)?.insertText(text, run)
+          onInsert={(text, run, macro) => {
+            if (!activeId) return
+            if (!macro) {
+              controllers.get(activeId)?.insertText(text, run)
+              return
+            }
+            // Macro: MultiExec đang bật và tab hiện tại nằm trong nhóm → chạy trên mọi tab đã chọn.
+            const { enabled, tabIds } = useBroadcast.getState()
+            const targets = enabled && tabIds.includes(activeId) ? tabIds : [activeId]
+            const steps = parseMacro(text)
+            for (const id of targets) {
+              void controllers
+                .get(id)
+                ?.runMacro(steps)
+                .catch(() => undefined)
+            }
           }}
         />
       )}

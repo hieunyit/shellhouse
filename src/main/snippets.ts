@@ -11,10 +11,17 @@ export class SnippetService {
   list(): SnippetSummary[] {
     const rows = this.db
       .prepare(
-        `SELECT id, name, body, tags, updated_at FROM snippets
+        `SELECT id, name, body, tags, mode, updated_at FROM snippets
          WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE`
       )
-      .all() as { id: string; name: string; body: string; tags: string; updated_at: number }[]
+      .all() as {
+      id: string
+      name: string
+      body: string
+      tags: string
+      mode: string
+      updated_at: number
+    }[]
     return rows.map((r) => ({
       id: r.id,
       name: r.name,
@@ -26,6 +33,7 @@ export class SnippetService {
           return []
         }
       })(),
+      mode: r.mode === 'macro' ? 'macro' : 'paste',
       updatedAt: r.updated_at
     }))
   }
@@ -33,19 +41,22 @@ export class SnippetService {
   save(input: SnippetInput): string {
     const now = this.now()
     const tags = JSON.stringify([...new Set(input.tags)])
+    const mode = input.mode ?? 'paste'
     if (input.id) {
       const result = this.db
         .prepare(
-          'UPDATE snippets SET name = ?, body = ?, tags = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL'
+          'UPDATE snippets SET name = ?, body = ?, tags = ?, mode = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL'
         )
-        .run(input.name, input.body, tags, now, input.id)
+        .run(input.name, input.body, tags, mode, now, input.id)
       if (result.changes === 0) throw new Error('Snippet not found')
       return input.id
     }
     const id = uuidv7(now)
     this.db
-      .prepare('INSERT INTO snippets (id, name, body, tags, updated_at) VALUES (?, ?, ?, ?, ?)')
-      .run(id, input.name, input.body, tags, now)
+      .prepare(
+        'INSERT INTO snippets (id, name, body, tags, mode, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+      .run(id, input.name, input.body, tags, mode, now)
     return id
   }
 
