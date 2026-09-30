@@ -22,6 +22,7 @@ import { handle } from './ipc/router'
 import { installAppMenu, installDevToolsShortcut } from './app-menu'
 import { installEditContextMenu } from './context-menu'
 import { CommandHistory } from './command-history'
+import { S3Accounts } from './s3-accounts'
 import { listLocal } from './local-files'
 import { openInEditor, RemoteEditFiles } from './remote-edit'
 import { sessionLogFor } from './session-log-path'
@@ -92,6 +93,12 @@ let knownHosts: KnownHosts | null = null
 let hosts: HostService | null = null
 let snippets: SnippetService | null = null
 let history: CommandHistory | null = null
+let s3Accounts: S3Accounts | null = null
+
+function requireS3(): S3Accounts {
+  if (!s3Accounts) throw new Error('Data is not ready yet')
+  return s3Accounts
+}
 let settings: SettingsService | null = null
 let vaultController: VaultController | null = null
 let deviceKeys: DeviceKeyStore | null = null
@@ -219,7 +226,26 @@ function registerIpc(): void {
     const logFor = (kind: 'local' | 'ssh', label: string) =>
       sessionLogFor(requireSettings().get().logging, { kind, label }, defaultLogDirectory()) ??
       undefined
-    if (spec.kind === 'local') {
+    if (spec.kind === 's3') {
+      // Secret key giải mã tại main, chỉ đi thẳng sang Session Host.
+      const account = requireS3().resolve(spec.accountId)
+      supervisor.openSession(
+        sessionId,
+        {
+          kind: 's3',
+          cols: spec.cols,
+          rows: spec.rows,
+          connection: {
+            endpoint: account.endpoint,
+            region: account.region,
+            accessKeyId: account.accessKeyId,
+            secretAccessKey: account.secretAccessKey,
+            forcePathStyle: account.forcePathStyle
+          }
+        },
+        port1
+      )
+    } else if (spec.kind === 'local') {
       const shell = await shells.resolve(
         spec.shellId,
         requireSettings().get().terminal.defaultShell
@@ -411,6 +437,20 @@ function registerIpc(): void {
     if (!history) throw new Error('Data is not ready yet')
     return history
   }
+  handle('s3:accounts', isTrustedSender, () => requireS3().list())
+  handle('s3:save', isTrustedSender, (input) => {
+    try {
+      const id = requireS3().save(input)
+      send('s3:changed', null)
+      return { ok: true, id }
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    }
+  })
+  handle('s3:delete', isTrustedSender, (id) => {
+    requireS3().delete(id)
+    send('s3:changed', null)
+  })
   handle('history:list', isTrustedSender, (target) => requireHistory().list(target))
   handle('history:record', isTrustedSender, (target, command) => {
     // Tắt gợi ý trong cài đặt = không ghi nữa.
@@ -553,6 +593,7 @@ if (!app.requestSingleInstanceLock()) {
     hosts = new HostService(db, vault)
     snippets = new SnippetService(db)
     history = new CommandHistory(db)
+    s3Accounts = new S3Accounts(db, vault)
     settings = new SettingsService(db)
     // Hộp thoại hệ thống, thanh cuộn, nền cửa sổ theo cài đặt Appearance.
     nativeTheme.themeSource = settings.get().appearance.theme

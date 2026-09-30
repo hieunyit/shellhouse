@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { Maximize2, Radio, Server, SquareTerminal, X } from 'lucide-react'
 import { hostColorClass } from '../components/hostColors'
 import { Button, connectionLabel, cx, StatusDot } from '../components/ui'
@@ -14,7 +14,9 @@ import { controllers } from './registry'
  * không được tạo lại — phần tử xterm của từng tab được chuyển vào ô lưới và trả về khi thoát.
  */
 export function MultiExecView(): React.JSX.Element {
-  const tabs = useTabs((s) => s.tabs)
+  // Chỉ tab có terminal (tab S3 không gõ lệnh được).
+  const allTabs = useTabs((s) => s.tabs)
+  const tabs = useMemo(() => allTabs.filter((t) => t.target.kind !== 's3'), [allTabs])
   const included = useBroadcast((s) => s.tabIds)
   const n = tabs.length
   const cols = Math.max(1, Math.ceil(Math.sqrt(n)))

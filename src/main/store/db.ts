@@ -6,11 +6,17 @@ export type Db = BetterSqlite3.Database
 export function openDatabase(path: string): Db {
   const Database = loadNative('better-sqlite3') as typeof BetterSqlite3
   const db = new Database(path)
-  // Mặc định SQLite TẮT foreign key; phải bật trên mỗi connection.
-  db.pragma('foreign_keys = ON')
-  db.pragma('journal_mode = WAL')
-  db.pragma('synchronous = NORMAL')
-  db.pragma('busy_timeout = 5000')
+  try {
+    // Mặc định SQLite TẮT foreign key; phải bật trên mỗi connection.
+    db.pragma('foreign_keys = ON')
+    db.pragma('journal_mode = WAL')
+    db.pragma('synchronous = NORMAL')
+    db.pragma('busy_timeout = 5000')
+  } catch (error) {
+    // File hỏng: đóng ngay — Windows không cho khôi phục (ghi đè) file đang mở.
+    db.close()
+    throw error
+  }
   return db
 }
 

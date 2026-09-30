@@ -10,7 +10,7 @@ import { useHosts } from '../stores/hosts'
 import { useTabStatus } from '../stores/tab-status'
 import { useBroadcast } from './broadcast'
 import { useTerminalMenu } from './TerminalMenu'
-import { useTabs, type TabTarget } from '../stores/tabs'
+import { useTabs, type TerminalTarget } from '../stores/tabs'
 import { TerminalController, type ActivePrompt } from './controller'
 import { DeployKeyDialog, ForwardsPanel, SftpPanel } from '../lazy'
 import type { SftpOp, TransferStatus } from '@shared/sftp'
@@ -28,7 +28,7 @@ export function TerminalView({
   visible = true
 }: {
   tabId: string
-  target: TabTarget
+  target: TerminalTarget
   active: boolean
   /** Panel đang hiện trong bố cục (không bị tab khác cùng nhóm che). */
   visible?: boolean

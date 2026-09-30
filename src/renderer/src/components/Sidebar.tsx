@@ -41,6 +41,7 @@ import type { GroupSummary, HostSummary } from '@shared/hosts'
 import { GroupForm, HostForm, ImportDialog } from '../lazy'
 import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
+import { S3Section } from '../s3/S3Section'
 import { useContextMenu, type MenuEntry } from './ContextMenu'
 import { hostTextClass } from './hostColors'
 import {
@@ -1071,6 +1072,7 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
                 <p className="mt-1 text-xs text-faint">Add one, or import from ~/.ssh/config.</p>
               </div>
             )}
+            <S3Section />
           </>
         )}
       </div>

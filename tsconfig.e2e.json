@@ -7,6 +7,7 @@
     "src/shared/**/*",
     "test/integration/ssh-test-server.ts",
     "test/integration/telnet-test-server.ts",
+    "test/integration/s3-test-server.ts",
     "src/node-shared/**/*",
     "test/soak/**/*",
     "test/package/**/*",

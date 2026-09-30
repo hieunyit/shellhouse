@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.1] - 2026-09-30
+
 ### Changed
 
 - **Open SFTP** no longer opens a shell on the server: the connection only authenticates and
@@ -14,6 +16,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Added
 
+- **S3 manager** (like S3 Browser) for AWS S3 and S3-compatible storage (MinIO, Wasabi,
+  Cloudflare R2, Ceph): add an account under "S3 storage" in the sidebar, then browse buckets and
+  folders, upload and download files or whole folders (drag and drop works; large files use
+  multipart upload), create folders and buckets, delete (including whole folders), and create
+  time-limited share links. The secret key is stored encrypted in the vault and never reaches
+  the window; transfers run in the session host.
 - Hide the **Favorites** / **Recent** shortcuts at the top of the sidebar: right-click the
   section title → Hide, or Settings → Appearance → Sidebar. The hosts stay in their groups.
 - **Telnet** hosts for network devices without SSH: choose Telnet in the host form. Window
@@ -31,6 +39,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Fixed
 
+- A damaged data file could make the app fail to start instead of offering to restore the
+  latest backup (the error happened while opening the file, before the damage check).
 - **Ctrl+Shift+V / Shift+Insert pasted twice** in the terminal (since the menu bar was removed
   in 1.1.0-beta.3). The app handles these keys itself and no longer lets Chromium paste again.
 - Command suggestions work for long command lines that wrap onto several lines (long prompts,

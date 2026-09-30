@@ -32,8 +32,23 @@ export function storePaths(userDataDir: string): StorePaths {
 }
 
 /** Mở DB: kiểm tra hỏng → migrate (có sao lưu trước) → sao lưu hằng ngày. */
+/** Lỗi SQLite cho biết file hỏng / không phải DB (khác lỗi quyền, đĩa đầy…). */
+function isCorruptionError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  return code === 'SQLITE_CORRUPT' || code === 'SQLITE_NOTADB'
+}
+
 export async function openStore(paths: StorePaths): Promise<Db> {
-  const db = openDatabase(paths.db)
+  let db: Db
+  try {
+    // File hỏng có thể lỗi ngay lúc mở (đọc schema khi bật WAL / foreign keys) — trước cả
+    // quick_check. Vẫn phải thành luồng "khôi phục từ bản sao lưu", không được làm app crash.
+    db = openDatabase(paths.db)
+  } catch (error) {
+    if (isCorruptionError(error))
+      throw new CorruptDatabaseError(paths.db, listBackups(paths.backups))
+    throw error
+  }
   if (!quickCheck(db)) {
     db.close()
     throw new CorruptDatabaseError(paths.db, listBackups(paths.backups))

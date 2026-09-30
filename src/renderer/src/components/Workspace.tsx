@@ -8,6 +8,7 @@ import {
 } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
 import {
+  Cloud,
   Columns2,
   Copy,
   RotateCw,
@@ -28,6 +29,7 @@ import { useSettings } from '../stores/settings'
 import { Button, connectionLabel, cx, Kbd, StatusDot } from './ui'
 import { useTabs } from '../stores/tabs'
 import { TerminalView } from '../terminal/TerminalView'
+import { S3View } from '../s3/S3View'
 import { layoutToItems, type WorkspaceItem } from '@shared/workspaces'
 
 interface PanelParams {
@@ -55,6 +57,7 @@ function TerminalPanel(props: IDockviewPanelProps<PanelParams>): React.JSX.Eleme
   }, [props.api])
 
   if (!tab) return null
+  if (tab.target.kind === 's3') return <S3View tabId={tab.id} accountId={tab.target.accountId} />
   return <TerminalView tabId={tab.id} target={tab.target} active={active} visible={visible} />
 }
 
@@ -82,7 +85,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
     return t?.kind === 'host' ? t.hostId : null
   })
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
-  const Icon = kind === 'local' ? SquareTerminal : Server
+  const Icon = kind === 'local' ? SquareTerminal : kind === 's3' ? Cloud : Server
   const overrides = useSettings((s) => s.settings.keybindings)
   const { menu, open: openMenu } = useContextMenu()
   const key = (id: string): string => displayKeybinding(keybindingFor(id, overrides, isMac))

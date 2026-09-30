@@ -2,10 +2,19 @@ import { create } from 'zustand'
 import type { WorkspaceItem } from '@shared/workspaces'
 import { shellName } from './shells'
 
-export type TabTarget =
+/** Tab có terminal (local / SSH / host đã lưu). */
+export type TerminalTarget =
   | { kind: 'local'; shellId?: string }
   | { kind: 'ssh'; host: string; port: number; username: string }
   | { kind: 'host'; hostId: string }
+
+/** Tab trình quản lý S3 (không có terminal). */
+export interface S3Target {
+  kind: 's3'
+  accountId: string
+}
+
+export type TabTarget = TerminalTarget | S3Target
 
 export interface Tab {
   id: string
@@ -34,6 +43,8 @@ interface TabsState {
   addLocal: (shellId?: string) => string
   addSsh: (target: { host: string; port: number; username: string }) => string
   addHost: (host: { id: string; label: string }, options?: OpenHostOptions) => string
+  /** Mở trình quản lý S3 của một tài khoản. */
+  addS3: (account: { id: string; name: string }) => string
   /** Mở nhiều host: thành các tab, hoặc xếp lưới (chia màn hình) trong một khung. */
   openHosts: (hosts: readonly { id: string; label: string }[], layout: 'tabs' | 'grid') => string[]
   /** Mở lại một workspace đã lưu (thêm vào các tab đang mở). */
@@ -100,6 +111,7 @@ export const useTabs = create<TabsState>((set, get) => {
         options?.view
       )
     },
+    addS3: (account) => add(account.name, { kind: 's3', accountId: account.id }),
     openHosts: (hosts, layout) => {
       const ids: string[] = []
       // Lưới gần vuông: 4 host → 2×2, 6 → 3×2. Hàng đầu chia phải, các hàng sau chia xuống từ ô phía trên.

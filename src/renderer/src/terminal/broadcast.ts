@@ -52,7 +52,10 @@ export function toggleMultiExec(): void {
     b.stop()
     return
   }
-  const ids = useTabs.getState().tabs.map((t) => t.id)
+  const ids = useTabs
+    .getState()
+    .tabs.filter((t) => t.target.kind !== 's3')
+    .map((t) => t.id)
   if (ids.length > 0) b.start(ids)
 }
 

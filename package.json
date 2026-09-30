@@ -1,6 +1,6 @@
 {
   "name": "shellhouse",
-  "version": "1.1.0-beta.3",
+  "version": "1.2.0-beta.1",
   "private": true,
   "description": "SSH & terminal client",
   "homepage": "https://github.com/hieunyit/shellhouse",
@@ -40,6 +40,9 @@
     "screens": "playwright test --project=screens"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1142.0",
+    "@aws-sdk/lib-storage": "^3.1142.0",
+    "@aws-sdk/s3-request-presigner": "^3.1142.0",
     "better-sqlite3": "^13.0.3",
     "electron-log": "^5.4.4",
     "electron-updater": "^6.8.9",
@@ -83,6 +86,7 @@
     "prettier": "^3.9.9",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "s3rver": "^3.7.1",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.70.1",

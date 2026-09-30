@@ -9,7 +9,7 @@ import type { ExitReason, PromptRequest, SessionSpec } from '@shared/stream-prot
 import type { ForwardSpec, ForwardStatus } from '@shared/forwards'
 import type { ServerStats } from '@shared/server-stats'
 import type { SftpOp, TransferStatus } from '@shared/sftp'
-import { useTabs, type TabTarget } from '../stores/tabs'
+import { useTabs, type TerminalTarget } from '../stores/tabs'
 import { openSession } from '../lib/sessions'
 import type { AppSettings } from '@shared/settings'
 import { resolveTheme } from '@shared/themes'
@@ -128,7 +128,7 @@ export class TerminalController {
 
   constructor(
     readonly tabId: string,
-    private readonly target: TabTarget,
+    private readonly target: TerminalTarget,
     private readonly container: HTMLElement,
     private readonly events: ControllerEvents
   ) {

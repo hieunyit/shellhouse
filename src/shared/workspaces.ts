@@ -13,7 +13,8 @@ export const WorkspaceTarget = z.discriminatedUnion('kind', [
     port: z.number().int().min(1).max(65535),
     username: z.string().min(1).max(128)
   }),
-  z.object({ kind: z.literal('host'), hostId: z.string().min(1).max(64) })
+  z.object({ kind: z.literal('host'), hostId: z.string().min(1).max(64) }),
+  z.object({ kind: z.literal('s3'), accountId: z.string().min(1).max(64) })
 ])
 export type WorkspaceTarget = z.infer<typeof WorkspaceTarget>
 

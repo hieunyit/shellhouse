@@ -14,6 +14,7 @@ import { ForwardManager } from '../forward/manager'
 import { SftpService } from '../sftp/service'
 import { deployPublicKey } from '../ssh/deploy-key'
 import { StatsMonitor } from '../ssh/stats-monitor'
+import { S3Service } from '../s3/service'
 import { RemoteEdits } from '../sftp/edit'
 import { downloadFolder, uploadFolder } from '../sftp/folders'
 import { TransferQueue } from '../sftp/transfers'
@@ -95,6 +96,7 @@ export class Session {
   private edits: RemoteEdits | null = null
   private log: SessionLog | null = null
   private stats: StatsMonitor | null = null
+  private s3: S3Service | null = null
   private wantStats = false
   /** Yêu cầu forward đến trước khi kết nối xong. */
   private pendingForwards: ForwardSpec[] = []
@@ -157,6 +159,13 @@ export class Session {
         const launch = resolveLocalShell(this.deps.appVersion, this.spec.shell)
         this.transport = new LocalPty(launch, this.spec.cols, this.spec.rows, callbacks)
         this.deps.log('info', `Session ${this.id}: started ${launch.file}`)
+      } else if (this.spec.kind === 's3') {
+        // Không có terminal: chỉ thao tác S3 + truyền file qua port của tab.
+        this.s3 = new S3Service(this.spec.connection, (list) => {
+          this.post({ t: 'transfers', list })
+        })
+        this.post({ t: 'status', phase: 'connected', detail: 'S3 ready' })
+        this.deps.log('info', `Session ${this.id}: S3 ${this.spec.connection.endpoint || 'AWS'}`)
       } else if (this.spec.kind === 'telnet') {
         const { host, port } = this.spec.target
         this.post({
@@ -294,6 +303,8 @@ export class Session {
     this.log = null
     this.stats?.stop()
     this.stats = null
+    this.s3?.dispose()
+    this.s3 = null
     this.pump.dispose()
     this.forwards?.dispose()
     this.forwards = null
@@ -502,6 +513,28 @@ export class Session {
       case 'sftp':
         void this.handleSftp(message.id, message.op)
         break
+      case 's3': {
+        const { id, op } = message
+        const s3 = this.s3
+        if (!s3) {
+          this.post({ t: 's3-result', id, ok: false, error: 'Not an S3 session' })
+          break
+        }
+        void s3.run(op).then(
+          (result) => {
+            this.post({ t: 's3-result', id, ok: true, result })
+          },
+          (error: unknown) => {
+            this.post({
+              t: 's3-result',
+              id,
+              ok: false,
+              error: error instanceof Error ? error.message : String(error)
+            })
+          }
+        )
+        break
+      }
       case 'deploy-key': {
         const { id, publicKey } = message
         void this.waitForSsh().then(async (ssh) => {

@@ -3,6 +3,7 @@ import { NativeModuleStatus } from './session-host-protocol'
 import { SessionSpec } from './stream-protocol'
 import { LocalListing } from './local-files'
 import { SerialPortInfo } from './serial'
+import { S3AccountInput, S3AccountSummary } from './s3'
 import {
   GroupInput,
   HostInput,
@@ -171,6 +172,9 @@ export const invokeContract = {
   /** Hộp thoại của hệ điều hành — renderer không tự chọn đường dẫn trên máy. */
   'dialog:openFiles': { args: z.tuple([]), result: z.array(z.string()) },
   'dialog:saveFile': { args: z.tuple([z.string().max(255)]), result: z.string().nullable() },
+  's3:accounts': { args: z.tuple([]), result: z.array(S3AccountSummary) },
+  's3:save': { args: z.tuple([S3AccountInput]), result: MutationResult },
+  's3:delete': { args: z.tuple([z.string().max(64)]), result: z.void() },
   /** Lịch sử lệnh của một đích (gợi ý khi gõ), mới nhất trước. */
   'history:list': { args: z.tuple([z.string().min(1).max(300)]), result: z.array(z.string()) },
   'history:record': {
@@ -244,7 +248,9 @@ export const eventContract = {
   /** Danh sách host/nhóm/key thay đổi → renderer tải lại. */
   'hosts:changed': z.null(),
   'settings:changed': AppSettings,
-  'updates:status': z.custom<UpdateStatus>()
+  'updates:status': z.custom<UpdateStatus>(),
+  /** Danh sách tài khoản S3 thay đổi. */
+  's3:changed': z.null()
 } as const
 
 export type EventChannel = keyof typeof eventContract
@@ -296,6 +302,10 @@ export interface ShellhouseApi {
   listLocal(path: string | null): Promise<LocalListing>
   listSerialPorts(): Promise<SerialPortInfo[]>
   commandHistory(target: string): Promise<string[]>
+  s3Accounts(): Promise<S3AccountSummary[]>
+  saveS3Account(input: S3AccountInput): Promise<MutationResult>
+  deleteS3Account(id: string): Promise<void>
+  onS3Changed(listener: () => void): () => void
   recordCommand(target: string, command: string): Promise<void>
   clearCommandHistory(target: string | null): Promise<void>
   pickFolder(title: string, start: 'logs' | 'downloads'): Promise<string | null>
