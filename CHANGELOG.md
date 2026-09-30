@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.2] - 2026-09-30
+
 ### Added
 
 - **S3 statistics**: object count and total size per bucket, right in the bucket list
