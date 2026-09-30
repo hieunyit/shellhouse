@@ -91,7 +91,7 @@ test('SFTP qua giao diện: tải lên, tạo thư mục, tải về, xoá', asy
   await panel.locator('[data-testid="sftp-entry"][data-name="xoa-1.tmp"]').click()
   await panel
     .locator('[data-testid="sftp-entry"][data-name="xoa-2.tmp"]')
-    .click({ modifiers: ['Control'] })
+    .click({ modifiers: ['ControlOrMeta'] })
   await expect(panel.getByTestId('sftp-status')).toContainText('2 selected')
   await page.keyboard.press('Delete')
   await expect(page.getByTestId('sftp-dialog')).toContainText('Delete these 2 items')
