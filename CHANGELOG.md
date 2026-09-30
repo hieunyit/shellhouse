@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.1.0-beta.3] - 2026-09-30
+
 ### Added
 
 - Right-click a tab title: Reconnect (Restart shell for local tabs), Duplicate tab, Split,
