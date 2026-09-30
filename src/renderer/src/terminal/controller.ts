@@ -365,8 +365,7 @@ export class TerminalController {
         if (cancelled() || !this.client) return
         if (step.kind === 'wait') {
           const until = Date.now() + step.ms
-          while (Date.now() < until && !cancelled())
-            await sleep(Math.min(100, until - Date.now()))
+          while (Date.now() < until && !cancelled()) await sleep(Math.min(100, until - Date.now()))
           continue
         }
         if (step.kind === 'expect') {
