@@ -8,10 +8,10 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Added
 
-- **S3 statistics**: object count and total size for every bucket (bucket pane → chart icon, or
-  right-click a bucket) and for any folder (right-click → **Size & object count**, or **Total
-  size incl. subfolders…** in the status bar). Split by storage class, counts live and can be
-  stopped at any time. The status bar shows the folders, files and size of the current folder.
+- **S3 statistics**: object count and total size per bucket, right in the bucket list
+  (**Calculate**, or **Calculate all sizes**), and for any folder (right-click → **Size & object
+  count**, or **Folder size…** in the status bar). Folder totals are split by storage class; counts
+  update live and can be stopped at any time.
 - **S3 rename, copy and move** of objects and whole folders, within a bucket or to another
   bucket. Copying happens on the server (nothing is downloaded), objects over 5 GB included.
   Existing objects are never replaced unless you tick **Replace objects that already exist**.
@@ -21,6 +21,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Changed
 
+- **New S3 layout** (like the AWS Console and Cyberduck): opening an account shows its buckets as
+  a full-width table (Region, Created, Objects, Size), and the narrow bucket column is gone. Inside
+  a bucket, the path bar reads `account › bucket ▾ › folder`: click the account to go back to the
+  bucket list, or **▾** to jump to another bucket (type to filter). The tab title follows the
+  current location, and duplicated tabs / saved workspaces reopen at the same place.
+- **Pin to sidebar**: pin a bucket or folder (right-click, or the pin button in the path bar) and it
+  appears under its account in the sidebar — one click opens a tab right there.
 - The S3 browser adapts to narrow windows and split panes: toolbar buttons shrink to icons,
   the Modified / Class columns hide, and the bucket list gets narrower — nothing is cut off.
 - S3 columns can be sorted (Name, Size, Modified; folders stay first), with natural number order.

@@ -191,7 +191,11 @@ export class S3Service {
   private async listBuckets(): Promise<S3Bucket[]> {
     const out = await this.client.send(new ListBucketsCommand({}))
     return (out.Buckets ?? [])
-      .map((b) => ({ name: b.Name ?? '', createdAt: b.CreationDate?.getTime() ?? null }))
+      .map((b) => ({
+        name: b.Name ?? '',
+        createdAt: b.CreationDate?.getTime() ?? null,
+        region: b.BucketRegion ?? null
+      }))
       .filter((b) => b.name)
       .sort((a, b) => a.name.localeCompare(b.name))
   }

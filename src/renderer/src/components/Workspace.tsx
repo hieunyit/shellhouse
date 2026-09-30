@@ -57,7 +57,18 @@ function TerminalPanel(props: IDockviewPanelProps<PanelParams>): React.JSX.Eleme
   }, [props.api])
 
   if (!tab) return null
-  if (tab.target.kind === 's3') return <S3View tabId={tab.id} accountId={tab.target.accountId} />
+  if (tab.target.kind === 's3')
+    return (
+      <S3View
+        tabId={tab.id}
+        accountId={tab.target.accountId}
+        initialLocation={
+          tab.target.bucket
+            ? { bucket: tab.target.bucket, prefix: tab.target.prefix ?? '' }
+            : undefined
+        }
+      />
+    )
   return <TerminalView tabId={tab.id} target={tab.target} active={active} visible={visible} />
 }
 

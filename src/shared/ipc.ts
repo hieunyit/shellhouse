@@ -3,7 +3,7 @@ import { NativeModuleStatus } from './session-host-protocol'
 import { SessionSpec } from './stream-protocol'
 import { LocalListing } from './local-files'
 import { SerialPortInfo } from './serial'
-import { S3AccountInput, S3AccountSummary } from './s3'
+import { S3AccountInput, S3AccountSummary, S3Pin } from './s3'
 import {
   GroupInput,
   HostInput,
@@ -175,6 +175,7 @@ export const invokeContract = {
   's3:accounts': { args: z.tuple([]), result: z.array(S3AccountSummary) },
   's3:save': { args: z.tuple([S3AccountInput]), result: MutationResult },
   's3:delete': { args: z.tuple([z.string().max(64)]), result: z.void() },
+  's3:pin': { args: z.tuple([z.string().max(64), S3Pin, z.boolean()]), result: z.void() },
   /** Lịch sử lệnh của một đích (gợi ý khi gõ), mới nhất trước. */
   'history:list': { args: z.tuple([z.string().min(1).max(300)]), result: z.array(z.string()) },
   'history:record': {
@@ -305,6 +306,8 @@ export interface ShellhouseApi {
   s3Accounts(): Promise<S3AccountSummary[]>
   saveS3Account(input: S3AccountInput): Promise<MutationResult>
   deleteS3Account(id: string): Promise<void>
+  /** Ghim / bỏ ghim bucket hoặc thư mục lên thanh bên. */
+  pinS3Location(accountId: string, pin: S3Pin, pinned: boolean): Promise<void>
   onS3Changed(listener: () => void): () => void
   recordCommand(target: string, command: string): Promise<void>
   clearCommandHistory(target: string | null): Promise<void>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, Cloud, Pencil, Plus, Trash2 } from 'lucide-react'
-import { S3AccountInput, type S3AccountSummary } from '@shared/s3'
+import { ChevronRight, Cloud, Pencil, Pin, PinOff, Plus, Trash2 } from 'lucide-react'
+import { pinLabel, S3AccountInput, type S3AccountSummary } from '@shared/s3'
 import { Button, Checkbox, cx, Field, IconButton, Input, Modal, Notice } from '../components/ui'
 import { useContextMenu } from '../components/ContextMenu'
 import { useS3 } from '../stores/s3'
@@ -53,60 +53,95 @@ export function S3Section(): React.JSX.Element {
       )}
       {open &&
         accounts.map((a) => (
-          <div
-            key={a.id}
-            role="button"
-            tabIndex={0}
-            data-testid="s3-account"
-            data-name={a.name}
-            className="group flex h-10 cursor-default items-center gap-2.5 rounded-md px-2 hover:bg-hover"
-            title="Double-click to open"
-            onDoubleClick={() => useTabs.getState().addS3(a)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') useTabs.getState().addS3(a)
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              openMenu(e, [
-                {
-                  id: 's3-open',
-                  label: 'Open',
-                  icon: <Cloud size={14} />,
-                  onSelect: () => useTabs.getState().addS3(a)
-                },
-                {
-                  id: 's3-edit',
-                  label: 'Edit…',
-                  icon: <Pencil size={14} />,
-                  onSelect: () => {
-                    setEditing(a)
+          <div key={a.id}>
+            <div
+              role="button"
+              tabIndex={0}
+              data-testid="s3-account"
+              data-name={a.name}
+              className="group flex h-10 cursor-default items-center gap-2.5 rounded-md px-2 hover:bg-hover"
+              title="Double-click to open"
+              onDoubleClick={() => useTabs.getState().addS3(a)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') useTabs.getState().addS3(a)
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                openMenu(e, [
+                  {
+                    id: 's3-open',
+                    label: 'Open',
+                    icon: <Cloud size={14} />,
+                    onSelect: () => useTabs.getState().addS3(a)
+                  },
+                  {
+                    id: 's3-edit',
+                    label: 'Edit…',
+                    icon: <Pencil size={14} />,
+                    onSelect: () => {
+                      setEditing(a)
+                    }
+                  },
+                  'separator',
+                  {
+                    id: 's3-delete',
+                    label: 'Delete account',
+                    icon: <Trash2 size={14} />,
+                    danger: true,
+                    onSelect: () => {
+                      if (
+                        window.confirm(
+                          `Delete the S3 account “${a.name}”? Buckets are not touched.`
+                        )
+                      )
+                        void window.shellhouse.deleteS3Account(a.id)
+                    }
                   }
-                },
-                'separator',
-                {
-                  id: 's3-delete',
-                  label: 'Delete account',
-                  icon: <Trash2 size={14} />,
-                  danger: true,
-                  onSelect: () => {
-                    if (
-                      window.confirm(`Delete the S3 account “${a.name}”? Buckets are not touched.`)
-                    )
-                      void window.shellhouse.deleteS3Account(a.id)
-                  }
-                }
-              ])
-            }}
-          >
-            <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-subtle text-muted">
-              <Cloud size={14} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] text-fg">{a.name}</span>
-              <span className="block truncate font-mono text-[11px] text-faint">
-                {a.endpoint ? new URL(a.endpoint).host : `AWS ${a.region || 'us-east-1'}`}
+                ])
+              }}
+            >
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-subtle text-muted">
+                <Cloud size={14} />
               </span>
-            </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] text-fg">{a.name}</span>
+                <span className="block truncate font-mono text-[11px] text-faint">
+                  {a.endpoint ? new URL(a.endpoint).host : `AWS ${a.region || 'us-east-1'}`}
+                </span>
+              </span>
+            </div>
+            {/* Mục ghim: lối tắt đã lưu (không giữ kết nối) — bấm là mở tab ngay tại đó. */}
+            {a.pins.map((pin) => (
+              <button
+                key={`${pin.bucket}/${pin.prefix}`}
+                type="button"
+                data-testid="s3-pin"
+                data-name={pinLabel(pin)}
+                title={`s3://${pin.bucket}/${pin.prefix}`}
+                className="flex h-7 w-full items-center gap-2 rounded-md pr-2 pl-9 text-left text-[12.5px] text-muted hover:bg-hover hover:text-fg"
+                onClick={() => useTabs.getState().addS3(a, pin)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  openMenu(e, [
+                    {
+                      id: 's3-pin-open',
+                      label: 'Open',
+                      icon: <Cloud size={14} />,
+                      onSelect: () => useTabs.getState().addS3(a, pin)
+                    },
+                    {
+                      id: 's3-pin-remove',
+                      label: 'Unpin',
+                      icon: <PinOff size={14} />,
+                      onSelect: () => void window.shellhouse.pinS3Location(a.id, pin, false)
+                    }
+                  ])
+                }}
+              >
+                <Pin size={12} className="shrink-0 text-accent" />
+                <span className="min-w-0 flex-1 truncate">{pinLabel(pin)}</span>
+              </button>
+            ))}
           </div>
         ))}
       {menu}

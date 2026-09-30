@@ -20,6 +20,16 @@ const Endpoint = z
     }
   }, 'Enter a URL like https://s3.example.com (or leave empty for AWS)')
 
+/** Bucket hoặc "thư mục" được ghim lên thanh bên (prefix '' = cả bucket). */
+export const S3Pin = z.object({
+  bucket: z.string().min(1).max(255),
+  prefix: z.string().max(1024)
+})
+export type S3Pin = z.infer<typeof S3Pin>
+
+/** Tối đa số mục ghim mỗi tài khoản. */
+export const MAX_S3_PINS = 50
+
 export const S3AccountSummary = z.object({
   id: z.string(),
   name: z.string(),
@@ -28,7 +38,8 @@ export const S3AccountSummary = z.object({
   accessKeyId: z.string(),
   /** Bucket dạng https://endpoint/bucket thay vì https://bucket.endpoint (MinIO, Ceph). */
   forcePathStyle: z.boolean(),
-  hasSecret: z.boolean()
+  hasSecret: z.boolean(),
+  pins: z.array(S3Pin)
 })
 export type S3AccountSummary = z.infer<typeof S3AccountSummary>
 
@@ -124,6 +135,13 @@ export type S3Op = z.infer<typeof S3Op>
 export interface S3Bucket {
   name: string
   createdAt: number | null
+  /** Region (AWS trả về trong ListBuckets; MinIO/R2… thường không có). */
+  region: string | null
+}
+
+/** Tên hiển thị của một mục ghim: "bucket" hoặc "bucket / a / b". */
+export function pinLabel(pin: S3Pin): string {
+  return [pin.bucket, ...pin.prefix.split('/').filter(Boolean)].join(' / ')
 }
 
 export interface S3Entry {

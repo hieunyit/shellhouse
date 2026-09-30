@@ -1,4 +1,5 @@
-import type { S3AccountInput, S3AccountSummary } from '@shared/s3'
+import { z } from 'zod'
+import { MAX_S3_PINS, S3Pin, type S3AccountInput, type S3AccountSummary } from '@shared/s3'
 import { uuidv7 } from '../node-shared/uuid'
 import type { Db } from './store/db'
 import type { Vault } from './vault/vault'
@@ -11,6 +12,16 @@ interface Row {
   access_key_id: string
   secret_enc: Buffer | null
   path_style: number
+  pins: string
+}
+
+function parsePins(json: string): S3Pin[] {
+  try {
+    const parsed = z.array(S3Pin).safeParse(JSON.parse(json))
+    return parsed.success ? parsed.data : []
+  } catch {
+    return []
+  }
 }
 
 /** Tài khoản S3: secret key nằm trong vault, chỉ giải mã lúc mở kết nối (không gửi renderer). */
@@ -24,8 +35,8 @@ export class S3Accounts {
   list(): S3AccountSummary[] {
     const rows = this.db
       .prepare(
-        `SELECT id, name, endpoint, region, access_key_id, secret_enc, path_style FROM s3_accounts
-         WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE`
+        `SELECT id, name, endpoint, region, access_key_id, secret_enc, path_style, pins
+         FROM s3_accounts WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE`
       )
       .all() as Row[]
     return rows.map((r) => ({
@@ -35,8 +46,26 @@ export class S3Accounts {
       region: r.region,
       accessKeyId: r.access_key_id,
       forcePathStyle: r.path_style === 1,
-      hasSecret: r.secret_enc !== null
+      hasSecret: r.secret_enc !== null,
+      pins: parsePins(r.pins)
     }))
+  }
+
+  /** Ghim / bỏ ghim bucket hoặc thư mục (mục mới thêm vào cuối). */
+  setPin(id: string, pin: S3Pin, pinned: boolean): void {
+    const row = this.db
+      .prepare('SELECT pins FROM s3_accounts WHERE id = ? AND deleted_at IS NULL')
+      .get(id) as { pins: string } | undefined
+    if (!row) throw new Error('The S3 account no longer exists')
+    const same = (p: S3Pin): boolean => p.bucket === pin.bucket && p.prefix === pin.prefix
+    const pins = parsePins(row.pins).filter((p) => !same(p))
+    if (pinned) {
+      if (pins.length >= MAX_S3_PINS) throw new Error(`You can pin up to ${MAX_S3_PINS} locations`)
+      pins.push(pin)
+    }
+    this.db
+      .prepare('UPDATE s3_accounts SET pins = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(pins), this.now(), id)
   }
 
   save(input: S3AccountInput): string {

@@ -39,16 +39,18 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
       'hasSecret',
       'id',
       'name',
+      'pins',
       'region'
     ])
     expect(accounts[0]).toMatchObject({ hasSecret: true })
 
-    // Mở tab S3, chọn bucket.
+    // Mở tab S3 → bảng bucket; bấm đúp để vào bucket, tên tab theo vị trí.
     await account.dblclick()
     const view = page.getByTestId('s3-view')
     await expect(page.getByTestId('tab').last()).toContainText('MinIO test')
-    await view.locator('[data-testid="s3-bucket"][data-name="demo"]').click()
-    await expect(view.getByTestId('s3-path')).toContainText('demo')
+    await view.locator('[data-testid="s3-bucket"][data-name="demo"]').dblclick()
+    await expect(view.getByTestId('s3-crumb-bucket')).toHaveText('demo')
+    await expect(page.getByTestId('tab').last()).toContainText('demo')
 
     // Thư mục mới, vào trong, tải file lên.
     await view.getByTestId('s3-mkdir').click()
@@ -100,22 +102,42 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
     await page.getByTestId('s3-copy-prefix').fill('')
     await page.getByTestId('s3-dialog-submit').click()
     await expect(page.getByTestId('s3-dialog')).toHaveCount(0)
-    await page.locator('[data-testid="s3-path"] button').first().click()
+    await view.getByTestId('s3-crumb-bucket').click()
     await expect(
       view.locator('[data-testid="s3-entry"][data-name="bao-cao-2024.txt"]')
     ).toBeVisible()
 
-    // Thống kê bucket: 2 object (bản trong reports/ + bản ở gốc).
-    await view.getByTestId('s3-bucket-stats').click()
-    const row = page.locator('[data-testid="s3-stats-row"][data-name="demo"]')
-    await expect(row).toHaveAttribute('data-state', 'done')
-    await expect(row.getByTestId('s3-stats-objects')).toHaveText('2')
-    await expect(row.getByTestId('s3-stats-size')).toHaveText(
+    // Ghim thư mục reports lên thanh bên → bấm mục ghim mở tab mới ngay tại đó.
+    await folder.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Pin to sidebar' }).click()
+    const pin = page.locator('[data-testid="s3-pin"][data-name="demo / reports"]')
+    await expect(pin).toBeVisible()
+    await pin.click()
+    await expect(page.getByTestId('tab')).toHaveCount(3)
+    const pinnedView = page.getByTestId('s3-view').last()
+    await expect(
+      pinnedView.locator('[data-testid="s3-entry"][data-name="bao-cao-2024.txt"]')
+    ).toBeVisible()
+    await expect(page.getByTestId('tab').last()).toContainText('demo/reports')
+    await page.getByTestId('tab').last().getByTestId('tab-close').click()
+    await expect(page.getByTestId('tab')).toHaveCount(2)
+
+    // Về bảng bucket (bấm tên tài khoản) → tính dung lượng: 2 object (reports/ + gốc).
+    await view.getByTestId('s3-crumb-account').click()
+    const row = view.locator('[data-testid="s3-bucket"][data-name="demo"]')
+    await row.getByTestId('s3-bucket-calc').click()
+    await expect(row.getByTestId('s3-bucket-objects')).toHaveText('2')
+    await expect(row.getByTestId('s3-bucket-size')).toHaveText(
       `${2 * Buffer.byteLength('nội dung báo cáo')} B`
     )
-    await page.keyboard.press('Escape')
+
+    // Bỏ ghim từ thanh bên.
+    await pin.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Unpin' }).click()
+    await expect(pin).toHaveCount(0)
 
     // Xoá cả thư mục từ gốc bucket.
+    await row.dblclick()
     await folder.click()
     await view.getByTestId('s3-delete').click()
     await page.getByTestId('s3-dialog-submit').click()

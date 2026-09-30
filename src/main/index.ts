@@ -451,6 +451,10 @@ function registerIpc(): void {
     requireS3().delete(id)
     send('s3:changed', null)
   })
+  handle('s3:pin', isTrustedSender, (id, pin, pinned) => {
+    requireS3().setPin(id, pin, pinned)
+    send('s3:changed', null)
+  })
   handle('history:list', isTrustedSender, (target) => requireHistory().list(target))
   handle('history:record', isTrustedSender, (target, command) => {
     // Tắt gợi ý trong cài đặt = không ghi nữa.

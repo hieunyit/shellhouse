@@ -77,6 +77,7 @@ const api: ShellhouseApi = {
   s3Accounts: () => invoke('s3:accounts'),
   saveS3Account: (input) => invoke('s3:save', input),
   deleteS3Account: (id) => invoke('s3:delete', id),
+  pinS3Location: (accountId, pin, pinned) => invoke('s3:pin', accountId, pin, pinned),
   onS3Changed: (listener) =>
     subscribe('s3:changed', () => {
       listener()

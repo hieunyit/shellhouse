@@ -14,7 +14,12 @@ export const WorkspaceTarget = z.discriminatedUnion('kind', [
     username: z.string().min(1).max(128)
   }),
   z.object({ kind: z.literal('host'), hostId: z.string().min(1).max(64) }),
-  z.object({ kind: z.literal('s3'), accountId: z.string().min(1).max(64) })
+  z.object({
+    kind: z.literal('s3'),
+    accountId: z.string().min(1).max(64),
+    bucket: z.string().min(1).max(255).optional(),
+    prefix: z.string().max(1024).optional()
+  })
 ])
 export type WorkspaceTarget = z.infer<typeof WorkspaceTarget>
 
