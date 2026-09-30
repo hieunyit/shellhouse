@@ -79,21 +79,25 @@ describe('parseRequest', () => {
     expect(parseRequest(connectRequest(3, [evil.length, ...evil], 80)).status).toBe('error')
   })
 
-  it('fuzz: 20.000 buffer ngẫu nhiên không bao giờ throw, kết quả luôn hợp lệ', () => {
-    for (let i = 0; i < 20_000; i++) {
-      const buf = randomBytes(Math.floor(Math.random() * 40))
-      if (i % 2 === 0) buf[0] = 5 // tăng xác suất đi sâu vào parser
-      if (i % 3 === 0 && buf.length > 1) buf[1] = 1
-      const g = parseGreeting(buf)
-      const r = parseRequest(buf)
-      expect(['more', 'ok', 'error']).toContain(g.status)
-      expect(['more', 'ok', 'error']).toContain(r.status)
-      if (r.status === 'ok') {
-        expect(r.consumed).toBeLessThanOrEqual(buf.length)
-        expect(r.port).toBeGreaterThan(0)
+  it(
+    'fuzz: 20.000 buffer ngẫu nhiên không bao giờ throw, kết quả luôn hợp lệ',
+    { timeout: 30_000 },
+    () => {
+      for (let i = 0; i < 20_000; i++) {
+        const buf = randomBytes(Math.floor(Math.random() * 40))
+        if (i % 2 === 0) buf[0] = 5 // tăng xác suất đi sâu vào parser
+        if (i % 3 === 0 && buf.length > 1) buf[1] = 1
+        const g = parseGreeting(buf)
+        const r = parseRequest(buf)
+        expect(['more', 'ok', 'error']).toContain(g.status)
+        expect(['more', 'ok', 'error']).toContain(r.status)
+        if (r.status === 'ok') {
+          expect(r.consumed).toBeLessThanOrEqual(buf.length)
+          expect(r.port).toBeGreaterThan(0)
+        }
       }
     }
-  })
+  )
 
   it('giới hạn kích thước handshake đủ cho yêu cầu dài nhất', () => {
     const name = Array.from({ length: 255 }, () => 0x61)

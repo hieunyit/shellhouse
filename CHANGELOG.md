@@ -6,6 +6,19 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- **S3 statistics**: object count and total size for every bucket (bucket pane → chart icon, or
+  right-click a bucket) and for any folder (right-click → **Size & object count**, or **Total
+  size incl. subfolders…** in the status bar). Split by storage class, counts live and can be
+  stopped at any time. The status bar shows the folders, files and size of the current folder.
+- **S3 rename, copy and move** of objects and whole folders, within a bucket or to another
+  bucket. Copying happens on the server (nothing is downloaded), objects over 5 GB included.
+  Existing objects are never replaced unless you tick **Replace objects that already exist**.
+- **Edit S3 objects in your local editor**: saving uploads the file back, keeping its content
+  type. If someone else changed the object in the meantime, it is not overwritten.
+- S3 right-click menu, **F2** to rename, **Del** to delete, **Ctrl+A** to select all.
+
 ## [1.2.0-beta.1] - 2026-09-30
 
 ### Changed

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { S3Listing } from '@shared/s3'
+import { addStats, type S3Listing, type S3StatsPage } from '@shared/s3'
 import type { TransferStatus } from '@shared/sftp'
 import { S3Service } from '../../src/session-host/s3/service'
 import { tempDir } from '../unit/helpers'
@@ -130,6 +130,129 @@ describe('S3', () => {
       expect(existsSync(join(out, 'site'))).toBe(true) // bản trên máy không bị đụng
     }
   )
+
+  it('thống kê, copy / move / đổi tên file và thư mục', { timeout: 60_000 }, async () => {
+    const { s, settled } = await setup()
+    await s.run({ op: 'createBucket', bucket: 'other' })
+    const local = tempDir()
+    mkdirSync(join(local, 'site', 'css'), { recursive: true })
+    writeFileSync(join(local, 'site', 'index.html'), '<h1>hi</h1>')
+    writeFileSync(join(local, 'site', 'css', 'a.css'), 'body{}')
+    writeFileSync(join(local, 'note.txt'), 'hello')
+    await s.run({ op: 'upload', bucket: 'demo', prefix: '', localPath: join(local, 'site') })
+    await s.run({ op: 'upload', bucket: 'demo', prefix: '', localPath: join(local, 'note.txt') })
+    await s.run({ op: 'mkdir', bucket: 'demo', key: 'empty/' })
+    await settled()
+    const names = async (bucket: string, prefix: string): Promise<string[]> =>
+      ((await s.run({ op: 'list', bucket, prefix })) as S3Listing).entries.map((e) => e.name)
+
+    // Thống kê: bỏ qua object "thư mục" rỗng.
+    const stats = (await s.run({ op: 'stats', bucket: 'demo', prefix: '' })) as S3StatsPage
+    expect(stats).toMatchObject({ objects: 3, bytes: 11 + 6 + 5, next: null })
+    expect(stats.byClass.STANDARD?.objects).toBe(3)
+    const site = (await s.run({ op: 'stats', bucket: 'demo', prefix: 'site/' })) as S3StatsPage
+    expect(addStats(stats, site)).toMatchObject({ objects: 5, bytes: 22 + 17 })
+
+    // Đổi tên file + thư mục.
+    await s.run({
+      op: 'rename',
+      bucket: 'demo',
+      key: 'note.txt',
+      name: 'readme.txt',
+      overwrite: false
+    })
+    await s.run({ op: 'rename', bucket: 'demo', key: 'site/', name: 'www', overwrite: false })
+    expect(await names('demo', '')).toEqual(['empty', 'www', 'readme.txt'])
+    expect(await names('demo', 'www/css/')).toEqual(['a.css'])
+    await expect(
+      s.run({ op: 'rename', bucket: 'demo', key: 'www/', name: 'a/b', overwrite: false })
+    ).rejects.toThrow(/cannot contain/)
+
+    // Copy sang bucket khác, move vào thư mục; trùng tên → báo lỗi, không ghi đè.
+    expect(
+      await s.run({
+        op: 'copy',
+        bucket: 'demo',
+        keys: ['www/', 'readme.txt'],
+        destBucket: 'other',
+        destPrefix: 'backup',
+        move: false,
+        overwrite: false
+      })
+    ).toBe(3)
+    expect(await names('other', 'backup/www/')).toEqual(['css', 'index.html'])
+    await expect(
+      s.run({
+        op: 'copy',
+        bucket: 'demo',
+        keys: ['readme.txt'],
+        destBucket: 'other',
+        destPrefix: 'backup/',
+        move: false,
+        overwrite: false
+      })
+    ).rejects.toThrow(/already exists/)
+    await expect(
+      s.run({
+        op: 'copy',
+        bucket: 'demo',
+        keys: ['www/'],
+        destBucket: 'demo',
+        destPrefix: 'www/css/',
+        move: true,
+        overwrite: false
+      })
+    ).rejects.toThrow(/into itself/)
+    await s.run({
+      op: 'copy',
+      bucket: 'demo',
+      keys: ['readme.txt'],
+      destBucket: 'demo',
+      destPrefix: 'empty/',
+      move: true,
+      overwrite: false
+    })
+    expect(await names('demo', '')).toEqual(['empty', 'www'])
+    expect(await names('demo', 'empty/')).toEqual(['readme.txt'])
+  })
+
+  it('sửa object bằng editor: lưu → tải lên; object bị người khác sửa → không ghi đè', async () => {
+    const { s, settled } = await setup()
+    const local = tempDir()
+    writeFileSync(join(local, 'conf.json'), '{"a":1}')
+    await s.run({ op: 'upload', bucket: 'demo', prefix: '', localPath: join(local, 'conf.json') })
+    await settled()
+    const editDir = tempDir()
+    const editPath = join(editDir, 'conf.json')
+    await s.run({ op: 'edit', bucket: 'demo', key: 'conf.json', localPath: editPath })
+    expect(readFileSync(editPath, 'utf8')).toBe('{"a":1}')
+
+    const remote = async (): Promise<string> => {
+      const out = tempDir()
+      await s.run({
+        op: 'download',
+        bucket: 'demo',
+        key: 'conf.json',
+        localPath: join(out, 'c'),
+        overwrite: true
+      })
+      await settled()
+      return readFileSync(join(out, 'c'), 'utf8')
+    }
+    writeFileSync(editPath, '{"a":2}')
+    await expect.poll(remote, { timeout: 10_000 }).toBe('{"a":2}')
+
+    // Người khác ghi đè object → lần lưu tiếp theo phải báo lỗi, không đè.
+    writeFileSync(join(local, 'conf.json'), '{"other":true}')
+    await s.run({ op: 'upload', bucket: 'demo', prefix: '', localPath: join(local, 'conf.json') })
+    await settled()
+    writeFileSync(editPath, '{"a":3}')
+    await expect
+      .poll(() => s.transfers().some((t) => t.edit && t.state === 'error'), { timeout: 10_000 })
+      .toBe(true)
+    expect(s.transfers().find((t) => t.state === 'error')?.error).toMatch(/changed on the server/)
+    expect(await remote()).toBe('{"other":true}')
+  })
 
   it('access key sai → lỗi dễ hiểu', async () => {
     server = await startS3TestServer()

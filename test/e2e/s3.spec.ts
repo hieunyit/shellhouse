@@ -10,7 +10,7 @@ test.afterEach(async () => {
   server = null
 })
 
-test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tải lên / về, link chia sẻ, xoá', async ({
+test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tải lên / về, link chia sẻ, đổi tên, copy, thống kê, xoá', async ({
   app,
   page
 }) => {
@@ -87,8 +87,35 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
       .poll(() => (existsSync(saved) ? readFileSync(saved, 'utf8') : ''))
       .toBe('nội dung báo cáo')
 
-    // Xoá cả thư mục từ gốc bucket.
+    // Đổi tên (F2), rồi copy ra gốc bucket (copy trên server).
+    await file.click()
+    await page.keyboard.press('F2')
+    await page.getByTestId('s3-dialog-input').fill('bao-cao-2024.txt')
+    await page.getByTestId('s3-dialog-submit').click()
+    const renamed = view.locator('[data-testid="s3-entry"][data-name="bao-cao-2024.txt"]')
+    await expect(renamed).toBeVisible()
+    await expect(file).toHaveCount(0)
+    await renamed.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Copy to…' }).click()
+    await page.getByTestId('s3-copy-prefix').fill('')
+    await page.getByTestId('s3-dialog-submit').click()
+    await expect(page.getByTestId('s3-dialog')).toHaveCount(0)
     await page.locator('[data-testid="s3-path"] button').first().click()
+    await expect(
+      view.locator('[data-testid="s3-entry"][data-name="bao-cao-2024.txt"]')
+    ).toBeVisible()
+
+    // Thống kê bucket: 2 object (bản trong reports/ + bản ở gốc).
+    await view.getByTestId('s3-bucket-stats').click()
+    const row = page.locator('[data-testid="s3-stats-row"][data-name="demo"]')
+    await expect(row).toHaveAttribute('data-state', 'done')
+    await expect(row.getByTestId('s3-stats-objects')).toHaveText('2')
+    await expect(row.getByTestId('s3-stats-size')).toHaveText(
+      `${2 * Buffer.byteLength('nội dung báo cáo')} B`
+    )
+    await page.keyboard.press('Escape')
+
+    // Xoá cả thư mục từ gốc bucket.
     await folder.click()
     await view.getByTestId('s3-delete').click()
     await page.getByTestId('s3-dialog-submit').click()

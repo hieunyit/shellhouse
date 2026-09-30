@@ -25,7 +25,7 @@ interface Edit {
   again: boolean
 }
 
-async function hashFile(path: string): Promise<string | null> {
+export async function hashFile(path: string): Promise<string | null> {
   try {
     return createHash('sha256')
       .update(await readFile(path))

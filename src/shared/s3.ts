@@ -86,6 +86,36 @@ export const S3Op = z.discriminatedUnion('op', [
     localPath: LocalPath,
     overwrite: z.boolean()
   }),
+  /**
+   * Thống kê số object + dung lượng dưới `prefix` ('' = cả bucket). Quét theo từng đợt: trả về
+   * `next` để gọi tiếp (renderer hiện tiến độ và dừng được giữa chừng).
+   */
+  z.object({
+    op: z.literal('stats'),
+    bucket: Bucket,
+    prefix: Key,
+    token: z.string().max(4096).optional()
+  }),
+  /** Copy (hoặc move) object / "thư mục" (key kết thúc "/") vào `destPrefix` của `destBucket`. */
+  z.object({
+    op: z.literal('copy'),
+    bucket: Bucket,
+    keys: z.array(Key).min(1).max(1000),
+    destBucket: Bucket,
+    destPrefix: Key,
+    move: z.boolean(),
+    overwrite: z.boolean()
+  }),
+  /** Đổi tên object hoặc "thư mục" (giữ nguyên thư mục cha). */
+  z.object({
+    op: z.literal('rename'),
+    bucket: Bucket,
+    key: Key,
+    name: z.string().min(1).max(1024),
+    overwrite: z.boolean()
+  }),
+  /** Tải object về `localPath` rồi theo dõi: lưu trong editor → tải lên đè (nếu server chưa đổi). */
+  z.object({ op: z.literal('edit'), bucket: Bucket, key: Key, localPath: LocalPath }),
   z.object({ op: z.literal('cancel'), transferId: z.string().max(64) }),
   z.object({ op: z.literal('clearDone') })
 ])
@@ -112,6 +142,39 @@ export interface S3Listing {
   entries: S3Entry[]
   /** Thư mục quá lớn: chỉ hiện phần đầu. */
   truncated: boolean
+}
+
+/** Một đợt thống kê (xem op `stats`). */
+export interface S3StatsPage {
+  objects: number
+  bytes: number
+  /** Theo storage class (STANDARD, GLACIER…). */
+  byClass: Record<string, { objects: number; bytes: number }>
+  /** Còn nữa: gọi lại với token này. */
+  next: string | null
+}
+
+/** Cộng dồn một đợt thống kê vào tổng. */
+export function addStats(total: S3StatsPage, page: S3StatsPage): S3StatsPage {
+  const byClass = { ...total.byClass }
+  for (const [cls, v] of Object.entries(page.byClass)) {
+    const cur = byClass[cls] ?? { objects: 0, bytes: 0 }
+    byClass[cls] = { objects: cur.objects + v.objects, bytes: cur.bytes + v.bytes }
+  }
+  return {
+    objects: total.objects + page.objects,
+    bytes: total.bytes + page.bytes,
+    byClass,
+    next: page.next
+  }
+}
+
+/** Tên mới cho đổi tên: không rỗng, không có "/". */
+export function objectNameProblem(name: string): string | null {
+  if (!name.trim()) return 'Enter a name'
+  if (name.includes('/')) return 'The name cannot contain “/”'
+  if (name === '.' || name === '..') return 'Invalid name'
+  return null
 }
 
 /** Prefix cha: "a/b/c/" → "a/b/"; "a/" → "". */
