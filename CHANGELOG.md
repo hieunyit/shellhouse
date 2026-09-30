@@ -24,6 +24,10 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - **Macros**: a snippet can run line by line, waiting for the prompt before each next line
   (`# wait 5` pauses, `# expect Password:` waits for text). With MultiExec the macro runs in
   every selected terminal, each at its own pace. Ctrl+C in a terminal stops it there.
+- **Command suggestions**: while you type, the last matching command you ran on the same host
+  appears in faint text after the cursor; press → to accept (like fish). History is kept per
+  host. Commands starting with a space and anything not shown on screen (passwords) are never
+  saved. Turn off or clear it in Settings → Terminal.
 
 ## [1.1.0-beta.3] - 2026-09-30
 

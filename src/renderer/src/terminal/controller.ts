@@ -23,6 +23,7 @@ import { SessionClient } from './session-client'
 import { broadcastInput } from './broadcast'
 import { tabTitle } from '@shared/tab-title'
 import { looksLikePrompt, MACRO_STEP_TIMEOUT_MS, type MacroStep } from '@shared/macro'
+import { loadHistory, recordCommand, suggestRest } from './suggestions'
 import { windowsPty } from '../lib/platform'
 
 export interface ActivePrompt {
@@ -191,6 +192,10 @@ export class TerminalController {
       }),
       term.onResize(({ cols, rows }) => {
         this.client?.resize(cols, rows)
+        this.scheduleGhost()
+      }),
+      term.onScroll(() => {
+        this.scheduleGhost()
       }),
       term.onTitleChange((raw) => {
         const title = tabTitle(raw)
@@ -296,6 +301,8 @@ export class TerminalController {
     this.unsubscribeSettings?.()
     this.stopWaitingForUnlock()
     this.cancelReconnect()
+    if (this.ghostFrame) cancelAnimationFrame(this.ghostFrame)
+    this.hideGhost()
     this.resizeObserver?.disconnect()
     if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer)
     for (const d of this.disposables) d.dispose()
@@ -312,6 +319,221 @@ export class TerminalController {
    * Chèn văn bản như dán (bracketed paste nếu shell bật): nhiều dòng không bị chạy từng dòng.
    * `run` = gửi thêm Enter.
    */
+  // ---------- Gợi ý lệnh từ lịch sử (chữ mờ sau con trỏ, → để nhận) ----------
+
+  /** Khoá lịch sử của đích: id host đã lưu, ssh:user@host:port, local:<shell>. */
+  private get historyTarget(): string {
+    const t = this.target
+    if (t.kind === 'host') return t.hostId
+    if (t.kind === 'ssh') return `ssh:${t.username}@${t.host}:${t.port}`
+    return `local:${t.shellId ?? 'default'}`
+  }
+
+  /** Vị trí (tuyệt đối trong buffer) nơi lệnh đang gõ bắt đầu — ngay sau dấu nhắc. */
+  private inputStart: { row: number; col: number } | null = null
+  /** Chờ phím in được đầu tiên sau Enter / Ctrl+C để ghi nhận vị trí bắt đầu. */
+  private awaitingStart = true
+  private ghost: HTMLSpanElement | null = null
+  private ghostRest: string | null = null
+  private ghostFrame = 0
+
+  private suggestionsOn(): boolean {
+    return (
+      useSettings.getState().settings.terminal.commandSuggestions &&
+      !this.inMultiExec &&
+      this.term.buffer.active.type === 'normal'
+    )
+  }
+
+  /** Chữ từ vị trí bắt đầu tới `endCol` của dòng con trỏ (gộp các dòng bị ngắt do quá dài). */
+  private typedText(toCursor: boolean): string | null {
+    const start = this.inputStart
+    if (!start) return null
+    const b = this.term.buffer.active
+    const cursorRow = b.baseY + b.cursorY
+    if (cursorRow < start.row || cursorRow - start.row > 20) return null
+    let text = ''
+    for (let r = start.row; r <= cursorRow; r++) {
+      const line = b.getLine(r)
+      if (!line) return null
+      if (r > start.row && !line.isWrapped) return null // con trỏ đã sang dòng lệnh khác
+      const from = r === start.row ? start.col : 0
+      const to = toCursor && r === cursorRow ? b.cursorX : undefined
+      text += line.translateToString(!(r < cursorRow), from, to)
+    }
+    return text
+  }
+
+  /** Phím chữ đã gõ từ đầu lệnh (chính xác khi chỉ gõ chữ thường). */
+  private lineBuf = ''
+  /** Đã dùng Tab / mũi tên / dán… → phải đọc lệnh từ màn hình. */
+  private lineDirty = false
+
+  private resetLine(): void {
+    this.inputStart = null
+    this.awaitingStart = true
+    this.lineBuf = ''
+    this.lineDirty = false
+    this.hideGhost()
+  }
+
+  private trackTyping(data: string): void {
+    if (data === '\r') {
+      this.resolveStart()
+      const known = this.inputStart
+      const typed = this.lineBuf
+      const dirty = this.lineDirty
+      const fromRow = this.term.buffer.active.baseY + this.term.buffer.active.cursorY
+      this.resetLine()
+      if (this.term.buffer.active.type !== 'normal' || (!known && (dirty || !typed))) return
+      // Đọc màn hình SAU khi echo về (gõ nhanh / SSH chậm: lúc nhấn Enter phần cuối chưa hiện).
+      // Chỉ lưu thứ đã hiện trên màn hình → mật khẩu (không echo) không bao giờ vào lịch sử.
+      const target = this.historyTarget
+      window.setTimeout(() => {
+        if (this.disposed) return
+        // Gõ nhanh rồi Enter ngay: lúc đó chữ chưa echo → tìm dòng chứa lệnh sau khi đã hiện.
+        const start = known ?? this.findEchoed(typed, fromRow)
+        if (!start) return
+        const shown = this.textFrom(start)
+        if (shown === null) return
+        const command = dirty ? shown : typed
+        if (command.trim() && shown.trimEnd().startsWith(command.trimEnd())) {
+          recordCommand(target, command)
+          // Người dùng có thể đã gõ tiếp trong lúc chờ → tính lại gợi ý.
+          this.scheduleGhost()
+        }
+      }, 300)
+      return
+    }
+    if (data === '\x03' || data === '\x04' || data === '\x15') {
+      if (data === '\x15') {
+        this.lineBuf = ''
+        return
+      }
+      this.resetLine()
+      return
+    }
+    const code = data.charCodeAt(0)
+    const startsLine = this.awaitingStart && code >= 0x20 && code !== 0x7f
+    if (data === '\x7f' || data === '\b') this.lineBuf = this.lineBuf.slice(0, -1)
+    else if (!/\p{Cc}/u.test(data)) this.lineBuf += data
+    else this.lineDirty = true
+    if (startsLine) {
+      // Vị trí bắt đầu lệnh được xác định khi chữ đã hiện (resolveStart): gõ nhanh ngay sau Enter
+      // thì lúc bấm phím, dấu nhắc mới có thể chưa in ra.
+      this.awaitingStart = false
+      void loadHistory(this.historyTarget)
+    }
+  }
+
+  /** Tìm chỗ bắt đầu lệnh: phần đã gõ nằm ở cuối dòng con trỏ (sau dấu nhắc). */
+  private resolveStart(): void {
+    if (this.inputStart || this.awaitingStart || !this.lineBuf) return
+    const b = this.term.buffer.active
+    const row = b.baseY + b.cursorY
+    const before = b.getLine(row)?.translateToString(false, 0, b.cursorX) ?? ''
+    if (!this.lineDirty && before.endsWith(this.lineBuf))
+      this.inputStart = { row, col: b.cursorX - this.lineBuf.length }
+  }
+
+  /** Dòng (từ `fromRow` trở xuống vài dòng) kết thúc bằng `typed` → vị trí bắt đầu của nó. */
+  private findEchoed(typed: string, fromRow: number): { row: number; col: number } | null {
+    const b = this.term.buffer.active
+    for (let row = fromRow; row <= Math.min(b.length - 1, fromRow + 3); row++) {
+      const text = b.getLine(row)?.translateToString(true) ?? ''
+      if (text.endsWith(typed)) return { row, col: text.length - typed.length }
+    }
+    return null
+  }
+
+  /** Dòng lệnh (logic, gộp dòng bị ngắt) bắt đầu từ `start`, hết dòng. */
+  private textFrom(start: { row: number; col: number }): string | null {
+    const b = this.term.buffer.active
+    let text = ''
+    for (let r = start.row; r < b.length && r - start.row <= 20; r++) {
+      const line = b.getLine(r)
+      if (!line) return null
+      if (r > start.row && !line.isWrapped) break
+      const next = b.getLine(r + 1)
+      text += line.translateToString(!next?.isWrapped, r === start.row ? start.col : 0)
+    }
+    return text
+  }
+
+  private scheduleGhost(): void {
+    if (this.ghostFrame) return
+    this.ghostFrame = requestAnimationFrame(() => {
+      this.ghostFrame = 0
+      this.updateGhost()
+    })
+  }
+
+  private updateGhost(): void {
+    this.resolveStart()
+    if (this.disposed || !this.suggestionsOn()) {
+      this.hideGhost()
+      return
+    }
+    const b = this.term.buffer.active
+    // Chỉ khi con trỏ ở cuối phần đã gõ và đang xem đáy màn hình.
+    const line = b.getLine(b.baseY + b.cursorY)
+    const afterCursor = line?.translateToString(true, b.cursorX) ?? ''
+    const typed = this.typedText(true)
+    const rest =
+      typed !== null && afterCursor === '' && b.viewportY === b.baseY
+        ? suggestRest(this.historyTarget, typed)
+        : null
+    if (!rest) {
+      this.hideGhost()
+      return
+    }
+    const screen = this.term.element?.querySelector<HTMLElement>('.xterm-screen')
+    if (!screen || !this.term.element) return
+    const cellW = screen.clientWidth / this.term.cols
+    const cellH = screen.clientHeight / this.term.rows
+    const room = this.term.cols - b.cursorX
+    if (!this.ghost) {
+      this.ghost = document.createElement('span')
+      this.ghost.className = 'sh-ghost'
+      this.ghost.setAttribute('aria-hidden', 'true')
+      this.ghost.dataset['testid'] = 'command-suggestion'
+      this.term.element.appendChild(this.ghost)
+    }
+    const g = this.ghost
+    const o = this.term.options
+    g.textContent = rest.slice(0, Math.max(0, room))
+    g.style.left = `${screen.offsetLeft + b.cursorX * cellW}px`
+    g.style.top = `${screen.offsetTop + b.cursorY * cellH}px`
+    g.style.height = `${cellH}px`
+    g.style.lineHeight = `${cellH}px`
+    g.style.fontFamily = o.fontFamily ?? 'monospace'
+    g.style.fontSize = `${o.fontSize ?? 14}px`
+    g.style.letterSpacing = `${Math.max(0, cellW - this.measureChar(g))}px`
+    this.ghostRest = rest
+  }
+
+  /** Bề rộng thật của một ký tự trong font terminal (để chữ gợi ý thẳng cột với terminal). */
+  private charWidth: { font: string; width: number } | null = null
+  private measureChar(g: HTMLElement): number {
+    const font = `${g.style.fontSize} ${g.style.fontFamily}`
+    if (this.charWidth?.font !== font) {
+      const canvas = document.createElement('canvas').getContext('2d')
+      let width = 0
+      if (canvas) {
+        canvas.font = font
+        width = canvas.measureText('W'.repeat(20)).width / 20
+      }
+      this.charWidth = { font, width }
+    }
+    return this.charWidth.width
+  }
+
+  private hideGhost(): void {
+    this.ghostRest = null
+    this.ghost?.remove()
+    this.ghost = null
+  }
+
   /** Đang chạy macro (Ctrl+C trong tab thì dừng). */
   private macro: { cancelled: boolean } | null = null
 
@@ -549,6 +771,7 @@ export class TerminalController {
           this.term.write(data, () => {
             done()
             this.resolveEcho(data)
+            this.scheduleGhost()
           })
         },
         exit: (code, reason) => {
@@ -763,6 +986,14 @@ export class TerminalController {
   private handleInput(data: string): void {
     // Ctrl+C trong lúc macro chạy → dừng macro (và vẫn gửi Ctrl+C cho lệnh đang chạy).
     if (data === '\x03') this.cancelMacro()
+    // → ở cuối dòng khi đang có gợi ý: gõ nốt phần gợi ý (như fish).
+    if ((data === '\x1b[C' || data === '\x1bOC') && this.ghostRest) {
+      const rest = this.ghostRest
+      this.hideGhost()
+      this.handleInput(rest)
+      return
+    }
+    this.trackTyping(data)
     if (
       (this.state === 'exited' || this.state === 'reconnecting' || this.state === 'disconnected') &&
       data === '\r'

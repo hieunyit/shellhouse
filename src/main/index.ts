@@ -21,6 +21,7 @@ import { checkMainNativeModules } from './diagnostics'
 import { handle } from './ipc/router'
 import { installAppMenu, installDevToolsShortcut } from './app-menu'
 import { installEditContextMenu } from './context-menu'
+import { CommandHistory } from './command-history'
 import { listLocal } from './local-files'
 import { openInEditor, RemoteEditFiles } from './remote-edit'
 import { sessionLogFor } from './session-log-path'
@@ -90,6 +91,7 @@ let vault: Vault | null = null
 let knownHosts: KnownHosts | null = null
 let hosts: HostService | null = null
 let snippets: SnippetService | null = null
+let history: CommandHistory | null = null
 let settings: SettingsService | null = null
 let vaultController: VaultController | null = null
 let deviceKeys: DeviceKeyStore | null = null
@@ -405,6 +407,19 @@ function registerIpc(): void {
     return result.canceled || !result.filePath ? null : result.filePath
   })
 
+  const requireHistory = (): CommandHistory => {
+    if (!history) throw new Error('Data is not ready yet')
+    return history
+  }
+  handle('history:list', isTrustedSender, (target) => requireHistory().list(target))
+  handle('history:record', isTrustedSender, (target, command) => {
+    // Tắt gợi ý trong cài đặt = không ghi nữa.
+    if (requireSettings().get().terminal.commandSuggestions)
+      requireHistory().record(target, command)
+  })
+  handle('history:clear', isTrustedSender, (target) => {
+    requireHistory().clear(target)
+  })
   handle('serial:list', isTrustedSender, async () => {
     // Nạp khi cần (module native) — không làm chậm lúc khởi động.
     const { SerialPort } = await import('serialport')
@@ -537,6 +552,7 @@ if (!app.requestSingleInstanceLock()) {
     )
     hosts = new HostService(db, vault)
     snippets = new SnippetService(db)
+    history = new CommandHistory(db)
     settings = new SettingsService(db)
     // Hộp thoại hệ thống, thanh cuộn, nền cửa sổ theo cài đặt Appearance.
     nativeTheme.themeSource = settings.get().appearance.theme

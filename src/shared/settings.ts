@@ -49,6 +49,8 @@ const TerminalSettings = z.object({
   defaultShell: z.string().max(80).catch(''),
   /** Chuột phải trong terminal: hiện menu (Copy/Paste…) hoặc dán ngay như PuTTY / MobaXterm. */
   rightClick: z.enum(['menu', 'paste']).catch('menu'),
+  /** Gợi ý lệnh (chữ mờ sau con trỏ, → để nhận) từ lịch sử lệnh của từng host. */
+  commandSuggestions: z.boolean().catch(true),
   /** Thanh CPU/RAM/ổ đĩa/mạng dưới terminal SSH (chỉ đo khi tab đang hiện; server Linux). */
   serverStats: z.boolean().catch(true),
   /** Bật cây accessibility của xterm.js để trình đọc màn hình đọc được output. Tốn thêm CPU. */

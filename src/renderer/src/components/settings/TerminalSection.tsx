@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Upload } from 'lucide-react'
 import { BUILTIN_THEMES, importItermColors, importWindowsTerminal } from '@shared/themes'
+import { forgetHistory } from '../../terminal/suggestions'
 import { useSettings } from '../../stores/settings'
 import { useShells } from '../../stores/shells'
-import { Checkbox, Field, Input, Notice, SectionTitle, Segmented, Select } from '../ui'
+import { Button, Checkbox, Field, Input, Notice, SectionTitle, Segmented, Select } from '../ui'
 
 export function TerminalSection(): React.JSX.Element {
   const { settings, update } = useSettings()
@@ -200,6 +201,28 @@ export function TerminalSection(): React.JSX.Element {
           checked={t.copyOnSelect}
           onChange={(e) => void update({ terminal: { copyOnSelect: e.target.checked } })}
         />
+        <div className="flex items-start gap-3">
+          <Checkbox
+            label="Suggest commands from history"
+            description="Shows the last matching command you ran on the same host in faint text after the cursor; press → to accept. Commands starting with a space and anything not shown on screen (passwords) are never saved."
+            checked={t.commandSuggestions}
+            data-testid="setting-command-suggestions"
+            onChange={(e) => void update({ terminal: { commandSuggestions: e.target.checked } })}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="shrink-0"
+            data-testid="clear-command-history"
+            onClick={() => {
+              if (!window.confirm('Delete the command history of every host?')) return
+              forgetHistory(null)
+              void window.shellhouse.clearCommandHistory(null)
+            }}
+          >
+            Clear history
+          </Button>
+        </div>
         <Checkbox
           label="Show server statistics"
           description="CPU, memory, disk and network under SSH terminals (Linux servers). Measured only while the tab is visible."

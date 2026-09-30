@@ -321,3 +321,14 @@ select.sh-select option {
 .dockview-theme-shellhouse .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab::after {
   background: var(--sh-line-strong);
 }
+
+/* Gợi ý lệnh từ lịch sử: chữ mờ ngay sau con trỏ (→ để nhận), không nhận chuột. */
+.sh-ghost {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  white-space: pre;
+  overflow: hidden;
+  color: var(--sh-faint);
+  opacity: 0.85;
+}

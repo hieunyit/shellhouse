@@ -171,6 +171,14 @@ export const invokeContract = {
   /** Hộp thoại của hệ điều hành — renderer không tự chọn đường dẫn trên máy. */
   'dialog:openFiles': { args: z.tuple([]), result: z.array(z.string()) },
   'dialog:saveFile': { args: z.tuple([z.string().max(255)]), result: z.string().nullable() },
+  /** Lịch sử lệnh của một đích (gợi ý khi gõ), mới nhất trước. */
+  'history:list': { args: z.tuple([z.string().min(1).max(300)]), result: z.array(z.string()) },
+  'history:record': {
+    args: z.tuple([z.string().min(1).max(300), z.string().max(1000)]),
+    result: z.void()
+  },
+  /** null = xoá tất cả. */
+  'history:clear': { args: z.tuple([z.string().max(300).nullable()]), result: z.void() },
   /** Cổng serial đang có trên máy (COM3, /dev/ttyUSB0…). */
   'serial:list': { args: z.tuple([]), result: z.array(SerialPortInfo) },
   /** Liệt kê thư mục trên máy (null = thư mục home) cho SFTP hai cột. */
@@ -287,6 +295,9 @@ export interface ShellhouseApi {
   pickProgram(): Promise<string | null>
   listLocal(path: string | null): Promise<LocalListing>
   listSerialPorts(): Promise<SerialPortInfo[]>
+  commandHistory(target: string): Promise<string[]>
+  recordCommand(target: string, command: string): Promise<void>
+  clearCommandHistory(target: string | null): Promise<void>
   pickFolder(title: string, start: 'logs' | 'downloads'): Promise<string | null>
   openLogFolder(): Promise<void>
   prepareRemoteEdit(remoteName: string): Promise<string>
