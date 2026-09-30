@@ -1,8 +1,11 @@
 import type { Client, SFTPWrapper, Stats } from 'ssh2'
 import type { SftpEntry, SftpListing } from '@shared/sftp'
 import { joinRemote } from '@shared/sftp'
+import { createLimiter } from '../../node-shared/pool'
 
 const MAX_RECURSIVE_DELETE = 10_000
+/** Số yêu cầu SFTP cùng lúc khi xoá đệ quy (một kênh SFTP xử lý nhiều yêu cầu song song). */
+const DELETE_PARALLEL = 8
 
 /**
  * Tín hiệu "kết nối đã chết". ssh2 chỉ huỷ các yêu cầu SFTP đang chờ khi kênh nhận EOF bình thường;
@@ -228,25 +231,35 @@ export class SftpService implements LossGuard {
     }
     if (recursive) {
       let budget = MAX_RECURSIVE_DELETE
+      // Mọi yêu cầu mạng đi qua bộ giới hạn: các thư mục con / file được xử lý song song, nhưng
+      // không quá DELETE_PARALLEL yêu cầu cùng lúc. Thư mục chỉ rmdir sau khi mọi thứ bên trong xong.
+      const limit = createLimiter(DELETE_PARALLEL)
       const walk = async (dir: string): Promise<void> => {
-        const entries = await this.guarded<{ filename: string; attrs: Stats }[]>((cb) => {
-          s.readdir(dir, cb)
-        })
-        for (const e of entries) {
-          if (e.filename === '.' || e.filename === '..') continue
-          if (--budget < 0)
-            throw new Error(
-              `Folder is too large to delete recursively (> ${MAX_RECURSIVE_DELETE} entries)`
-            )
-          const child = joinRemote(dir, e.filename)
-          // KHÔNG đi theo symlink ra ngoài. Thuộc tính của readdir có thể là của đích (một số server,
-          // ví dụ Windows OpenSSH, báo link tới thư mục như thư mục) → lstat lại trước khi đi vào.
-          const own =
-            e.attrs.isDirectory() || e.attrs.isSymbolicLink() ? await lstat(child) : e.attrs
-          if (own.isDirectory() && !own.isSymbolicLink()) await walk(child)
-          else await removeEntry(child, own.isSymbolicLink())
-        }
-        await rmdir(dir)
+        const entries = await limit(() =>
+          this.guarded<{ filename: string; attrs: Stats }[]>((cb) => {
+            s.readdir(dir, cb)
+          })
+        )
+        const children = entries.filter((e) => e.filename !== '.' && e.filename !== '..')
+        budget -= children.length
+        if (budget < 0)
+          throw new Error(
+            `Folder is too large to delete recursively (> ${MAX_RECURSIVE_DELETE} entries)`
+          )
+        await Promise.all(
+          children.map(async (e) => {
+            const child = joinRemote(dir, e.filename)
+            // KHÔNG đi theo symlink ra ngoài. Thuộc tính của readdir có thể là của đích (một số
+            // server, ví dụ Windows OpenSSH, báo link tới thư mục như thư mục) → lstat lại.
+            const own =
+              e.attrs.isDirectory() || e.attrs.isSymbolicLink()
+                ? await limit(() => lstat(child))
+                : e.attrs
+            if (own.isDirectory() && !own.isSymbolicLink()) await walk(child)
+            else await limit(() => removeEntry(child, own.isSymbolicLink()))
+          })
+        )
+        await limit(() => rmdir(dir))
       }
       await walk(path)
       return

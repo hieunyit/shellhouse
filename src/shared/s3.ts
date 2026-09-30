@@ -98,15 +98,12 @@ export const S3Op = z.discriminatedUnion('op', [
     overwrite: z.boolean()
   }),
   /**
-   * Thống kê số object + dung lượng dưới `prefix` ('' = cả bucket). Quét theo từng đợt: trả về
-   * `next` để gọi tiếp (renderer hiện tiến độ và dừng được giữa chừng).
+   * Thống kê số object + dung lượng dưới `prefix` ('' = cả bucket): chạy nền, song song nhiều
+   * request; trả về id để hỏi tiến độ (`statsPoll`) hoặc dừng (`statsStop`).
    */
-  z.object({
-    op: z.literal('stats'),
-    bucket: Bucket,
-    prefix: Key,
-    token: z.string().max(4096).optional()
-  }),
+  z.object({ op: z.literal('statsStart'), bucket: Bucket, prefix: Key }),
+  z.object({ op: z.literal('statsPoll'), id: z.string().max(64) }),
+  z.object({ op: z.literal('statsStop'), id: z.string().max(64) }),
   /** Copy (hoặc move) object / "thư mục" (key kết thúc "/") vào `destPrefix` của `destBucket`. */
   z.object({
     op: z.literal('copy'),
@@ -162,29 +159,29 @@ export interface S3Listing {
   truncated: boolean
 }
 
-/** Một đợt thống kê (xem op `stats`). */
-export interface S3StatsPage {
+/** Số object + dung lượng (tổng và theo storage class: STANDARD, GLACIER…). */
+export interface S3Stats {
   objects: number
   bytes: number
-  /** Theo storage class (STANDARD, GLACIER…). */
   byClass: Record<string, { objects: number; bytes: number }>
-  /** Còn nữa: gọi lại với token này. */
-  next: string | null
 }
 
-/** Cộng dồn một đợt thống kê vào tổng. */
-export function addStats(total: S3StatsPage, page: S3StatsPage): S3StatsPage {
-  const byClass = { ...total.byClass }
-  for (const [cls, v] of Object.entries(page.byClass)) {
+/** Tiến độ một lượt thống kê (op `statsPoll`). */
+export interface S3StatsProgress extends S3Stats {
+  done: boolean
+  error: string | null
+}
+
+export const EMPTY_STATS: S3Stats = { objects: 0, bytes: 0, byClass: {} }
+
+/** Cộng hai kết quả thống kê. */
+export function addStats(a: S3Stats, b: S3Stats): S3Stats {
+  const byClass = { ...a.byClass }
+  for (const [cls, v] of Object.entries(b.byClass)) {
     const cur = byClass[cls] ?? { objects: 0, bytes: 0 }
     byClass[cls] = { objects: cur.objects + v.objects, bytes: cur.bytes + v.bytes }
   }
-  return {
-    objects: total.objects + page.objects,
-    bytes: total.bytes + page.bytes,
-    byClass,
-    next: page.next
-  }
+  return { objects: a.objects + b.objects, bytes: a.bytes + b.bytes, byClass }
 }
 
 /** Tên mới cho đổi tên: không rỗng, không có "/". */

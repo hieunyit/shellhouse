@@ -14,7 +14,7 @@ import type { SftpService } from './service'
 export const PART_SUFFIX = '.shellhouse-part'
 /** Resume chỉ khi phần đuôi của file dở dang khớp với nguồn. */
 const TAIL_CHECK_BYTES = 4096
-const MAX_PARALLEL = 2
+const MAX_PARALLEL = 4
 const PROGRESS_INTERVAL_MS = 250
 
 interface Job {

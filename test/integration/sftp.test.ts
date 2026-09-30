@@ -281,4 +281,41 @@ describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
       )
     }
   )
+
+  it(
+    'cây lớn (duyệt / tạo / xoá song song): 121 file ở 5 cấp đi về, đi lên, xoá đệ quy đủ và đúng',
+    { timeout: 60_000 },
+    async () => {
+      const { remoteRoot, localRoot, sftp, queue } = await setup()
+      // 5 cấp, mỗi thư mục 3 nhánh + 1 file ở mọi cấp = 1 + 3 + 9 + 27 + 81 = 121 file.
+      const expected: string[] = []
+      const make = (dir: string, rel: string, depth: number): void => {
+        mkdirSync(dir, { recursive: true })
+        writeFileSync(join(dir, `f${depth}.txt`), rel || 'goc')
+        expected.push(`${rel}f${depth}.txt`)
+        if (depth < 4) for (const b of ['a', 'b', 'c']) make(join(dir, b), `${rel}${b}/`, depth + 1)
+      }
+      make(join(remoteRoot, 'tree'), '', 0)
+      expect(expected).toHaveLength(121)
+
+      expect(await downloadFolder(sftp, queue, join(remoteRoot, 'tree'), localRoot, false)).toBe(
+        121
+      )
+      await settledAll(queue)
+      for (const rel of expected) expect(existsSync(join(localRoot, 'tree', rel))).toBe(true)
+      expect(readFileSync(join(localRoot, 'tree', 'c', 'b', 'a', 'f3.txt'), 'utf8')).toBe('c/b/a/')
+
+      mkdirSync(join(remoteRoot, 'up'))
+      expect(
+        await uploadFolder(sftp, queue, join(localRoot, 'tree'), join(remoteRoot, 'up'), false)
+      ).toBe(121)
+      await settledAll(queue)
+      for (const rel of expected) expect(existsSync(join(remoteRoot, 'up', 'tree', rel))).toBe(true)
+
+      await sftp.remove(join(remoteRoot, 'up', 'tree'), true)
+      await sftp.remove(join(remoteRoot, 'tree'), true)
+      expect(existsSync(join(remoteRoot, 'up', 'tree'))).toBe(false)
+      expect(existsSync(join(remoteRoot, 'tree'))).toBe(false)
+    }
+  )
 })

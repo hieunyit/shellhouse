@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { addStats, type S3Op, type S3StatsPage } from '@shared/s3'
+import { addStats, EMPTY_STATS, type S3Op, type S3Stats } from '@shared/s3'
 import { Button, cx, Modal } from '../components/ui'
 import { cleanError, formatSize } from './format'
+import { eachLimit, runStatsJob } from './stats-job'
 
 /** Một dòng cần thống kê: cả bucket (prefix '') hoặc một "thư mục". */
 export interface StatsTarget {
@@ -13,16 +14,24 @@ export interface StatsTarget {
 type RowState = 'waiting' | 'running' | 'done' | 'stopped' | 'error'
 
 interface Row {
-  total: S3StatsPage
+  total: S3Stats
   state: RowState
   error: string | null
 }
 
-const EMPTY: S3StatsPage = { objects: 0, bytes: 0, byClass: {}, next: null }
+/** Số dòng đếm cùng lúc (mỗi dòng bên Session Host còn tự quét song song nhiều request). */
+const PARALLEL_TARGETS = 3
+
+const initialRows = (count: number): Row[] =>
+  Array.from({ length: count }, (_, i) => ({
+    total: EMPTY_STATS,
+    state: i < PARALLEL_TARGETS ? 'running' : 'waiting',
+    error: null
+  }))
 
 /**
  * Thống kê số object + dung lượng (như "Bucket size" của S3 Browser). S3 không có API cho con số
- * này nên phải liệt kê toàn bộ object: quét từng đợt, cập nhật dần, dừng được bất cứ lúc nào.
+ * này nên phải liệt kê toàn bộ object: quét song song bên Session Host, cập nhật dần, dừng được.
  */
 export function S3StatsDialog({
   targets,
@@ -33,9 +42,7 @@ export function S3StatsDialog({
   run: (op: S3Op) => Promise<unknown>
   onClose: () => void
 }): React.JSX.Element {
-  const [rows, setRows] = useState<Row[]>(() =>
-    targets.map((_, i) => ({ total: EMPTY, state: i === 0 ? 'running' : 'waiting', error: null }))
-  )
+  const [rows, setRows] = useState<Row[]>(() => initialRows(targets.length))
   const [scanning, setScanning] = useState(true)
   const stopRef = useRef(false)
   const [generation, setGeneration] = useState(0)
@@ -49,33 +56,35 @@ export function S3StatsDialog({
       if (life.alive) setRows((all) => all.map((r, j) => (j === i ? { ...r, ...change } : r)))
     }
     void (async () => {
-      for (let i = 0; i < targets.length; i++) {
-        const target = targets[i]
-        if (!target) continue
-        if (stopped()) {
-          patch(i, { state: 'stopped' })
-          continue
+      await eachLimit(
+        targets.map((target, i) => ({ target, i })),
+        PARALLEL_TARGETS,
+        async ({ target, i }) => {
+          if (stopped()) {
+            patch(i, { state: 'stopped' })
+            return
+          }
+          patch(i, { state: 'running' })
+          try {
+            const { result, stopped: wasStopped } = await runStatsJob(
+              run,
+              target.bucket,
+              target.prefix,
+              (p) => {
+                patch(i, { total: p })
+              },
+              stopped
+            )
+            patch(i, {
+              total: result,
+              state: result.error ? 'error' : wasStopped ? 'stopped' : 'done',
+              error: result.error
+            })
+          } catch (e) {
+            patch(i, { state: 'error', error: cleanError(e) })
+          }
         }
-        if (i > 0) patch(i, { state: 'running' })
-        let total = EMPTY
-        let token: string | undefined
-        try {
-          do {
-            const page = (await run({
-              op: 'stats',
-              bucket: target.bucket,
-              prefix: target.prefix,
-              ...(token ? { token } : {})
-            })) as S3StatsPage
-            total = addStats(total, page)
-            token = page.next ?? undefined
-            patch(i, { total })
-          } while (token && !stopped())
-          patch(i, { state: token ? 'stopped' : 'done' })
-        } catch (e) {
-          patch(i, { state: 'error', error: cleanError(e) })
-        }
-      }
+      )
       if (life.alive) setScanning(false)
     })()
     return () => {
@@ -83,7 +92,7 @@ export function S3StatsDialog({
     }
   }, [targets, run, generation])
 
-  const sum = rows.reduce((acc, r) => addStats(acc, r.total), EMPTY)
+  const sum = rows.reduce((acc, r) => addStats(acc, r.total), EMPTY_STATS)
   const partial = rows.some((r) => r.state === 'stopped' || r.state === 'error')
 
   return (
@@ -107,13 +116,7 @@ export function S3StatsDialog({
           ) : (
             <Button
               onClick={() => {
-                setRows(
-                  targets.map((_, i) => ({
-                    total: EMPTY,
-                    state: i === 0 ? 'running' : 'waiting',
-                    error: null
-                  }))
-                )
+                setRows(initialRows(targets.length))
                 setScanning(true)
                 setGeneration((g) => g + 1)
               }}

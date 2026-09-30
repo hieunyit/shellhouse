@@ -8,6 +8,18 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [1.2.0-beta.2] - 2026-09-30
 
+### Performance
+
+- **S3 and SFTP work in parallel** instead of one request at a time:
+  - S3 size / object counts scan many folders at once (up to 8 requests per bucket, 3 buckets at
+    a time for **Calculate all sizes**), running in the background with live progress.
+  - Listing a whole S3 folder tree (download, delete, copy, move) is parallel too, and deletes
+    send several 1,000-object batches at once.
+  - SFTP folder download / upload / recursive delete read and create directories in parallel
+    (up to 8 requests at once on the same connection).
+  - More files transfer at the same time: 6 for S3 (large files are still split into parallel
+    parts), 4 for SFTP (each with pipelined reads and writes).
+
 ### Added
 
 - **S3 statistics**: object count and total size per bucket, right in the bucket list

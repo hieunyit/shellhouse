@@ -28,14 +28,7 @@ import {
   Upload,
   X
 } from 'lucide-react'
-import {
-  parentPrefix,
-  type S3Bucket,
-  type S3Entry,
-  type S3Listing,
-  type S3Op,
-  type S3StatsPage
-} from '@shared/s3'
+import { parentPrefix, type S3Bucket, type S3Entry, type S3Listing, type S3Op } from '@shared/s3'
 import { joinLocal } from '@shared/local-files'
 import type { TransferStatus } from '@shared/sftp'
 import { Button, cx, IconButton, Notice } from '../components/ui'
@@ -59,6 +52,10 @@ import { useS3 } from '../stores/s3'
 import { s3LocationTitle, useTabs } from '../stores/tabs'
 import { useTabStatus } from '../stores/tab-status'
 import { S3SessionClient } from './s3-client'
+import { eachLimit, runStatsJob } from './stats-job'
+
+/** Số bucket đếm cùng lúc khi "Calculate all sizes". */
+const PARALLEL_BUCKETS = 3
 
 /**
  * Trình quản lý S3 của một tài khoản — một tab. Cấp gốc là bảng bucket (như AWS Console /
@@ -225,6 +222,7 @@ export function S3View({
 
   // ---------- Thống kê bucket (tính khi cần, cập nhật dần trong bảng) ----------
 
+  /** Tính dung lượng các bucket: vài bucket cùng lúc, mỗi bucket Session Host quét song song. */
   const calculate = async (names: readonly string[]): Promise<void> => {
     stopCalc.current = false
     // Hàm (không phải đọc thẳng): TS không thu hẹp kiểu ref qua các lần await.
@@ -233,30 +231,33 @@ export function S3View({
     const patch = (name: string, value: BucketStats): void => {
       setBucketStats((all) => ({ ...all, [name]: value }))
     }
-    for (const name of names) {
-      if (stopped()) break
-      let objects = 0
-      let bytes = 0
-      let token: string | undefined
-      patch(name, { state: 'running', objects, bytes })
+    await eachLimit(names, PARALLEL_BUCKETS, async (name) => {
+      if (stopped()) return
+      patch(name, { state: 'running', objects: 0, bytes: 0 })
       try {
-        do {
-          const page = (await run({
-            op: 'stats',
-            bucket: name,
-            prefix: '',
-            ...(token ? { token } : {})
-          })) as S3StatsPage
-          objects += page.objects
-          bytes += page.bytes
-          token = page.next ?? undefined
-          patch(name, { state: 'running', objects, bytes })
-        } while (token && !stopped())
-        patch(name, { state: token ? 'stopped' : 'done', objects, bytes })
+        const { result, stopped: wasStopped } = await runStatsJob(
+          run,
+          name,
+          '',
+          (p) => {
+            patch(name, { state: 'running', objects: p.objects, bytes: p.bytes })
+          },
+          stopped
+        )
+        patch(
+          name,
+          result.error
+            ? { state: 'error', objects: result.objects, bytes: result.bytes, error: result.error }
+            : {
+                state: wasStopped ? 'stopped' : 'done',
+                objects: result.objects,
+                bytes: result.bytes
+              }
+        )
       } catch (e) {
-        patch(name, { state: 'error', objects, bytes, error: cleanError(e) })
+        patch(name, { state: 'error', objects: 0, bytes: 0, error: cleanError(e) })
       }
-    }
+    })
     setCalculating(false)
   }
 

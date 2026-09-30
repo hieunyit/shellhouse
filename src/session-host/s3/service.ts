@@ -19,6 +19,7 @@ import {
   S3Client,
   UploadPartCopyCommand
 } from '@aws-sdk/client-s3'
+import type { _Object } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { replaceUnsafeFileChars } from '@shared/file-names'
@@ -29,9 +30,10 @@ import {
   type S3Entry,
   type S3Listing,
   type S3Op,
-  type S3StatsPage
+  type S3StatsProgress
 } from '@shared/s3'
 import type { TransferStatus } from '@shared/sftp'
+import { mapLimit, runQueue } from '../../node-shared/pool'
 import { S3Edits } from './edit'
 
 export interface S3Connection {
@@ -45,11 +47,15 @@ export interface S3Connection {
 /** Mỗi lần liệt kê hiện tối đa chừng này mục (thư mục khổng lồ: báo truncated). */
 const MAX_LIST = 5000
 const MAX_TREE = 10_000
-const MAX_PARALLEL = 3
+/** Số file truyền cùng lúc (mỗi file lớn còn tự chia nhiều phần song song). */
+const MAX_PARALLEL = 6
 const PART_SUFFIX = '.shellhouse-part'
 const PROGRESS_MS = 250
-/** Mỗi lần gọi `stats` quét tối đa chừng này trang (1000 object/trang). */
-const STATS_PAGES = 20
+/** Số request liệt kê cùng lúc khi duyệt cây (thống kê, tải / xoá / copy cả thư mục). */
+const SCAN_PARALLEL = 8
+/** Hai cấp đầu liệt kê theo "thư mục" để chia việc; sâu hơn liệt kê phẳng (ít request nhất). */
+const SPLIT_DEPTH = 2
+const DELETE_PARALLEL = 4
 const COPY_PARALLEL = 8
 /** CopyObject một phát chỉ tới 5 GiB; lớn hơn phải copy từng phần (UploadPartCopy). */
 const MAX_SINGLE_COPY = 5 * 1024 ** 3
@@ -109,6 +115,10 @@ export class S3Service {
   private notifyTimer: NodeJS.Timeout | null = null
   private disposed = false
   private edits: S3Edits | null = null
+  private readonly statsJobs = new Map<
+    string,
+    { progress: S3StatsProgress; abort: AbortController }
+  >()
 
   constructor(
     connection: S3Connection,
@@ -161,8 +171,16 @@ export class S3Service {
         return this.enqueueUpload(op.bucket, op.prefix, op.localPath)
       case 'download':
         return this.enqueueDownload(op.bucket, op.key, op.localPath, op.overwrite)
-      case 'stats':
-        return this.stats(op.bucket, op.prefix, op.token)
+      case 'statsStart':
+        return this.startStats(op.bucket, op.prefix)
+      case 'statsPoll':
+        return this.pollStats(op.id)
+      case 'statsStop': {
+        const job = this.statsJobs.get(op.id)
+        job?.abort.abort()
+        this.statsJobs.delete(op.id)
+        return job ? { ...job.progress, byClass: { ...job.progress.byClass }, done: true } : null
+      }
       case 'copy':
         return this.copy(op.bucket, op.keys, op.destBucket, op.destPrefix, op.move, op.overwrite)
       case 'rename':
@@ -248,71 +266,140 @@ export class S3Service {
     return { bucket, prefix, entries, truncated }
   }
 
-  /** Mọi key dưới prefix (đệ quy), tối đa MAX_TREE. */
+  /**
+   * Duyệt mọi object dưới `prefix`, nhiều request song song. S3 chỉ phân trang tuần tự trong một
+   * prefix (token trang sau nằm trong trang trước), nên chia việc theo "thư mục": 2 cấp đầu liệt kê
+   * có Delimiter để lấy các thư mục con rồi quét chúng song song; sâu hơn thì liệt kê phẳng. Mỗi
+   * object được báo đúng một lần.
+   */
+  private scanTree(
+    bucket: string,
+    prefix: string,
+    onObjects: (objects: readonly _Object[]) => void,
+    signal?: AbortSignal
+  ): Promise<void> {
+    return runQueue(
+      [{ prefix, depth: 0 }],
+      SCAN_PARALLEL,
+      async (task, push) => {
+        const split = task.depth < SPLIT_DEPTH
+        let token: string | undefined
+        do {
+          const out = await this.client.send(
+            new ListObjectsV2Command({
+              Bucket: bucket,
+              Prefix: task.prefix,
+              ...(split ? { Delimiter: '/' } : {}),
+              ContinuationToken: token
+            }),
+            { abortSignal: signal }
+          )
+          if (out.Contents?.length) onObjects(out.Contents)
+          if (split)
+            for (const p of out.CommonPrefixes ?? [])
+              if (p.Prefix) push({ prefix: p.Prefix, depth: task.depth + 1 })
+          token = out.IsTruncated ? out.NextContinuationToken : undefined
+        } while (token && !signal?.aborted)
+      },
+      signal
+    )
+  }
+
+  /** Mọi key dưới prefix (đệ quy, song song), tối đa MAX_TREE; sắp theo key. */
   private async allKeys(bucket: string, prefix: string): Promise<{ key: string; size: number }[]> {
     const keys: { key: string; size: number }[] = []
-    let token: string | undefined
-    do {
-      const out = await this.client.send(
-        new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token })
-      )
-      for (const o of out.Contents ?? []) if (o.Key) keys.push({ key: o.Key, size: o.Size ?? 0 })
-      if (keys.length > MAX_TREE)
-        throw new Error(`The folder has too many objects (more than ${MAX_TREE})`)
-      token = out.IsTruncated ? out.NextContinuationToken : undefined
-    } while (token)
-    return keys
+    const abort = new AbortController()
+    await this.scanTree(
+      bucket,
+      prefix,
+      (objects) => {
+        for (const o of objects) if (o.Key) keys.push({ key: o.Key, size: o.Size ?? 0 })
+        if (keys.length > MAX_TREE)
+          abort.abort(new Error(`The folder has too many objects (more than ${MAX_TREE})`))
+      },
+      abort.signal
+    )
+    return keys.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
   }
 
   /** Xoá object và cả "thư mục" (key kết thúc "/"). Trả về số object đã xoá. */
   private async remove(bucket: string, keys: readonly string[]): Promise<number> {
-    const all = new Set<string>()
-    for (const key of keys) {
-      if (key.endsWith('/')) for (const k of await this.allKeys(bucket, key)) all.add(k.key)
-      all.add(key)
-    }
+    const all = new Set<string>(keys)
+    const trees = await mapLimit(
+      keys.filter((k) => k.endsWith('/')),
+      DELETE_PARALLEL,
+      (key) => this.allKeys(bucket, key)
+    )
+    for (const tree of trees) for (const k of tree) all.add(k.key)
     await this.deleteExact(bucket, [...all])
     return all.size
   }
 
-  /** Xoá đúng các key này (không đệ quy). */
+  /** Xoá đúng các key này (không đệ quy): lô 1000 key, nhiều lô song song. */
   private async deleteExact(bucket: string, list: readonly string[]): Promise<void> {
-    for (let i = 0; i < list.length; i += 1000) {
+    const batches: string[][] = []
+    for (let i = 0; i < list.length; i += 1000) batches.push(list.slice(i, i + 1000))
+    await mapLimit(batches, DELETE_PARALLEL, async (batch) => {
       const out = await this.client.send(
         new DeleteObjectsCommand({
           Bucket: bucket,
-          Delete: { Objects: list.slice(i, i + 1000).map((Key) => ({ Key })), Quiet: true }
+          Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true }
         })
       )
       const failed = out.Errors?.[0]
       if (failed) throw new Error(`Could not delete ${failed.Key ?? ''}: ${failed.Message ?? ''}`)
-    }
+    })
   }
 
   // ---------- Thống kê ----------
 
-  private async stats(bucket: string, prefix: string, token?: string): Promise<S3StatsPage> {
-    const page: S3StatsPage = { objects: 0, bytes: 0, byClass: {}, next: null }
-    let next = token
-    for (let i = 0; i < STATS_PAGES; i++) {
-      const out = await this.client.send(
-        new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: next })
-      )
-      for (const o of out.Contents ?? []) {
-        const size = o.Size ?? 0
-        // Object "thư mục" rỗng (New folder) không phải dữ liệu.
-        if (!o.Key || (o.Key.endsWith('/') && size === 0)) continue
-        const cls = o.StorageClass ?? 'STANDARD'
-        const cur = page.byClass[cls] ?? { objects: 0, bytes: 0 }
-        page.byClass[cls] = { objects: cur.objects + 1, bytes: cur.bytes + size }
-        page.objects++
-        page.bytes += size
-      }
-      next = out.IsTruncated ? out.NextContinuationToken : undefined
-      if (!next) break
+  /** Bắt đầu thống kê chạy nền (song song); renderer hỏi tiến độ bằng `statsPoll`. */
+  private startStats(bucket: string, prefix: string): string {
+    const id = randomUUID()
+    const abort = new AbortController()
+    const progress: S3StatsProgress = {
+      objects: 0,
+      bytes: 0,
+      byClass: {},
+      done: false,
+      error: null
     }
-    page.next = next ?? null
-    return page
+    this.statsJobs.set(id, { progress, abort })
+    this.scanTree(
+      bucket,
+      prefix,
+      (objects) => {
+        for (const o of objects) {
+          const size = o.Size ?? 0
+          // Object "thư mục" rỗng (New folder) không phải dữ liệu.
+          if (!o.Key || (o.Key.endsWith('/') && size === 0)) continue
+          const cls = o.StorageClass ?? 'STANDARD'
+          const cur = progress.byClass[cls] ?? { objects: 0, bytes: 0 }
+          progress.byClass[cls] = { objects: cur.objects + 1, bytes: cur.bytes + size }
+          progress.objects++
+          progress.bytes += size
+        }
+      },
+      abort.signal
+    ).then(
+      () => {
+        progress.done = true
+      },
+      (error: unknown) => {
+        progress.done = true
+        if (!abort.signal.aborted) progress.error = errorText(error)
+      }
+    )
+    return id
+  }
+
+  private pollStats(id: string): S3StatsProgress {
+    const job = this.statsJobs.get(id)
+    if (!job) throw new Error('The statistics were stopped')
+    // Bản sao: object gốc vẫn đang được cộng dồn.
+    const snapshot = { ...job.progress, byClass: { ...job.progress.byClass } }
+    if (snapshot.done) this.statsJobs.delete(id)
+    return snapshot
   }
 
   // ---------- Copy / move / đổi tên ----------
@@ -758,6 +845,8 @@ export class S3Service {
   dispose(): void {
     this.disposed = true
     this.edits?.dispose()
+    for (const job of this.statsJobs.values()) job.abort.abort()
+    this.statsJobs.clear()
     for (const job of this.jobs.values()) job.abort.abort()
     if (this.notifyTimer) clearTimeout(this.notifyTimer)
     this.client.destroy()
