@@ -184,7 +184,9 @@ export const SshSessionSpec = z.object({
     host: Hostname,
     port: z.number().int().min(1).max(65535),
     username: Username
-  })
+  }),
+  /** true = chỉ SFTP, không mở shell trên server. */
+  noShell: z.boolean().optional()
 })
 export type SshSessionSpec = z.infer<typeof SshSessionSpec>
 
@@ -193,7 +195,8 @@ export const SavedHostSessionSpec = z.object({
   kind: z.literal('host'),
   cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
   rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows),
-  hostId: z.string().min(1).max(64)
+  hostId: z.string().min(1).max(64),
+  noShell: z.boolean().optional()
 })
 export type SavedHostSessionSpec = z.infer<typeof SavedHostSessionSpec>
 

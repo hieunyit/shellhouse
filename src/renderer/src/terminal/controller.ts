@@ -9,7 +9,7 @@ import type { ExitReason, PromptRequest, SessionSpec } from '@shared/stream-prot
 import type { ForwardSpec, ForwardStatus } from '@shared/forwards'
 import type { ServerStats } from '@shared/server-stats'
 import type { SftpOp, TransferStatus } from '@shared/sftp'
-import type { TabTarget } from '../stores/tabs'
+import { useTabs, type TabTarget } from '../stores/tabs'
 import { openSession } from '../lib/sessions'
 import type { AppSettings } from '@shared/settings'
 import { resolveTheme } from '@shared/themes'
@@ -104,6 +104,8 @@ export class TerminalController {
   private webglUnavailable = false
   private visibleInPanel = true
   private inMultiExec = false
+  /** Đã từng xem terminal → mọi phiên sau đều mở shell. */
+  private shellWanted = false
   /** Đã yêu cầu session đo số liệu server. */
   private statsOn = false
   private readonly disposables: IDisposable[] = []
@@ -571,9 +573,28 @@ export class TerminalController {
         ...size,
         ...(this.target.shellId ? { shellId: this.target.shellId } : {})
       }
-    if (this.target.kind === 'host') return { kind: 'host', ...size, hostId: this.target.hostId }
+    const noShell = this.withoutShell() ? { noShell: true } : {}
+    if (this.target.kind === 'host')
+      return { kind: 'host', ...size, hostId: this.target.hostId, ...noShell }
     const { host, port, username } = this.target
-    return { kind: 'ssh', ...size, target: { host, port, username } }
+    return { kind: 'ssh', ...size, target: { host, port, username }, ...noShell }
+  }
+
+  /**
+   * Tab mở bằng "Open SFTP" (chế độ file manager) kết nối không mở shell — cho tới khi người dùng
+   * xem terminal lần đầu.
+   */
+  private withoutShell(): boolean {
+    if (this.shellWanted) return false
+    return useTabs.getState().tabs.find((t) => t.id === this.tabId)?.view === 'files'
+  }
+
+  /** Người dùng muốn xem terminal: nếu phiên hiện tại không có shell thì kết nối lại có shell. */
+  openShell(): void {
+    if (this.shellWanted) return
+    const hadNoShell = this.withoutShell()
+    this.shellWanted = true
+    if (hadNoShell) this.reconnect()
   }
 
   private emitPrompt(): void {

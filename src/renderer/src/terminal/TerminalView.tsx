@@ -46,6 +46,8 @@ export function TerminalView({
   )
   // Ghi lại vào tab để Workspace / Duplicate giữ đúng chế độ.
   const setView = (next: 'terminal' | 'files'): void => {
+    // Tab SFTP chưa có shell → mở shell khi người dùng xem terminal lần đầu.
+    if (next === 'terminal') controllers.get(tabId)?.openShell()
     setViewState(next)
     useTabs.getState().setView(tabId, next === 'files' ? 'files' : undefined)
   }

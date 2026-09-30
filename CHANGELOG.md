@@ -6,6 +6,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- **Open SFTP** no longer opens a shell on the server: the connection only authenticates and
+  opens SFTP (no login shell, no `.bashrc` / motd, no extra "last login"). The shell is opened
+  the first time you click **Show terminal**.
+
 ## [1.1.0-beta.3] - 2026-09-30
 
 ### Added

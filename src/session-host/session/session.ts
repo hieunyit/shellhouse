@@ -186,6 +186,7 @@ export class Session {
           ...(this.extras.jumps ? { jumps: this.extras.jumps } : {}),
           cols: this.spec.cols,
           rows: this.spec.rows,
+          ...(this.spec.noShell ? { shell: false } : {}),
           callbacks,
           ctx: this.context(),
           ...this.deps.sshOverrides

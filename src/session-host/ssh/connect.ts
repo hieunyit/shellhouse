@@ -94,6 +94,8 @@ export interface HopConfig {
 export interface SshOpenOptions {
   /** Đích cuối. */
   destination: HopConfig
+  /** false = chỉ kết nối + xác thực, không mở shell (tab SFTP). Mặc định true. */
+  shell?: boolean
   /** Các jump host theo thứ tự (ProxyJump). */
   jumps?: readonly HopConfig[]
   cols: number
@@ -238,29 +240,32 @@ export class SshShell implements Transport {
     /** Client của đích cuối — dùng cho SFTP và port forwarding. */
     readonly client: Client,
     private readonly chain: readonly Client[],
-    private readonly stream: ClientChannel,
+    /** null = kết nối chỉ để truyền file (SFTP), không mở shell trên server. */
+    private readonly stream: ClientChannel | null,
     callbacks: TransportCallbacks
   ) {
     let exitCode: number | null = null
     let exitSignal: number | null = null
-    const onData = (chunk: Buffer): void => {
-      callbacks.onData(chunk)
-    }
-    stream.on('data', onData)
-    stream.stderr.on('data', onData)
-    stream.on('exit', (code: number | null, signal?: string) => {
-      exitCode = typeof code === 'number' ? code : null
-      exitSignal = signal ? 1 : null
-    })
     const finish = (error?: string): void => {
       if (this.exited) return
       this.exited = true
       callbacks.onExit({ code: exitCode, signal: exitSignal, ...(error ? { error } : {}) })
       this.endAll()
     }
-    stream.on('close', () => {
-      finish()
-    })
+    if (stream) {
+      const onData = (chunk: Buffer): void => {
+        callbacks.onData(chunk)
+      }
+      stream.on('data', onData)
+      stream.stderr.on('data', onData)
+      stream.on('exit', (code: number | null, signal?: string) => {
+        exitCode = typeof code === 'number' ? code : null
+        exitSignal = signal ? 1 : null
+      })
+      stream.on('close', () => {
+        finish()
+      })
+    }
     // Bất kỳ chặng nào rớt (kể cả jump host) đều làm mất shell.
     for (const c of chain) {
       c.on('error', (error: Error) => {
@@ -273,24 +278,24 @@ export class SshShell implements Transport {
   }
 
   write(data: string): void {
-    if (!this.exited) this.stream.write(data)
+    if (!this.exited) this.stream?.write(data)
   }
 
   resize(cols: number, rows: number): void {
-    if (!this.exited) this.stream.setWindow(rows, cols, 0, 0)
+    if (!this.exited) this.stream?.setWindow(rows, cols, 0, 0)
   }
 
   pause(): void {
-    this.stream.pause()
+    this.stream?.pause()
   }
 
   resume(): void {
-    this.stream.resume()
+    this.stream?.resume()
   }
 
   close(): void {
     if (this.exited) return
-    this.stream.close()
+    this.stream?.close()
     this.endAll()
   }
 
@@ -329,6 +334,12 @@ export async function openSshShell(options: SshOpenOptions): Promise<SshShell> {
     }
 
     const last = clients.at(-1) as Client
+    if (options.shell === false) {
+      // Chỉ truyền file: không mở shell (server không ghi nhận phiên đăng nhập shell, không chạy
+      // .bashrc / motd).
+      ctx.status('connected', 'Authenticated — file transfer only (no shell opened)')
+      return new SshShell(last, clients, null, options.callbacks)
+    }
     ctx.status('connected', 'Authenticated, opening shell…')
     const stream = await new Promise<ClientChannel>((resolve, reject) => {
       last.shell({ term: 'xterm-256color', cols: options.cols, rows: options.rows }, (error, s) => {

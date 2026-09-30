@@ -346,10 +346,17 @@ test('chuột phải host → Open SFTP: trình quản lý file hai cột Local 
       localPane.locator('[data-testid="local-entry"][data-name="tren-server.txt"]')
     ).toBeVisible()
 
-    // Xem terminal của cùng kết nối.
+    // Tab SFTP không mở shell trên server (không có yêu cầu PTY) — cho tới khi xem terminal.
+    expect(server.events.ptyRequests).toHaveLength(0)
     await page.getByTestId('toggle-files').click()
     await expect(manager).toHaveCount(0)
     await waitForText(page, await activeTab(page), 'welcome to test server')
+    expect(server.events.ptyRequests).toHaveLength(1)
+    // Quay lại file manager vẫn dùng được (kết nối mới, có shell).
+    await page.getByTestId('toggle-files').click()
+    await expect(
+      remotePane.locator('[data-testid="sftp-entry"][data-name="tren-may.txt"]')
+    ).toBeVisible()
   } finally {
     // Windows: sftp-server.exe (cwd = thư mục remote) còn sống tới lúc app đóng → EPERM; thư mục
     // tạm để hệ điều hành dọn.

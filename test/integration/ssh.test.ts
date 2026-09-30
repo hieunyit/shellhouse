@@ -7,7 +7,8 @@ import {
   hostKeyAlgorithms,
   openSshShell,
   type HopConfig,
-  type SshOpenOptions
+  type SshOpenOptions,
+  type SshShell
 } from '../../src/session-host/ssh/connect'
 import type { StoredCredentials } from '../../src/session-host/ssh/auth'
 import type { PromptReply, Transport, TransportExit } from '../../src/session-host/transport/types'
@@ -57,6 +58,7 @@ interface ConnectOpts {
   agent?: string
   logs?: string[]
   storedOnly?: boolean
+  shell?: boolean
 }
 
 async function connectTo(opts: ConnectOpts): Promise<Harness> {
@@ -83,6 +85,7 @@ async function connectTo(opts: ConnectOpts): Promise<Harness> {
     ...(opts.jumps ? { jumps: opts.jumps } : {}),
     cols: spec.cols,
     rows: spec.rows,
+    ...(opts.shell === false ? { shell: false } : {}),
     agent: opts.agent ?? null,
     keyFiles: opts.keyFiles ?? [],
     ...(opts.timeouts ? { timeouts: opts.timeouts } : {}),
@@ -388,6 +391,31 @@ describe('SSH: ProxyJump', () => {
         ]
       })
     ).rejects.toThrow(/could not open a channel/)
+  })
+})
+
+describe('SSH: chỉ truyền file (không mở shell)', () => {
+  it('không có yêu cầu PTY/shell tới server; SFTP vẫn dùng được; đóng thì báo kết thúc', async () => {
+    const s = await server([{ username: 'alice', password: 's3cret' }])
+    const h = await connectTo({
+      port: s.port,
+      username: 'alice',
+      hostKey: 'match',
+      credentials: { password: 's3cret' },
+      shell: false
+    })
+    expect(s.events.ptyRequests).toEqual([])
+    const shell = h.transport as SshShell
+    const channel = await new Promise((resolve, reject) => {
+      shell.client.sftp((err, sftp) => {
+        if (err) reject(err)
+        else resolve(sftp)
+      })
+    })
+    expect(channel).toBeTruthy()
+    h.transport.write('ignored\r') // không có shell → không làm gì, không lỗi
+    h.transport.close()
+    await expect(h.exit).resolves.toBeTruthy()
   })
 })
 

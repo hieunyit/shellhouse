@@ -288,7 +288,15 @@ function registerIpc(): void {
               }
             : {})
         }
-        supervisor.openSession(sessionId, { kind: 'ssh', ...size, target }, port1, ssh, log)
+        const noShell = spec.noShell === true
+        supervisor.openSession(
+          sessionId,
+          { kind: 'ssh', ...size, target, ...(noShell ? { noShell: true } : {}) },
+          port1,
+          ssh,
+          // Không có shell thì không có gì để ghi log.
+          noShell ? undefined : log
+        )
       }
       if (resolved) send('hosts:changed', null) // cập nhật "dùng gần nhất"
     }
