@@ -389,20 +389,27 @@ export class TerminalController {
       // Đọc màn hình SAU khi echo về (gõ nhanh / SSH chậm: lúc nhấn Enter phần cuối chưa hiện).
       // Chỉ lưu thứ đã hiện trên màn hình → mật khẩu (không echo) không bao giờ vào lịch sử.
       const target = this.historyTarget
-      window.setTimeout(() => {
+      // Echo có thể tới chậm (SSH xa, zsh / PSReadLine vẽ lại cả dòng, máy bận) → thử lại tới 3 s.
+      // Mật khẩu không bao giờ hiện nên sau 3 s bỏ qua — không lưu.
+      const attempt = (left: number): void => {
         if (this.disposed) return
-        // Gõ nhanh rồi Enter ngay: lúc đó chữ chưa echo → tìm dòng chứa lệnh sau khi đã hiện.
         const start = known ?? this.findEchoed(typed, fromRow)
-        if (!start) return
-        const shown = this.textFrom(start)
-        if (shown === null) return
+        const shown = start ? this.textFrom(start) : null
         const command = dirty ? shown : typed
-        if (command.trim() && shown.trimEnd().startsWith(command.trimEnd())) {
+        if (shown !== null && command?.trim() && shown.trimEnd().startsWith(command.trimEnd())) {
           recordCommand(target, command)
           // Người dùng có thể đã gõ tiếp trong lúc chờ → tính lại gợi ý.
           this.scheduleGhost()
+          return
         }
-      }, 300)
+        if (left > 0)
+          window.setTimeout(() => {
+            attempt(left - 1)
+          }, 150)
+      }
+      window.setTimeout(() => {
+        attempt(20)
+      }, 150)
       return
     }
     if (data === '\x03' || data === '\x04' || data === '\x15') {

@@ -20,6 +20,14 @@ test('gợi ý lệnh từ lịch sử: chữ mờ sau con trỏ, → để nh�
   await waitForText(page, tab, first.expected)
   await typeLine(` ${echoComputed('bi-mat').command}`) // dấu cách đầu → không lưu
 
+  // Bước 1: lệnh đã vào lịch sử (tách riêng để biết lỗi ở khâu lưu hay khâu hiện gợi ý).
+  const target = 'local:default'
+  await expect
+    .poll(() => page.evaluate((t) => window.shellhouse.commandHistory(t), target), {
+      timeout: 10_000
+    })
+    .toContain(first.command)
+  // Bước 2: gõ phần đầu → gợi ý phần còn lại.
   const ghost = page.getByTestId('command-suggestion')
   await page.keyboard.type(first.command.slice(0, 8))
   await expect(ghost).toHaveText(first.command.slice(8))
