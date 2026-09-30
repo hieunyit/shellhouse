@@ -50,6 +50,8 @@ export interface TestServerEvents {
   ptyRequests: { cols: number; rows: number; term: string }[]
   windowChanges: { cols: number; rows: number }[]
   authAttempts: { method: string; username: string }[]
+  /** Kênh streamlocal client xin mở (đường dẫn socket). */
+  streamLocal: string[]
 }
 
 export interface TestSshServer {
@@ -135,6 +137,13 @@ export async function startTestSshServer(
     sftpRoot?: string
     /** Bật exec: lệnh chạy bằng /bin/sh với HOME này. */
     execHome?: string
+    /** Thư mục thêm vào đầu PATH của lệnh exec (chương trình giả: `docker`…). */
+    execPath?: string
+    /**
+     * streamlocal (kênh tới unix socket trên "server", như `ssh -L /path`): đường dẫn client xin →
+     * socket thật trên máy test. Không có = từ chối (như AllowStreamLocalForwarding no).
+     */
+    streamLocal?: Record<string, string>
   } = {}
 ): Promise<TestSshServer> {
   const hostKey = options.hostKey ?? generateTestKey()
@@ -144,7 +153,8 @@ export async function startTestSshServer(
     directTcpip: [],
     ptyRequests: [],
     windowChanges: [],
-    authAttempts: []
+    authAttempts: [],
+    streamLocal: []
   }
 
   const clients = new Set<Connection>()
@@ -302,6 +312,38 @@ export async function startTestSshServer(
           reject()
         })
       })
+      // ssh2 có sự kiện này nhưng @types/ssh2 thiếu.
+      ;(
+        client as unknown as {
+          on(
+            event: 'openssh.streamlocal',
+            listener: (
+              accept: () => import('ssh2').ServerChannel,
+              reject: () => void,
+              info: { socketPath: string }
+            ) => void
+          ): void
+        }
+      ).on('openssh.streamlocal', (accept, reject, info) => {
+        events.streamLocal.push(info.socketPath)
+        const target = options.streamLocal?.[info.socketPath]
+        if (!target) {
+          reject()
+          return
+        }
+        const upstream = connect(target)
+        upstream.once('connect', () => {
+          const channel = accept()
+          channel.pipe(upstream).pipe(channel)
+          channel.on('close', () => upstream.destroy())
+          upstream.on('close', () => {
+            channel.close()
+          })
+        })
+        upstream.once('error', () => {
+          reject()
+        })
+      })
       client.on('session', (accept) => {
         const session = accept()
         const size = { cols: 80, rows: 24 }
@@ -330,7 +372,12 @@ export async function startTestSshServer(
           }
           const channel = acceptExec()
           const child = spawn('/bin/sh', ['-c', info.command], {
-            env: { HOME: options.execHome, PATH: process.env['PATH'] ?? '/usr/bin:/bin' }
+            env: {
+              HOME: options.execHome,
+              PATH: [options.execPath, process.env['PATH'] ?? '/usr/bin:/bin']
+                .filter(Boolean)
+                .join(':')
+            }
           })
           channel.pipe(child.stdin)
           child.stdout.pipe(channel)

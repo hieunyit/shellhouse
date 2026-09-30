@@ -89,6 +89,12 @@ const systemSshTestOptions: string[] | null = (() => {
   const parsed: unknown = JSON.parse(raw)
   return Array.isArray(parsed) ? parsed.filter((o): o is string => typeof o === 'string') : null
 })()
+/** Chỉ cho E2E: các đường dẫn coi như có trên máy khi dò dấu hiệu module (không đọc máy thật). */
+const testDetect: string[] | null = (() => {
+  if (!testHooks) return null
+  const parsed: unknown = JSON.parse(process.env['SHELLHOUSE_TEST_DETECT'] ?? '[]')
+  return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === 'string') : []
+})()
 let db: Db | null = null
 let vault: Vault | null = null
 let knownHosts: KnownHosts | null = null
@@ -499,7 +505,10 @@ function registerIpc(): void {
       requireModules().invoke(id, name, args) as Promise<InvokeResult<'modules:invoke'>>
   )
   handle('modules:detectLocal', isTrustedSender, () =>
-    requireModules().detectLocal(existsSync, app.getPath('home'))
+    requireModules().detectLocal(
+      testDetect ? (p) => testDetect.includes(p) : existsSync,
+      app.getPath('home')
+    )
   )
   handle('history:list', isTrustedSender, (target) => requireHistory().list(target))
   handle('history:record', isTrustedSender, (target, command) => {
@@ -692,6 +701,7 @@ if (!app.requestSingleInstanceLock()) {
     powerMonitor.on('suspend', () => controllerRef.onPowerEvent('suspend'))
     powerMonitor.on('lock-screen', () => controllerRef.onPowerEvent('lock-screen'))
     const hostKeys = knownHosts
+    const modulesRef = modules
     supervisor.onEvent((event) => {
       if (event.type === 'hostkey:check') {
         const result = hostKeys.check(event.host, event.port, Buffer.from(event.key, 'base64'))
@@ -699,6 +709,25 @@ if (!app.requestSingleInstanceLock()) {
       } else if (event.type === 'hostkey:trust') {
         hostKeys.trust(event.host, event.port, Buffer.from(event.key, 'base64'))
         log.info(`Trusted a new host key for ${event.host}:${event.port}`)
+      } else if (event.type === 'module:request') {
+        void modulesRef.hostRequest(event.module, event.name, event.params).then(
+          (result) => {
+            supervisor.send({
+              type: 'module:response',
+              requestId: event.requestId,
+              ok: true,
+              result
+            })
+          },
+          (error: unknown) => {
+            supervisor.send({
+              type: 'module:response',
+              requestId: event.requestId,
+              ok: false,
+              error: error instanceof Error ? error.message : String(error)
+            })
+          }
+        )
       } else if (event.type === 'module:grant') {
         void decideProgramGrant(event).then((allowed) => {
           supervisor.send({ type: 'module:grant-result', requestId: event.requestId, allowed })
@@ -706,7 +735,6 @@ if (!app.requestSingleInstanceLock()) {
       }
     })
     // Session Host (khởi động lại) cần biết module nào đang bật.
-    const modulesRef = modules
     supervisor.onStatus((status) => {
       if (status.state === 'running')
         supervisor.send({

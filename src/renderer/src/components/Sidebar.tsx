@@ -43,6 +43,7 @@ import { Logo } from './Logo'
 import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
 import { ModuleSections } from './sidebar/ModuleSections'
+import { moduleHostActions } from '../../../modules/registry/renderer-kit'
 import { useContextMenu, type MenuEntry } from './ContextMenu'
 import { hostTextClass } from './hostColors'
 import {
@@ -357,6 +358,8 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
               }
             ]
           : []),
+        // Docker…, Kubernetes… của các module đang bật.
+        ...moduleHostActions({ hostId: host.id, label: host.label, protocol: host.protocol }),
         'separator',
         favorite,
         ...(host.protocol === 'ssh'

@@ -56,6 +56,8 @@ export interface MainModuleContext {
   ipc: ModuleIpc
   /** → renderer, tên sự kiện tự có tiền tố module. */
   events: { emit(name: string, data: unknown): void }
+  /** Đọc file trên máy — chỉ đường dẫn khai báo trong quyền `read-file` (kubeconfig…). */
+  readFile(path: string): Promise<string>
   log: ModuleLog
 }
 
@@ -65,6 +67,8 @@ export interface MainModuleApi {
    * tham số và giải mã secret; kết quả chỉ đi thẳng sang Session Host (không qua renderer).
    */
   resolveSession?(sessionKind: string, params: unknown): unknown
+  /** Yêu cầu từ phần Session Host của chính module (`ctx.fromMain`). */
+  onHostRequest?(name: string, params: unknown): unknown
   dispose?(): void
 }
 

@@ -70,13 +70,14 @@ function hashFile(path: string): Promise<string> {
 export function spawnProgram(
   path: string,
   args: readonly string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  env?: Record<string, string>
 ): { program: RunningProgram; stdin: NodeJS.WritableStream } {
   const child = spawnChild(path, [...args], {
     shell: false,
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: process.env
+    env: env ? { ...process.env, ...env } : process.env
   })
   const exitListeners: ((code: number | null) => void)[] = []
   let exited = false

@@ -45,6 +45,8 @@ export const ClientMessage = z.discriminatedUnion('t', [
   z.object({ t: z.literal('module-cancel'), id: z.number().int() }),
   /** Gắn module vào kết nối SSH của tab (Docker / K8s qua SSH). */
   z.object({ t: z.literal('module-attach'), module: ModuleId }),
+  /** Dò dấu hiệu của các module đang tắt trên server (gợi ý bật — ADR-014 mục 3.12.4). */
+  z.object({ t: z.literal('module-probe') }),
   /** Thêm public key vào ~/.ssh/authorized_keys của server (như ssh-copy-id). */
   z.object({
     t: z.literal('deploy-key'),
@@ -123,6 +125,8 @@ export type ServerMessage =
   | { t: 'module-result'; id: number; ok: true; result: unknown }
   | { t: 'module-result'; id: number; ok: false; error: string }
   | { t: 'module-event'; module: string; event: string; data: unknown }
+  /** Module đang tắt có dấu hiệu trên server này. */
+  | { t: 'module-suggest'; modules: string[] }
   | { t: 'stats'; stats: ServerStats }
   | { t: 'stats-unsupported'; reason: string }
   | {
@@ -167,6 +171,8 @@ export function isServerMessage(value: unknown): value is ServerMessage {
       return typeof m['id'] === 'number' && typeof m['ok'] === 'boolean'
     case 'module-event':
       return typeof m['module'] === 'string' && typeof m['event'] === 'string'
+    case 'module-suggest':
+      return Array.isArray(m['modules'])
     default:
       return false
   }

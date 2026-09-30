@@ -176,3 +176,24 @@ describe('shellQuote', () => {
     expect(() => shellQuote(['a\0b'])).toThrow()
   })
 })
+
+describe('dò dấu hiệu module trên server', () => {
+  it('lệnh sh chỉ đọc, đường dẫn được quote; không có cách dò → null', async () => {
+    const { probeCommand } = await import('../../src/session-host/modules/probe')
+    expect(
+      probeCommand([
+        {
+          id: 'docker',
+          detect: [
+            { on: 'ssh-connected', probe: 'unix-socket', path: "/var/run/it's.sock" },
+            { on: 'startup', probe: 'local-file', path: '~/.x' }
+          ]
+        },
+        { id: 'svc', detect: [{ on: 'ssh-connected', probe: 'command', command: 'systemctl' }] }
+      ])
+    ).toBe(
+      `test -S '/var/run/it'\\''s.sock' && echo docker; command -v systemctl >/dev/null 2>&1 && echo svc; true`
+    )
+    expect(probeCommand([])).toBeNull()
+  })
+})

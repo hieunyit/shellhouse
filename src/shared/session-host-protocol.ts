@@ -79,6 +79,14 @@ export const HostRequest = z.discriminatedUnion('type', [
     type: z.literal('modules:enabled'),
     ids: z.array(z.string().regex(/^[a-z0-9-]{1,40}$/)).max(100)
   }),
+  /** Trả lời `module:request` của Session Host. */
+  z.object({
+    type: z.literal('module:response'),
+    requestId: z.number().int(),
+    ok: z.boolean(),
+    result: z.unknown().optional(),
+    error: z.string().optional()
+  }),
   z.object({
     type: z.literal('module:grant-result'),
     requestId: z.number().int(),
@@ -119,6 +127,17 @@ export const HostEvent = z.discriminatedUnion('type', [
     host: z.string(),
     port: z.number().int(),
     key: z.base64()
+  }),
+  /**
+   * Phần Session Host của module hỏi phần main của CHÍNH module đó (`ctx.fromMain`) — ví dụ
+   * kubeconfig đã import (mã hoá trong vault): đi thẳng main → Session Host, không qua renderer.
+   */
+  z.object({
+    type: z.literal('module:request'),
+    requestId: z.number().int(),
+    module: z.string().max(40),
+    name: z.string().max(64),
+    params: z.unknown()
   }),
   /** Module muốn chạy chương trình trên máy → main hỏi người dùng (hoặc dùng lựa chọn đã nhớ). */
   z.object({

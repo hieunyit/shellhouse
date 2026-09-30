@@ -18,9 +18,11 @@ import { openSession } from '../../renderer/src/lib/sessions'
 import { useTabs, type ModuleTerminalTarget } from '../../renderer/src/stores/tabs'
 import { useTabStatus } from '../../renderer/src/stores/tab-status'
 import { useSettings } from '../../renderer/src/stores/settings'
+import { useHosts } from '../../renderer/src/stores/hosts'
+import { PromptDialog } from '../../renderer/src/terminal/PromptDialog'
 import { SessionClient } from '../../renderer/src/terminal/session-client'
 import type { TerminalState } from '../../renderer/src/terminal/controller'
-import type { ModuleTabDef, RendererModule } from './renderer-types'
+import type { HostContext, ModuleMenuEntry, ModuleTabDef, RendererModule } from './renderer-types'
 import type { ModuleState } from './types'
 
 /**
@@ -109,6 +111,52 @@ export async function setModuleEnabled(id: string, enabled: boolean): Promise<vo
   }
 }
 
+// ——— Host SSH đã lưu (chỉ thông tin hiển thị — không có thông tin đăng nhập) ———
+
+export interface SavedHostInfo {
+  id: string
+  label: string
+  /** user@hostname */
+  address: string
+  protocol: string
+}
+
+/** Host đã lưu (để module chọn server chạy trên đó). */
+export function useSavedHosts(): SavedHostInfo[] {
+  const hosts = useHosts((s) => s.tree.hosts)
+  return useMemo(
+    () =>
+      hosts.map((h) => ({
+        id: h.id,
+        label: h.label,
+        address: `${h.username}@${h.hostname}`,
+        protocol: h.protocol
+      })),
+    [hosts]
+  )
+}
+
+export function savedHost(id: string): SavedHostInfo | undefined {
+  const h = useHosts.getState().tree.hosts.find((x) => x.id === id)
+  return h
+    ? { id: h.id, label: h.label, address: `${h.username}@${h.hostname}`, protocol: h.protocol }
+    : undefined
+}
+
+/**
+ * Hộp hỏi mật khẩu / passphrase / host key cho phiên module chạy qua SSH (cùng hộp thoại của tab
+ * terminal). Đặt trong khung `relative` của tab.
+ */
+export function ConnectionPrompt({
+  prompt,
+  onAnswer
+}: {
+  prompt: { id: number; request: PromptRequest }
+  onAnswer: (ok: boolean, answers: string[]) => void
+}): React.JSX.Element {
+  return <PromptDialog prompt={prompt} onAnswer={onAnswer} />
+}
+
 // ——— Cài đặt riêng của module (`settings.modules.<id>`) ———
 
 /** Đọc cài đặt của module bằng schema của nó (trường hỏng / thiếu → mặc định của schema). */
@@ -119,6 +167,15 @@ export function useModuleSettings<T>(id: string, schema: ZodType<T>): T {
 
 export function updateModuleSettings(id: string, patch: Record<string, unknown>): Promise<void> {
   return useSettings.getState().update({ modules: { [id]: patch } })
+}
+
+/** Mục của các module đang bật trong menu chuột phải của một host đã lưu (ADR-014 mục 3.8). */
+export function moduleHostActions(host: HostContext): ModuleMenuEntry[] {
+  return registered
+    .filter((m) => isModuleEnabled(m.manifest.id))
+    .flatMap((m) =>
+      (m.hostActions?.(host) ?? []).map((a) => ({ ...a, id: `module:${m.manifest.id}:${a.id}` }))
+    )
 }
 
 // ——— IPC và sự kiện của main ———

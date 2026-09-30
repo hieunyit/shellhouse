@@ -10,6 +10,7 @@ import {
   spawnProgram
 } from '../../session-host/modules/local-programs'
 import { collect } from '../../session-host/modules/ssh-capability'
+import { expandHome, localPathAllowed } from './local-paths'
 import type {
   HostModule,
   HostModuleContext,
@@ -17,7 +18,12 @@ import type {
   LimitedSpawn,
   SshCapability
 } from './host-types'
-import { matchPathPattern, type ModuleBinary, type ModuleManifest } from './types'
+import {
+  matchPathPattern,
+  type ModuleBinary,
+  type ModuleDetector,
+  type ModuleManifest
+} from './types'
 
 /**
  * Registry của Session Host (ADR-014 mục 3.4, 3.6): tạo phiên module, gắn module vào kết nối SSH,
@@ -40,19 +46,18 @@ export interface HostRegistryDeps {
     path: string,
     sha256: string
   ): Promise<boolean>
+  /** Chuyển yêu cầu `ctx.fromMain` tới main. */
+  requestMain?(module: string, name: string, params: unknown): Promise<unknown>
   /** Cho test. */
   findProgram?(name: string): string | null
   home?: string
+  env?: NodeJS.ProcessEnv
 }
 
 /** Nơi phiên module gửi sự kiện / danh sách truyền file (port của tab). */
 export interface ModuleSink {
   emit(event: string, data: unknown): void
   transfers(list: TransferStatus[]): void
-}
-
-function expandHome(path: string, home: string): string {
-  return path === '~' ? home : path.startsWith('~/') ? `${home}${path.slice(1)}` : path
 }
 
 export class HostModuleRegistry {
@@ -74,6 +79,17 @@ export class HostModuleRegistry {
 
   isEnabled(id: string): boolean {
     return this.enabled.has(id)
+  }
+
+  /** Module đang TẮT có cách dò trên kết nối SSH (để gợi ý bật). */
+  probeTargets(): { id: string; detect: readonly ModuleDetector[] }[] {
+    return [...this.modules.values()]
+      .filter((m) => !this.enabled.has(m.manifest.id))
+      .map((m) => ({
+        id: m.manifest.id,
+        detect: (m.manifest.detect ?? []).filter((d) => d.on === 'ssh-connected')
+      }))
+      .filter((t) => t.detect.length > 0)
   }
 
   manifest(id: string): ModuleManifest | null {
@@ -142,14 +158,13 @@ export class HostModuleRegistry {
   private context(manifest: ModuleManifest, sink: ModuleSink): HostModuleContext {
     const id = manifest.id
     const home = this.deps.home ?? homedir()
+    const paths = {
+      home,
+      env: this.deps.env ?? process.env,
+      platform: process.platform
+    }
     const pathAllowed = (kind: 'local-socket' | 'read-file', path: string): boolean =>
-      manifest.permissions.some((p) => {
-        if (p.kind !== kind) return false
-        const pattern = expandHome(p.path, home)
-        return pattern.endsWith('/**')
-          ? path.startsWith(pattern.slice(0, -2))
-          : matchPathPattern(pattern, path)
-      })
+      localPathAllowed(manifest, kind, path, paths)
     return {
       emit: (event, data) => {
         sink.emit(event, data)
@@ -179,7 +194,11 @@ export class HostModuleRegistry {
       },
       log: (level, message) => {
         this.deps.log(level, `[${id}] ${message}`)
-      }
+      },
+      fromMain: (name, params) =>
+        this.deps.requestMain
+          ? this.deps.requestMain(id, name, params)
+          : Promise.reject(new Error('Not available'))
     }
   }
 
@@ -215,7 +234,7 @@ export class HostModuleRegistry {
       available: (binary) => find(binary) !== null,
       exec: async (binary, args, options = {}) => {
         const path = await resolve(binary)
-        const { program, stdin } = spawnProgram(path, args, options.signal)
+        const { program, stdin } = spawnProgram(path, args, options.signal, options.env)
         const result = collect(program, options, (input) => {
           stdin.end(input)
         })

@@ -2,7 +2,10 @@ import type { ZodType } from 'zod'
 import type { AppSettings, ModuleEntry, SettingsPatch } from '@shared/settings'
 import type { Db } from '../../main/store/db'
 import type { Vault } from '../../main/vault/vault'
+import { readFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { createModuleDb, migrateModule, removeModuleData } from './main-db'
+import { expandHome, localPathAllowed } from './local-paths'
 import type { MainModule, MainModuleApi, MainModuleContext, ModuleLog } from './main-types'
 import { tablePrefix, type ModuleManifest, type ModuleState } from './types'
 
@@ -25,6 +28,9 @@ export interface MainRegistryDeps {
   onStatesChanged(states: ModuleState[]): void
   log: (level: 'info' | 'warn' | 'error', message: string) => void
   now?: () => number
+  /** Cho test: home / biến môi trường khi kiểm quyền đọc file. */
+  home?: string
+  env?: NodeJS.ProcessEnv
 }
 
 interface Active {
@@ -127,6 +133,14 @@ export class MainModuleRegistry {
       throw new Error('Invalid arguments')
     }
     return entry.handler(...(parsed.data as unknown[]))
+  }
+
+  /** `ctx.fromMain` của phần Session Host → handler của phần main cùng module. */
+  async hostRequest(id: string, name: string, params: unknown): Promise<unknown> {
+    const active = this.active.get(id)
+    if (!active) throw new ModuleNotEnabledError(id)
+    if (!active.api.onHostRequest) throw new Error(`Module ${id} does not answer host requests`)
+    return await active.api.onHostRequest(name, params)
   }
 
   /**
@@ -270,6 +284,18 @@ export class MainModuleRegistry {
         emit: (name, data) => {
           if (this.active.has(id)) this.deps.emit(id, name, data)
         }
+      },
+      readFile: async (path) => {
+        const ctx = {
+          home: this.deps.home ?? homedir(),
+          env: this.deps.env ?? process.env,
+          platform: process.platform
+        }
+        if (!localPathAllowed(module.manifest, 'read-file', path, ctx))
+          throw new Error(
+            `Module ${id} is not allowed to read ${path} (not declared in its manifest)`
+          )
+        return readFile(expandHome(path, ctx.home), 'utf8')
       },
       log
     }

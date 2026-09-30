@@ -61,3 +61,52 @@ export async function requestDisableModule(id: string): Promise<boolean> {
   await setModuleEnabled(id, false)
   return true
 }
+
+// ——— Gợi ý đúng lúc (ADR-014 mục 3.12.4) ———
+
+const SUGGEST_EVERY_MS = 30 * 24 * 3600 * 1000
+const PROBE_EVERY_MS = 7 * 24 * 3600 * 1000
+const PROBE_KEY = 'shellhouse.moduleProbe'
+
+/** Trong các module có dấu hiệu, những module nên gợi ý lúc này (đang tắt, chưa bị từ chối…). */
+export function suggestable(ids: readonly string[], now = Date.now()): string[] {
+  const { settings } = useSettings.getState()
+  if (!settings.moduleOptions.suggest) return []
+  return ids.filter((id) => {
+    const entry = settings.modules[id]
+    const manifest = manifestOf(id)
+    if (!manifest || entry?.neverSuggest) return false
+    const enabled = entry?.enabled ?? manifest.enabledByDefault
+    if (enabled) return false
+    return entry?.suggestedAt === undefined || now - entry.suggestedAt > SUGGEST_EVERY_MS
+  })
+}
+
+/** Đã hiện gợi ý → không hiện lại trong 30 ngày. */
+export function markSuggested(id: string, now = Date.now()): void {
+  void useSettings.getState().update({ modules: { [id]: { suggestedAt: now } } })
+}
+
+export function neverSuggest(id: string): void {
+  void useSettings.getState().update({ modules: { [id]: { neverSuggest: true } } })
+}
+
+/** Nên dò host này chưa (mỗi host tối đa một lần / 7 ngày; nhớ trên máy này). */
+export function shouldProbe(hostKey: string, now = Date.now()): boolean {
+  if (!useSettings.getState().settings.moduleOptions.suggest) return false
+  let seen: Record<string, number>
+  try {
+    seen = JSON.parse(localStorage.getItem(PROBE_KEY) ?? '{}') as Record<string, number>
+  } catch {
+    seen = {}
+  }
+  const last = seen[hostKey]
+  if (last !== undefined && now - last < PROBE_EVERY_MS) return false
+  seen[hostKey] = now
+  try {
+    localStorage.setItem(PROBE_KEY, JSON.stringify(seen))
+  } catch {
+    // Không lưu được — lần sau dò lại, không sao.
+  }
+  return true
+}

@@ -44,7 +44,13 @@ export async function launchApp(extraEnv: Record<string, string> = {}): Promise<
   if (!created.ok) throw new Error(`Không tạo được vault: ${created.message}`)
   // Tự khoá đo thời gian rảnh của CẢ MÁY: chạy test trên máy thật mà không ai chạm chuột lâu hơn
   // 15 phút thì vault tự khoá giữa chừng. Test nào cần thì tự bật lại.
-  await page.evaluate(() => window.shellhouse.updateSettings({ security: { autoLockMinutes: 0 } }))
+  // Gợi ý module dò máy / server thật (có Docker hay không) → tắt để test không phụ thuộc máy chạy.
+  await page.evaluate(() =>
+    window.shellhouse.updateSettings({
+      security: { autoLockMinutes: 0 },
+      moduleOptions: { suggest: false }
+    })
+  )
   await page.waitForFunction(() => {
     if (!('__shellhouseTest' in window)) return false
     const hooks = window.__shellhouseTest

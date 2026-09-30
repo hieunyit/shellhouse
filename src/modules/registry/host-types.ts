@@ -33,6 +33,8 @@ export interface ExecOptions {
   signal?: AbortSignal
   /** Giới hạn byte stdout giữ lại (mặc định 16 MB). */
   maxOutputBytes?: number
+  /** Biến môi trường thêm (chỉ chương trình trên máy; bỏ qua với SSH). */
+  env?: Record<string, string>
 }
 
 /**
@@ -83,6 +85,8 @@ export interface HostModuleContext {
   /** Đọc file trên máy (kubeconfig). Cần quyền `read-file` khớp đường dẫn (`~` = home). */
   readFile(path: string): Promise<string>
   log(level: 'info' | 'warn' | 'error', message: string): void
+  /** Hỏi phần main của chính module (`MainModuleApi.onHostRequest`). */
+  fromMain(name: string, params: unknown): Promise<unknown>
 }
 
 export interface HostModuleSession {

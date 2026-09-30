@@ -18,6 +18,7 @@
     "src/modules/registry/all-host.ts",
     "src/modules/registry/host-types.ts",
     "src/modules/registry/session-host.ts",
+    "src/modules/registry/local-paths.ts",
     "src/modules/*/manifest.ts",
     "src/modules/*/shared/**/*",
     "src/modules/*/main/**/*",

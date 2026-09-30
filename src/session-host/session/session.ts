@@ -32,6 +32,7 @@ import { classifyConnectError } from './exit-reason'
 import type { HostModuleSession } from '../../modules/registry/host-types'
 import type { HostModuleRegistry, ModuleSink } from '../../modules/registry/session-host'
 import { createSshCapability } from '../modules/ssh-capability'
+import { probeCommand, runProbe } from '../modules/probe'
 import { SessionLog, type SessionLogOptions } from './session-log'
 
 const MAX_PENDING_INPUT = 64 * 1024
@@ -557,6 +558,16 @@ export class Session {
     return pending
   }
 
+  private async probeModules(): Promise<void> {
+    const ssh = await this.waitForSsh()
+    const command = probeCommand(this.deps.modules.probeTargets())
+    if (!ssh || !command || this.isClosed()) return
+    const found = await runProbe(ssh.client, command)
+    const known = new Set(this.deps.modules.probeTargets().map((t) => t.id))
+    const modules = found.filter((id) => known.has(id))
+    if (modules.length > 0) this.post({ t: 'module-suggest', modules })
+  }
+
   private async runModuleOp(id: number, module: string, op: unknown): Promise<void> {
     const controller = new AbortController()
     this.moduleOps.set(id, controller)
@@ -649,6 +660,9 @@ export class Session {
         break
       case 'module-cancel':
         this.moduleOps.get(message.id)?.abort()
+        break
+      case 'module-probe':
+        void this.probeModules()
         break
       case 'module-attach':
         // Lỗi gắn được báo qua kết quả của thao tác kế tiếp.

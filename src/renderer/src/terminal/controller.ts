@@ -25,6 +25,7 @@ import { tabTitle } from '@shared/tab-title'
 import { looksLikePrompt, MACRO_STEP_TIMEOUT_MS, type MacroStep } from '@shared/macro'
 import { loadHistory, recordCommand, suggestRest } from './suggestions'
 import { windowsPty } from '../lib/platform'
+import { shouldProbe } from '../stores/module-ui'
 
 export interface ActivePrompt {
   id: number
@@ -48,6 +49,8 @@ export interface ControllerEvents {
   onContextMenu?(x: number, y: number): void
   /** Shell thoát bình thường (code 0) → tab nên đóng. */
   onCleanExit(): void
+  /** Module đang tắt có dấu hiệu trên server này (Docker…) — gợi ý bật. */
+  onModuleSuggest?(modules: string[]): void
 }
 
 export type TerminalState =
@@ -845,6 +848,12 @@ export class TerminalController {
             this.reconnectAttempt = 0
             if (this.state === 'connecting') this.setState('connected')
             this.events.onConnectedChange(true)
+            // SSH tích hợp tới host thật: dò nhẹ dấu hiệu module (Docker…) — mỗi host 7 ngày một lần.
+            if (
+              (this.target.kind === 'host' || this.target.kind === 'ssh') &&
+              shouldProbe(this.historyTarget)
+            )
+              this.client?.probeModules()
           }
         },
         prompt: (id, request) => {
@@ -860,6 +869,9 @@ export class TerminalController {
         },
         transfers: (list) => {
           this.events.onTransfers(list)
+        },
+        moduleSuggest: (modules) => {
+          this.events.onModuleSuggest?.(modules)
         },
         stats: (stats) => {
           this.events.onStats?.(stats)

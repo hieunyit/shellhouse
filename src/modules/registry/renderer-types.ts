@@ -35,6 +35,8 @@ export function defineTab<P>(def: ModuleTabDef<P>): ModuleTabDef {
 export interface HostContext {
   hostId: string
   label: string
+  /** 'ssh' | 'telnet' | 'serial' — module chạy trên SSH chỉ gắn vào host SSH. */
+  protocol: string
 }
 
 export interface ModuleMenuEntry {

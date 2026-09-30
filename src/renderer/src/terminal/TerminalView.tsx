@@ -18,6 +18,7 @@ import type { ServerStats } from '@shared/server-stats'
 import { PromptDialog } from './PromptDialog'
 import { ServerStatsBar } from './ServerStatsBar'
 import { controllers } from './registry'
+import { ModuleSuggestion } from '../components/ModuleSuggestion'
 
 type Panel = 'forwards' | 'sftp' | null
 
@@ -38,6 +39,8 @@ export function TerminalView({
   const [forwards, setForwards] = useState<ForwardStatus[]>([])
   const [transfers, setTransfers] = useState<TransferStatus[]>([])
   const [connected, setConnected] = useState(false)
+  /** Module có dấu hiệu trên server này (gợi ý bật). */
+  const [detected, setDetected] = useState<string[]>([])
   /** undefined = chưa có số liệu / tắt; null = server không hỗ trợ. */
   const [stats, setStats] = useState<ServerStats | null | undefined>(undefined)
   /** 'files' = trình quản lý file hai cột (Local | Remote); terminal vẫn chạy phía sau. */
@@ -104,6 +107,7 @@ export function TerminalView({
       onTransfers: setTransfers,
       onStats: setStats,
       onConnectedChange: setConnected,
+      onModuleSuggest: setDetected,
       onContextMenu: (x, y) => {
         useTerminalMenu.getState().open(tabId, x, y)
       },
@@ -238,6 +242,12 @@ export function TerminalView({
             </>
           )}
         </div>
+      )}
+      {detected.length > 0 && (
+        <ModuleSuggestion
+          candidates={detected}
+          where={`on ${useTabs.getState().tabs.find((t) => t.id === tabId)?.title ?? 'this server'}`}
+        />
       )}
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">

@@ -23,6 +23,8 @@ export interface SessionClientHandlers {
   stats(stats: ServerStats | null): void
   /** Sự kiện của module (log stream, watch…). */
   moduleEvent?(module: string, event: string, data: unknown): void
+  /** Module đang tắt có dấu hiệu trên server (gợi ý bật). */
+  moduleSuggest?(modules: string[]): void
 }
 
 /** Đầu renderer của một MessagePort session: nhận output + ack, gửi input/resize. */
@@ -87,6 +89,11 @@ export class SessionClient {
           pending?.({ status: message.status, message: message.message })
           break
         }
+        case 'module-suggest':
+          handlers.moduleSuggest?.(
+            message.modules.filter((m): m is string => typeof m === 'string')
+          )
+          break
         case 'module-event':
           handlers.moduleEvent?.(message.module, message.event, message.data)
           break
@@ -140,6 +147,11 @@ export class SessionClient {
       })
       this.send({ t: 'module', id, module, op })
     })
+  }
+
+  /** Dò dấu hiệu module trên server (trả lời bằng `moduleSuggest`). */
+  probeModules(): void {
+    this.send({ t: 'module-probe' })
   }
 
   /** Gắn module vào kết nối SSH của phiên này. */

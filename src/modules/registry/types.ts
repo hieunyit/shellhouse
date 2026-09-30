@@ -90,7 +90,9 @@ export function describePermission(p: ModulePermission): string {
     case 'ssh-tunnel':
       return 'Opens tunnels through SSH hosts you choose'
     case 'local-socket':
-      return `Connects to ${p.path} on this computer`
+      return p.path === '$DOCKER_HOST'
+        ? 'Connects to the Docker socket set in DOCKER_HOST'
+        : `Connects to ${p.path} on this computer`
     case 'run-program':
       return `May run \`${p.binary}\` on this computer — asks first`
     case 'read-file':

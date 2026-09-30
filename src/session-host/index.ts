@@ -46,8 +46,20 @@ const hostKeyRequests = new Map<number, (result: HostKeyCheck) => void>()
 let nextGrantRequest = 1
 const grantRequests = new Map<number, (allowed: boolean) => void>()
 
+let nextMainRequest = 1
+const mainRequests = new Map<
+  number,
+  { resolve: (v: unknown) => void; reject: (e: Error) => void }
+>()
+
 const modules = new HostModuleRegistry(HOST_MODULES, {
   log,
+  requestMain: (module, name, params) =>
+    new Promise((resolve, reject) => {
+      const requestId = nextMainRequest++
+      mainRequests.set(requestId, { resolve, reject })
+      post({ type: 'module:request', requestId, module, name, params })
+    }),
   requestProgramGrant: (module, binary, path, sha256) =>
     new Promise((resolve) => {
       const requestId = nextGrantRequest++
@@ -151,6 +163,13 @@ port.on('message', (event) => {
     case 'modules:enabled':
       modules.setEnabled(request.ids)
       break
+    case 'module:response': {
+      const pending = mainRequests.get(request.requestId)
+      mainRequests.delete(request.requestId)
+      if (request.ok) pending?.resolve(request.result)
+      else pending?.reject(new Error(request.error ?? 'Failed'))
+      break
+    }
     case 'module:grant-result': {
       const resolve = grantRequests.get(request.requestId)
       grantRequests.delete(request.requestId)
