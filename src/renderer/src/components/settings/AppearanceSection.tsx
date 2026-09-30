@@ -1,6 +1,6 @@
 import { Monitor, Moon, Sun } from 'lucide-react'
 import { useSettings } from '../../stores/settings'
-import { cx, SectionTitle } from '../ui'
+import { Checkbox, cx, SectionTitle } from '../ui'
 
 const OPTIONS = [
   { value: 'system', label: 'System', icon: Monitor, hint: 'Follow the operating system' },
@@ -37,6 +37,25 @@ export function AppearanceSection(): React.JSX.Element {
             <span className="-mt-2 text-xs text-muted">{o.hint}</span>
           </button>
         ))}
+      </div>
+      <div className="mt-6">
+        <SectionTitle description="Shortcuts at the top of the sidebar. The hosts stay in their groups either way.">
+          Sidebar
+        </SectionTitle>
+        <div className="flex flex-col gap-3">
+          <Checkbox
+            label="Show Favorites"
+            checked={settings.appearance.showFavorites}
+            data-testid="setting-show-favorites"
+            onChange={(e) => void update({ appearance: { showFavorites: e.target.checked } })}
+          />
+          <Checkbox
+            label="Show Recent (last 5 hosts you connected to)"
+            checked={settings.appearance.showRecent}
+            data-testid="setting-show-recent"
+            onChange={(e) => void update({ appearance: { showRecent: e.target.checked } })}
+          />
+        </div>
       </div>
     </div>
   )

@@ -10,6 +10,7 @@ import {
 } from 'react'
 import {
   ChevronRight,
+  EyeOff,
   ChevronsDownUp,
   ChevronsUpDown,
   Clock,
@@ -39,6 +40,7 @@ import { countHostsRecursive, groupMoveProblem } from '@shared/group-tree'
 import type { GroupSummary, HostSummary } from '@shared/hosts'
 import { GroupForm, HostForm, ImportDialog } from '../lazy'
 import { useHosts } from '../stores/hosts'
+import { useSettings } from '../stores/settings'
 import { useContextMenu, type MenuEntry } from './ContextMenu'
 import { hostTextClass } from './hostColors'
 import {
@@ -179,6 +181,8 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
   const allCollapsed = groups.length > 0 && groups.every((g) => collapsed.has(g.id))
 
   const favorites = useMemo(() => hosts.filter((h) => h.favorite), [hosts])
+  const showFavorites = useSettings((s) => s.settings.appearance.showFavorites)
+  const showRecent = useSettings((s) => s.settings.appearance.showRecent)
   const recent = useMemo(
     () =>
       hosts
@@ -807,6 +811,21 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
           onClick={() => {
             setOpen(id, !open)
           }}
+          onContextMenu={(e) => {
+            e.preventDefault()
+            openMenu(e, [
+              {
+                id: `hide-${testId}`,
+                label: `Hide ${title}`,
+                icon: <EyeOff size={14} />,
+                hint: 'Settings → Appearance',
+                onSelect: () =>
+                  void useSettings.getState().update({
+                    appearance: id === RECENT ? { showRecent: false } : { showFavorites: false }
+                  })
+              }
+            ])
+          }}
           {...(dropTarget ?? {})}
         >
           <ChevronRight
@@ -1005,16 +1024,17 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
           )
         ) : (
           <>
-            {section(
-              FAVORITES,
-              'Favorites',
-              <Star size={12} />,
-              favorites,
-              'favorite-row',
-              favoritesDrop
-            )}
-            {section(RECENT, 'Recent', <Clock size={12} />, recent, 'recent-row')}
-            {(favorites.length > 0 || recent.length > 0) && (
+            {showFavorites &&
+              section(
+                FAVORITES,
+                'Favorites',
+                <Star size={12} />,
+                favorites,
+                'favorite-row',
+                favoritesDrop
+              )}
+            {showRecent && section(RECENT, 'Recent', <Clock size={12} />, recent, 'recent-row')}
+            {((showFavorites && favorites.length > 0) || (showRecent && recent.length > 0)) && (
               <div className="mx-1 mb-1.5 h-px bg-line" />
             )}
             {tree.children(null).map((g) => renderGroup(g))}

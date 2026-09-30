@@ -67,7 +67,10 @@ const AppearanceSettings = z.object({
   /** Giao diện app: theo hệ điều hành, hoặc cố định sáng/tối. */
   theme: z.enum(['system', 'light', 'dark']).catch('system'),
   /** Ẩn thanh bên (danh sách host) để terminal rộng hơn. */
-  sidebarHidden: z.boolean().catch(false)
+  sidebarHidden: z.boolean().catch(false),
+  /** Mục "Favorites" / "Recent" ở đầu thanh bên (host đã có trong cây nhóm — lặp lại cho nhanh). */
+  showFavorites: z.boolean().catch(true),
+  showRecent: z.boolean().catch(true)
 })
 
 const FileSettings = z.object({

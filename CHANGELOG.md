@@ -12,6 +12,11 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   opens SFTP (no login shell, no `.bashrc` / motd, no extra "last login"). The shell is opened
   the first time you click **Show terminal**.
 
+### Added
+
+- Hide the **Favorites** / **Recent** shortcuts at the top of the sidebar: right-click the
+  section title → Hide, or Settings → Appearance → Sidebar. The hosts stay in their groups.
+
 ## [1.1.0-beta.3] - 2026-09-30
 
 ### Added

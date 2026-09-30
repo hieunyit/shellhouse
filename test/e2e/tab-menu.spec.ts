@@ -73,3 +73,43 @@ test('cửa sổ hẹp (chia đôi màn hình): không cuộn ngang, nút Settin
     await expect(page.getByTestId('quick-connect')).toBeVisible()
   }
 })
+
+test('ẩn mục Recent / Favorites ở thanh bên (chuột phải tiêu đề mục, hoặc trong cài đặt)', async ({
+  page
+}) => {
+  // Một host đã dùng gần đây + yêu thích.
+  const saved = await page.evaluate(() =>
+    window.shellhouse.saveHost({
+      groupId: null,
+      label: 'web',
+      hostname: 'web.example.com',
+      port: 22,
+      username: 'u',
+      auth: 'auto',
+      keyId: null,
+      keyFile: null,
+      proxyJump: null,
+      jumpHostIds: [],
+      mode: 'builtin',
+      tags: [],
+      color: null
+    })
+  )
+  if (!saved.ok) throw new Error(saved.message)
+  await page.evaluate((id) => window.shellhouse.setFavorite([id], true), saved.id)
+  const favorites = page.getByTestId('section-favorite-row')
+  await expect(favorites).toBeVisible()
+
+  await favorites.getByRole('button').first().click({ button: 'right' })
+  await page.getByTestId('menu-hide-favorite-row').click()
+  await expect(favorites).toHaveCount(0)
+  // Host vẫn còn trong danh sách chính.
+  await expect(page.locator('[data-testid="host-row"][data-host-label="web"]')).toBeVisible()
+
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-nav-appearance').click()
+  await expect(page.getByTestId('setting-show-favorites')).not.toBeChecked()
+  await page.getByTestId('setting-show-favorites').check()
+  await page.keyboard.press('Escape')
+  await expect(favorites).toBeVisible()
+})
