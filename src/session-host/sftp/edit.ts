@@ -8,6 +8,12 @@ import type { TransferQueue } from './transfers'
 /** Editor thường ghi file nhiều bước (ghi tạm → đổi tên); chờ yên rồi mới tải lên. */
 const SETTLE_MS = 400
 const POLL_MS = 1000
+/**
+ * Kiểm tra lại một lần sau khi bắt đầu theo dõi: fs.watch trên macOS (FSEvents) cần một lúc mới nhận
+ * sự kiện, còn watchFile lấy mốc so sánh bất đồng bộ — lưu ngay sau khi mở có thể lọt cả hai. So hash
+ * nên không đổi thì không làm gì.
+ */
+const INITIAL_CHECK_MS = 1500
 
 interface Edit {
   remotePath: string
@@ -84,6 +90,13 @@ export class RemoteEdits {
       uploading: false,
       again: false
     })
+    const added = this.edits.get(localPath)
+    if (added) {
+      added.timer = setTimeout(() => {
+        added.timer = null
+        void this.sync(added)
+      }, INITIAL_CHECK_MS)
+    }
   }
 
   stop(localPath: string): void {
