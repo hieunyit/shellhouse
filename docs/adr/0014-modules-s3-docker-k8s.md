@@ -74,7 +74,22 @@ Quy tắc import (kiểm bằng ESLint `no-restricted-imports`):
 export interface ModuleManifest {
   id: string // 's3' | 'docker' | 'k8s' — chữ thường, [a-z0-9-]
   name: string // 'S3 storage'
+  /** Một dòng, hiện trên thẻ ở trang Modules (≤ 80 ký tự). */
+  summary: string
+  /** Mô tả dài (Markdown đơn giản) ở trang chi tiết. */
   description: string
+  /** Nhóm để lọc ở trang Modules (3.12). */
+  category: 'cloud' | 'containers' | 'servers' | 'databases' | 'network' | 'other'
+  /** Từ khoá tìm kiếm (tiếng Anh, chữ thường): 'bucket', 'minio', 'container', 'pod'… */
+  keywords: readonly string[]
+  /** Nguồn: chính thức (đi kèm app) / tải theo nhu cầu / cộng đồng (tương lai). */
+  source: 'builtin' | 'official-download' | 'community'
+  /** Phiên bản app đầu tiên có module — để gắn nhãn NEW. */
+  since: string // '1.3.0'
+  /** Mô tả quyền hiển thị cho người dùng (3.12.3), khớp với năng lực thật được cấp. */
+  permissions: readonly ModulePermission[]
+  /** Dấu hiệu để gợi ý bật module đúng lúc (3.12.4). */
+  detect?: readonly ModuleDetector[]
   version: number // tăng khi đổi định dạng dữ liệu / giao thức của module
   icon: string // tên icon lucide
   /** Bật mặc định khi cài mới. */
@@ -95,6 +110,28 @@ export interface ModuleManifest {
 ```
 
 Manifest chỉ là dữ liệu tĩnh → đọc được mà không tải code module (hiện trong Settings, bảng lệnh).
+
+```ts
+export type ModulePermission =
+  | { kind: 'ssh-exec'; detail: string } // 'Runs docker on hosts you open it for'
+  | { kind: 'ssh-socket'; path: string } // '/var/run/docker.sock'
+  | { kind: 'ssh-tunnel' } // mở kênh TCP qua host SSH
+  | { kind: 'local-socket'; path: string }
+  | { kind: 'run-program'; binary: string } // 'kubectl', 'aws'
+  | { kind: 'read-file'; path: string } // '~/.kube/config'
+  | { kind: 'network'; hosts: string } // 'The S3 endpoints you add'
+  | { kind: 'secrets'; detail: string } // 'Stores access keys encrypted in the vault'
+
+export type ModuleDetector =
+  | { on: 'ssh-connected'; probe: 'unix-socket'; path: string } // Docker: /var/run/docker.sock
+  | { on: 'ssh-connected'; probe: 'command'; command: 'systemctl' | 'kubectl' | 'docker' }
+  | { on: 'startup'; probe: 'local-file'; path: string } // K8s: ~/.kube/config
+  | { on: 'startup'; probe: 'local-socket'; path: string } // Docker Desktop / Colima
+```
+
+`permissions` phải **khớp** với năng lực module thật sự dùng: registry kiểm khi chạy (module gọi
+`ctx.spawn('kubectl')` mà không khai báo `run-program: kubectl` → lỗi). Như vậy những gì người dùng đọc
+trên trang Modules luôn đúng sự thật.
 
 ### 3.3. Main process
 
@@ -279,6 +316,80 @@ như Tabby.
 - ESLint chặn import sai (3.1).
 
 ---
+
+### 3.12. Tìm, thêm và bật module (giao diện)
+
+Ở giai đoạn này mọi module đều **chính thức và có sẵn trong bộ cài** (3.9): "thêm module" = **bật**;
+module mới đến qua bản cập nhật app.
+
+#### 3.12.1. Trang Settings → Modules
+
+- Đầu trang: ô **Search modules…** + chip lọc theo `category` (All · Cloud · Containers · Servers ·
+  Databases · Network) + lọc trạng thái (All · Enabled · Off).
+- Mỗi module một **thẻ**: icon, tên, nhãn `NEW` (module có `since` là bản hiện tại và người dùng chưa mở
+  thẻ), `summary`, nhóm, trạng thái, nút **Enable** / công tắc, nút **⚙** (trang cài đặt riêng nếu có).
+- Bấm thẻ → **trang chi tiết**: mô tả dài, ảnh chụp, danh sách **quyền** (3.12.3), những chỗ module gắn
+  vào app ("Adds a Docker section to the sidebar, a _Docker…_ item to host menus, and a Docker tab"),
+  phiên bản, nút **Remove data** (xoá bảng của module, xác nhận hai bước).
+- Bật module có hiệu lực ngay, không cần khởi động lại (renderer đăng ký điểm gắn; main đăng ký IPC và
+  chạy migration; Session Host tạo service khi phiên đầu tiên cần). Tắt: gỡ điểm gắn; tab của module
+  đang mở được hỏi đóng.
+- Không có kết quả → "No module matches “…”. Tell us what you need" (link GitHub Discussions).
+
+#### 3.12.2. Tìm kiếm
+
+- Chạy **trên máy** với manifest (không gọi mạng), không phân biệt hoa thường, bỏ dấu.
+- Điểm: khớp đầu `name` (100) > khớp một từ trong `name` (80) > khớp `keywords` (60) > khớp `summary`
+  (40) > khớp `description` (20) > khớp gần đúng (khác ≤ 1 ký tự với từ ≥ 5 ký tự: "kubernets" →
+  Kubernetes) (10). Module đang bật +5. Sắp giảm dần, cùng điểm theo tên.
+- Từ đồng nghĩa nằm trong `keywords`: Docker có `container, compose, podman, image`; Kubernetes có
+  `k8s, kube, kubectl, pod, helm, cluster`; S3 có `bucket, minio, r2, wasabi, object storage, aws`.
+- Cùng bộ tìm kiếm dùng trong **bảng lệnh**: gõ "docker" → "Modules: Enable Docker" (nếu đang tắt) hoặc
+  các lệnh của Docker (nếu đang bật).
+
+#### 3.12.3. Quyền hiển thị cho người dùng
+
+Trang chi tiết và hộp xác nhận khi bật lần đầu liệt kê `permissions` bằng câu dễ hiểu, ví dụ Kubernetes:
+
+- Reads your kubeconfig (`~/.kube/config` and files you add)
+- May run the auth helpers your clusters already use (`aws`, `gcloud`, `kubelogin`) — asks first
+- Opens tunnels through SSH hosts you choose
+- Never sees your SSH passwords or keys
+
+Module chính thức cũng hiện quyền như vậy — minh bạch, và là nền cho plugin bên thứ ba sau này.
+
+#### 3.12.4. Gợi ý đúng lúc
+
+- Dựa trên `detect` của các module đang **tắt**:
+  - Kết nối SSH xong → Session Host thử (nhẹ, không ghi gì) `test -S /var/run/docker.sock`,
+    `command -v systemctl`… một lần mỗi host, nhớ kết quả 7 ngày.
+  - Khởi động app → kiểm `~/.kube/config`, socket Docker Desktop / Colima / OrbStack.
+- Có dấu hiệu → một dòng gợi ý nhỏ (không popup) trên thanh trạng thái của tab hoặc ở thanh bên:
+  _"Docker detected on web-01 — Enable Docker module"_ · **Enable** · **Not now** · **Don't suggest again**.
+- Tối đa 1 gợi ý / module / 30 ngày; tắt được toàn bộ ("Suggest modules" trong Settings → Modules).
+- Không gửi gì ra ngoài: phát hiện và quyết định đều ở trên máy.
+
+#### 3.12.5. Các lối vào khác
+
+| Chỗ                         | Nội dung                                                             |
+| --------------------------- | -------------------------------------------------------------------- |
+| Nút **＋** ở thanh bên      | Thêm mục _Add module…_ → trang Modules                               |
+| Bảng lệnh                   | _Modules: Browse_, _Modules: Enable …_, lệnh của các module đang bật |
+| Màn chào (khi không có tab) | Thẻ _Add tools_ → trang Modules                                      |
+| Thông báo có bản cập nhật   | Module mới trong bản cập nhật → nút _Enable_ ngay trong thông báo    |
+
+#### 3.12.6. Về sau: tải module chính thức theo nhu cầu
+
+Module lớn (K8s kéo thư viện nặng) có thể không nằm sẵn trong bộ cài: đóng gói riêng, **ký bằng cùng
+khoá ký bản cập nhật** (cơ chế kiểm chữ ký đã có trong `update-signature`), tải từ release GitHub / CDN,
+kiểm chữ ký + hash trước khi nạp. Thẻ trên trang Modules có nút **Download** thay cho **Enable**,
+`source: 'official-download'`. Mức tin cậy ngang cập nhật app.
+
+#### 3.12.7. Về sau nữa: kho cộng đồng
+
+Tab **Community** trên trang Modules (tìm theo tên, tag, lượt cài; cài / cập nhật / gỡ; màn xin quyền
+như tiện ích trình duyệt; nhãn _Official_ / _Community_; danh sách thu hồi). Chỉ làm khi đã có sandbox
+cho code lạ (3.10) — cần ADR riêng.
 
 ## 4. (dành chỗ) Đồng bộ
 
@@ -526,16 +637,17 @@ type K8sOp =
 
 ## 8. Kế hoạch tổng
 
-| Bước | Nội dung                                                                                                 | Ước lượng           |
-| ---- | -------------------------------------------------------------------------------------------------------- | ------------------- |
-| 1    | Khuôn module (registry 3 tiến trình, giao thức chung, migration theo module, Settings → Modules, ESLint) | 1 tuần              |
-| 2    | Chuyển S3 sang module (5.2), xoá đường cũ                                                                | 1 tuần              |
-| 3    | `SshCapability` (exec đã quote, streamlocal, direct-tcpip) + tab `module-terminal`                       | 0,5 tuần            |
-| 4    | Module Docker (6)                                                                                        | 3 tuần              |
-| 5    | Module Kubernetes (7)                                                                                    | 4–5 tuần            |
-| 6    | (Tuỳ chọn) systemd / database tunnel trên cùng khuôn                                                     | 1–2 tuần mỗi module |
+| Bước | Nội dung                                                                               | Ước lượng           |
+| ---- | -------------------------------------------------------------------------------------- | ------------------- |
+| 1    | Khuôn module (registry 3 tiến trình, giao thức chung, migration theo module, ESLint)   | 1 tuần              |
+| 1b   | Trang Settings → Modules (tìm kiếm, lọc, chi tiết, quyền), lệnh, gợi ý đúng lúc (3.12) | 0,5–1 tuần          |
+| 2    | Chuyển S3 sang module (5.2), xoá đường cũ                                              | 1 tuần              |
+| 3    | `SshCapability` (exec đã quote, streamlocal, direct-tcpip) + tab `module-terminal`     | 0,5 tuần            |
+| 4    | Module Docker (6)                                                                      | 3 tuần              |
+| 5    | Module Kubernetes (7)                                                                  | 4–5 tuần            |
+| 6    | (Tuỳ chọn) systemd / database tunnel trên cùng khuôn                                   | 1–2 tuần mỗi module |
 
-**Tổng**: khoảng **10–11 tuần** cho khuôn + S3 + Docker + Kubernetes (một người, đã gồm test).
+**Tổng**: khoảng **11–12 tuần** cho khuôn + S3 + Docker + Kubernetes (một người, đã gồm test).
 
 Thứ tự này cho giá trị sớm: sau bước 2 không có tính năng mới nhưng lõi gọn hơn; sau bước 4 người dùng
 đã có Docker qua SSH — tính năng mà Termius / MobaXterm không có.
