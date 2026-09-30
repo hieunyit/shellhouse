@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { serialSummary } from '@shared/serial'
 import { buildGroupTree, type GroupTree } from '@shared/group-tree'
 import type { GroupSummary, HostSummary, HostTree } from '@shared/hosts'
 import { effectiveHost, inheritedDefaults, type EffectiveHost } from '@shared/inherit'
@@ -35,6 +36,10 @@ export const useHosts = create<HostsStore>((set) => ({
 
 /** "user@host:port" thực tế của host (sau kế thừa); port 22 thì bỏ. */
 export function hostAddress(host: HostSummary, effective: EffectiveHost | undefined): string {
+  if (host.protocol === 'serial' && host.serial)
+    return `${host.serial.path} · ${serialSummary(host.serial)}`
+  if (host.protocol === 'telnet')
+    return `telnet ${host.hostname}${host.port === 23 || host.port === null ? '' : `:${host.port}`}`
   const user = effective?.username ?? (host.username || '?')
   const port = effective?.port ?? host.port ?? 22
   return `${user}@${host.hostname}${port === 22 ? '' : `:${port}`}`

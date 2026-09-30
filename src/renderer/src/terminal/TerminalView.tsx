@@ -69,6 +69,11 @@ export function TerminalView({
   )
   const [deploying, setDeploying] = useState(false)
   const isRemote = target.kind !== 'local'
+  // Host Telnet / Serial: không có SFTP, forwarding, deploy key, file manager.
+  const protocol = useHosts((s) =>
+    hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.protocol ?? 'ssh') : 'ssh'
+  )
+  const isSsh = protocol === 'ssh'
   const multiExec = useBroadcast((s) => s.enabled)
   const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
   const runSftp = useCallback(
@@ -140,6 +145,23 @@ export function TerminalView({
             <StatusDot state={state} />
             <span className="hidden text-muted @xs:inline">{connectionLabel[state]}</span>
           </span>
+          {protocol === 'telnet' && (
+            <span
+              className="ml-2 shrink-0 rounded bg-warning-soft px-1.5 py-px text-[11px] font-medium text-warning"
+              data-testid="session-telnet"
+              title="Telnet sends everything, including passwords, in clear text"
+            >
+              Telnet · not encrypted
+            </span>
+          )}
+          {protocol === 'serial' && (
+            <span
+              className="ml-2 shrink-0 rounded bg-subtle px-1.5 py-px text-[11px] font-medium text-muted"
+              data-testid="session-serial"
+            >
+              Serial
+            </span>
+          )}
           {legacy && (
             <span
               className="ml-2 hidden shrink-0 rounded bg-warning-soft px-1.5 py-px text-[11px] font-medium text-warning @sm:inline"
@@ -162,48 +184,52 @@ export function TerminalView({
             </span>
           )}
           <div className="flex-1" />
-          <ToolbarButton
-            testId="toggle-files"
-            pressed={view === 'files'}
-            icon={<Columns2 size={13} />}
-            onClick={() => {
-              setView(view === 'files' ? 'terminal' : 'files')
-              if (panel === 'sftp') setPanel(null)
-            }}
-          >
-            {view === 'files' ? 'Show terminal' : 'File manager'}
-          </ToolbarButton>
-          <ToolbarButton
-            testId="open-deploy-key"
-            disabled={!connected}
-            icon={<KeyRound size={13} />}
-            onClick={() => {
-              setDeploying(true)
-            }}
-          >
-            Deploy key
-          </ToolbarButton>
-          <ToolbarButton
-            testId="toggle-sftp"
-            disabled={view === 'files'}
-            pressed={panel === 'sftp'}
-            icon={<FolderOpen size={13} />}
-            onClick={() => {
-              setPanel(panel === 'sftp' ? null : 'sftp')
-            }}
-          >
-            SFTP
-          </ToolbarButton>
-          <ToolbarButton
-            testId="toggle-forwards"
-            pressed={panel === 'forwards'}
-            icon={<ArrowLeftRight size={13} />}
-            onClick={() => {
-              setPanel(panel === 'forwards' ? null : 'forwards')
-            }}
-          >
-            Forwarding{activeForwards > 0 ? ` (${activeForwards})` : ''}
-          </ToolbarButton>
+          {isSsh && (
+            <>
+              <ToolbarButton
+                testId="toggle-files"
+                pressed={view === 'files'}
+                icon={<Columns2 size={13} />}
+                onClick={() => {
+                  setView(view === 'files' ? 'terminal' : 'files')
+                  if (panel === 'sftp') setPanel(null)
+                }}
+              >
+                {view === 'files' ? 'Show terminal' : 'File manager'}
+              </ToolbarButton>
+              <ToolbarButton
+                testId="open-deploy-key"
+                disabled={!connected}
+                icon={<KeyRound size={13} />}
+                onClick={() => {
+                  setDeploying(true)
+                }}
+              >
+                Deploy key
+              </ToolbarButton>
+              <ToolbarButton
+                testId="toggle-sftp"
+                disabled={view === 'files'}
+                pressed={panel === 'sftp'}
+                icon={<FolderOpen size={13} />}
+                onClick={() => {
+                  setPanel(panel === 'sftp' ? null : 'sftp')
+                }}
+              >
+                SFTP
+              </ToolbarButton>
+              <ToolbarButton
+                testId="toggle-forwards"
+                pressed={panel === 'forwards'}
+                icon={<ArrowLeftRight size={13} />}
+                onClick={() => {
+                  setPanel(panel === 'forwards' ? null : 'forwards')
+                }}
+              >
+                Forwarding{activeForwards > 0 ? ` (${activeForwards})` : ''}
+              </ToolbarButton>
+            </>
+          )}
         </div>
       )}
       <div className="relative flex min-h-0 flex-1">

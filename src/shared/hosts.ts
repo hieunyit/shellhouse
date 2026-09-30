@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SerialSettings } from './serial'
 
 // Không import từ file khác ngoài zod: dùng chung cho main, renderer và test.
 
@@ -66,6 +67,10 @@ export const GroupDefaults = z.object({
 export type GroupDefaults = z.infer<typeof GroupDefaults>
 
 /** Thông tin host gửi cho renderer — KHÔNG có secret. */
+/** SSH (mặc định), Telnet hoặc cổng Serial (console thiết bị mạng). */
+export const HostProtocol = z.enum(['ssh', 'telnet', 'serial'])
+export type HostProtocol = z.infer<typeof HostProtocol>
+
 export const HostSummary = z.object({
   id: z.string(),
   groupId: z.string().nullable(),
@@ -87,6 +92,9 @@ export const HostSummary = z.object({
   direct: z.boolean(),
   /** Cho phép thuật toán cũ (thiết bị đời cũ). */
   legacyAlgorithms: z.boolean(),
+  protocol: HostProtocol,
+  /** Chỉ có khi protocol = 'serial'. */
+  serial: SerialSettings.nullable(),
   tags: z.array(z.string()),
   color: z.enum(HOST_COLORS).nullable(),
   lastUsedAt: z.number().nullable(),
@@ -99,6 +107,10 @@ export type HostSummary = z.infer<typeof HostSummary>
 export const HostInput = z.object({
   /** Không có = tạo mới. */
   id: z.string().optional(),
+  /** Không có = SSH. */
+  protocol: HostProtocol.optional(),
+  /** Bắt buộc khi protocol = 'serial' (hostname khi đó chỉ là giá trị giữ chỗ). */
+  serial: SerialSettings.optional(),
   groupId: z.string().nullable(),
   label: z
     .string()

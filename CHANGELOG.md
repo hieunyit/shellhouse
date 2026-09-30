@@ -16,6 +16,11 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 - Hide the **Favorites** / **Recent** shortcuts at the top of the sidebar: right-click the
   section title → Hide, or Settings → Appearance → Sidebar. The hosts stay in their groups.
+- **Telnet** hosts for network devices without SSH: choose Telnet in the host form. Window
+  size and terminal type are negotiated; the tab is marked "not encrypted".
+- **Serial (COM)** hosts for device consoles: pick the port (detected list or type it), speed,
+  data bits, parity, stop bits and flow control (9600 8N1 by default). A disconnected USB-serial
+  cable is reported and the tab reconnects when it is plugged back in.
 
 ## [1.1.0-beta.3] - 2026-09-30
 

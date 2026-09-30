@@ -8,6 +8,7 @@ import {
   type Page
 } from '@playwright/test'
 import { startTestSshServer, type TestSshServer } from '../integration/ssh-test-server'
+import { startTelnetTestServer } from '../integration/telnet-test-server'
 import { activeTab, E2E_PASSWORD, expect, sendLine, test, waitForText } from './fixtures'
 
 let server: TestSshServer | null = null
@@ -368,4 +369,55 @@ test('chuột phải host → Open SFTP: trình quản lý file hai cột Local 
       }
     }
   }
+})
+
+test('host Telnet: tạo bằng form, đăng nhập như console router; ẩn SFTP / Forwarding', async ({
+  page
+}) => {
+  const telnet = await startTelnetTestServer()
+  try {
+    await page.getByTestId('add-host').click()
+    const form = page.getByTestId('host-form')
+    await form.getByTestId('host-protocol-telnet').click()
+    await expect(form.getByTestId('host-username')).toHaveCount(0)
+    await form.getByTestId('host-hostname').fill('127.0.0.1')
+    await form.getByTestId('host-port').fill(String(telnet.port))
+    await form.getByTestId('host-label').fill('core-switch')
+    await form.getByTestId('host-save').click()
+    const row = page.locator('[data-testid="host-row"][data-host-label="core-switch"]')
+    await expect(row).toContainText(`telnet 127.0.0.1:${telnet.port}`)
+
+    await row.dblclick()
+    const tab = await activeTab(page)
+    await waitForText(page, tab, 'Username:')
+    await expect(page.getByTestId('session-telnet')).toBeVisible()
+    await expect(page.getByTestId('toggle-sftp')).toHaveCount(0)
+    await sendLine(page, tab, 'admin')
+    await waitForText(page, tab, 'Password:')
+    await sendLine(page, tab, 'secret')
+    await waitForText(page, tab, 'router#')
+    await sendLine(page, tab, 'show clock')
+    await waitForText(page, tab, '% output of show clock')
+  } finally {
+    await telnet.close()
+  }
+})
+
+test('host Serial: cấu hình cổng + tốc độ; cổng không có → báo lỗi dễ hiểu', async ({ page }) => {
+  await page.getByTestId('add-host').click()
+  const form = page.getByTestId('host-form')
+  await form.getByTestId('host-protocol-serial').click()
+  await expect(form.getByTestId('serial-fields')).toBeVisible()
+  const missing = process.platform === 'win32' ? 'COM250' : '/dev/ttyShellhouseMissing'
+  await form.getByTestId('serial-path').fill(missing)
+  await form.getByTestId('serial-baud').selectOption('115200')
+  await form.getByTestId('host-label').fill('switch console')
+  await form.getByTestId('host-save').click()
+  const row = page.locator('[data-testid="host-row"][data-host-label="switch console"]')
+  await expect(row).toContainText(`${missing} · 115200 8N1`)
+
+  await row.dblclick()
+  const tab = await activeTab(page)
+  await waitForText(page, tab, 'was not found')
+  await expect(page.getByTestId('session-serial')).toBeVisible()
 })

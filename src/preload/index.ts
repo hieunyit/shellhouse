@@ -72,6 +72,7 @@ const api: ShellhouseApi = {
   pickSaveLocation: (defaultName) => invoke('dialog:saveFile', defaultName),
   pickProgram: () => invoke('dialog:pickProgram'),
   listLocal: (path) => invoke('local:list', path),
+  listSerialPorts: () => invoke('serial:list'),
   pickFolder: (title, start) => invoke('dialog:pickFolder', title, start),
   openLogFolder: () => invoke('logs:openFolder'),
   prepareRemoteEdit: (remoteName) => invoke('files:prepareEdit', remoteName),

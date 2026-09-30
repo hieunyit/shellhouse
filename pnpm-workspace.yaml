@@ -5,6 +5,7 @@ nodeLinker: hoisted
 # - node-pty: KHÔNG build lúc install; build riêng cho ABI của Electron bằng `pnpm rebuild:native`.
 # - better-sqlite3, sodium-native: dùng bản build N-API có sẵn (prebuilds/), không cần build.
 # ssh2/cpu-features: binding tăng tốc tuỳ chọn, bỏ để giảm phụ thuộc native.
+# - @serialport/bindings-cpp: dùng bản build N-API có sẵn (prebuilds/, mọi OS), không cần build.
 allowBuilds:
   electron: true
   esbuild: true
@@ -14,3 +15,4 @@ allowBuilds:
   ssh2: false
   electron-winstaller: false
   unrs-resolver: false
+  '@serialport/bindings-cpp': false

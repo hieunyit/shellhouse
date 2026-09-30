@@ -212,6 +212,8 @@ function registerIpc(): void {
     if (!window) throw new Error('No window')
     const sessionId = randomUUID()
     const { port1, port2 } = new MessageChannelMain()
+    // Host Telnet / Serial (null = SSH hoặc không phải host đã lưu).
+    const direct = spec.kind === 'host' ? requireHosts().resolveDirect(spec.hostId) : null
     const logFor = (kind: 'local' | 'ssh', label: string) =>
       sessionLogFor(requireSettings().get().logging, { kind, label }, defaultLogDirectory()) ??
       undefined
@@ -232,6 +234,27 @@ function registerIpc(): void {
         undefined,
         logFor('local', shell?.name ?? 'Local terminal')
       )
+    } else if (direct) {
+      // Telnet / Serial: không có user, mật khẩu, jump host.
+      const size = { cols: spec.cols, rows: spec.rows }
+      if (direct.protocol === 'telnet') {
+        supervisor.openSession(
+          sessionId,
+          { kind: 'telnet', ...size, target: { host: direct.host, port: direct.port } },
+          port1,
+          undefined,
+          logFor('ssh', `${direct.host}-telnet`)
+        )
+      } else {
+        supervisor.openSession(
+          sessionId,
+          { kind: 'serial', ...size, serial: direct.serial },
+          port1,
+          undefined,
+          logFor('ssh', direct.serial.path)
+        )
+      }
+      send('hosts:changed', null)
     } else {
       // Host đã lưu: giải mã thông tin xác thực ngay tại main, không đi qua renderer.
       const resolved =
@@ -382,6 +405,22 @@ function registerIpc(): void {
     return result.canceled || !result.filePath ? null : result.filePath
   })
 
+  handle('serial:list', isTrustedSender, async () => {
+    // Nạp khi cần (module native) — không làm chậm lúc khởi động.
+    const { SerialPort } = await import('serialport')
+    // friendlyName chỉ có trên Windows ("USB Serial Port (COM3)").
+    type RawPort = {
+      path: string
+      manufacturer?: string | undefined
+      serialNumber?: string | undefined
+      friendlyName?: string | undefined
+    }
+    const ports = (await SerialPort.list()) as RawPort[]
+    return ports.map((p) => ({
+      path: p.path,
+      description: [p.friendlyName ?? p.manufacturer, p.serialNumber].filter(Boolean).join(' · ')
+    }))
+  })
   handle('local:list', isTrustedSender, (path) => listLocal(path, app.getPath('home')))
   handle('dialog:pickProgram', isTrustedSender, async () => {
     const options = {

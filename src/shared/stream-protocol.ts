@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { Hostname, Username } from './hosts'
 import { ForwardSpec, type ForwardStatus } from './forwards'
 import type { ServerStats } from './server-stats'
+import { SerialSettings } from './serial'
 import { SftpOp, type TransferStatus } from './sftp'
 
 /**
@@ -228,11 +229,30 @@ export const SystemSshSessionSpec = z.object({
 })
 export type SystemSshSessionSpec = z.infer<typeof SystemSshSessionSpec>
 
+/** Telnet (thiết bị mạng) — không mã hoá. */
+export const TelnetSessionSpec = z.object({
+  kind: z.literal('telnet'),
+  cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
+  rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows),
+  target: z.object({ host: Hostname, port: z.number().int().min(1).max(65535) })
+})
+export type TelnetSessionSpec = z.infer<typeof TelnetSessionSpec>
+
+/** Cổng serial — chỉ main tạo (từ host đã lưu). */
+export const SerialSessionSpec = z.object({
+  kind: z.literal('serial'),
+  cols: z.number().int().min(1).max(STREAM_LIMITS.maxCols),
+  rows: z.number().int().min(1).max(STREAM_LIMITS.maxRows),
+  serial: SerialSettings
+})
+
 /** Spec Session Host thực sự nhận (host đã lưu đã được main phân giải). */
 export const ResolvedSessionSpec = z.discriminatedUnion('kind', [
   ResolvedLocalSessionSpec,
   SshSessionSpec,
-  SystemSshSessionSpec
+  SystemSshSessionSpec,
+  TelnetSessionSpec,
+  SerialSessionSpec
 ])
 export type ResolvedSessionSpec = z.infer<typeof ResolvedSessionSpec>
 export type SessionSpec = z.infer<typeof SessionSpec>

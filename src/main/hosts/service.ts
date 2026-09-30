@@ -12,6 +12,7 @@ import { buildGroupTree, groupMoveProblem, type GroupTree } from '@shared/group-
 import { GroupDefaults, HOST_COLORS } from '@shared/hosts'
 import { inheritedDefaults, type GroupWithDefaults, type InheritedDefaults } from '@shared/inherit'
 import type { SavedForward, SavedForwardInput } from '@shared/forwards'
+import type { SerialSettings } from '@shared/serial'
 import { parseQuickConnect } from '@shared/quick-connect'
 import { generateVerifiedKey, type KeyType } from './keygen'
 import { fingerprintSha256 } from '../../node-shared/hostkey'
@@ -73,6 +74,9 @@ interface HostOptions {
   direct?: boolean
   /** Cho phép thuật toán cũ (ssh-rsa/SHA-1, DH-SHA1, CBC) — thiết bị đời cũ. */
   legacy?: boolean
+  /** Không có = SSH. */
+  protocol?: 'telnet' | 'serial'
+  serial?: SerialSettings
 }
 
 function parseDefaults(raw: string): GroupDefaults {
@@ -156,6 +160,8 @@ export class HostService {
           mode: r.mode === 'system' ? 'system' : 'builtin',
           direct: options.direct === true,
           legacyAlgorithms: options.legacy === true,
+          protocol: options.protocol ?? 'ssh',
+          serial: options.protocol === 'serial' ? (options.serial ?? null) : null,
           tags: parseJson<string[]>(r.tags, []),
           color: toColor(r.color),
           lastUsedAt: r.last_used_at,
@@ -238,6 +244,12 @@ export class HostService {
       if (input.port === null) options.inheritPort = true
       if (input.direct) options.direct = true
       if (input.legacyAlgorithms) options.legacy = true
+      if (input.protocol === 'telnet') options.protocol = 'telnet'
+      if (input.protocol === 'serial') {
+        if (!input.serial) throw new Error('Choose a serial port')
+        options.protocol = 'serial'
+        options.serial = input.serial
+      }
       const values = [
         input.groupId,
         input.label,
@@ -712,6 +724,31 @@ export class HostService {
   }
 
   /** Giải mã thông tin để kết nối (kèm chuỗi jump). Cập nhật "dùng gần nhất". */
+  /**
+   * Host Telnet / Serial → thông tin kết nối (không cần user, mật khẩu, jump host); null = SSH.
+   * Cập nhật "dùng gần nhất".
+   */
+  resolveDirect(
+    hostId: string
+  ):
+    | { protocol: 'telnet'; label: string; host: string; port: number }
+    | { protocol: 'serial'; label: string; serial: SerialSettings }
+    | null {
+    const row = this.db
+      .prepare(
+        'SELECT label, hostname, port, options FROM hosts WHERE id = ? AND deleted_at IS NULL'
+      )
+      .get(hostId) as { label: string; hostname: string; port: number; options: string } | undefined
+    if (!row) throw new Error('Host not found')
+    const options = parseJson<HostOptions>(row.options, {})
+    if (options.protocol !== 'telnet' && options.protocol !== 'serial') return null
+    this.db.prepare('UPDATE hosts SET last_used_at = ? WHERE id = ?').run(this.now(), hostId)
+    if (options.protocol === 'telnet')
+      return { protocol: 'telnet', label: row.label, host: row.hostname, port: row.port }
+    if (!options.serial) throw new Error(`"${row.label}" has no serial port configured`)
+    return { protocol: 'serial', label: row.label, serial: options.serial }
+  }
+
   resolveForConnect(hostId: string, defaultUser = 'root'): ResolvedHost {
     const host = this.resolveHop(hostId)
     const row = this.db

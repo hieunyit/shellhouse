@@ -96,7 +96,7 @@ test('bản đóng gói: khởi động, tạo vault, native module + Session Ho
   const modules = await page.evaluate(() => window.shellhouse.checkNativeModules())
   expect(modules.filter((m) => !m.ok)).toEqual([])
   expect(modules.map((m) => m.name)).toEqual(
-    expect.arrayContaining(['better-sqlite3', 'sodium-native', 'node-pty'])
+    expect.arrayContaining(['better-sqlite3', 'sodium-native', 'node-pty', 'serialport'])
   )
   const status = await page.evaluate(() => window.shellhouse.getSessionHostStatus())
   expect(status.state).toBe('running')

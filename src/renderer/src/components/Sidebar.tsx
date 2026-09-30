@@ -328,22 +328,31 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
             connect(host, { split: 'right' })
           }
         },
-        {
-          id: 'sftp',
-          label: 'Open SFTP',
-          icon: <FolderOpen size={14} />,
-          onSelect: () => {
-            connect(host, { view: 'files' })
-          }
-        },
+        // SFTP và lệnh ssh chỉ có với host SSH.
+        ...(host.protocol === 'ssh'
+          ? [
+              {
+                id: 'sftp',
+                label: 'Open SFTP',
+                icon: <FolderOpen size={14} />,
+                onSelect: () => {
+                  connect(host, { view: 'files' })
+                }
+              }
+            ]
+          : []),
         'separator',
         favorite,
-        {
-          id: 'copy-ssh',
-          label: 'Copy SSH command',
-          icon: <Copy size={14} />,
-          onSelect: () => void window.shellhouse.writeClipboard(sshCommandFor(host))
-        },
+        ...(host.protocol === 'ssh'
+          ? [
+              {
+                id: 'copy-ssh',
+                label: 'Copy SSH command',
+                icon: <Copy size={14} />,
+                onSelect: () => void window.shellhouse.writeClipboard(sshCommandFor(host))
+              }
+            ]
+          : []),
         {
           id: 'duplicate',
           label: 'Duplicate',

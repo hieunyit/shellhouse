@@ -23,6 +23,9 @@ import type { ForwardSpec } from '@shared/forwards'
 import { LocalPty, resolveLocalShell } from '../transport/local-pty'
 import { buildShellEnv } from '../transport/shell'
 import { buildSystemSshArgs, findSystemSsh } from '../transport/system-ssh'
+import { SerialTransport } from '../transport/serial'
+import { TelnetTransport } from '../transport/telnet'
+import { serialSummary } from '@shared/serial'
 import { homedir } from 'node:os'
 import type { PromptReply, Transport, TransportContext, TransportExit } from '../transport/types'
 import { classifyConnectError } from './exit-reason'
@@ -154,6 +157,41 @@ export class Session {
         const launch = resolveLocalShell(this.deps.appVersion, this.spec.shell)
         this.transport = new LocalPty(launch, this.spec.cols, this.spec.rows, callbacks)
         this.deps.log('info', `Session ${this.id}: started ${launch.file}`)
+      } else if (this.spec.kind === 'telnet') {
+        const { host, port } = this.spec.target
+        this.post({
+          t: 'status',
+          phase: 'connecting',
+          detail: `Connecting to ${host}:${port} (Telnet)…`
+        })
+        const transport = await TelnetTransport.open(
+          { host, port, cols: this.spec.cols, rows: this.spec.rows },
+          callbacks
+        )
+        if (this.closed) {
+          transport.close()
+          return
+        }
+        this.transport = transport
+        this.flushPendingInput()
+        this.post({ t: 'status', phase: 'connected', detail: 'Connected (Telnet — not encrypted)' })
+        this.deps.log('info', `Session ${this.id}: telnet ${host}:${port}`)
+      } else if (this.spec.kind === 'serial') {
+        const { serial } = this.spec
+        this.post({ t: 'status', phase: 'connecting', detail: `Opening ${serial.path}…` })
+        const transport = await SerialTransport.open(serial, callbacks)
+        if (this.closed) {
+          transport.close()
+          return
+        }
+        this.transport = transport
+        this.flushPendingInput()
+        this.post({
+          t: 'status',
+          phase: 'connected',
+          detail: `Connected to ${serial.path} (${serialSummary(serial)}) — press Enter if nothing shows`
+        })
+        this.deps.log('info', `Session ${this.id}: serial ${serial.path}`)
       } else if (this.spec.kind === 'system-ssh') {
         const file = findSystemSsh()
         if (!file) throw new Error('The system ssh command (OpenSSH client) was not found')
@@ -205,10 +243,7 @@ export class Session {
         }
         this.pendingForwards = []
         this.syncStats()
-        if (this.pendingInput) {
-          transport.write(this.pendingInput)
-          this.pendingInput = ''
-        }
+        this.flushPendingInput()
         const { host, port, username } = this.spec.target
         this.deps.log('info', `Session ${this.id}: SSH ${username}@${host}:${port}`)
       }
@@ -218,6 +253,12 @@ export class Session {
       this.post({ t: 'error', message })
       this.finish(null, null, classifyConnectError(error))
     }
+  }
+
+  private flushPendingInput(): void {
+    if (!this.transport || !this.pendingInput) return
+    this.transport.write(this.pendingInput)
+    this.pendingInput = ''
   }
 
   close(): void {

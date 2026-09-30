@@ -27,7 +27,7 @@ test('native modules nạp được trong đúng process', async ({ page }) => {
   await page.getByTestId('toggle-diagnostics').click()
   await expect(page.getByTestId('host-state')).toHaveAttribute('data-state', 'running')
   await page.getByTestId('run-selfcheck').click()
-  for (const name of ['better-sqlite3', 'sodium-native', 'node-pty', 'ssh2']) {
+  for (const name of ['better-sqlite3', 'sodium-native', 'node-pty', 'ssh2', 'serialport']) {
     await expect(page.getByTestId(`module-${name}`)).toHaveAttribute('data-ok', 'true')
   }
 })

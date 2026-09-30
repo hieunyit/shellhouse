@@ -49,6 +49,22 @@ function checkSsh2(): NativeModuleStatus {
   }
 }
 
+/** Cổng serial: nạp binding native và liệt kê cổng (không mở cổng nào). */
+async function checkSerialport(): Promise<NativeModuleStatus> {
+  try {
+    const { SerialPort } = loadNative('serialport') as typeof import('serialport')
+    const ports = await SerialPort.list()
+    return {
+      name: 'serialport',
+      process: 'session-host',
+      ok: true,
+      detail: `${ports.length} serial port${ports.length === 1 ? '' : 's'} found`
+    }
+  } catch (error) {
+    return { name: 'serialport', process: 'session-host', ok: false, detail: errorText(error) }
+  }
+}
+
 export async function checkSessionHostNativeModules(): Promise<NativeModuleStatus[]> {
-  return [await checkNodePty(), checkSsh2()]
+  return [await checkNodePty(), checkSsh2(), await checkSerialport()]
 }
