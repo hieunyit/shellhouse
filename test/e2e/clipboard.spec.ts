@@ -123,3 +123,27 @@ test('ô nhập có menu chuột phải chuẩn (Cut / Copy / Paste / Select All
   ])
   expect(await build({ isEditable: false, selectionText: '', editFlags: flags })).toEqual([])
 })
+
+test('Ctrl+Shift+V / Shift+Insert dán đúng MỘT lần (không bị Chromium dán thêm)', async ({
+  app,
+  page
+}) => {
+  const tab = await activeTab(page)
+  await terminal(page, tab).click()
+  const countOnScreen = (text: string): Promise<number> =>
+    page.evaluate(([id, t]) => window.__shellhouseTest.bufferText(id).split(t).length - 1, [
+      tab,
+      text
+    ] as const)
+  for (const [key, marker] of [
+    [process.platform === 'darwin' ? 'Meta+V' : 'Control+Shift+V', 'dan-mot-lan-A'],
+    ['Shift+Insert', 'dan-mot-lan-B']
+  ] as const) {
+    await setClipboard(app, marker)
+    await page.keyboard.press(key)
+    await expect.poll(() => countOnScreen(marker)).toBe(1)
+    await page.waitForTimeout(400) // lần dán thứ hai (nếu có) tới sau
+    expect(await countOnScreen(marker)).toBe(1)
+    await page.keyboard.press('Control+C')
+  }
+})

@@ -39,8 +39,21 @@ test('gợi ý lệnh từ lịch sử: chữ mờ sau con trỏ, → để nh�
   // Bước 2: gõ phần đầu → gợi ý phần còn lại.
   const ghost = page.getByTestId('command-suggestion')
   await page.keyboard.type(first.command.slice(0, 8))
-  await expect(ghost)
-    .toHaveText(first.command.slice(8))
+  // PowerShell (PSReadLine) tự hiện gợi ý của nó ngay sau con trỏ → app không vẽ chồng lên;
+  // → vẫn nhận gợi ý (của PSReadLine).
+  const shown = async (): Promise<string> => {
+    if ((await ghost.count()) > 0) return (await ghost.textContent()) ?? ''
+    const state = (await page.evaluate(
+      (id) => window.__shellhouseTest.suggestionState(id),
+      tab
+    )) as {
+      afterCursor?: string
+    } | null
+    return isWindows ? (state?.afterCursor ?? '') : ''
+  }
+  await expect
+    .poll(shown)
+    .toBe(first.command.slice(8))
     .catch(() => diagnose('no suggestion shown'))
   await page.keyboard.press('ArrowRight')
   await expect(ghost).toHaveCount(0)
@@ -70,4 +83,40 @@ test('gợi ý lệnh từ lịch sử: chữ mờ sau con trỏ, → để nh�
     await page.waitForTimeout(300)
     await expect(ghost).toHaveCount(0)
   }
+})
+
+test('gợi ý lệnh với dòng lệnh dài bị ngắt xuống dòng (cửa sổ hẹp / dấu nhắc dài)', async ({
+  app,
+  page
+}) => {
+  test.skip(isWindows, 'PowerShell tự gợi ý (PSReadLine)')
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.setSize(760, 600)
+  })
+  const tab = await activeTab(page)
+  await page.getByTestId(`terminal-${tab}`).click()
+  const ready = echoComputed('ready')
+  await page.keyboard.type(ready.command)
+  await page.keyboard.press('Enter')
+  await waitForText(page, tab, ready.expected)
+  const cols = await page.evaluate((id) => window.__shellhouseTest.size(id)?.cols ?? 80, tab)
+  // Dài hơn một dòng terminal → chắc chắn bị ngắt.
+  const long = `echo ${'dai-'.repeat(Math.ceil(cols / 4))}xong`
+  await page.keyboard.type(long)
+  await page.keyboard.press('Enter')
+  await waitForText(page, tab, 'xong\n')
+  await expect
+    .poll(() => page.evaluate(() => window.shellhouse.commandHistory('local:default')), {
+      timeout: 10_000
+    })
+    .toContain(long)
+  await page.keyboard.type('echo dai-dai')
+  // Gợi ý = phần còn lại của lệnh (có thể bị cắt ở mép phải cửa sổ).
+  const rest = long.slice('echo dai-dai'.length)
+  await expect
+    .poll(async () => {
+      const text = (await page.getByTestId('command-suggestion').textContent()) ?? ''
+      return text.length > 0 && rest.startsWith(text)
+    })
+    .toBe(true)
 })

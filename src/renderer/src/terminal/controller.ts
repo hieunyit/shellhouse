@@ -453,22 +453,47 @@ export class TerminalController {
 
   /** Tìm chỗ bắt đầu lệnh: phần đã gõ nằm ở cuối dòng con trỏ (sau dấu nhắc). */
   private resolveStart(): void {
-    if (this.inputStart || this.awaitingStart || !this.lineBuf) return
+    if (this.inputStart || this.awaitingStart || !this.lineBuf || this.lineDirty) return
     const b = this.term.buffer.active
     const row = b.baseY + b.cursorY
-    const before = b.getLine(row)?.translateToString(false, 0, b.cursorX) ?? ''
-    if (!this.lineDirty && before.endsWith(this.lineBuf))
-      this.inputStart = { row, col: b.cursorX - this.lineBuf.length }
+    const line = this.logicalLine(row)
+    if (!line) return
+    // Lệnh dài / dấu nhắc dài: dòng bị ngắt thành nhiều dòng hiển thị → xét cả dòng logic.
+    const offset = (row - line.firstRow) * this.term.cols + b.cursorX
+    if (line.text.slice(0, offset).endsWith(this.lineBuf))
+      this.inputStart = this.positionAt(line.firstRow, offset - this.lineBuf.length)
   }
 
   /** Dòng (từ `fromRow` trở xuống vài dòng) kết thúc bằng `typed` → vị trí bắt đầu của nó. */
   private findEchoed(typed: string, fromRow: number): { row: number; col: number } | null {
     const b = this.term.buffer.active
     for (let row = fromRow; row <= Math.min(b.length - 1, fromRow + 3); row++) {
-      const text = b.getLine(row)?.translateToString(true) ?? ''
-      if (text.endsWith(typed)) return { row, col: text.length - typed.length }
+      const line = this.logicalLine(row)
+      const text = line?.text.trimEnd() ?? ''
+      if (line && text.endsWith(typed))
+        return this.positionAt(line.firstRow, text.length - typed.length)
     }
     return null
+  }
+
+  /** Dòng logic chứa `row` (gộp các dòng hiển thị bị ngắt do quá dài), mỗi dòng đủ `cols` ô. */
+  private logicalLine(row: number): { firstRow: number; text: string } | null {
+    const b = this.term.buffer.active
+    let first = row
+    while (first > 0 && b.getLine(first)?.isWrapped && row - first < 20) first--
+    let text = ''
+    for (let r = first; r < b.length && r - first <= 20; r++) {
+      const line = b.getLine(r)
+      if (!line) return null
+      if (r > first && !line.isWrapped) break
+      text += line.translateToString(false).padEnd(this.term.cols, ' ')
+    }
+    return { firstRow: first, text }
+  }
+
+  private positionAt(firstRow: number, offset: number): { row: number; col: number } {
+    const cols = this.term.cols
+    return { row: firstRow + Math.floor(offset / cols), col: offset % cols }
   }
 
   /** Dòng lệnh (logic, gộp dòng bị ngắt) bắt đầu từ `start`, hết dòng. */
@@ -1035,24 +1060,30 @@ export class TerminalController {
   private handleKey(event: KeyboardEvent): boolean {
     if (event.type !== 'keydown') return true
     if (matchCommand(event)) return false
+    // Phím copy/dán do app tự xử lý: chặn luôn hành vi mặc định của Chromium — không thì
+    // Ctrl+Shift+V ("dán dạng chữ thường") / Shift+Insert dán THÊM một lần nữa vào terminal.
+    const handled = (): false => {
+      event.preventDefault()
+      return false
+    }
     // Ctrl+Insert / Shift+Insert: copy / dán kiểu Windows (PuTTY, MobaXterm, cmd).
     if (event.code === 'Insert' && event.ctrlKey && !event.shiftKey && this.term.hasSelection()) {
       this.copySelection()
-      return false
+      return handled()
     }
     if (event.code === 'Insert' && event.shiftKey && !event.ctrlKey) {
       this.pasteFromClipboard()
-      return false
+      return handled()
     }
     const copyPaste = isMac ? event.metaKey && !event.shiftKey : event.ctrlKey && event.shiftKey
     if (!copyPaste) return true
     if (event.code === 'KeyC' && this.term.hasSelection()) {
       this.copySelection()
-      return false
+      return handled()
     }
     if (event.code === 'KeyV') {
       this.pasteFromClipboard()
-      return false
+      return handled()
     }
     return true
   }

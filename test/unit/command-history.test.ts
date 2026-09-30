@@ -32,10 +32,11 @@ describe('CommandHistory', () => {
 
   it('giới hạn số lệnh mỗi host (bỏ lệnh cũ nhất)', async () => {
     const h = await setup()
-    for (let i = 0; i < MAX_COMMANDS_PER_TARGET + 5; i++) h.record('web', `cmd-${i}`)
-    const list = h.list('web', MAX_COMMANDS_PER_TARGET + 10)
+    const total = MAX_COMMANDS_PER_TARGET + 101 // vượt ngưỡng dọn (dọn theo đợt 100)
+    for (let i = 0; i < total; i++) h.record('web', `cmd-${i}`)
+    const list = h.list('web', total)
     expect(list).toHaveLength(MAX_COMMANDS_PER_TARGET)
-    expect(list[0]).toBe(`cmd-${MAX_COMMANDS_PER_TARGET + 4}`)
+    expect(list[0]).toBe(`cmd-${total - 1}`)
     expect(list).not.toContain('cmd-0')
   })
 

@@ -29,6 +29,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   host. Commands starting with a space and anything not shown on screen (passwords) are never
   saved. Turn off or clear it in Settings → Terminal.
 
+### Fixed
+
+- **Ctrl+Shift+V / Shift+Insert pasted twice** in the terminal (since the menu bar was removed
+  in 1.1.0-beta.3). The app handles these keys itself and no longer lets Chromium paste again.
+- Command suggestions work for long command lines that wrap onto several lines (long prompts,
+  narrow windows).
+
 ## [1.1.0-beta.3] - 2026-09-30
 
 ### Added

@@ -3,6 +3,7 @@ import type { Db } from './store/db'
 /** Mỗi đích giữ tối đa chừng này lệnh (cũ nhất bị xoá). */
 export const MAX_COMMANDS_PER_TARGET = 2000
 export const MAX_COMMAND_LENGTH = 1000
+const PRUNE_SLACK = 100
 
 /**
  * Lịch sử lệnh theo đích kết nối — nguồn cho gợi ý lệnh khi gõ. Chỉ lệnh người dùng đã gõ và
@@ -31,6 +32,11 @@ export class CommandHistory {
          ON CONFLICT (target, command) DO UPDATE SET count = count + 1, used_at = excluded.used_at`
       )
       .run(target, text, this.now())
+    // Dọn theo đợt (vượt quá 100 lệnh mới dọn) — không quét lại cả bảng mỗi lần gõ lệnh.
+    const { n } = this.db
+      .prepare('SELECT COUNT(*) AS n FROM command_history WHERE target = ?')
+      .get(target) as { n: number }
+    if (n <= MAX_COMMANDS_PER_TARGET + PRUNE_SLACK) return
     this.db
       .prepare(
         `DELETE FROM command_history WHERE target = ? AND command NOT IN (
