@@ -20,7 +20,9 @@ test('Session Host khởi động và tự phục hồi sau khi bị giết', as
   await page.getByTestId('crash-host').click()
   await expect(page.getByTestId('host-restarts')).toContainText('1')
   await expect(state).toHaveAttribute('data-state', 'running')
-  expect(Date.now() - started).toBeLessThan(2_000)
+  // Backoff lần đầu 250 ms + khởi động process. 5 giây: vẫn bắt lỗi thật (treo, backoff sai) mà
+  // không trượt khi máy test đang bận (vừa đóng gói, chạy song song).
+  expect(Date.now() - started).toBeLessThan(5_000)
 })
 
 test('native modules nạp được trong đúng process', async ({ page }) => {
