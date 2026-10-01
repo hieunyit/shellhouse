@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.4] - 2026-10-01
+
 ### Added
 
 - **Docker inside WSL** (Windows): every running WSL distribution with Docker shows up in the
