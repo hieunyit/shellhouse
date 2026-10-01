@@ -46,6 +46,10 @@ export interface ApiTestServer {
     obj: Omit<Obj, 'metadata'> & { metadata: Partial<Obj['metadata']> & { name: string } }
   ): Obj
   remove(plural: string, namespace: string | undefined, name: string): void
+  /** Giả cluster không có metrics-server. */
+  disableMetrics(): void
+  get(plural: string, namespace: string | undefined, name: string): Obj | undefined
+  list(plural: string): Obj[]
   /** Làm các watch sau nhận 410 Gone. */
   expireWatches(): void
   close(): Promise<void>
@@ -128,7 +132,14 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         [
           'shop/web',
           make('apps/v1', 'Deployment', 'web', 'shop', {
-            spec: { replicas: 2, template: { metadata: {} } },
+            spec: {
+              replicas: 2,
+              selector: { matchLabels: { app: 'web' } },
+              template: {
+                metadata: { labels: { app: 'web' } },
+                spec: { containers: [{ name: 'app', image: 'nginx:1.27' }] }
+              }
+            },
             status: { readyReplicas: 1, updatedReplicas: 2, availableReplicas: 1 }
           })
         ]
@@ -180,14 +191,105 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         ]
       ])
     ],
-    ['widgets', new Map([['shop/w1', make('example.com/v1', 'Widget', 'w1', 'shop')]])]
+    ['widgets', new Map([['shop/w1', make('example.com/v1', 'Widget', 'w1', 'shop')]])],
+    [
+      'replicasets',
+      new Map(
+        [1, 2].map((rev) => [
+          `shop/web-rs${rev}`,
+          make('apps/v1', 'ReplicaSet', `web-rs${rev}`, 'shop', {
+            spec: {
+              replicas: rev === 2 ? 2 : 0,
+              template: {
+                metadata: { labels: { app: 'web', 'pod-template-hash': `h${rev}` } },
+                spec: {
+                  containers: [{ name: 'app', image: rev === 1 ? 'nginx:1.26' : 'nginx:1.27' }]
+                }
+              }
+            },
+            status: { replicas: rev === 2 ? 2 : 0 }
+          })
+        ])
+      )
+    ],
+    [
+      'nodes',
+      new Map(
+        ['node-1', 'node-2'].map((n, i) => [
+          n,
+          make('v1', 'Node', n, undefined, {
+            spec: {},
+            status: {
+              conditions: [{ type: 'Ready', status: i === 0 ? 'True' : 'False' }],
+              allocatable: { cpu: '4', memory: '8Gi' },
+              nodeInfo: { kubeletVersion: 'v1.31.2' }
+            }
+          })
+        ])
+      )
+    ],
+    [
+      'cronjobs',
+      new Map([
+        [
+          'shop/nightly',
+          make('batch/v1', 'CronJob', 'nightly', 'shop', {
+            spec: {
+              schedule: '0 2 * * *',
+              suspend: false,
+              jobTemplate: {
+                metadata: { labels: { job: 'nightly' } },
+                spec: { template: { spec: { containers: [{ name: 'job', image: 'busybox' }] } } }
+              }
+            }
+          })
+        ]
+      ])
+    ],
+    ['jobs', new Map()],
+    ['configmaps', new Map()]
   ])
+  for (const rs of store.get('replicasets')?.values() ?? []) {
+    rs.metadata.labels = { app: 'web' }
+    ;(
+      rs.metadata as Obj['metadata'] & {
+        annotations?: Record<string, string>
+        ownerReferences?: unknown[]
+      }
+    ).annotations = {
+      'deployment.kubernetes.io/revision': rs.metadata.name.endsWith('1') ? '1' : '2'
+    }
+    ;(rs.metadata as Obj['metadata'] & { ownerReferences?: unknown[] }).ownerReferences = [
+      { kind: 'Deployment', name: 'web' }
+    ]
+  }
+  const web = store.get('deployments')?.get('shop/web')
+  if (web)
+    (web.metadata as Obj['metadata'] & { annotations?: Record<string, string> }).annotations = {
+      'deployment.kubernetes.io/revision': '2'
+    }
+  // Pod chạy trên node-1 (drain), có requests (tổng quan).
+  for (const pod of store.get('pods')?.values() ?? []) {
+    pod.spec = {
+      ...pod.spec,
+      nodeName: 'node-1',
+      containers: [
+        {
+          name: 'app',
+          image: 'nginx:1.27',
+          ports: [{ containerPort: 8080, name: 'http' }],
+          resources: { requests: { cpu: '250m', memory: '128Mi' } }
+        }
+      ]
+    }
+  }
   // Pod cần nhãn để service tìm thấy.
   for (const p of store.get('pods')?.values() ?? [])
     p.metadata.labels = { app: p.metadata.name.startsWith('web') ? 'web' : 'tool' }
   const requests: string[] = []
   const watchers = new Set<{ plural: string; namespace: string | undefined; res: ServerResponse }>()
   let expired = false
+  let metricsDisabled = false
 
   const kindOf: Record<string, { apiVersion: string; kind: string; namespaced: boolean }> = {
     namespaces: { apiVersion: 'v1', kind: 'Namespace', namespaced: false },
@@ -196,6 +298,11 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     secrets: { apiVersion: 'v1', kind: 'Secret', namespaced: true },
     events: { apiVersion: 'v1', kind: 'Event', namespaced: true },
     deployments: { apiVersion: 'apps/v1', kind: 'Deployment', namespaced: true },
+    replicasets: { apiVersion: 'apps/v1', kind: 'ReplicaSet', namespaced: true },
+    nodes: { apiVersion: 'v1', kind: 'Node', namespaced: false },
+    cronjobs: { apiVersion: 'batch/v1', kind: 'CronJob', namespaced: true },
+    jobs: { apiVersion: 'batch/v1', kind: 'Job', namespaced: true },
+    configmaps: { apiVersion: 'v1', kind: 'ConfigMap', namespaced: true },
     widgets: { apiVersion: 'example.com/v1', kind: 'Widget', namespaced: true }
   }
 
@@ -255,6 +362,46 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
             { name: 'widgets/status', kind: 'Widget', namespaced: true, verbs: ['get'] }
           ]
         })
+      // Discovery theo group/version (server-side apply tìm loại theo apiVersion + kind).
+      const discovery: Record<string, string[]> = {
+        '/api/v1': ['pods', 'services', 'secrets', 'events', 'namespaces', 'nodes', 'configmaps'],
+        '/apis/apps/v1': ['deployments', 'replicasets'],
+        '/apis/batch/v1': ['cronjobs', 'jobs']
+      }
+      const group = discovery[p]
+      if (group)
+        return json(res, 200, {
+          resources: group.flatMap((r) => {
+            const meta = kindOf[r]
+            return meta
+              ? [{ name: r, kind: meta.kind, namespaced: meta.namespaced, verbs: ['list'] }]
+              : []
+          })
+        })
+      if (p.startsWith('/apis/metrics.k8s.io/v1beta1/')) {
+        if (metricsDisabled)
+          return json(
+            res,
+            404,
+            statusBody(404, 'NotFound', 'the server could not find the requested resource')
+          )
+        if (p.endsWith('/nodes'))
+          return json(res, 200, {
+            items: [...(store.get('nodes')?.values() ?? [])].map((n) => ({
+              metadata: { name: n.metadata.name },
+              usage: { cpu: '1500m', memory: '2Gi' }
+            }))
+          })
+        const nsMatch = /\/namespaces\/([^/]+)\/pods$/.exec(p)
+        return json(res, 200, {
+          items: [...(store.get('pods')?.values() ?? [])]
+            .filter((x) => !nsMatch || x.metadata.namespace === nsMatch[1])
+            .map((x) => ({
+              metadata: { name: x.metadata.name, namespace: x.metadata.namespace },
+              containers: [{ name: 'app', usage: { cpu: '120000000n', memory: '64Mi' } }]
+            }))
+        })
+      }
       if (p === '/apis/authorization.k8s.io/v1/selfsubjectaccessreviews' && req.method === 'POST') {
         const body = (await readBody(req)) as {
           spec: { resourceAttributes: { resource: string; namespace?: string } }
@@ -292,6 +439,22 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       const key = (ns: string | undefined, n: string): string =>
         meta.namespaced ? `${ns ?? ''}/${n}` : n
 
+      if (!name && req.method === 'POST') {
+        const body = (await readBody(req)) as Obj
+        const created = {
+          ...body,
+          metadata: {
+            ...body.metadata,
+            namespace,
+            uid: `uid-${body.metadata.name}`,
+            resourceVersion: nextRv(),
+            creationTimestamp: new Date().toISOString()
+          }
+        }
+        table.set(key(namespace, body.metadata.name), created)
+        notify(plural, 'ADDED', created)
+        return json(res, 201, created)
+      }
       if (!name) {
         if (url.searchParams.get('watch') === 'true') {
           if (expired) {
@@ -320,6 +483,11 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         if (/status\.phase=Running/.test(field ?? ''))
           items = items.filter(
             (o) => (o.status as { phase?: string } | undefined)?.phase === 'Running'
+          )
+        const nodeField = /spec\.nodeName=([^,]+)/.exec(field ?? '')?.[1]
+        if (nodeField)
+          items = items.filter(
+            (o) => (o.spec as { nodeName?: string } | undefined)?.nodeName === nodeField
           )
         const selector = url.searchParams.get('labelSelector')
         if (selector) {
@@ -364,6 +532,34 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         current.metadata.resourceVersion = nextRv()
         notify(plural, 'MODIFIED', current)
         return json(res, 200, { spec: { replicas: body.spec.replicas } })
+      }
+      if (sub === 'eviction' && req.method === 'POST') {
+        if (!current) return json(res, 404, statusBody(404, 'NotFound', 'not found'))
+        table.delete(k)
+        notify(plural, 'DELETED', current)
+        return json(res, 201, { kind: 'Status', status: 'Success' })
+      }
+      // Server-side apply: tạo nếu chưa có, không thì gộp.
+      if (
+        req.method === 'PATCH' &&
+        req.headers['content-type'] === 'application/apply-patch+yaml'
+      ) {
+        const body = (await readBody(req)) as Obj
+        const next: Obj = {
+          ...(current ?? {}),
+          ...body,
+          metadata: {
+            ...(current?.metadata ?? {
+              uid: `uid-${body.metadata.name}`,
+              creationTimestamp: new Date().toISOString()
+            }),
+            ...body.metadata,
+            resourceVersion: nextRv()
+          }
+        } as Obj
+        table.set(k, next)
+        notify(plural, current ? 'MODIFIED' : 'ADDED', next)
+        return json(res, current ? 200 : 201, next)
       }
       if (!current)
         return json(res, 404, statusBody(404, 'NotFound', `${plural} "${name}" not found`))
@@ -496,6 +692,14 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       table?.delete(key)
       notify(plural, 'DELETED', obj)
     },
+    disableMetrics: () => {
+      metricsDisabled = true
+    },
+    get: (plural, namespace, name) => {
+      const meta = kindOf[plural]
+      return store.get(plural)?.get(meta?.namespaced ? `${namespace ?? ''}/${name}` : name)
+    },
+    list: (plural) => [...(store.get(plural)?.values() ?? [])],
     expireWatches: () => {
       expired = true
       for (const w of watchers) w.res.end()

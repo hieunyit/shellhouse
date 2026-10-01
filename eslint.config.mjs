@@ -50,6 +50,7 @@ const moduleZones = [
         './components/files',
         './components/SortMenu.tsx',
         './components/LogViewer.tsx',
+        './components/panels.tsx',
         './lib/format.ts',
         './lib/platform.ts'
       ],

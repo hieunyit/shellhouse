@@ -48,6 +48,18 @@ export interface ModuleLog {
   error(message: string): void
 }
 
+/** File người dùng vừa chọn trong hộp thoại. */
+export interface PickedFile {
+  path: string
+  name: string
+  content: string
+  /**
+   * Đọc file mà file này trỏ tới (chứng chỉ trong kubeconfig…), đường dẫn tương đối tính từ thư
+   * mục của file. Chỉ dùng trong lúc xử lý lần chọn này; tối đa 1 MB mỗi file.
+   */
+  readReferenced(path: string): Promise<string>
+}
+
 export interface MainModuleContext {
   db: ModuleDb
   /** Chỉ có khi manifest khai báo quyền `secrets`. */
@@ -58,6 +70,14 @@ export interface MainModuleContext {
   events: { emit(name: string, data: unknown): void }
   /** Đọc file trên máy — chỉ đường dẫn khai báo trong quyền `read-file` (kubeconfig…). */
   readFile(path: string): Promise<string>
+  /** Liệt kê file (không đệ quy) trong thư mục khai báo trong quyền `read-file`. */
+  readDir(path: string): Promise<{ name: string; path: string; size: number }[]>
+  /** Hộp thoại chọn file (cần quyền `pick-file`); huỷ → []. */
+  pickFiles(options: {
+    title: string
+    filters?: { name: string; extensions: string[] }[]
+    multiple?: boolean
+  }): Promise<PickedFile[]>
   log: ModuleLog
 }
 

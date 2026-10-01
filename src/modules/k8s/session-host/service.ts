@@ -23,6 +23,18 @@ import {
 } from '../shared/resources'
 import { KubeClient, KubeError, type RawConnect } from './client'
 import { credentialProvider, type AuthConfig } from './auth'
+import {
+  cordon,
+  cronSuspend,
+  cronTrigger,
+  drain,
+  logTargets,
+  metrics,
+  overview,
+  rollback,
+  rolloutHistory,
+  serverApply
+} from './operations'
 
 /** Kết quả `fromMain('resolve')` (xem main/kubeconfig.ts). */
 export interface ResolvedClusterConfig {
@@ -163,7 +175,13 @@ export class K8sService implements HostModuleSession {
         }
       }
       case 'watch':
-        return this.watch(op.kind, op.namespace, op.labelSelector, op.resourceVersion)
+        return this.watch(
+          op.kind,
+          op.namespace,
+          op.labelSelector,
+          op.resourceVersion,
+          op.fieldSelector
+        )
       case 'get': {
         const kind = this.kind(op.kind)
         let o = slim(
@@ -175,7 +193,35 @@ export class K8sService implements HostModuleSession {
       case 'apply':
         return this.apply(client, op.yaml)
       case 'delete':
-        await client.json('DELETE', resourcePath(this.kind(op.kind), op.namespace, op.name))
+        await client.json('DELETE', resourcePath(this.kind(op.kind), op.namespace, op.name), {
+          ...(op.force ? { query: { gracePeriodSeconds: 0 } } : {})
+        })
+        return null
+      case 'serverApply':
+        return serverApply(
+          client,
+          op.yaml,
+          op.namespace ?? this.cluster?.namespace ?? 'default',
+          (v, k) => this.findKind(client, v, k)
+        )
+      case 'metrics':
+        return metrics(client, op.scope, op.namespace, signal)
+      case 'overview':
+        return overview(client, op.namespaces)
+      case 'rolloutHistory':
+        return rolloutHistory(client, op.namespace, op.name)
+      case 'rollback':
+        await rollback(client, op.namespace, op.name, op.revision)
+        return null
+      case 'cordon':
+        await cordon(client, op.node, op.unschedulable)
+        return null
+      case 'drain':
+        return drain(client, op.node)
+      case 'cronTrigger':
+        return cronTrigger(client, op.namespace, op.name)
+      case 'cronSuspend':
+        await cronSuspend(client, op.namespace, op.name, op.suspend)
         return null
       case 'scale':
         await client.json(
@@ -211,9 +257,10 @@ export class K8sService implements HostModuleSession {
           }
         )
         return null
-      case 'logs.subscribe':
+      case 'logs.subscribe': {
+        const targets = await logTargets(client, op.namespace, op)
+        const prefixed = targets.length > 1
         return this.subscribe('logs', async (id, s) => {
-          const decoder = new TextDecoder()
           let buffer = ''
           let timer: NodeJS.Timeout | null = null
           const flush = (): void => {
@@ -222,30 +269,51 @@ export class K8sService implements HostModuleSession {
             if (buffer) this.deps.emit('logs', { subscription: id, stream: 'stdout', text: buffer })
             buffer = ''
           }
+          const push = (text: string): void => {
+            buffer += text
+            if (buffer.length > 64 * 1024) flush()
+            else timer ??= setTimeout(flush, 50)
+          }
           try {
-            await client.stream(
-              'GET',
-              `/api/v1/namespaces/${encodeURIComponent(op.namespace)}/pods/${encodeURIComponent(op.pod)}/log`,
-              {
-                query: {
-                  follow: !op.previous,
-                  previous: op.previous || undefined,
-                  container: op.container,
-                  tailLines: op.tail,
-                  timestamps: op.timestamps || undefined
-                },
-                signal: s
-              },
-              (chunk) => {
-                buffer += decoder.decode(chunk, { stream: true })
-                if (buffer.length > 64 * 1024) flush()
-                else timer ??= setTimeout(flush, 50)
-              }
+            // Nhiều nguồn: mỗi dòng có tiền tố pod/container (như `stern` / log workload của Lens).
+            await Promise.all(
+              targets.map(async (t) => {
+                const decoder = new TextDecoder()
+                let partial = ''
+                const prefix = prefixed ? `[${t.pod}${t.container ? `/${t.container}` : ''}] ` : ''
+                await client.stream(
+                  'GET',
+                  `/api/v1/namespaces/${encodeURIComponent(op.namespace)}/pods/${encodeURIComponent(t.pod)}/log`,
+                  {
+                    query: {
+                      follow: !op.previous,
+                      previous: op.previous || undefined,
+                      container: t.container,
+                      tailLines: op.tail,
+                      timestamps: op.timestamps || undefined
+                    },
+                    signal: s
+                  },
+                  (chunk) => {
+                    const text = decoder.decode(chunk, { stream: true })
+                    if (!prefixed) {
+                      push(text)
+                      return
+                    }
+                    partial += text
+                    const lines = partial.split('\n')
+                    partial = lines.pop() ?? ''
+                    if (lines.length) push(lines.map((l) => `${prefix}${l}\n`).join(''))
+                  }
+                )
+                if (partial) push(`${prefix}${partial}\n`)
+              })
             )
           } finally {
             flush()
           }
         })
+      }
       case 'portForward':
         return this.portForward(client, op.namespace, op.target, op.ports)
       case 'portForward.stop': {
@@ -268,6 +336,39 @@ export class K8sService implements HostModuleSession {
       case 'edit':
         return this.edit(client, this.kind(op.kind), op.namespace, op.name, op.localPath)
     }
+  }
+
+  /** Loại theo apiVersion + kind (YAML người dùng) — hỏi discovery của group/version khi cần. */
+  private async findKind(
+    client: KubeClient,
+    apiVersion: string,
+    kindName: string
+  ): Promise<ResourceKind | undefined> {
+    const known = [...this.kinds.values()].find(
+      (k) => k.kind === kindName && (k.group ? `${k.group}/${k.version}` : k.version) === apiVersion
+    )
+    if (known) return known
+    const [group, version] = apiVersion.includes('/') ? apiVersion.split('/') : ['', apiVersion]
+    const list = await client
+      .json<{ resources: { name: string; kind: string; namespaced: boolean }[] }>(
+        'GET',
+        group ? `/apis/${group}/${version ?? ''}` : `/api/${version ?? ''}`
+      )
+      .catch(() => null)
+    const r = list?.resources.find((x) => x.kind === kindName && !x.name.includes('/'))
+    if (!r) return undefined
+    const kind: ResourceKind = {
+      id: group ? `${r.name}.${group}` : r.name,
+      group: group ?? '',
+      version: version ?? '',
+      plural: r.name,
+      kind: r.kind,
+      namespaced: r.namespaced,
+      title: r.kind,
+      section: 'Custom resources'
+    }
+    this.kinds.set(kind.id, kind)
+    return kind
   }
 
   /**
@@ -392,10 +493,11 @@ export class K8sService implements HostModuleSession {
     kindId: string,
     namespace: string | undefined,
     selector: string | undefined,
-    resourceVersion: string
+    resourceVersion: string,
+    fieldSelector?: string
   ): { subscription: string } {
     const kind = this.kind(kindId)
-    const key = `${kindId}|${namespace ?? ''}|${selector ?? ''}`
+    const key = `${kindId}|${namespace ?? ''}|${selector ?? ''}|${fieldSelector ?? ''}`
     const id = randomUUID()
     let shared = this.watches.get(key)
     if (!shared) {
@@ -407,7 +509,7 @@ export class K8sService implements HostModuleSession {
       }
       shared = created
       this.watches.set(key, created)
-      void this.runWatch(created, kind, namespace, selector, resourceVersion)
+      void this.runWatch(created, kind, namespace, selector, resourceVersion, fieldSelector)
     }
     const w = shared
     w.subscribers.add(id)
@@ -437,7 +539,8 @@ export class K8sService implements HostModuleSession {
     kind: ResourceKind,
     namespace: string | undefined,
     selector: string | undefined,
-    startVersion: string
+    startVersion: string,
+    fieldSelector?: string
   ): Promise<void> {
     let rv = startVersion
     let failures = 0
@@ -458,6 +561,7 @@ export class K8sService implements HostModuleSession {
               resourceVersion: rv,
               allowWatchBookmarks: true,
               labelSelector: selector || undefined,
+              fieldSelector: fieldSelector || undefined,
               timeoutSeconds: 300
             },
             signal

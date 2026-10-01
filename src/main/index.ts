@@ -670,6 +670,22 @@ if (!app.requestSingleInstanceLock()) {
       },
       log: (level, message) => {
         log[level](`[modules] ${message}`)
+      },
+      showOpenDialog: async (options) => {
+        const opts = {
+          title: options.title,
+          properties: (options.multiple
+            ? ['openFile', 'multiSelections', 'showHiddenFiles']
+            : ['openFile', 'showHiddenFiles']) as (
+            'openFile' | 'multiSelections' | 'showHiddenFiles'
+          )[],
+          ...(options.filters ? { filters: options.filters } : {}),
+          defaultPath: app.getPath('home')
+        }
+        const result = mainWindow
+          ? await dialog.showOpenDialog(mainWindow, opts)
+          : await dialog.showOpenDialog(opts)
+        return result.canceled ? [] : result.filePaths
       }
     })
     modules.start()

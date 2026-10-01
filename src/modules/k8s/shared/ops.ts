@@ -54,6 +54,7 @@ export const K8sOp = z.discriminatedUnion('op', [
     kind: Kind,
     namespace: Namespace.optional(),
     labelSelector: Selector.optional(),
+    fieldSelector: Selector.optional(),
     resourceVersion: z.string().max(64)
   }),
   z.object({
@@ -65,7 +66,45 @@ export const K8sOp = z.discriminatedUnion('op', [
   }),
   /** Ghi đè (replace) có kiểm resourceVersion — xung đột → báo, không ghi đè. */
   z.object({ op: z.literal('apply'), yaml: z.string().max(4 * 1024 * 1024) }),
-  z.object({ op: z.literal('delete'), kind: Kind, namespace: Namespace.optional(), name: Name }),
+  /** force = xoá ngay (grace period 0) — "kill" của k9s. */
+  z.object({
+    op: z.literal('delete'),
+    kind: Kind,
+    namespace: Namespace.optional(),
+    name: Name,
+    force: z.boolean().optional()
+  }),
+  /** Tạo / cập nhật bằng server-side apply (nhiều tài liệu YAML, ngăn bởi ---). */
+  z.object({
+    op: z.literal('serverApply'),
+    yaml: z.string().max(4 * 1024 * 1024),
+    namespace: Namespace.optional()
+  }),
+  /** CPU / RAM từ metrics-server (null nếu cluster không có). */
+  z.object({
+    op: z.literal('metrics'),
+    scope: z.enum(['pods', 'nodes']),
+    namespace: Namespace.optional()
+  }),
+  /** Số liệu tổng quan cluster (kiểu Lens). */
+  z.object({ op: z.literal('overview'), namespaces: z.array(Namespace).max(64) }),
+  z.object({ op: z.literal('rolloutHistory'), namespace: Namespace, name: Name }),
+  z.object({
+    op: z.literal('rollback'),
+    namespace: Namespace,
+    name: Name,
+    revision: z.number().int().min(1)
+  }),
+  z.object({ op: z.literal('cordon'), node: Name, unschedulable: z.boolean() }),
+  /** Cordon + evict mọi pod (trừ DaemonSet / static pod). */
+  z.object({ op: z.literal('drain'), node: Name }),
+  z.object({ op: z.literal('cronTrigger'), namespace: Namespace, name: Name }),
+  z.object({
+    op: z.literal('cronSuspend'),
+    namespace: Namespace,
+    name: Name,
+    suspend: z.boolean()
+  }),
   z.object({
     op: z.literal('scale'),
     kind: z.enum(['deployments.apps', 'statefulsets.apps', 'replicasets.apps']),
@@ -85,11 +124,17 @@ export const K8sOp = z.discriminatedUnion('op', [
     name: Name,
     paused: z.boolean()
   }),
+  /**
+   * Log theo luồng. Một pod + container; hoặc mọi container của pod (`allContainers`); hoặc mọi
+   * pod khớp `selector` (log cả workload) — dòng có tiền tố pod/container.
+   */
   z.object({
     op: z.literal('logs.subscribe'),
     namespace: Namespace,
-    pod: Name,
+    pod: Name.optional(),
+    selector: Selector.optional(),
     container: z.string().max(253).optional(),
+    allContainers: z.boolean().optional(),
     previous: z.boolean(),
     tail: z.number().int().min(0).max(100_000),
     timestamps: z.boolean()
@@ -127,7 +172,20 @@ export type K8sOp = z.infer<typeof K8sOp>
 
 /** Thao tác thay đổi (bị chặn ở chế độ chỉ đọc). */
 export function isMutating(op: K8sOp): boolean {
-  return ['apply', 'delete', 'scale', 'rolloutRestart', 'rolloutPause', 'edit'].includes(op.op)
+  return [
+    'apply',
+    'serverApply',
+    'delete',
+    'scale',
+    'rolloutRestart',
+    'rolloutPause',
+    'edit',
+    'rollback',
+    'cordon',
+    'drain',
+    'cronTrigger',
+    'cronSuspend'
+  ].includes(op.op)
 }
 
 // ——— Kết quả / sự kiện ———
@@ -162,6 +220,61 @@ export interface WatchEvent {
   events: { type: 'ADDED' | 'MODIFIED' | 'DELETED'; object: unknown }[]
   /** Server trả 410 Gone → renderer list lại từ đầu. */
   relist?: boolean
+}
+
+/** Mức dùng (millicore CPU, byte RAM). */
+export interface Usage {
+  cpu: number
+  memory: number
+}
+
+export interface MetricsResult {
+  /** false = cluster không có metrics-server. */
+  available: boolean
+  /** "ns/pod" hoặc tên node → mức dùng. */
+  items: Record<string, Usage>
+}
+
+export interface OverviewResult {
+  version: string
+  nodes: { total: number; ready: number; cordoned: number }
+  /** Tổng allocatable của các node (millicore / byte). */
+  capacity: Usage
+  /** Tổng requests của pod đang chạy. */
+  requests: Usage
+  /** Mức dùng thật (metrics-server), null nếu không có. */
+  usage: Usage | null
+  pods: { running: number; pending: number; failed: number; succeeded: number; restarting: number }
+  workloads: { kind: string; total: number; ready: number }[]
+  warnings: {
+    namespace: string
+    object: string
+    reason: string
+    message: string
+    count: number
+    last: string
+  }[]
+}
+
+export interface RolloutRevision {
+  revision: number
+  replicaSet: string
+  images: string[]
+  created: string
+  replicas: number
+  current: boolean
+}
+
+export interface DrainResult {
+  evicted: string[]
+  skipped: string[]
+  failed: string[]
+}
+
+export interface ApplyResult {
+  object: string
+  action: 'configured' | 'error'
+  error?: string
 }
 
 export interface PortForwardInfo {

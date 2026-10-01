@@ -11,6 +11,7 @@ export const useK8s = create<K8sStore>((set) => ({
   contexts: [],
   errors: [],
   imported: [],
+  files: [],
   loaded: false,
   reload: async () => {
     set({ ...(await k8sApi.contexts()), loaded: true })

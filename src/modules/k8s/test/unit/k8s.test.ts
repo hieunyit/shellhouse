@@ -324,3 +324,90 @@ describe('xác thực', () => {
     expect(jwtExpiry('garbage')).toBeNull()
   })
 })
+
+describe('import kubeconfig từ file', () => {
+  it('nhúng CA / chứng chỉ / khoá / tokenFile vào bản lưu; file thiếu → lỗi nêu tên', async () => {
+    const { embedReferences } = await import('../../main/kubeconfig')
+    const files: Record<string, string> = {
+      'ca.crt': 'CA',
+      '/abs/client.crt': 'CERT',
+      'key.pem': 'KEY',
+      tok: 'TOKEN\n'
+    }
+    const read = (p: string): Promise<string> =>
+      p in files ? Promise.resolve(files[p] ?? '') : Promise.reject(new Error('ENOENT'))
+    const out = await embedReferences(
+      `clusters:
+- name: c
+  cluster:
+    server: https://x
+    certificate-authority: ca.crt
+users:
+- name: u
+  user:
+    client-certificate: /abs/client.crt
+    client-key: key.pem
+- name: t
+  user:
+    tokenFile: tok
+contexts:
+- name: a
+  context: {cluster: c, user: u}
+`,
+      read
+    )
+    const doc = parseKubeconfig(out)
+    expect(doc.clusters.get('c')).toEqual({
+      server: 'https://x',
+      'certificate-authority-data': Buffer.from('CA').toString('base64')
+    })
+    expect(doc.users.get('u')).toEqual({
+      'client-certificate-data': Buffer.from('CERT').toString('base64'),
+      'client-key-data': Buffer.from('KEY').toString('base64')
+    })
+    expect(doc.users.get('t')).toEqual({ token: 'TOKEN' })
+    await expect(
+      embedReferences(
+        'clusters:\n- name: c\n  cluster: {server: x, certificate-authority: missing.crt}\n',
+        read
+      )
+    ).rejects.toThrow('missing.crt')
+  })
+
+  it('quantity và selector', async () => {
+    const { parseCpu, parseMemory, formatCpu, formatMemory, selectorString } =
+      await import('../../shared/resources')
+    expect([
+      parseCpu('250m'),
+      parseCpu('2'),
+      parseCpu('1500000n'),
+      parseCpu('3u'),
+      parseCpu('x')
+    ]).toEqual([250, 2000, 1.5, 0.003, 0])
+    expect([
+      parseMemory('1Gi'),
+      parseMemory('500M'),
+      parseMemory('1e3'),
+      parseMemory('128974848'),
+      parseMemory('5Q')
+    ]).toEqual([1024 ** 3, 5e8, 1000, 128974848, 0])
+    expect([
+      formatCpu(120),
+      formatCpu(1500),
+      formatCpu(12000),
+      formatMemory(64 * 1024 ** 2),
+      formatMemory(1.5 * 1024 ** 3)
+    ]).toEqual(['120m', '1.5', '12', '64Mi', '1.5Gi'])
+    expect(
+      selectorString({
+        matchLabels: { app: 'web' },
+        matchExpressions: [
+          { key: 'tier', operator: 'In', values: ['a', 'b'] },
+          { key: 'x', operator: 'Exists' }
+        ]
+      })
+    ).toBe('app=web,tier in (a,b),x')
+    expect(selectorString({ app: 'db' })).toBe('app=db')
+    expect(selectorString(undefined)).toBeNull()
+  })
+})

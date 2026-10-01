@@ -10,7 +10,9 @@ export const ContextSettings = z.object({
   namespace: z.string().max(63).nullable(),
   readOnly: z.boolean(),
   /** Đỏ = production: thao tác phá huỷ phải gõ tên tài nguyên. */
-  color: ContextColor
+  color: ContextColor,
+  /** Ẩn khỏi thanh bên. */
+  hidden: z.boolean()
 })
 export type ContextSettings = z.infer<typeof ContextSettings>
 
@@ -23,7 +25,14 @@ export interface ContextList {
   contexts: ContextEntry[]
   /** File không đọc được / hỏng (hiện cho người dùng). */
   errors: string[]
-  imported: { id: string; name: string }[]
+  imported: { id: string; name: string; contexts: number }[]
+  /** File kubeconfig đang đọc (KUBECONFIG / ~/.kube). */
+  files: { path: string; label: string; contexts: number }[]
+}
+
+export interface ImportResult {
+  imported: { name: string; contexts: number }[]
+  errors: string[]
 }
 
 export const K8sIpc = {
@@ -36,5 +45,8 @@ export const K8sIpc = {
       .min(1)
       .max(1024 * 1024)
   ]),
-  removeImported: z.tuple([z.string().max(64)])
+  removeImported: z.tuple([z.string().max(64)]),
+  renameImported: z.tuple([z.string().max(64), z.string().trim().min(1).max(100)]),
+  /** Hộp thoại chọn file kubeconfig (một hay nhiều) → nhúng chứng chỉ → lưu vào vault. */
+  importFiles: z.tuple([])
 } as const

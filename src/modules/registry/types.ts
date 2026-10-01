@@ -34,6 +34,8 @@ export type ModulePermission =
   | { kind: 'read-file'; path: string }
   | { kind: 'network'; hosts: string }
   | { kind: 'secrets'; detail: string }
+  /** Đọc file người dùng tự chọn trong hộp thoại của hệ điều hành (và file chúng trỏ tới). */
+  | { kind: 'pick-file'; detail: string }
 
 export type ModuleDetector =
   | { on: 'ssh-connected'; probe: 'unix-socket'; path: string }
@@ -102,6 +104,7 @@ export function describePermission(p: ModulePermission): string {
     case 'network':
       return `Connects to ${p.hosts}`
     case 'secrets':
+    case 'pick-file':
       return p.detail
   }
 }

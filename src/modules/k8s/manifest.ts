@@ -32,6 +32,10 @@ export const k8sManifest: ModuleManifest = {
     { kind: 'read-file', path: '~/.kube/**' },
     { kind: 'read-file', path: '$KUBECONFIG' },
     { kind: 'read-file', path: '~/.minikube/**' },
+    {
+      kind: 'pick-file',
+      detail: 'Reads kubeconfig files you choose to import (and the certificates they point to)'
+    },
     { kind: 'network', hosts: 'The API servers in your kubeconfig' },
     { kind: 'run-program', binary: 'aws' },
     { kind: 'run-program', binary: 'gcloud' },
@@ -48,7 +52,10 @@ export const k8sManifest: ModuleManifest = {
   contributes: {
     sidebarSection: true,
     tabKinds: ['cluster', 'logs'],
-    commands: [{ id: 'import', title: 'Import a kubeconfig' }],
+    commands: [
+      { id: 'import', title: 'Import kubeconfig files' },
+      { id: 'paste', title: 'Paste a kubeconfig' }
+    ],
     settings: true,
     sessionKinds: ['cluster', 'terminal'],
     attachToSsh: true,

@@ -369,3 +369,107 @@ export function hideSecretValues(o: K8sObject): K8sObject {
   delete rest['stringData']
   return { ...rest, data: Object.fromEntries(keys.map((key) => [key, ''])) }
 }
+
+// ——— Quantity (CPU / bộ nhớ) ———
+
+/** "250m" / "1" / "1500000n" / "2u" → millicore. */
+export function parseCpu(q: unknown): number {
+  const s = typeof q === 'number' ? String(q) : typeof q === 'string' ? q.trim() : ''
+  const m = /^([\d.]+)([numk]?)$/.exec(s)
+  if (!m) return 0
+  const n = Number(m[1])
+  switch (m[2]) {
+    case 'n':
+      return n / 1e6
+    case 'u':
+      return n / 1e3
+    case 'm':
+      return n
+    case 'k':
+      return n * 1e6
+    default:
+      return n * 1000
+  }
+}
+
+const MEM_UNITS: Record<string, number> = {
+  '': 1,
+  k: 1e3,
+  M: 1e6,
+  G: 1e9,
+  T: 1e12,
+  P: 1e15,
+  Ki: 1024,
+  Mi: 1024 ** 2,
+  Gi: 1024 ** 3,
+  Ti: 1024 ** 4,
+  Pi: 1024 ** 5,
+  m: 1e-3
+}
+
+/** "128Mi" / "1G" / "123456" / "1e3" → byte. */
+export function parseMemory(q: unknown): number {
+  const s = typeof q === 'number' ? String(q) : typeof q === 'string' ? q.trim() : ''
+  const m = /^([\d.]+(?:e[+-]?\d+)?)([a-zA-Z]*)$/.exec(s)
+  if (!m) return 0
+  const unit = MEM_UNITS[m[2] ?? '']
+  return unit === undefined ? 0 : Number(m[1]) * unit
+}
+
+export function formatCpu(milli: number): string {
+  if (milli >= 1000)
+    return `${(milli / 1000).toFixed(milli >= 10_000 ? 0 : 2).replace(/\.?0+$/, '')}`
+  return `${Math.round(milli)}m`
+}
+
+export function formatMemory(bytes: number): string {
+  const units = ['B', 'Ki', 'Mi', 'Gi', 'Ti']
+  let v = bytes
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v >= 100 || i === 0 ? Math.round(v) : Number(v.toFixed(1))}${units[i] ?? ''}`
+}
+
+/** Tổng requests (CPU, RAM) của các container trong một pod. */
+export function podRequests(o: K8sObject): { cpu: number; memory: number } {
+  const containers =
+    (o.spec?.['containers'] as
+      { resources?: { requests?: Record<string, unknown> } }[] | undefined) ?? []
+  let cpu = 0
+  let memory = 0
+  for (const c of containers) {
+    cpu += parseCpu(c.resources?.requests?.['cpu'])
+    memory += parseMemory(c.resources?.requests?.['memory'])
+  }
+  return { cpu, memory }
+}
+
+/** matchLabels của selector → chuỗi labelSelector ("a=b,c=d"); null nếu không có. */
+export function selectorString(selector: unknown): string | null {
+  const s = selector as
+    | {
+        matchLabels?: Record<string, string>
+        matchExpressions?: { key: string; operator: string; values?: string[] }[]
+      }
+    | Record<string, string>
+    | undefined
+  if (!s || typeof s !== 'object') return null
+  const labels =
+    'matchLabels' in s || 'matchExpressions' in s
+      ? ((s as { matchLabels?: Record<string, string> }).matchLabels ?? {})
+      : (s as Record<string, string>)
+  const parts = Object.entries(labels).map(([k, v]) => `${k}=${v}`)
+  const exprs =
+    (s as { matchExpressions?: { key: string; operator: string; values?: string[] }[] })
+      .matchExpressions ?? []
+  for (const e of exprs) {
+    if (e.operator === 'In') parts.push(`${e.key} in (${(e.values ?? []).join(',')})`)
+    else if (e.operator === 'NotIn') parts.push(`${e.key} notin (${(e.values ?? []).join(',')})`)
+    else if (e.operator === 'Exists') parts.push(e.key)
+    else if (e.operator === 'DoesNotExist') parts.push(`!${e.key}`)
+  }
+  return parts.length ? parts.join(',') : null
+}

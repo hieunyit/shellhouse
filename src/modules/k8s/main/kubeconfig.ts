@@ -1,4 +1,4 @@
-import { parse } from 'yaml'
+import { parse, parseDocument } from 'yaml'
 import type { ContextInfo, ContextRef } from '../shared/ops'
 
 /**
@@ -200,4 +200,58 @@ export async function resolveContext(
     namespace: ctx.namespace ?? 'default',
     auth
   }
+}
+
+/** Trường đường dẫn → trường nhúng tương ứng. */
+const FILE_FIELDS: readonly (readonly [
+  section: 'clusters' | 'users',
+  inner: string,
+  file: string,
+  data: string
+])[] = [
+  ['clusters', 'cluster', 'certificate-authority', 'certificate-authority-data'],
+  ['users', 'user', 'client-certificate', 'client-certificate-data'],
+  ['users', 'user', 'client-key', 'client-key-data']
+]
+
+/**
+ * Kubeconfig tự chứa để lưu vào vault: mọi file tham chiếu (CA, chứng chỉ, khoá, tokenFile) được
+ * đọc và nhúng vào (`…-data`, `token`). File thiếu → lỗi rõ tên file.
+ */
+export async function embedReferences(
+  text: string,
+  readReferenced: (path: string) => Promise<string>
+): Promise<string> {
+  const doc = parseDocument(text)
+  const root = doc.toJS() as Obj | null
+  if (!root || typeof root !== 'object') throw new Error('This file is not a kubeconfig')
+  for (const [section, inner, file, data] of FILE_FIELDS) {
+    const list = arr(root[section])
+    for (let i = 0; i < list.length; i++) {
+      const body = obj(list[i]?.[inner])
+      const ref = str(body[file])
+      if (!ref || str(body[data])) continue
+      let content: string
+      try {
+        content = await readReferenced(ref)
+      } catch {
+        throw new Error(`Could not read ${ref} (referenced as ${file})`)
+      }
+      doc.setIn([section, i, inner, data], Buffer.from(content).toString('base64'))
+      doc.deleteIn([section, i, inner, file])
+    }
+  }
+  const users = arr(root['users'])
+  for (let i = 0; i < users.length; i++) {
+    const ref = str(obj(users[i]?.['user'])['tokenFile'])
+    if (!ref) continue
+    const token = (
+      await readReferenced(ref).catch(() => {
+        throw new Error(`Could not read ${ref} (referenced as tokenFile)`)
+      })
+    ).trim()
+    doc.setIn(['users', i, 'user', 'token'], token)
+    doc.deleteIn(['users', i, 'user', 'tokenFile'])
+  }
+  return doc.toString()
 }

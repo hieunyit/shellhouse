@@ -263,3 +263,60 @@ describe('checkModuleSql', () => {
     }).not.toThrow()
   })
 })
+
+describe('ctx.pickFiles / readDir', () => {
+  it('chỉ khi khai báo quyền pick-file; đọc file được chọn và file nó trỏ tới; readDir theo quyền read-file', async () => {
+    const { tempDir } = await import('./helpers')
+    const { writeFileSync, mkdirSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const home = tempDir()
+    mkdirSync(join(home, '.kube', 'sub'), { recursive: true })
+    writeFileSync(join(home, '.kube', 'config'), 'a')
+    writeFileSync(join(home, '.kube', 'dev.yaml'), 'b')
+    const elsewhere = tempDir()
+    writeFileSync(join(elsewhere, 'picked.yaml'), 'picked')
+    writeFileSync(join(elsewhere, 'ca.crt'), 'ca')
+    const picking: MainModule = {
+      ...fakeModule('pick'),
+      manifest: manifest('pick', {
+        permissions: [
+          { kind: 'pick-file', detail: 'x' },
+          { kind: 'read-file', path: '~/.kube/**' }
+        ]
+      })
+    }
+    const plain = fakeModule('plain')
+    const db = openDatabase(':memory:')
+    await migrate(db, MIGRATIONS)
+    const vault = new Vault(db, TEST_KDF)
+    await vault.create(Secret.fromString('master-password'))
+    const settings = new SettingsService(db)
+    let captured: MainModuleContext | null = null
+    const registry = new MainModuleRegistry(
+      [{ ...picking, activate: (ctx) => ((captured = ctx), {}) }, plain],
+      {
+        db,
+        vault,
+        settings,
+        emit: () => undefined,
+        onStatesChanged: () => undefined,
+        log: () => undefined,
+        home,
+        showOpenDialog: () => Promise.resolve([join(elsewhere, 'picked.yaml')])
+      }
+    )
+    registry.start()
+    registry.setEnabled('pick', true)
+    registry.setEnabled('plain', true)
+    const ctx = captured as MainModuleContext | null
+    const files = await ctx?.pickFiles({ title: 't' })
+    expect(files?.map((f) => [f.name, f.content])).toEqual([['picked.yaml', 'picked']])
+    await expect(files?.[0]?.readReferenced('ca.crt')).resolves.toBe('ca')
+    await expect(plain.ctx?.pickFiles({ title: 't' })).rejects.toThrow(/pick-file/)
+    expect((await ctx?.readDir('~/.kube'))?.map((f) => f.name).sort()).toEqual([
+      'config',
+      'dev.yaml'
+    ])
+    await expect(ctx?.readFile(join(elsewhere, 'picked.yaml'))).rejects.toThrow(/not allowed/)
+  })
+})

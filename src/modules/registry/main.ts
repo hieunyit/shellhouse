@@ -2,7 +2,8 @@ import type { ZodType } from 'zod'
 import type { AppSettings, ModuleEntry, SettingsPatch } from '@shared/settings'
 import type { Db } from '../../main/store/db'
 import type { Vault } from '../../main/vault/vault'
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 import { homedir } from 'node:os'
 import { createModuleDb, migrateModule, removeModuleData } from './main-db'
 import { expandHome, localPathAllowed } from './local-paths'
@@ -28,6 +29,12 @@ export interface MainRegistryDeps {
   onStatesChanged(states: ModuleState[]): void
   log: (level: 'info' | 'warn' | 'error', message: string) => void
   now?: () => number
+  /** Hộp thoại chọn file của hệ điều hành (main của app); huỷ → []. */
+  showOpenDialog?(options: {
+    title: string
+    filters?: { name: string; extensions: string[] }[]
+    multiple?: boolean
+  }): Promise<string[]>
   /** Cho test: home / biến môi trường khi kiểm quyền đọc file. */
   home?: string
   env?: NodeJS.ProcessEnv
@@ -296,6 +303,49 @@ export class MainModuleRegistry {
             `Module ${id} is not allowed to read ${path} (not declared in its manifest)`
           )
         return readFile(expandHome(path, ctx.home), 'utf8')
+      },
+      readDir: async (path) => {
+        const ctx = {
+          home: this.deps.home ?? homedir(),
+          env: this.deps.env ?? process.env,
+          platform: process.platform
+        }
+        const dir = expandHome(path, ctx.home)
+        const entries = await readdir(dir, { withFileTypes: true })
+        const out: { name: string; path: string; size: number }[] = []
+        for (const e of entries) {
+          if (!e.isFile()) continue
+          const full = join(dir, e.name)
+          if (!localPathAllowed(module.manifest, 'read-file', full, ctx)) continue
+          const info = await stat(full).catch(() => null)
+          if (info) out.push({ name: e.name, path: full, size: info.size })
+        }
+        return out
+      },
+      pickFiles: async (options) => {
+        if (!module.manifest.permissions.some((p) => p.kind === 'pick-file'))
+          throw new Error(`Module ${id} did not declare the "pick-file" permission`)
+        if (!this.deps.showOpenDialog) return []
+        const paths = await this.deps.showOpenDialog(options)
+        const MAX = 4 * 1024 * 1024
+        return Promise.all(
+          paths.map(async (path) => {
+            const info = await stat(path)
+            if (info.size > MAX) throw new Error(`${basename(path)} is too large`)
+            return {
+              path,
+              name: basename(path),
+              content: await readFile(path, 'utf8'),
+              readReferenced: async (ref: string) => {
+                const target = isAbsolute(ref) ? ref : join(dirname(path), ref)
+                const s = await stat(target)
+                if (!s.isFile() || s.size > 1024 * 1024)
+                  throw new Error(`${ref} is not a small file`)
+                return readFile(target, 'utf8')
+              }
+            }
+          })
+        )
       },
       log
     }
