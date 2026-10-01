@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.3] - 2026-10-01
+
 ### Changed
 
 - **S3 is now a module** (on by default — nothing changes for existing accounts, tabs, pins or
