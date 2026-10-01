@@ -6,6 +6,19 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- **Kubernetes: cluster Map** — the whole cluster as a live map you can pan and zoom like a
+  street map. Namespaces are islands grouped into regions by purpose (your applications, ingress
+  & networking, platform, monitoring, system). Zoomed out you see each namespace's workload / pod
+  counts and a health bar; zoom in for workload cards, services, Ingress / Gateway API routes and
+  volume claims with the connections between them; closer still, every pod as a coloured dot.
+  Search and fly to anything (`/`), jump to the next failing or degraded workload, show problems
+  only, hide system namespaces, a minimap, keyboard control (+ / − / 0 / arrows). Click something
+  to highlight everything connected to it and see its pods, traffic sources, volumes, autoscaler
+  and network policies, with **Open details**, **Logs** and **Shell**. Drawn on a canvas and only
+  what is on screen, so clusters with thousands of workloads stay smooth; refreshes every 20 s.
+
 ## [1.2.0-beta.4] - 2026-10-01
 
 ### Added

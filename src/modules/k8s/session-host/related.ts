@@ -1,5 +1,6 @@
 import type { RelatedGroup, RelatedItem, RelatedResult } from '../shared/ops'
 import { selectorString, type K8sObject } from '../shared/resources'
+import { selectorMatches } from '../shared/map'
 import { KubeError, type KubeClient } from './client'
 
 /**
@@ -95,38 +96,6 @@ export function podRefs(spec: Obj): PodRefs {
   }
   for (const p of a(spec['imagePullSecrets'])) add(r.pullSecrets, p['name'])
   return r
-}
-
-/** LabelSelector (matchLabels + matchExpressions) khớp nhãn không. Selector rỗng → không khớp. */
-export function selectorMatches(selector: unknown, labels: Record<string, string>): boolean {
-  const sel = o(selector)
-  const match = o(sel['matchLabels'])
-  const exprs = a(sel['matchExpressions'])
-  // Selector của Service là map phẳng (không có matchLabels).
-  const flat =
-    !('matchLabels' in sel) && !('matchExpressions' in sel)
-      ? (sel as Record<string, unknown>)
-      : match
-  const pairs = Object.entries(flat)
-  if (pairs.length === 0 && exprs.length === 0) return false
-  if (pairs.some(([k, v]) => labels[k] !== v)) return false
-  return exprs.every((e) => {
-    const key = s(e['key']) ?? ''
-    const values = (Array.isArray(e['values']) ? e['values'] : []) as string[]
-    const has = key in labels
-    switch (e['operator']) {
-      case 'In':
-        return has && values.includes(labels[key] ?? '')
-      case 'NotIn':
-        return !has || !values.includes(labels[key] ?? '')
-      case 'Exists':
-        return has
-      case 'DoesNotExist':
-        return !has
-      default:
-        return false
-    }
-  })
 }
 
 const podTone = (p: K8sObject): RelatedItem['tone'] => {

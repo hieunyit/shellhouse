@@ -1,6 +1,7 @@
 import { connect, type Socket } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { LimitedSpawn } from '../../../registry/host-types'
+import { layoutMap, type MapData } from '../../shared/map'
 import { K8sService, type ResolvedClusterConfig } from '../../session-host/service'
 import type {
   ApplyResult,
@@ -391,6 +392,147 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     await expect(
       run({ op: 'argoSync', namespace: 'shop', name: 'shop', prune: false })
     ).rejects.toThrow(/already syncing/)
+  })
+
+  it('bản đồ: pod quy về workload gốc (qua ReplicaSet / Job → CronJob), service, ingress, PVC, HPA, policy; Gateway API chưa cài → bỏ qua', async () => {
+    const { server, run } = await setup()
+    const meta = (name: string, extra: Record<string, unknown> = {}) => ({
+      name,
+      namespace: 'shop',
+      ...extra
+    })
+    server.upsert('deployments', {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: meta('api'),
+      spec: {
+        replicas: 2,
+        selector: { matchLabels: { app: 'api' } },
+        template: {
+          metadata: { labels: { app: 'api' } },
+          spec: {
+            volumes: [{ name: 'd', persistentVolumeClaim: { claimName: 'api-data' } }],
+            containers: [{ name: 'c' }]
+          }
+        }
+      },
+      status: { readyReplicas: 1 }
+    })
+    server.upsert('replicasets', {
+      apiVersion: 'apps/v1',
+      kind: 'ReplicaSet',
+      metadata: meta('api-7d9', {
+        ownerReferences: [{ kind: 'Deployment', name: 'api', controller: true }]
+      })
+    })
+    for (const n of ['api-7d9-a', 'api-7d9-b'])
+      server.upsert('pods', {
+        apiVersion: 'v1',
+        kind: 'Pod',
+        metadata: meta(n, {
+          ownerReferences: [{ kind: 'ReplicaSet', name: 'api-7d9', controller: true }]
+        }),
+        spec: { containers: [{ name: 'c' }], nodeName: 'node-1' },
+        status: {
+          phase: 'Running',
+          containerStatuses: [{ name: 'c', ready: true, restartCount: 1, state: { running: {} } }]
+        }
+      })
+    server.upsert('jobs', {
+      apiVersion: 'batch/v1',
+      kind: 'Job',
+      metadata: meta('nightly-123', {
+        ownerReferences: [{ kind: 'CronJob', name: 'nightly', controller: true }]
+      }),
+      spec: { template: { spec: { containers: [{ name: 'j' }] } } }
+    })
+    server.upsert('pods', {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      metadata: meta('nightly-123-x', {
+        ownerReferences: [{ kind: 'Job', name: 'nightly-123', controller: true }]
+      }),
+      status: { phase: 'Succeeded' }
+    })
+    server.upsert('services', {
+      apiVersion: 'v1',
+      kind: 'Service',
+      metadata: meta('api'),
+      spec: { selector: { app: 'api' }, ports: [{ port: 80, protocol: 'TCP' }] }
+    })
+    server.upsert('ingresses', {
+      apiVersion: 'networking.k8s.io/v1',
+      kind: 'Ingress',
+      metadata: meta('api'),
+      spec: {
+        rules: [
+          { host: 'api.example.com', http: { paths: [{ backend: { service: { name: 'api' } } }] } }
+        ]
+      }
+    })
+    server.upsert('persistentvolumeclaims', {
+      apiVersion: 'v1',
+      kind: 'PersistentVolumeClaim',
+      metadata: meta('api-data'),
+      status: { phase: 'Bound', capacity: { storage: '5Gi' } }
+    })
+    server.upsert('horizontalpodautoscalers', {
+      apiVersion: 'autoscaling/v2',
+      kind: 'HorizontalPodAutoscaler',
+      metadata: meta('api'),
+      spec: { minReplicas: 2, maxReplicas: 5, scaleTargetRef: { kind: 'Deployment', name: 'api' } },
+      status: { currentReplicas: 2 }
+    })
+
+    const d = await run<MapData>({ op: 'map', namespaces: ['shop'] })
+    expect(d.namespaces).toEqual([{ name: 'shop', active: true }])
+    const api = d.workloads.find((w) => w.name === 'api')
+    expect(api).toMatchObject({
+      kind: 'deployments.apps',
+      ready: 1,
+      desired: 2,
+      labels: { app: 'api' },
+      pvcs: ['api-data']
+    })
+    // Job của CronJob không thành thẻ riêng; pod của nó thuộc CronJob.
+    expect(d.workloads.some((w) => w.name === 'nightly-123')).toBe(false)
+    expect(d.pods.find((p) => p.name === 'api-7d9-a')).toMatchObject({
+      owner: { kind: 'Deployment', name: 'api' },
+      restarts: 1,
+      tone: 'ok'
+    })
+    expect(d.pods.find((p) => p.name === 'nightly-123-x')?.owner).toEqual({
+      kind: 'CronJob',
+      name: 'nightly'
+    })
+    expect(d.services.find((x) => x.name === 'api')).toMatchObject({
+      selector: { app: 'api' },
+      ports: '80/TCP'
+    })
+    expect(d.routes).toEqual([
+      {
+        kind: 'ingresses.networking.k8s.io',
+        ns: 'shop',
+        name: 'api',
+        hosts: ['api.example.com'],
+        backends: ['api']
+      }
+    ])
+    expect(d.pvcs).toEqual([
+      { ns: 'shop', name: 'api-data', status: 'Bound', capacity: '5Gi', tone: 'ok' }
+    ])
+    expect(d.hpas[0]).toMatchObject({ target: { kind: 'Deployment', name: 'api' }, min: 2, max: 5 })
+    expect(d.nodes.total).toBeGreaterThan(0)
+    expect(d.truncated).toBe(false)
+    // Đưa thẳng vào bố cục: ingress → service → deployment → PVC.
+    const layout = layoutMap(d, { hideSystem: false })
+    expect(layout.edges.map((e) => `${e.kind}:${e.from}>${e.to}`)).toEqual(
+      expect.arrayContaining([
+        'route:r:ingresses.networking.k8s.io:shop/api>s:shop/api',
+        'select:s:shop/api>w:deployments.apps:shop/api',
+        'storage:w:deployments.apps:shop/api>v:shop/api-data'
+      ])
+    )
   })
 
   it('lịch sử rollout + rollback về revision cũ (bỏ pod-template-hash)', async () => {

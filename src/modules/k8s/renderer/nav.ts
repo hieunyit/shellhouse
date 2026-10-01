@@ -7,6 +7,8 @@ import { BUILTIN_KINDS } from '../shared/resources'
  */
 
 export const OVERVIEW = 'overview'
+/** Bản đồ cluster (vùng → namespace → workload → pod, route → service → workload → PVC). */
+export const MAP = 'map'
 /** Trang Helm releases (đọc từ Secret của Helm 3). */
 export const HELM = 'helm-releases'
 
@@ -46,6 +48,7 @@ const ALIASES: Record<string, string> = {
   gw: 'gateways.gateway.networking.k8s.io',
   httproute: 'httproutes.gateway.networking.k8s.io',
   helm: 'helm-releases',
+  map: 'map',
   cronjob: 'cronjobs.batch',
   cronjobs: 'cronjobs.batch',
   svc: 'services',

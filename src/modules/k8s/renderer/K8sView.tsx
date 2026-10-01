@@ -63,7 +63,8 @@ import {
 } from './dialogs'
 import { COLOR_DOT } from './K8sSection'
 import { HelmView } from './HelmView'
-import { HELM, OVERVIEW, parseCommand, suggest } from './nav'
+import { MapView, type MapRef } from './MapView'
+import { HELM, MAP, OVERVIEW, parseCommand, suggest } from './nav'
 import { ClusterOverview } from './Overview'
 import { useK8s } from './store'
 import { fitColumns } from '../shared/columns'
@@ -245,6 +246,7 @@ export function ClusterTab({
   const kind = kinds?.find((k) => k.id === kindId) ?? BUILTIN_KINDS.find((k) => k.id === kindId)
   const scopeNs = top?.namespace ? [top.namespace] : (namespaces ?? [])
   const onOverview = view === OVERVIEW && !top
+  const onMap = view === MAP && !top
   const onHelm = view === HELM && !top
   const listQuery =
     onOverview || namespaces === null || !kind
@@ -720,7 +722,20 @@ export function ClusterTab({
 
   /** Mở một tài nguyên liên quan (tab Related): sang loại đó, chọn và mở chi tiết. */
   const openRelated = (from: K8sObject, kind: string, name: string): void => {
-    const ns = from.metadata.namespace
+    openRef(kind, from.metadata.namespace, name)
+  }
+
+  /** Từ bản đồ: namespace → xem tài nguyên của nó; còn lại → bảng của loại đó + chi tiết. */
+  const openFromMap = (ref: MapRef): void => {
+    if (ref.kind === 'namespaces') {
+      setNamespaces([ref.name])
+      go('pods')
+      return
+    }
+    openRef(ref.kind, ref.ns, ref.name)
+  }
+
+  const openRef = (kind: string, ns: string | undefined, name: string): void => {
     const known =
       BUILTIN_KINDS.some((k) => k.id === kind) || (kinds ?? []).some((k) => k.id === kind)
     if (!known) {
@@ -927,7 +942,7 @@ export function ClusterTab({
       : (BUILTIN_KINDS.find((b) => b.id === id)?.title ??
         kinds?.find((k) => k.id === id)?.kind ??
         id)
-  const hintItems: (readonly [string, string])[] = [
+  const tableHints: (readonly [string, string])[] = [
     [':', 'go to'],
     ['/', 'filter'],
     ['Enter', drillable ? 'pods' : 'details'],
@@ -939,6 +954,18 @@ export function ClusterTab({
       : []),
     ['Esc', 'back']
   ]
+  const hintItems: (readonly [string, string])[] = onMap
+    ? [
+        ['Drag', 'move'],
+        ['Scroll', 'zoom'],
+        ['Double-click', 'zoom in'],
+        ['/', 'find'],
+        ['0', 'fit'],
+        ['Enter', 'open'],
+        ['Esc', 'clear']
+      ]
+    : tableHints
+
   const allKeys = [
     {
       title: 'Navigate',
@@ -977,7 +1004,7 @@ export function ClusterTab({
       className="relative flex h-full flex-col bg-surface"
       data-testid="k8s-view"
       data-tab={tabId}
-      data-ready={ready && (loaded || onOverview)}
+      data-ready={ready && (loaded || onOverview || onMap)}
     >
       {/* Thanh trên: context, namespace, lọc / lệnh, thao tác chung. */}
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-2">
@@ -1157,7 +1184,7 @@ export function ClusterTab({
         )}
 
         <div ref={tableRef} className="@container flex min-w-0 flex-1 flex-col">
-          {!onOverview && (
+          {!onOverview && !onMap && (
             <div
               className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-3 text-xs"
               data-testid="k8s-breadcrumb"
@@ -1221,6 +1248,42 @@ export function ClusterTab({
           ) : onHelm ? (
             namespaces === null ? null : (
               <HelmView request={request} namespaces={namespaces} active={active} filter={query} />
+            )
+          ) : onMap ? (
+            namespaces === null ? null : (
+              <MapView
+                tabId={tabId}
+                request={request}
+                namespaces={namespaces}
+                active={active}
+                onOpen={openFromMap}
+                onLogs={(ref, labels) => {
+                  const base = {
+                    ref: params.ref,
+                    ...(params.bastionHostId ? { bastionHostId: params.bastionHostId } : {}),
+                    namespace: ref.ns ?? ''
+                  }
+                  if (ref.kind === 'pods') openPodLogs({ ...base, pod: ref.name })
+                  else {
+                    const selector = Object.entries(labels ?? {})
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(',')
+                    if (!selector) notify(`${ref.name} has no pod labels`, 'danger')
+                    else
+                      openPodLogs({
+                        ...base,
+                        selector,
+                        title: `${ref.kind.split('.')[0]?.replace(/s$/, '') ?? ''}/${ref.name}`
+                      })
+                  }
+                }}
+                onShell={(ref) => {
+                  openPodShell(
+                    { ref: params.ref, namespace: ref.ns ?? '', pod: ref.name },
+                    params.bastionHostId
+                  )
+                }}
+              />
             )
           ) : onOverview ? (
             namespaces === null ? null : (

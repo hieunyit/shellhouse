@@ -406,3 +406,66 @@ ${names.map((n) => `- name: ${n}\n  context: { cluster: ${n}-c, user: u }`).join
     rmSync(home, { recursive: true, force: true })
   }
 })
+
+test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi tiếp theo, zoom, mở chi tiết', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await page.setViewportSize({ width: 1366, height: 820 })
+    await view.getByTestId('k8s-nav-map').click()
+    const map = view.getByTestId('k8s-map')
+    await expect(map.getByTestId('k8s-map-summary')).toContainText('workloads')
+    await expect(map.getByTestId('k8s-map-summary')).toContainText('pods')
+
+    // Tìm → bay tới + chọn; bảng bên phải: pod của deployment, service gửi traffic tới.
+    await map.getByTestId('k8s-map-search').fill('web')
+    const result = map
+      .getByTestId('k8s-map-result')
+      .filter({ hasText: 'Workload' })
+      .filter({ hasText: 'web' })
+      .first()
+    await result.click()
+    const panel = view.getByTestId('k8s-map-panel')
+    await expect(panel).toContainText('web')
+    await expect(panel).toContainText('Deployment · shop')
+    await expect(panel.getByTestId('k8s-map-details')).toContainText('Pods 2')
+    await expect(panel.locator('[data-testid="k8s-map-link"][data-name="web"]')).toContainText(
+      'Service'
+    )
+
+    // Bấm service trong bảng → chọn service; quay lại.
+    await panel.locator('[data-testid="k8s-map-link"][data-name="web"]').click()
+    await expect(panel).toContainText('Service · shop')
+
+    // Lỗi tiếp theo: deployment web (1/2 ready) + pod CrashLoopBackOff.
+    await map.getByTestId('k8s-map-next-problem').click()
+    await expect(panel).toContainText('Deployment · shop')
+
+    // Zoom: phím + và nút Fit đổi tỉ lệ.
+    const zoom = map.getByTestId('k8s-map-zoom')
+    const before = await zoom.textContent()
+    await map.getByTestId('k8s-map-canvas').focus()
+    await page.keyboard.press('+')
+    await expect(zoom).not.toHaveText(before ?? '')
+    await map.getByTestId('k8s-map-fit').click()
+
+    // Mở chi tiết → bảng Deployments, chi tiết của web.
+    await panel.getByTestId('k8s-map-open').click()
+    await expect(view.getByTestId('k8s-nav-deployments.apps')).toHaveAttribute(
+      'aria-current',
+      'true'
+    )
+    await expect(view.getByTestId('k8s-describe')).toContainText('web')
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})

@@ -295,9 +295,14 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       ]
     }
   }
-  // Pod cần nhãn để service tìm thấy.
-  for (const p of store.get('pods')?.values() ?? [])
+  // Pod cần nhãn để service tìm thấy; pod web-* thuộc ReplicaSet mới nhất của deployment web.
+  for (const p of store.get('pods')?.values() ?? []) {
     p.metadata.labels = { app: p.metadata.name.startsWith('web') ? 'web' : 'tool' }
+    if (p.metadata.name.startsWith('web'))
+      (p.metadata as Obj['metadata'] & { ownerReferences?: unknown[] }).ownerReferences = [
+        { kind: 'ReplicaSet', name: 'web-rs2', controller: true }
+      ]
+  }
   const requests: string[] = []
   let failingWatches = 0
   const logStreams = new Set<ServerResponse>()

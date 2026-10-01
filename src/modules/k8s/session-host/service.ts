@@ -41,6 +41,7 @@ import {
   rolloutHistory,
   serverApply
 } from './operations'
+import { mapData } from './map'
 import { related } from './related'
 
 /** Kết quả `fromMain('resolve')` (xem main/kubeconfig.ts). */
@@ -227,6 +228,8 @@ export class K8sService implements HostModuleSession {
         else await argoRefresh(client, version, op.namespace, op.name, op.hard)
         return null
       }
+      case 'map':
+        return mapData(client, op.namespaces, signal)
       case 'helm.releases':
         return helmReleases(client, op.namespaces)
       case 'helm.release':

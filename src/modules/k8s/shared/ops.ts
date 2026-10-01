@@ -93,6 +93,8 @@ export const K8sOp = z.discriminatedUnion('op', [
   }),
   /** Số liệu tổng quan cluster (kiểu Lens). */
   z.object({ op: z.literal('overview'), namespaces: z.array(Namespace).max(64) }),
+  /** Bản đồ cluster: workload, pod, service, route, PVC, HPA, policy — gọn để vẽ. */
+  z.object({ op: z.literal('map'), namespaces: z.array(Namespace).max(64) }),
   /** Helm 3 releases (đọc Secret owner=helm — không cần cài helm). */
   z.object({ op: z.literal('helm.releases'), namespaces: z.array(Namespace).max(64) }),
   /** Chi tiết một release: values, notes, manifest, lịch sử revision. */

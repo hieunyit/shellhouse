@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { ChevronRight, LayoutDashboard } from 'lucide-react'
+import { ChevronRight, LayoutDashboard, Map as MapIcon } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import type { DiscoveredKind } from '../shared/ops'
 import { BUILTIN_KINDS, CRD_SECTIONS, type ResourceSection } from '../shared/resources'
-import { HELM, OVERVIEW } from './nav'
+import { HELM, MAP, OVERVIEW } from './nav'
 
 /** Thứ tự nhóm như Rancher; CRD có nhóm riêng (Gateway API, Argo CD) đứng sau, rồi Apps. */
 const SECTIONS: readonly ResourceSection[] = [
@@ -204,6 +204,22 @@ export function ResourceNav({
         }}
       >
         <LayoutDashboard size={13} /> Overview
+      </button>
+      <button
+        type="button"
+        data-testid={`k8s-nav-${MAP}`}
+        aria-current={view === MAP && !drilled}
+        className={cx(
+          'mb-1 flex items-center gap-2 rounded-md px-2 py-1 text-left text-[13px]',
+          view === MAP && !drilled
+            ? 'bg-surface font-medium text-fg shadow-sm'
+            : 'text-muted hover:bg-hover hover:text-fg'
+        )}
+        onClick={() => {
+          onGo(MAP)
+        }}
+      >
+        <MapIcon size={13} /> Map
       </button>
       {groups.map((g) => {
         const open = isOpen(g.id, g.items, g.id === 'Workloads')
