@@ -83,28 +83,36 @@ export function actionsFor(
       label: 'Logs',
       icon: <FileText size={14} />,
       key: 'l',
-      run: () => h.logs(obj)
+      run: () => {
+        h.logs(obj)
+      }
     })
     if (containers.length > 1)
       out.push({
         id: 'logs-all',
         label: 'Logs (all containers)',
         icon: <FileText size={14} />,
-        run: () => h.logs(obj, { allContainers: true })
+        run: () => {
+          h.logs(obj, { allContainers: true })
+        }
       })
     out.push({
       id: 'shell',
       label: 'Open shell',
       icon: <SquareTerminal size={14} />,
       key: 's',
-      run: () => h.shell(obj)
+      run: () => {
+        h.shell(obj)
+      }
     })
     for (const c of containers.length > 1 ? containers : [])
       out.push({
         id: `shell-${c}`,
         label: `Shell in ${c}`,
         icon: <SquareTerminal size={14} />,
-        run: () => h.shell(obj, c)
+        run: () => {
+          h.shell(obj, c)
+        }
       })
   }
   if (HAS_PODS.includes(kindId) && ns)
@@ -113,7 +121,9 @@ export function actionsFor(
       label: 'Logs of all pods',
       icon: <FileText size={14} />,
       key: 'l',
-      run: () => h.logs(obj)
+      run: () => {
+        h.logs(obj)
+      }
     })
   if ((kindId === 'pods' || kindId === 'services') && ns)
     out.push({
@@ -121,14 +131,18 @@ export function actionsFor(
       label: 'Forward a port…',
       icon: <ArrowLeftRight size={14} />,
       key: 'f',
-      run: () => h.forward(obj)
+      run: () => {
+        h.forward(obj)
+      }
     })
   out.push({
     id: 'yaml',
     label: 'View YAML',
     icon: <FileCode size={14} />,
     key: 'y',
-    run: () => h.yaml(obj)
+    run: () => {
+      h.yaml(obj)
+    }
   })
   if (kindId === 'deployments.apps')
     out.push({
@@ -136,7 +150,9 @@ export function actionsFor(
       label: 'Rollout history',
       icon: <History size={14} />,
       key: 'h',
-      run: () => h.history(obj)
+      run: () => {
+        h.history(obj)
+      }
     })
   if (readOnly) return out
   if (kindId !== 'secrets') {
@@ -145,13 +161,17 @@ export function actionsFor(
       label: 'Edit YAML',
       icon: <Pencil size={14} />,
       key: 'e',
-      run: () => h.edit(obj)
+      run: () => {
+        h.edit(obj)
+      }
     })
     out.push({
       id: 'edit-external',
       label: 'Edit in external editor',
       icon: <Pencil size={14} />,
-      run: () => h.editExternal(obj)
+      run: () => {
+        h.editExternal(obj)
+      }
     })
   }
   if (SCALABLE.includes(kindId))
@@ -160,7 +180,9 @@ export function actionsFor(
       label: 'Scale…',
       icon: <Scale size={14} />,
       key: 'S',
-      run: () => h.scale(obj)
+      run: () => {
+        h.scale(obj)
+      }
     })
   if (WORKLOADS.includes(kindId))
     out.push({
@@ -168,7 +190,9 @@ export function actionsFor(
       label: 'Rollout restart',
       icon: <RotateCw size={14} />,
       key: 'r',
-      run: () => h.restart(obj)
+      run: () => {
+        h.restart(obj)
+      }
     })
   if (kindId === 'deployments.apps') {
     const paused = obj.spec?.['paused'] === true
@@ -176,7 +200,9 @@ export function actionsFor(
       id: 'pause',
       label: paused ? 'Resume rollout' : 'Pause rollout',
       icon: paused ? <Play size={14} /> : <Pause size={14} />,
-      run: () => h.pause(obj, !paused)
+      run: () => {
+        h.pause(obj, !paused)
+      }
     })
   }
   if (kindId === 'nodes') {
@@ -186,7 +212,9 @@ export function actionsFor(
       label: cordoned ? 'Uncordon' : 'Cordon',
       icon: cordoned ? <Unlock size={14} /> : <Ban size={14} />,
       key: 'c',
-      run: () => h.cordon(obj, !cordoned)
+      run: () => {
+        h.cordon(obj, !cordoned)
+      }
     })
     out.push({
       id: 'drain',
@@ -194,7 +222,9 @@ export function actionsFor(
       icon: <Wind size={14} />,
       key: 'r',
       danger: true,
-      run: () => h.drain(obj)
+      run: () => {
+        h.drain(obj)
+      }
     })
   }
   if (kindId === 'cronjobs.batch') {
@@ -204,13 +234,17 @@ export function actionsFor(
       label: 'Run now',
       icon: <PlayCircle size={14} />,
       key: 't',
-      run: () => h.trigger(obj)
+      run: () => {
+        h.trigger(obj)
+      }
     })
     out.push({
       id: 'suspend',
       label: suspended ? 'Resume schedule' : 'Suspend schedule',
       icon: suspended ? <Play size={14} /> : <Pause size={14} />,
-      run: () => h.suspend(obj, !suspended)
+      run: () => {
+        h.suspend(obj, !suspended)
+      }
     })
   }
   if (kindId !== 'nodes' && kindId !== 'namespaces' && kindId !== 'events') {
@@ -220,7 +254,9 @@ export function actionsFor(
       icon: <Trash2 size={14} />,
       key: 'ctrl+d',
       danger: true,
-      run: () => h.remove(obj, false)
+      run: () => {
+        h.remove(obj, false)
+      }
     })
     if (kindId === 'pods')
       out.push({
@@ -229,7 +265,9 @@ export function actionsFor(
         icon: <Zap size={14} />,
         key: 'ctrl+k',
         danger: true,
-        run: () => h.remove(obj, true)
+        run: () => {
+          h.remove(obj, true)
+        }
       })
   }
   return out
@@ -239,7 +277,9 @@ export function actionsFor(
 export function keyLabel(key: string): string {
   return key
     .split('+')
-    .map((p) => (p === 'ctrl' ? 'Ctrl' : p.length === 1 ? p : p[0]?.toUpperCase() + p.slice(1)))
+    .map((p) =>
+      p === 'ctrl' ? 'Ctrl' : p.length === 1 ? p : `${(p[0] ?? '').toUpperCase()}${p.slice(1)}`
+    )
     .join('+')
 }
 
@@ -257,7 +297,9 @@ export function toMenu(actions: readonly K8sAction[]): MenuEntry[] {
       icon: a.icon,
       ...(a.key ? { hint: keyLabel(a.key) } : {}),
       ...(a.danger ? { danger: true } : {}),
-      onSelect: a.run
+      onSelect: () => {
+        a.run()
+      }
     })
   }
   return out

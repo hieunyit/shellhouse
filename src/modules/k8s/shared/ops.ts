@@ -302,8 +302,13 @@ export const K8sLogsParams = z.object({
   ref: ContextRef,
   bastionHostId: z.string().min(1).max(64).optional(),
   namespace: Namespace,
-  pod: Name,
-  container: z.string().max(253).optional()
+  /** Một pod; hoặc `selector` = mọi pod của workload. */
+  pod: Name.optional(),
+  selector: Selector.optional(),
+  container: z.string().max(253).optional(),
+  allContainers: z.boolean().optional(),
+  /** Tiêu đề tab khi xem log workload ("deployment/web"). */
+  title: z.string().max(253).optional()
 })
 export type K8sLogsParams = z.infer<typeof K8sLogsParams>
 

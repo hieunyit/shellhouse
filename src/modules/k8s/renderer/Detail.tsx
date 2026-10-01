@@ -118,7 +118,9 @@ export function Detail({
               data-testid={`k8s-action-${x.id}`}
               title={x.key ? `${x.label} (${keyLabel(x.key)})` : x.label}
               className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted hover:bg-hover hover:text-fg"
-              onClick={x.run}
+              onClick={() => {
+                x.run()
+              }}
             >
               {x.icon}
               {x.label}
@@ -534,7 +536,7 @@ function Overview({
                 [
                   'Addresses',
                   a(status['addresses'])
-                    .map((x) => `${s(x['address'])}`)
+                    .map((x) => s(x['address']))
                     .join(', ')
                 ],
                 spec['unschedulable'] === true && [
@@ -651,7 +653,9 @@ function Overview({
                     {s(spec['schedule'])}
                   </span>
                 ],
-                spec['timeZone'] !== undefined ? (['Time zone', s(spec['timeZone'])] as const) : null,
+                spec['timeZone'] !== undefined
+                  ? (['Time zone', s(spec['timeZone'])] as const)
+                  : null,
                 [
                   'Suspended',
                   spec['suspend'] === true ? (
@@ -687,10 +691,11 @@ function Overview({
                   'Started',
                   new Date(s(status['startTime'])).toLocaleString()
                 ],
-                status['completionTime'] !== undefined && status['startTime'] !== undefined && [
-                  'Duration',
-                  `${Math.round((Date.parse(s(status['completionTime'])) - Date.parse(s(status['startTime']))) / 1000)}s`
-                ]
+                status['completionTime'] !== undefined &&
+                  status['startTime'] !== undefined && [
+                    'Duration',
+                    `${Math.round((Date.parse(s(status['completionTime'])) - Date.parse(s(status['startTime']))) / 1000)}s`
+                  ]
               ]}
             />
           </Section>

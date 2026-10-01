@@ -417,8 +417,7 @@ export function parseMemory(q: unknown): number {
 }
 
 export function formatCpu(milli: number): string {
-  if (milli >= 1000)
-    return `${(milli / 1000).toFixed(milli >= 10_000 ? 0 : 2).replace(/\.?0+$/, '')}`
+  if (milli >= 1000) return (milli / 1000).toFixed(milli >= 10_000 ? 0 : 2).replace(/\.?0+$/, '')
   return `${Math.round(milli)}m`
 }
 

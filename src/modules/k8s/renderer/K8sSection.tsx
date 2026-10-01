@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, Eye, FileInput, Settings2, Ship, Trash2 } from 'lucide-react'
+import {
+  ChevronRight,
+  ClipboardPaste,
+  Eye,
+  EyeOff,
+  FileInput,
+  Settings2,
+  Ship,
+  Trash2
+} from 'lucide-react'
 import {
   Button,
   Checkbox,
@@ -14,7 +23,7 @@ import {
 } from '../../../renderer/src/components/ui'
 import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
 import { useSavedHosts } from '../../registry/renderer-kit'
-import type { ContextColor, ContextEntry } from '../shared/ipc'
+import type { ContextColor, ContextEntry, ImportResult } from '../shared/ipc'
 import { k8sApi, openCluster } from './api'
 import { useK8s } from './store'
 
@@ -25,9 +34,22 @@ export const COLOR_DOT: Record<NonNullable<ContextColor>, string> = {
   blue: 'bg-accent-solid'
 }
 
+/** "Imported 2 files (5 contexts)" + lỗi từng file. */
+export function importSummary(r: ImportResult): string | null {
+  if (r.imported.length === 0 && r.errors.length === 0) return null
+  const contexts = r.imported.reduce((n, i) => n + i.contexts, 0)
+  const ok = r.imported.length
+    ? `Imported ${r.imported.length} file${r.imported.length > 1 ? 's' : ''} (${contexts} context${contexts === 1 ? '' : 's'}).`
+    : ''
+  return [ok, ...r.errors].filter(Boolean).join(' ')
+}
+
 /** Mục "Kubernetes" ở thanh bên: context trong kubeconfig; bấm đúp để mở. */
 export function K8sSection(): React.JSX.Element {
-  const { contexts, errors, imported } = useK8s()
+  const { contexts: all, errors, imported } = useK8s()
+  const contexts = all.filter((c) => !c.settings.hidden)
+  const hidden = all.length - contexts.length
+  const [importNote, setImportNote] = useState<string | null>(null)
   const [open, setOpen] = useState(true)
   const [importing, setImporting] = useState(false)
   const [editing, setEditing] = useState<ContextEntry | null>(null)
@@ -56,19 +78,64 @@ export function K8sSection(): React.JSX.Element {
           <span className="flex-1 text-left">Kubernetes</span>
         </button>
         <IconButton
-          label="Import a kubeconfig"
+          label="Add clusters"
           size="sm"
           data-testid="k8s-import"
-          onClick={() => {
-            setImporting(true)
+          onClick={(e) => {
+            openMenu(e, [
+              {
+                id: 'k8s-import-files',
+                label: 'Import kubeconfig files…',
+                icon: <FileInput size={14} />,
+                onSelect: () => {
+                  setImportNote(null)
+                  k8sApi.importFiles().then(
+                    (r) => {
+                      setImportNote(importSummary(r))
+                    },
+                    (err: unknown) => {
+                      setImportNote(err instanceof Error ? err.message : String(err))
+                    }
+                  )
+                }
+              },
+              {
+                id: 'k8s-import-paste',
+                label: 'Paste a kubeconfig…',
+                icon: <ClipboardPaste size={14} />,
+                onSelect: () => {
+                  setImporting(true)
+                }
+              }
+            ])
           }}
         >
           <FileInput size={13} />
         </IconButton>
       </div>
+      {open && importNote && (
+        <p
+          className="flex items-start gap-1 px-2 py-1 text-xs text-muted"
+          data-testid="k8s-import-note"
+        >
+          <span className="flex-1">{importNote}</span>
+          <button
+            type="button"
+            aria-label="Dismiss"
+            className="text-faint hover:text-fg"
+            onClick={() => {
+              setImportNote(null)
+            }}
+          >
+            ×
+          </button>
+        </p>
+      )}
       {open && contexts.length === 0 && (
         <p className="px-2 py-1 text-xs text-faint">
-          No contexts in ~/.kube/config. Import a kubeconfig to add clusters.
+          {hidden
+            ? 'All contexts are hidden.'
+            : 'No contexts in ~/.kube. Use + to import kubeconfig files.'}
         </p>
       )}
       {open && errors.length > 0 && (
@@ -103,6 +170,12 @@ export function K8sSection(): React.JSX.Element {
                   label: c.settings.readOnly ? 'Turn off read-only mode' : 'Read-only mode',
                   icon: <Eye size={14} />,
                   onSelect: () => void k8sApi.setContext(c.ref, { readOnly: !c.settings.readOnly })
+                },
+                {
+                  id: 'hide',
+                  label: 'Hide from sidebar',
+                  icon: <EyeOff size={14} />,
+                  onSelect: () => void k8sApi.setContext(c.ref, { hidden: true })
                 },
                 {
                   id: 'settings',

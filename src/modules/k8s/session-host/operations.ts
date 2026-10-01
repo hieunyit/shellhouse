@@ -134,7 +134,7 @@ export async function overview(
     have: (o: K8sObject) => number
   ): number => list.filter((o) => have(o) >= want(o)).length
   const num = (o: K8sObject, path: 'spec' | 'status', key: string): number => {
-    const v = (o[path] as Record<string, unknown> | undefined)?.[key]
+    const v = o[path]?.[key]
     return typeof v === 'number' ? v : 0
   }
   let usageSum: Usage | null = null
@@ -152,10 +152,13 @@ export async function overview(
       return {
         namespace: e.metadata.namespace ?? '',
         object: `${(involved.kind ?? '').toLowerCase()}/${involved.name ?? ''}`,
-        reason: String(e['reason'] ?? ''),
-        message: String(e['message'] ?? ''),
+        reason: typeof e['reason'] === 'string' ? e['reason'] : '',
+        message: typeof e['message'] === 'string' ? e['message'] : '',
         count: typeof e['count'] === 'number' ? e['count'] : 1,
-        last: String(e['lastTimestamp'] ?? e['eventTime'] ?? e.metadata.creationTimestamp ?? '')
+        last:
+          [e['lastTimestamp'], e['eventTime'], e.metadata.creationTimestamp].find(
+            (x): x is string => typeof x === 'string'
+          ) ?? ''
       }
     })
     .sort((a, b) => b.last.localeCompare(a.last))

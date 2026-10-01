@@ -556,7 +556,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
             ...body.metadata,
             resourceVersion: nextRv()
           }
-        } as Obj
+        }
         table.set(k, next)
         notify(plural, current ? 'MODIFIED' : 'ADDED', next)
         return json(res, current ? 200 : 201, next)

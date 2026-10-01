@@ -68,7 +68,9 @@ export function ClusterOverview({
           type="button"
           aria-label="Refresh"
           className="ml-auto rounded p-1 text-faint hover:bg-hover hover:text-fg"
-          onClick={() => setTick((n) => n + 1)}
+          onClick={() => {
+            setTick((n) => n + 1)
+          }}
         >
           <RefreshCw size={13} />
         </button>
@@ -79,28 +81,36 @@ export function ClusterOverview({
           value={`${data.nodes.ready}/${data.nodes.total}`}
           sub={data.nodes.cordoned ? `${data.nodes.cordoned} cordoned` : 'ready'}
           tone={data.nodes.ready < data.nodes.total ? 'warn' : 'ok'}
-          onClick={() => onNavigate('nodes')}
+          onClick={() => {
+            onNavigate('nodes')
+          }}
           testId="k8s-ov-nodes"
         />
         <StatCard
           label="Running pods"
           value={p.running}
           tone="ok"
-          onClick={() => onNavigate('pods', 'Running')}
+          onClick={() => {
+            onNavigate('pods', 'Running')
+          }}
           testId="k8s-ov-running"
         />
         <StatCard
           label="Pending"
           value={p.pending}
           tone={p.pending ? 'warn' : 'muted'}
-          onClick={() => onNavigate('pods', 'Pending')}
+          onClick={() => {
+            onNavigate('pods', 'Pending')
+          }}
         />
         <StatCard
           label="Failing"
           value={p.failed + p.restarting}
           sub={p.restarting ? `${p.restarting} crash-looping` : undefined}
           tone={p.failed + p.restarting ? 'bad' : 'muted'}
-          onClick={() => onNavigate('pods', p.restarting ? 'CrashLoopBackOff' : 'Failed')}
+          onClick={() => {
+            onNavigate('pods', p.restarting ? 'CrashLoopBackOff' : 'Failed')
+          }}
           testId="k8s-ov-failing"
         />
         {data.workloads.map((w) => (
@@ -109,8 +119,8 @@ export function ClusterOverview({
             label={w.kind}
             value={`${w.ready}/${w.total}`}
             sub="ready"
-            tone={w.ready < w.total ? 'warn' : 'ok'}
-            onClick={() =>
+            tone={w.total === 0 ? 'muted' : w.ready < w.total ? 'warn' : 'ok'}
+            onClick={() => {
               onNavigate(
                 w.kind === 'Deployments'
                   ? 'deployments.apps'
@@ -118,7 +128,7 @@ export function ClusterOverview({
                     ? 'statefulsets.apps'
                     : 'daemonsets.apps'
               )
-            }
+            }}
           />
         ))}
       </div>
@@ -174,7 +184,7 @@ export function ClusterOverview({
           <Heading>Warnings ({data.warnings.length})</Heading>
         </div>
         {data.warnings.length === 0 ? (
-          <p className="p-3 text-xs text-faint">No warning events. 🎉</p>
+          <p className="p-3 text-xs text-faint">No warning events.</p>
         ) : (
           <div
             className="max-h-80 divide-y divide-line overflow-auto text-xs"

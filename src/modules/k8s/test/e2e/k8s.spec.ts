@@ -66,9 +66,19 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     })
     await expect(rows).toHaveCount(3)
 
-    // Mô tả: sự kiện liên quan.
+    // Mô tả (phím d): tab Overview có container; tab Events có sự kiện liên quan.
     await view.locator('[data-testid="k8s-row"][data-name="shop/web-2"]').click()
+    await page.keyboard.press('d')
+    const describe = view.getByTestId('k8s-describe')
+    await expect(describe.getByTestId('k8s-container')).toContainText('CrashLoopBackOff')
+    await describe.getByTestId('k8s-detail-tab-events').click()
     await expect(view.getByTestId('k8s-events')).toContainText('BackOff')
+    await page.keyboard.press('Escape')
+    await expect(describe).toHaveCount(0)
+    // Cột CPU / Memory từ metrics-server.
+    await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toContainText(
+      '64Mi'
+    )
 
     // Log pod.
     const web1 = view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')
@@ -88,17 +98,38 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     }, tab)
     await waitForText(page, tab, 'echo xin-chao')
 
-    // Scale deployment.
+    // Thanh lệnh kiểu k9s: ":deploy" → Deployments; scale bằng phím S; Enter → pod của deployment.
     await page.getByTestId('tab').filter({ hasText: 'test' }).first().click()
-    await view.getByTestId('k8s-nav-deployments.apps').click()
-    await view.locator('[data-testid="k8s-row"][data-name="shop/web"]').click()
+    await view.getByTestId('k8s-filter').fill(':deploy')
+    await page.keyboard.press('Enter')
+    await expect(view.getByTestId('k8s-nav-deployments.apps')).toHaveAttribute(
+      'aria-current',
+      'true'
+    )
+    const deploy = view.locator('[data-testid="k8s-row"][data-name="shop/web"]')
+    await deploy.click()
+    await page.keyboard.press('d')
     await expect(view.getByTestId('k8s-replicas')).toHaveText('2')
-    await view.getByTestId('k8s-scale-up').click()
+    await page.keyboard.press('Shift+S')
+    await page.getByTestId('k8s-scale-more').click()
+    await page.getByTestId('k8s-scale-apply').click()
     await expect(view.getByTestId('k8s-replicas')).toHaveText('3')
+    await page.keyboard.press('Escape')
+    await deploy.dblclick()
+    await expect(view.getByTestId('k8s-breadcrumb')).toContainText('deployment/web')
+    await expect(rows).toHaveCount(2)
+    await page.keyboard.press('Escape')
+    await expect(view.getByTestId('k8s-breadcrumb')).not.toContainText('deployment/web')
+
+    // Tổng quan cluster.
+    await view.getByTestId('k8s-nav-overview').click()
+    await expect(view.getByTestId('k8s-ov-nodes')).toContainText('1/2')
 
     // Secret: giá trị ẩn, bấm mới hiện.
     await view.getByTestId('k8s-nav-secrets').click()
     await view.locator('[data-testid="k8s-row"][data-name="shop/db"]').click()
+    await page.keyboard.press('d')
+    await view.getByTestId('k8s-detail-tab-data').click()
     await expect(view.getByTestId('k8s-secret-keys')).toContainText('password')
     await expect(view.getByTestId('k8s-secret-value')).toHaveCount(0)
     await view.getByTestId('k8s-secret-reveal').first().click()
@@ -134,7 +165,7 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await page.getByRole('menuitem', { name: 'Read-only mode' }).click()
     await expect(view.getByTestId('k8s-read-only')).toBeVisible()
     await web1.click({ button: 'right' })
-    await expect(page.getByRole('menuitem', { name: 'Delete' })).toHaveCount(0)
+    await expect(page.getByRole('menuitem', { name: /^Delete/ })).toHaveCount(0)
     await page.keyboard.press('Escape')
   } finally {
     await launched.close()
@@ -150,6 +181,7 @@ test('Kubernetes: import kubeconfig (mã hoá trong vault), context production p
   try {
     await enableK8s(page)
     await page.getByTestId('k8s-import').click()
+    await page.getByRole('menuitem', { name: 'Paste a kubeconfig…' }).click()
     await page.getByTestId('k8s-import-name').fill('staging')
     await page.getByTestId('k8s-import-yaml').fill(kubeconfig(server))
     await page.getByTestId('k8s-import-save').click()
@@ -167,7 +199,7 @@ test('Kubernetes: import kubeconfig (mã hoá trong vault), context production p
     const view = page.getByTestId('k8s-view')
     const row = view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')
     await row.click({ button: 'right' })
-    await page.getByRole('menuitem', { name: 'Delete' }).click()
+    await page.getByRole('menuitem', { name: 'Delete…' }).click()
     const confirm = page.getByTestId('k8s-delete-confirm')
     await expect(confirm).toBeDisabled()
     await page.getByTestId('k8s-delete-typed').fill('web-1')
@@ -176,5 +208,43 @@ test('Kubernetes: import kubeconfig (mã hoá trong vault), context production p
   } finally {
     await launched.close()
     await server.close()
+  }
+})
+
+test('Kubernetes: import kubeconfig từ file (chứng chỉ tham chiếu được nhúng), ẩn context', async () => {
+  const server = await startApiTestServer()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-file-'))
+  // Kubeconfig trỏ tới CA bằng đường dẫn tương đối — sau khi import vẫn kết nối được.
+  writeFileSync(join(dir, 'ca.crt'), TEST_CA)
+  writeFileSync(
+    join(dir, 'team.yaml'),
+    kubeconfig(server).replace(/certificate-authority-data: .*/, 'certificate-authority: ca.crt')
+  )
+  const launched = await launchApp({ KUBECONFIG: join(tmpdir(), 'does-not-exist-kubeconfig') })
+  const { page, app } = launched
+  try {
+    await enableK8s(page)
+    await app.evaluate(
+      ({ dialog }, f) => {
+        dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [f] })
+      },
+      join(dir, 'team.yaml')
+    )
+    await page.getByTestId('k8s-import').click()
+    await page.getByRole('menuitem', { name: 'Import kubeconfig files…' }).click()
+    await expect(page.getByTestId('k8s-import-note')).toContainText('Imported 1 file (1 context)')
+    rmSync(dir, { recursive: true, force: true })
+    const context = page.locator('[data-testid="k8s-context"][data-name="test"]')
+    await expect(context).toHaveAttribute('title', /Imported: team/)
+    await context.dblclick()
+    await expect(page.getByTestId('k8s-view').getByTestId('k8s-row')).toHaveCount(2)
+
+    await context.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Hide from sidebar' }).click()
+    await expect(context).toHaveCount(0)
+  } finally {
+    await launched.close()
+    await server.close()
+    rmSync(dir, { recursive: true, force: true })
   }
 })

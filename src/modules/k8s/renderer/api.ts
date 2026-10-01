@@ -5,7 +5,7 @@ import {
   openModuleTab,
   openModuleTerminal
 } from '../../registry/renderer-kit'
-import type { ContextEntry, ContextList, ContextSettings } from '../shared/ipc'
+import type { ContextEntry, ContextList, ContextSettings, ImportResult } from '../shared/ipc'
 import type { ContextRef, K8sClusterParams, K8sLogsParams, K8sTerminalParams } from '../shared/ops'
 
 /** IPC `module:k8s:*`. */
@@ -16,6 +16,10 @@ export const k8sApi = {
   importKubeconfig: (name: string, yaml: string) =>
     invokeModule<MutationResult>('k8s', 'importKubeconfig', name, yaml),
   removeImported: (id: string) => invokeModule<undefined>('k8s', 'removeImported', id),
+  renameImported: (id: string, name: string) =>
+    invokeModule<undefined>('k8s', 'renameImported', id, name),
+  /** Hộp thoại chọn file kubeconfig → nhúng chứng chỉ → lưu vào vault. */
+  importFiles: () => invokeModule<ImportResult>('k8s', 'importFiles'),
   onChanged: (listener: () => void) =>
     onModuleEvent('k8s', 'changed', () => {
       listener()

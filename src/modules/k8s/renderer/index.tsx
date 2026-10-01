@@ -3,6 +3,7 @@ import { defineTab, type RendererModule } from '../../registry/renderer-types'
 import { lazyModuleComponent } from '../../registry/renderer-kit'
 import { k8sManifest } from '../manifest'
 import { K8sClusterParams, K8sLogsParams } from '../shared/ops'
+import { k8sApi } from './api'
 
 /** Phần renderer của Kubernetes: thanh bên, tab cluster, tab log pod, cài đặt. */
 export const k8sRenderer: RendererModule = {
@@ -19,15 +20,22 @@ export const k8sRenderer: RendererModule = {
       component: lazyModuleComponent(() => import('./LogsView').then((m) => m.PodLogsTab)),
       params: K8sLogsParams,
       icon: FileText,
-      title: (p) => `${p.pod} (logs)`
+      title: (p) => `${p.pod ?? p.title ?? 'pods'} (logs)`
     })
   },
   commands: () => [
     {
       id: 'import',
-      title: 'Import a kubeconfig',
+      title: 'Import kubeconfig files',
       run: () => {
-        document.querySelector<HTMLButtonElement>('[data-testid="k8s-import"]')?.click()
+        k8sApi.importFiles().then(
+          (r) => {
+            if (r.errors.length) window.alert(r.errors.join('\n'))
+          },
+          (e: unknown) => {
+            window.alert(e instanceof Error ? e.message : String(e))
+          }
+        )
       }
     }
   ],

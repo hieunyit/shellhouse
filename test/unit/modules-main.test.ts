@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tempDir } from './helpers'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { Secret } from '../../src/node-shared/secret'
@@ -266,9 +269,6 @@ describe('checkModuleSql', () => {
 
 describe('ctx.pickFiles / readDir', () => {
   it('chỉ khi khai báo quyền pick-file; đọc file được chọn và file nó trỏ tới; readDir theo quyền read-file', async () => {
-    const { tempDir } = await import('./helpers')
-    const { writeFileSync, mkdirSync } = await import('node:fs')
-    const { join } = await import('node:path')
     const home = tempDir()
     mkdirSync(join(home, '.kube', 'sub'), { recursive: true })
     writeFileSync(join(home, '.kube', 'config'), 'a')

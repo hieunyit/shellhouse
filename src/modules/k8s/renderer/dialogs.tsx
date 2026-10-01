@@ -110,7 +110,9 @@ export function ForwardDialog({
             variant="primary"
             disabled={!valid}
             data-testid="k8s-forward-start"
-            onClick={() => onForward(l, r)}
+            onClick={() => {
+              onForward(l, r)
+            }}
           >
             Start
           </Button>
@@ -124,7 +126,9 @@ export function ForwardDialog({
             <Select
               data-testid="k8s-forward-remote"
               value={remote}
-              onChange={(e) => setRemote(e.target.value)}
+              onChange={(e) => {
+                setRemote(e.target.value)
+              }}
             >
               {ports.map((p) => (
                 <option key={p} value={p}>
@@ -137,7 +141,9 @@ export function ForwardDialog({
               mono
               data-testid="k8s-forward-remote"
               value={remote}
-              onChange={(e) => setRemote(e.target.value)}
+              onChange={(e) => {
+                setRemote(e.target.value)
+              }}
             />
           )}
         </label>
@@ -148,7 +154,9 @@ export function ForwardDialog({
             placeholder="auto"
             data-testid="k8s-forward-local"
             value={local}
-            onChange={(e) => setLocal(e.target.value)}
+            onChange={(e) => {
+              setLocal(e.target.value)
+            }}
           />
         </label>
       </div>
@@ -192,7 +200,9 @@ export function ScaleDialog({
             variant="primary"
             disabled={!valid}
             data-testid="k8s-scale-apply"
-            onClick={() => onScale(n)}
+            onClick={() => {
+              onScale(n)
+            }}
           >
             Scale
           </Button>
@@ -205,7 +215,9 @@ export function ScaleDialog({
             variant="secondary"
             aria-label="Fewer replicas"
             disabled={n <= 0}
-            onClick={() => setValue(String(Math.max(0, n - 1)))}
+            onClick={() => {
+              setValue(String(Math.max(0, n - 1)))
+            }}
           >
             <Minus size={14} />
           </Button>
@@ -226,7 +238,9 @@ export function ScaleDialog({
             variant="secondary"
             aria-label="More replicas"
             data-testid="k8s-scale-more"
-            onClick={() => setValue(String(n + 1))}
+            onClick={() => {
+              setValue(String(n + 1))
+            }}
           >
             <Plus size={14} />
           </Button>
@@ -238,7 +252,9 @@ export function ScaleDialog({
               mono
               placeholder={obj.metadata.name}
               value={typed}
-              onChange={(e) => setTyped(e.target.value)}
+              onChange={(e) => {
+                setTyped(e.target.value)
+              }}
             />
           </>
         )}
@@ -666,13 +682,23 @@ export function ContainerPicker({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={() => onPick(value)}>
+          <Button
+            variant="primary"
+            onClick={() => {
+              onPick(value)
+            }}
+          >
             Open
           </Button>
         </>
       }
     >
-      <Select value={value} onChange={(e) => setValue(e.target.value)}>
+      <Select
+        value={value}
+        onChange={(e) => {
+          setValue(e.target.value)
+        }}
+      >
         {containers.map((c) => (
           <option key={c} value={c}>
             {c}
@@ -683,7 +709,9 @@ export function ContainerPicker({
         className="mt-2 hidden"
         label="All"
         checked={all}
-        onChange={(e) => setAll(e.target.checked)}
+        onChange={(e) => {
+          setAll(e.target.checked)
+        }}
       />
     </Modal>
   )

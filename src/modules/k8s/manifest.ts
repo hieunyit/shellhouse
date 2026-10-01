@@ -52,10 +52,7 @@ export const k8sManifest: ModuleManifest = {
   contributes: {
     sidebarSection: true,
     tabKinds: ['cluster', 'logs'],
-    commands: [
-      { id: 'import', title: 'Import kubeconfig files' },
-      { id: 'paste', title: 'Paste a kubeconfig' }
-    ],
+    commands: [{ id: 'import', title: 'Import kubeconfig files' }],
     settings: true,
     sessionKinds: ['cluster', 'terminal'],
     attachToSsh: true,

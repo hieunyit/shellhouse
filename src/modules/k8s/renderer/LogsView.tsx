@@ -20,7 +20,9 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
     (st) => st.contexts.find((c) => c.key === contextKey(params.ref))?.settings.readOnly ?? false
   )
   const [containers, setContainers] = useState<string[]>(params.container ? [params.container] : [])
-  const [container, setContainer] = useState(params.container ?? '')
+  /** '*' = mọi container của pod. */
+  const [container, setContainer] = useState(params.allContainers ? '*' : (params.container ?? ''))
+  const pod = params.pod
   const [tail, setTail] = useState(500)
   const [timestamps, setTimestamps] = useState(false)
   const [previous, setPrevious] = useState(false)
@@ -42,13 +44,13 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
 
   // Danh sách container của pod.
   useEffect(() => {
-    if (!ready) return
+    if (!ready || !pod) return
     let cancelled = false
     request<K8sObject>({
       op: 'get',
       kind: 'pods',
       namespace: params.namespace,
-      name: params.pod,
+      name: pod,
       format: 'json'
     }).then(
       (pod) => {
@@ -64,7 +66,7 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
     return () => {
       cancelled = true
     }
-  }, [ready, request, params.namespace, params.pod])
+  }, [ready, request, params.namespace, pod])
 
   useEffect(() => {
     if (!ready) return
@@ -73,8 +75,8 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
     request<{ subscription: string }>({
       op: 'logs.subscribe',
       namespace: params.namespace,
-      pod: params.pod,
-      ...(container ? { container } : {}),
+      ...(pod ? { pod } : params.selector ? { selector: params.selector } : {}),
+      ...(container === '*' ? { allContainers: true } : container ? { container } : {}),
       previous,
       tail,
       timestamps
@@ -104,7 +106,8 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
     request,
     feed,
     params.namespace,
-    params.pod,
+    pod,
+    params.selector,
     container,
     previous,
     tail,
@@ -116,7 +119,10 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
     <div className="relative flex h-full flex-col bg-surface" data-testid="k8s-logs-view">
       <LogViewer
         feed={feed}
-        fileName={`${params.pod}${container ? `-${container}` : ''}`}
+        fileName={
+          (pod ?? params.title ?? 'logs').replace(/\//g, '-') +
+          (container && container !== '*' ? `-${container}` : '')
+        }
         testIdPrefix="k8s"
         controls={
           <>
@@ -130,6 +136,7 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
                   setContainer(e.target.value)
                 }}
               >
+                <option value="*">All containers</option>
                 {containers.map((c) => (
                   <option key={c} value={c}>
                     {c}

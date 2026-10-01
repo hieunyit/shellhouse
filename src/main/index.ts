@@ -674,11 +674,9 @@ if (!app.requestSingleInstanceLock()) {
       showOpenDialog: async (options) => {
         const opts = {
           title: options.title,
-          properties: (options.multiple
+          properties: options.multiple
             ? ['openFile', 'multiSelections', 'showHiddenFiles']
-            : ['openFile', 'showHiddenFiles']) as (
-            'openFile' | 'multiSelections' | 'showHiddenFiles'
-          )[],
+            : ['openFile', 'showHiddenFiles'],
           ...(options.filters ? { filters: options.filters } : {}),
           defaultPath: app.getPath('home')
         }
