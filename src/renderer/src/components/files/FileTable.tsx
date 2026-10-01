@@ -22,10 +22,12 @@ export interface FileColumn<T, K extends string> {
 export function FileTable<T, K extends string>({
   items,
   getKey,
+  getLabel,
   icon,
   badge,
   columns,
   gridClass,
+  gridStyle,
   nameSort,
   sort,
   onSort,
@@ -43,12 +45,16 @@ export function FileTable<T, K extends string>({
 }: {
   items: readonly T[]
   getKey: (item: T) => string
+  /** Tên hiển thị nếu khác khoá (vd. khoá "ns/tên", hiện "tên"). */
+  getLabel?: (item: T) => string
   icon: (item: T) => ReactNode
   /** Nội dung nhỏ sau tên (đang mở, đã ghim…). */
   badge?: (item: T) => ReactNode
   columns: readonly FileColumn<T, K>[]
   /** Lớp grid-cols (tĩnh, để Tailwind thấy) — cột đầu là tên. */
   gridClass: string
+  /** Mẫu cột tính lúc chạy (vd. bỏ bớt cột theo độ rộng) — dùng thay / cùng `gridClass`. */
+  gridStyle?: React.CSSProperties
   nameSort: SortOption<K>
   sort: SortState<K>
   onSort: (sort: SortState<K>) => void
@@ -185,6 +191,7 @@ export function FileTable<T, K extends string>({
           'sticky top-0 z-10 grid h-8 items-center gap-3 border-b border-line bg-surface px-3 text-xs font-medium text-faint',
           gridClass
         )}
+        style={gridStyle}
       >
         {header(nameSort, 'Name')}
         {columns.map((c) =>
@@ -221,6 +228,7 @@ export function FileTable<T, K extends string>({
               gridClass,
               isSelected ? 'bg-accent-soft' : 'hover:bg-hover'
             )}
+            style={gridStyle ? { ...extra.style, ...gridStyle } : extra.style}
             onClick={(e) => {
               select(item, e)
             }}
@@ -242,7 +250,7 @@ export function FileTable<T, K extends string>({
             <span role="gridcell" className="flex min-w-0 items-center gap-2">
               {icon(item)}
               <span className="truncate" title={key}>
-                {key}
+                {getLabel ? getLabel(item) : key}
               </span>
               {badge?.(item)}
             </span>

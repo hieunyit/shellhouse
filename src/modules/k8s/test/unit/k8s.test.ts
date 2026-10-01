@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { fitColumns } from '../../shared/columns'
 import { tempDir } from '../../../../../test/unit/helpers'
 import {
   hideSecretValues,
@@ -409,5 +410,24 @@ contexts:
     ).toBe('app=web,tier in (a,b),x')
     expect(selectorString({ app: 'db' })).toBe('app=db')
     expect(selectorString(undefined)).toBeNull()
+  })
+})
+
+describe('bố cục cột bảng (bỏ bớt cột khi hẹp)', () => {
+  const pods = ['ready', 'status', 'restarts', 'node', 'cpu', 'mem', 'age']
+  it('rộng → giữ hết; chưa đo (0) → giữ hết', () => {
+    expect([...fitColumns(pods, 2000).keep]).toEqual(pods)
+    expect([...fitColumns(pods, 0).keep]).toEqual(pods)
+  })
+  it('hẹp → bỏ Node trước, rồi CPU / Memory; Status và Age luôn còn', () => {
+    const mid = fitColumns(pods, 640).keep
+    expect(mid.has('node')).toBe(false)
+    expect(mid.has('status')).toBe(true)
+    const narrow = fitColumns(pods, 300).keep
+    expect([...narrow]).toEqual(['status', 'age'])
+  })
+  it('mẫu grid: cột tên + cột giữ lại, Status đủ rộng', () => {
+    const { template } = fitColumns(['status', 'age'], 2000)
+    expect(template).toBe('minmax(10rem,2fr) minmax(8.5rem,1fr) 3.5rem')
   })
 })

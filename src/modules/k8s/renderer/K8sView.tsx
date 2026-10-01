@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Copy,
   Eye,
-  LayoutDashboard,
   Plus,
   RefreshCw,
   Search,
@@ -65,6 +64,8 @@ import { COLOR_DOT } from './K8sSection'
 import { OVERVIEW, parseCommand, suggest } from './nav'
 import { ClusterOverview } from './Overview'
 import { useK8s } from './store'
+import { fitColumns } from '../shared/columns'
+import { ResourceNav } from './Nav'
 import { useK8sSession } from './useK8sSession'
 import { objectKey, useResourceList, type EventBus } from './useResourceList'
 
@@ -75,14 +76,8 @@ const TONE: Record<ResourceRow['tone'], Tone> = {
   muted: 'muted'
 }
 const METRIC_EVERY_MS = 15_000
-const SECTIONS = [
-  'Workloads',
-  'Network',
-  'Config',
-  'Storage',
-  'Cluster',
-  'Custom resources'
-] as const
+/** Thông báo thành công tự tắt sau chừng này (lỗi thì giữ tới khi người dùng đóng). */
+const NOTICE_MS = 4000
 
 interface Drill {
   /** Breadcrumb: "deployment/web". */
@@ -147,8 +142,11 @@ export function ClusterTab({
   const [reloadKey, setReloadKey] = useState(0)
   const [metrics, setMetrics] = useState<MetricsResult | null>(null)
   const [history, setHistory] = useState<Record<string, Usage[]>>({})
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [tableWidth, setTableWidth] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  const tableRef = useRef<HTMLDivElement>(null)
   const { menu, open: openMenu } = useContextMenu()
   const [bus] = useState<EventBus>(() => new Set())
 
@@ -249,6 +247,31 @@ export function ClusterTab({
       clearInterval(t)
     }
   }, [ready, request, metricScope, metricNs, active])
+
+  // Thông báo thành công tự tắt; lỗi giữ lại.
+  useEffect(() => {
+    if (notice?.tone !== 'success') return
+    const t = setTimeout(() => {
+      setNotice((n) => (n === notice ? null : n))
+    }, NOTICE_MS)
+    return () => {
+      clearTimeout(t)
+    }
+  }, [notice])
+
+  // Độ rộng vùng bảng → số cột vừa (mở chi tiết / thu nhỏ cửa sổ thì bỏ bớt cột phụ).
+  useEffect(() => {
+    const el = tableRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width
+      if (w) setTableWidth(w)
+    })
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+    }
+  }, [ready])
 
   const go = useCallback((id: string, filter = '') => {
     setView(id)
@@ -503,14 +526,16 @@ export function ClusterTab({
     const used = which === 'cpu' ? u.cpu : u.memory
     return `${text} (${cap ? Math.round((used / cap) * 100) : 0}%)`
   }
-  const columns: FileColumn<Row, 'name' | 'age' | 'cpu' | 'mem'>[] = [
+  const allColumns: FileColumn<Row, 'name' | 'age' | 'cpu' | 'mem'>[] = [
     ...(multiNs ? [{ id: 'ns', label: 'Namespace', render: (r: Row) => r.row.namespace }] : []),
     ...(COLUMNS[kindId] ?? []).map((c) => ({
       id: c.id,
       label: c.label,
       render: (r: Row) =>
         c.id === 'status' ? (
-          <Pill tone={TONE[r.row.tone]}>{r.row.cells[c.id]}</Pill>
+          <span className="min-w-0" title={r.row.cells[c.id]}>
+            <Pill tone={TONE[r.row.tone]}>{r.row.cells[c.id]}</Pill>
+          </span>
         ) : (
           (r.row.cells[c.id] ?? '')
         )
@@ -541,18 +566,12 @@ export function ClusterTab({
       render: (r) => r.row.cells['age'] ?? ''
     }
   ]
-  // Lớp tĩnh (Tailwind cần thấy nguyên chuỗi): cột tên + N cột phụ (cột cuối là tuổi).
-  const gridClass =
-    [
-      'grid-cols-[minmax(10rem,2fr)_4rem]',
-      'grid-cols-[minmax(10rem,2fr)_minmax(3.5rem,1fr)_4rem]',
-      'grid-cols-[minmax(10rem,2fr)_repeat(2,minmax(3.5rem,1fr))_4rem]',
-      'grid-cols-[minmax(10rem,2fr)_repeat(3,minmax(3.5rem,1fr))_4rem]',
-      'grid-cols-[minmax(10rem,2fr)_repeat(4,minmax(3.5rem,1fr))_4rem]',
-      'grid-cols-[minmax(10rem,2fr)_repeat(5,minmax(3.5rem,1fr))_4rem]',
-      'grid-cols-[minmax(10rem,2fr)_repeat(6,minmax(3.5rem,1fr))_4rem]',
-      'grid-cols-[minmax(10rem,2fr)_repeat(7,minmax(3.5rem,1fr))_4rem]'
-    ][columns.length - 1] ?? 'grid-cols-[minmax(10rem,2fr)_repeat(7,minmax(3.5rem,1fr))_4rem]'
+  const fit = fitColumns(
+    allColumns.map((c) => c.id),
+    tableWidth,
+    { wide: kindId === 'nodes' }
+  )
+  const columns = allColumns.filter((c) => fit.keep.has(c.id))
 
   const drillable = kindId === 'nodes' || kindId === 'namespaces' || HAS_PODS.includes(kindId)
 
@@ -665,8 +684,13 @@ export function ClusterTab({
       inputRef.current?.focus()
       return
     }
+    if (k === '?') {
+      setHelpOpen((o) => !o)
+      return
+    }
     if (k === 'Escape') {
-      if (back()) e.preventDefault()
+      if (helpOpen) setHelpOpen(false)
+      else if (back()) e.preventDefault()
       return
     }
     if (k === '0') {
@@ -732,23 +756,50 @@ export function ClusterTab({
       </div>
     )
 
-  const visibleKinds = (kinds ?? BUILTIN_KINDS.map((x) => ({ ...x, forbidden: false }))).filter(
-    (x) => !x.forbidden
-  )
   const titleOf = (id: string): string =>
     BUILTIN_KINDS.find((b) => b.id === id)?.title ?? kinds?.find((k) => k.id === id)?.kind ?? id
   const hintItems: (readonly [string, string])[] = [
-    [':', 'command'],
+    [':', 'go to'],
     ['/', 'filter'],
     ['Enter', drillable ? 'pods' : 'details'],
-    ['d', 'describe'],
     ...(single
       ? actionsFor(kindId, single.obj, readOnly, handlers)
-          .filter((x) => x.key)
+          .filter((x) => x.key && !x.danger)
+          .slice(0, 3)
           .map((x) => [keyLabel(x.key ?? ''), x.label.replace(/…$/, '').toLowerCase()] as const)
       : []),
-    ['0', 'all namespaces'],
     ['Esc', 'back']
+  ]
+  const allKeys = [
+    {
+      title: 'Navigate',
+      keys: [
+        [':', 'Go to a resource, namespace or context'],
+        ['/', 'Filter the list'],
+        ['↑ ↓', 'Move'],
+        ['Enter', 'Pods of it / details'],
+        ['d', 'Details'],
+        ['0', 'All namespaces'],
+        ['Esc', 'Back / close']
+      ] as const
+    },
+    {
+      title: 'Selected resource',
+      keys: [
+        ['l', 'Logs'],
+        ['s', 'Open shell'],
+        ['f', 'Forward a port'],
+        ['y', 'View YAML'],
+        ['e', 'Edit YAML'],
+        ['S', 'Scale'],
+        ['r', 'Restart (drain for nodes)'],
+        ['h', 'Rollout history'],
+        ['c', 'Cordon / uncordon'],
+        ['t', 'Run CronJob now'],
+        ['Ctrl+D', 'Delete'],
+        ['Ctrl+K', 'Force delete']
+      ] as const
+    }
   ]
 
   return (
@@ -907,64 +958,9 @@ export function ClusterTab({
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <nav
-          className="flex w-44 shrink-0 flex-col overflow-auto border-r border-line bg-subtle p-2"
-          data-testid="k8s-nav"
-        >
-          <button
-            type="button"
-            data-testid={`k8s-nav-${OVERVIEW}`}
-            aria-current={onOverview}
-            className={cx(
-              'mb-2 flex items-center gap-2 rounded-md px-2 py-1 text-left text-[13px]',
-              onOverview
-                ? 'bg-surface font-medium text-fg shadow-sm'
-                : 'text-muted hover:bg-hover hover:text-fg'
-            )}
-            onClick={() => {
-              go(OVERVIEW)
-            }}
-          >
-            <LayoutDashboard size={13} /> Overview
-          </button>
-          {SECTIONS.map((section) => {
-            const items = visibleKinds.filter(
-              (x) =>
-                (BUILTIN_KINDS.find((b) => b.id === x.id)?.section ?? 'Custom resources') ===
-                section
-            )
-            if (items.length === 0) return null
-            return (
-              <div key={section} className="mb-2">
-                <div className="px-2 pb-0.5 text-[10px] font-semibold tracking-wider text-faint uppercase">
-                  {section}
-                </div>
-                {items.map((x) => (
-                  <button
-                    key={x.id}
-                    type="button"
-                    data-testid={`k8s-nav-${x.id}`}
-                    aria-current={view === x.id && !top}
-                    title={x.id}
-                    className={cx(
-                      'block w-full truncate rounded-md px-2 py-1 text-left text-[13px]',
-                      view === x.id && !top
-                        ? 'bg-surface font-medium text-fg shadow-sm'
-                        : 'text-muted hover:bg-hover hover:text-fg'
-                    )}
-                    onClick={() => {
-                      go(x.id)
-                    }}
-                  >
-                    {titleOf(x.id)}
-                  </button>
-                ))}
-              </div>
-            )
-          })}
-        </nav>
+        <ResourceNav kinds={kinds} view={view} drilled={Boolean(top)} onGo={go} />
 
-        <div className="@container flex min-w-0 flex-1 flex-col">
+        <div ref={tableRef} className="@container flex min-w-0 flex-1 flex-col">
           {!onOverview && (
             <div
               className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-3 text-xs"
@@ -1041,9 +1037,11 @@ export function ClusterTab({
             <FileTable
               items={rows}
               getKey={(r) => r.row.key}
+              getLabel={(r) => r.row.name}
               icon={(r) => <Box size={14} className={TONE_TEXT[TONE[r.row.tone]]} />}
               columns={columns}
-              gridClass={gridClass}
+              gridClass=""
+              gridStyle={{ gridTemplateColumns: fit.template }}
               nameSort={{ key: 'name', label: 'Name', kind: 'text' }}
               sort={sort}
               onSort={setSort}
@@ -1158,7 +1156,7 @@ export function ClusterTab({
         )}
       </div>
 
-      <KeyHints items={hintItems} />
+      <KeyHints items={hintItems} all={allKeys} open={helpOpen} onOpenChange={setHelpOpen} />
 
       {session.prompt && <ConnectionPrompt prompt={session.prompt} onAnswer={session.answer} />}
       {dialog?.kind === 'yaml' && (

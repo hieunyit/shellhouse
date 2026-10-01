@@ -70,6 +70,10 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await view.locator('[data-testid="k8s-row"][data-name="shop/web-2"]').click()
     await page.keyboard.press('d')
     const describe = view.getByTestId('k8s-describe')
+    // Chi tiết mở → bảng hẹp lại: bỏ bớt cột phụ, Status vẫn hiện đủ chữ.
+    await expect(
+      view.locator('[data-testid="k8s-row"][data-name="shop/web-2"]').getByText('CrashLoopBackOff')
+    ).toBeVisible()
     await expect(describe.getByTestId('k8s-container')).toContainText('CrashLoopBackOff')
     await describe.getByTestId('k8s-detail-tab-events').click()
     await expect(view.getByTestId('k8s-events')).toContainText('BackOff')
@@ -121,11 +125,25 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await page.keyboard.press('Escape')
     await expect(view.getByTestId('k8s-breadcrumb')).not.toContainText('deployment/web')
 
+    // Thanh bên: nhóm thu gọn được — chỉ Workloads mở sẵn; lựa chọn được nhớ.
+    await expect(view.getByTestId('k8s-nav-secrets')).toHaveCount(0)
+    await view.getByTestId('k8s-nav-group-Workloads').click()
+    await expect(view.getByTestId('k8s-nav-pods')).toHaveCount(0)
+    await view.getByTestId('k8s-nav-group-Workloads').click()
+    await expect(view.getByTestId('k8s-nav-pods')).toBeVisible()
+
+    // Bảng phím tắt đầy đủ (phím ?) — thanh dưới chỉ hiện vài phím chính.
+    await view.getByTestId('key-hints-all').click()
+    await expect(view.getByTestId('key-hints-sheet')).toContainText('Rollout history')
+    await page.keyboard.press('Escape')
+    await expect(view.getByTestId('key-hints-sheet')).toHaveCount(0)
+
     // Tổng quan cluster.
     await view.getByTestId('k8s-nav-overview').click()
     await expect(view.getByTestId('k8s-ov-nodes')).toContainText('1/2')
 
     // Secret: giá trị ẩn, bấm mới hiện.
+    await view.getByTestId('k8s-nav-group-Config').click()
     await view.getByTestId('k8s-nav-secrets').click()
     await view.locator('[data-testid="k8s-row"][data-name="shop/db"]').click()
     await page.keyboard.press('d')

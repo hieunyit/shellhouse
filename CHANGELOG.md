@@ -40,9 +40,10 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - **Kubernetes, k9s / Lens style**: a cluster **Overview** (nodes, CPU / memory requests and live
   usage, unhealthy workloads, warning events), live **CPU / MEM** columns from metrics-server, a
   `:` command bar with aliases (`:po`, `:deploy kube-system`, `:crd`…) and suggestions, drill-down
-  from a deployment / node / service to its pods with breadcrumbs, single-key shortcuts (l logs,
-  s shell, f forward, y YAML, e edit, d describe, ctrl+d delete…) shown in a hint bar, a tabbed
-  detail panel, **Create** from YAML (server-side apply, with templates), rollout **history and
+  from a deployment / node / service to its pods with breadcrumbs, a sidebar with collapsible
+  groups (custom resources grouped by API group), columns that make room for the detail panel
+  instead of squeezing every value, optional single-key shortcuts (l logs, s shell, f forward,
+  y YAML, e edit, d describe, ctrl+d delete… — press **?** for the list), a tabbed detail panel, **Create** from YAML (server-side apply, with templates), rollout **history and
   rollback**, **cordon / drain**, trigger / suspend CronJobs, force delete, and logs for every
   container or for all pods of a workload in one tab.
 - **Import kubeconfig files** (Kubernetes ＋ menu or Settings → Modules → Kubernetes): pick one or
@@ -54,8 +55,10 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   policy — pulls the image if needed), live CPU / memory columns for every container, All /
   Running / Stopped filter, multi-select with bulk start / stop / restart / remove, a detail panel
   (overview, stats, environment with secrets hidden until revealed, processes, inspect), image
-  layers, **Exec…** with a custom command / user, Compose project logs in one tab, and keyboard
-  shortcuts (l, s, x, i, r, t, p, ctrl+k, ctrl+d) shown in a hint bar.
+  layers, **Exec…** with a custom command / user, Compose project logs in one tab, and optional
+  keyboard shortcuts (press **?** for the list).
+- Success messages in the Docker and Kubernetes tabs now disappear on their own after a few
+  seconds; errors stay until dismissed.
 - **Suggestions**: when Docker is found on a server you connect to, or a kubeconfig on this
   computer, a one-line hint offers the matching module (at most once a month; can be turned off).
 - **Welcome screen** when no tab is open: add a host, import hosts, quick connect or open a local

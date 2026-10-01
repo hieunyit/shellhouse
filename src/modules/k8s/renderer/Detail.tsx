@@ -66,7 +66,7 @@ export function Detail({
   const hasData = kindId === 'configmaps' || kindId === 'secrets'
   const [tab, setTab] = useState<DetailTab>('overview')
   const { menu, open: openMenu } = useContextMenu()
-  const primary = actions.filter((x) => !x.danger).slice(0, 4)
+  const primary = actions.filter((x) => !x.danger).slice(0, 3)
   const row = toRow(kindId, obj)
   const statusTone = TONE[row.tone] ?? 'muted'
   const statusText = row.cells['status'] ?? row.cells['ready'] ?? ''
@@ -110,14 +110,14 @@ export function Detail({
         </button>
       </div>
       {primary.length > 0 && (
-        <div className="flex flex-wrap gap-1 border-b border-line px-2 py-1.5">
+        <div className="flex gap-1 overflow-hidden border-b border-line px-2 py-1.5">
           {primary.map((x) => (
             <button
               key={x.id}
               type="button"
               data-testid={`k8s-action-${x.id}`}
               title={x.key ? `${x.label} (${keyLabel(x.key)})` : x.label}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted hover:bg-hover hover:text-fg"
+              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium whitespace-nowrap text-muted hover:bg-hover hover:text-fg"
               onClick={() => {
                 x.run()
               }}

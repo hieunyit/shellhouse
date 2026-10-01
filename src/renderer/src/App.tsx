@@ -199,9 +199,10 @@ export function App(): React.JSX.Element {
             setOverlay({ kind: 'workspaces' })
           }}
         />
-        {/* overflow-hidden: panel ẩn (renderer "always") giữ kích thước cũ khi thu nhỏ cửa sổ —
-            không được làm cả trang tràn ngang. */}
-        <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+        {/* overflow-clip: panel ẩn (renderer "always") giữ kích thước cũ khi thu nhỏ cửa sổ —
+            không được làm cả trang tràn; "clip" (khác "hidden") còn chặn cuộn do focus() /
+            scrollIntoView, nếu không cả vùng tab bị đẩy lên vài chục px. */}
+        <div className="relative min-h-0 min-w-0 flex-1 overflow-clip">
           <Workspace />
           {multiExec && <MultiExecView />}
         </div>

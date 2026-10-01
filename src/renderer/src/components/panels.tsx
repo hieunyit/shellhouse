@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { cx, Kbd } from './ui'
 
 /**
@@ -96,28 +96,90 @@ export function TabStrip<T extends string>({
   )
 }
 
-/** Thanh gợi ý phím tắt ở đáy (kiểu k9s). */
+/**
+ * Thanh phím tắt cuối màn: vài phím chính + nút "Shortcuts" mở bảng đầy đủ (phím ?). Không bắt
+ * người dùng chuột phải học phím — mọi thao tác vẫn có nút / menu; phím chỉ để đi nhanh.
+ */
 export function KeyHints({
   items,
+  all,
+  open = false,
+  onOpenChange,
   className
 }: {
+  /** Luôn hiện (ngắn: 3–5 mục). */
   items: readonly (readonly [string, string])[]
+  /** Bảng đầy đủ theo nhóm — có thì hiện nút "Shortcuts". */
+  all?: readonly { title: string; keys: readonly (readonly [string, string])[] }[]
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   className?: string
 }): React.JSX.Element {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (e: MouseEvent): void => {
+      if (!ref.current?.contains(e.target as Node)) onOpenChange?.(false)
+    }
+    window.addEventListener('mousedown', close)
+    return () => {
+      window.removeEventListener('mousedown', close)
+    }
+  }, [open, onOpenChange])
   return (
     <div
+      ref={ref}
       className={cx(
-        'flex h-7 shrink-0 items-center gap-3 overflow-hidden border-t border-line bg-subtle px-2 text-[11px] whitespace-nowrap text-faint',
+        'relative flex h-7 shrink-0 items-center gap-3 border-t border-line bg-subtle px-2 text-[11px] whitespace-nowrap text-faint',
         className
       )}
       data-testid="key-hints"
     >
-      {items.map(([key, label]) => (
-        <span key={key} className="flex items-center gap-1">
-          <Kbd>{key}</Kbd>
-          {label}
-        </span>
-      ))}
+      <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
+        {items.map(([key, label]) => (
+          <span key={key} className="flex items-center gap-1">
+            <Kbd>{key}</Kbd>
+            {label}
+          </span>
+        ))}
+      </div>
+      {all && (
+        <button
+          type="button"
+          className={cx(
+            'flex shrink-0 items-center gap-1 rounded px-1 hover:text-fg',
+            open && 'text-fg'
+          )}
+          data-testid="key-hints-all"
+          aria-expanded={open}
+          onClick={() => onOpenChange?.(!open)}
+        >
+          <Kbd>?</Kbd>
+          Shortcuts
+        </button>
+      )}
+      {all && open && (
+        <div
+          role="dialog"
+          aria-label="Keyboard shortcuts"
+          data-testid="key-hints-sheet"
+          className="absolute right-2 bottom-8 z-40 grid max-h-[70vh] w-[30rem] max-w-[calc(100%-1rem)] grid-cols-2 gap-x-6 gap-y-3 overflow-auto rounded-lg border border-line bg-elevated p-3 text-xs whitespace-normal shadow-lg"
+        >
+          {all.map((g) => (
+            <div key={g.title} className="flex flex-col gap-1">
+              <div className="text-[11px] font-semibold tracking-wider text-faint uppercase">
+                {g.title}
+              </div>
+              {g.keys.map(([key, label]) => (
+                <div key={key} className="flex items-center justify-between gap-3">
+                  <span className="text-muted">{label}</span>
+                  <Kbd>{key}</Kbd>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

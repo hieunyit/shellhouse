@@ -168,6 +168,7 @@ export function DockerTab({
     dir: 'asc'
   })
   const [dialog, setDialog] = useState<Dialog>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
   const [pull, setPull] = useState<{
     subscription: string
@@ -183,6 +184,17 @@ export function DockerTab({
   const filterRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const { menu, open: openMenu } = useContextMenu()
+
+  // Thông báo thành công tự tắt sau 4 giây; lỗi giữ tới khi đóng.
+  useEffect(() => {
+    if (notice?.tone !== 'success') return
+    const t = setTimeout(() => {
+      setNotice((n) => (n === notice ? null : n))
+    }, 4000)
+    return () => {
+      clearTimeout(t)
+    }
+  }, [notice])
 
   const reload = useRef<() => void>(() => undefined)
   const onEvent = useCallback((event: string, data: unknown) => {
@@ -577,8 +589,13 @@ export function DockerTab({
       filterRef.current?.focus()
       return
     }
+    if (k === '?') {
+      setHelpOpen((o) => !o)
+      return
+    }
     if (k === 'Escape') {
-      if (selected.size) setSelected(new Set())
+      if (helpOpen) setHelpOpen(false)
+      else if (selected.size) setSelected(new Set())
       else if (filter) setFilter('')
       return
     }
@@ -753,27 +770,42 @@ export function DockerTab({
     networks: networks?.length,
     compose: projects.length
   }
-  const hints: (readonly [string, string])[] =
-    section === 'containers'
-      ? [
-          ['/', 'filter'],
-          ...(one
-            ? containerActions(one)
-                .filter((a) => a.key)
-                .map(
-                  (a) =>
-                    [
-                      a.key?.replace('ctrl+', 'Ctrl+') ?? '',
-                      a.label.replace(/…$/, '').toLowerCase()
-                    ] as const
-                )
-            : [['Click', 'details'] as const]),
-          ['Esc', 'clear']
-        ]
-      : [
-          ['/', 'filter'],
-          ['Esc', 'clear']
-        ]
+  const hints: (readonly [string, string])[] = [
+    ['/', 'filter'],
+    ...(section === 'containers' && one
+      ? containerActions(one)
+          .filter((a) => a.key && !a.danger)
+          .slice(0, 3)
+          .map((a) => [a.key ?? '', a.label.replace(/…$/, '').toLowerCase()] as const)
+      : []),
+    ['Esc', 'clear']
+  ]
+  const allKeys = [
+    {
+      title: 'Navigate',
+      keys: [
+        ['/', 'Filter the list'],
+        ['↑ ↓', 'Move'],
+        ['Enter', 'Logs of the container'],
+        ['Ctrl+A', 'Select all'],
+        ['Esc', 'Clear selection / filter']
+      ] as const
+    },
+    {
+      title: 'Selected container',
+      keys: [
+        ['l', 'Logs'],
+        ['s', 'Open shell'],
+        ['x', 'Exec a command'],
+        ['i', 'Inspect'],
+        ['r', 'Restart'],
+        ['t', 'Start / stop'],
+        ['p', 'Pause / resume'],
+        ['Ctrl+K', 'Kill'],
+        ['Ctrl+D', 'Remove']
+      ] as const
+    }
+  ]
 
   return (
     <div
@@ -1518,7 +1550,7 @@ export function DockerTab({
           />
         )}
       </div>
-      <KeyHints items={hints} />
+      <KeyHints items={hints} all={allKeys} open={helpOpen} onOpenChange={setHelpOpen} />
       {session.prompt && <ConnectionPrompt prompt={session.prompt} onAnswer={session.answer} />}
       {dialog?.kind === 'inspect' && (
         <InspectDialog
