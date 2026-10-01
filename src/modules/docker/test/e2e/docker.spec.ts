@@ -297,10 +297,14 @@ test('Docker trong WSL (Windows): gợi ý, distro đang chạy hiện ở thanh
     await page.getByRole('menuitem', { name: /Ubuntu \(WSL\)/ }).click()
     await expect(ubuntu).toBeVisible()
 
-    // Máy test không có wsl.exe: tab báo lỗi dễ hiểu (không treo).
     await ubuntu.dblclick()
     await expect(page.getByTestId('tab').last()).toContainText('Docker · Ubuntu (WSL)')
-    await expect(page.getByRole('alert').filter({ hasText: 'WSL is not installed' })).toBeVisible()
+    // Linux / macOS không có wsl.exe: tab báo lỗi dễ hiểu (không treo). Runner Windows có wsl.exe
+    // thật (distro giả không tồn tại) — phần này chỉ kiểm ở máy không có WSL.
+    if (process.platform !== 'win32')
+      await expect(
+        page.getByRole('alert').filter({ hasText: 'WSL is not installed' })
+      ).toBeVisible()
   } finally {
     await launched.close()
   }

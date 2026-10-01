@@ -15,11 +15,14 @@ export const useDocker = create<DockerStore>((set) => ({
   wsl: [],
   loaded: false,
   reload: async () => {
-    const [endpoints, wsl] = await Promise.all([
-      dockerApi.endpoints(),
-      dockerApi.wslDistros().catch(() => [])
-    ])
-    set({ endpoints, wsl, loaded: true })
+    // Danh sách WSL (wsl.exe, có thể mất vài giây trên máy chưa cài WSL) không giữ chân thanh bên.
+    void dockerApi.wslDistros().then(
+      (wsl) => {
+        set({ wsl })
+      },
+      () => undefined
+    )
+    set({ endpoints: await dockerApi.endpoints(), loaded: true })
   }
 }))
 

@@ -378,7 +378,8 @@ ${names.map((n) => `- name: ${n}\n  context: { cluster: ${n}-c, user: u }`).join
 `
   const file = join(home, '.kube', 'console-stg-kubeconfig')
   writeFileSync(file, yaml(['stg', 'old']))
-  const launched = await launchApp({ HOME: home, KUBECONFIG: '' })
+  // Windows lấy thư mục nhà từ USERPROFILE (không phải HOME).
+  const launched = await launchApp({ HOME: home, USERPROFILE: home, KUBECONFIG: '' })
   const { page } = launched
   try {
     await enableK8s(page)

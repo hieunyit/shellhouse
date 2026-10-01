@@ -96,10 +96,14 @@ const testDetect: string[] | null = (() => {
   const parsed: unknown = JSON.parse(process.env['SHELLHOUSE_TEST_DETECT'] ?? '[]')
   return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === 'string') : []
 })()
-/** Chỉ cho E2E: danh sách distro WSL giả (máy test không phải Windows). */
+/**
+ * Chỉ cho E2E: danh sách distro WSL giả. Khi chạy test luôn dùng danh sách giả (mặc định rỗng) —
+ * không gọi wsl.exe thật của máy CI (chậm / khác nhau giữa các runner Windows).
+ */
 const testWsl: WslDistro[] | null = (() => {
-  const raw = testHooks ? process.env['SHELLHOUSE_TEST_WSL'] : undefined
-  return raw ? (JSON.parse(raw) as WslDistro[]) : null
+  if (!testHooks) return null
+  const raw = process.env['SHELLHOUSE_TEST_WSL']
+  return raw ? (JSON.parse(raw) as WslDistro[]) : []
 })()
 const wslDistros = (): Promise<WslDistro[]> =>
   testWsl ? Promise.resolve(testWsl) : listWslDistros()

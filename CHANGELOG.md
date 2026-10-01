@@ -69,6 +69,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Fixed
 
+- Windows: the Docker sidebar no longer waits for `wsl.exe` (which can take seconds when WSL is not
+  installed) before listing your sources.
 - Kubernetes: tables showed “aborted” after a few minutes on clusters behind Rancher, a load
   balancer or another proxy that closes long requests. Live updates and followed logs now
   reconnect silently from where they stopped.
