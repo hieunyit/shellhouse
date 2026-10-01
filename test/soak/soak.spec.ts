@@ -74,6 +74,9 @@ test('soak: tải hỗn hợp liên tục, không rò rỉ bộ nhớ / handle',
   const { app, page } = launched
   const samples: Sample[] = []
   const errors: string[] = []
+  // Heap chính xác qua DevTools Protocol: performance.memory của Chromium bị làm tròn và rất lâu
+  // mới cập nhật (chống fingerprinting) — đứng 33 MB 20 phút rồi nhảy thẳng 93 MB, không dùng được.
+  const cdp = await page.context().newCDPSession(page)
 
   try {
     // Host đã lưu (qua proxy có trễ), tin host key sẵn.
@@ -209,7 +212,15 @@ test('soak: tải hỗn hợp liên tục, không rò rỉ bộ nhớ / handle',
           byType[key] = (byType[key] ?? 0) + kb / 1024
           total += kb / 1024
         }
-        const heap = await page.evaluate(() => window.__shellhouseTest.jsHeapBytes())
+        // Dọn rác trước khi đo: heap dao động răng cưa 20–47 MB giữa các lần GC — chỉ phần còn giữ
+        // lại sau GC mới cho biết có rò rỉ hay không.
+        await cdp.send('HeapProfiler.collectGarbage').catch(() => undefined)
+        const heap =
+          (
+            (await cdp.send('Runtime.getHeapUsage').catch(() => null)) as {
+              usedSize: number
+            } | null
+          )?.usedSize ?? null
         const tabs = await page.evaluate(() => window.__shellhouseTest.tabIds().length)
         samples.push({
           t: Date.now(),
@@ -232,14 +243,16 @@ test('soak: tải hỗn hợp liên tục, không rò rỉ bộ nhớ / handle',
       }
     }
 
-    // Phân tích: bỏ 20% đầu (khởi động), so 20% tiếp theo với 20% cuối.
+    // Phân tích: bỏ 1/3 đầu (khởi động — scrollback, cache, heap V8 còn đang lớn dần tới mức
+    // ổn định), so trung vị cửa sổ giữa (33–55%) với cửa sổ cuối (78–100%). Cửa sổ rộng để răng
+    // cưa của Session Host (GC sau mỗi lần truyền SFTP 5 MB) không làm lệch kết quả.
     expect(samples.length).toBeGreaterThanOrEqual(5)
     const n = samples.length
     const early = samples.slice(
-      Math.floor(n * 0.2),
-      Math.max(Math.floor(n * 0.4), Math.floor(n * 0.2) + 1)
+      Math.floor(n * 0.33),
+      Math.max(Math.floor(n * 0.55), Math.floor(n * 0.33) + 1)
     )
-    const late = samples.slice(Math.floor(n * 0.8))
+    const late = samples.slice(Math.floor(n * 0.78))
     const growth = (pick: (s: Sample) => number | null): number | null => {
       const a = early.map(pick).filter((x): x is number => x !== null)
       const b = late.map(pick).filter((x): x is number => x !== null)
@@ -259,6 +272,13 @@ test('soak: tải hỗn hợp liên tục, không rò rỉ bộ nhớ / handle',
       heapGrowth: heap,
       fdEarly,
       fdLate,
+      // Tăng theo từng tiến trình (Tab = renderer, Browser = main, SessionHost…) — biết ngay ai tăng.
+      byType: Object.fromEntries(
+        Object.keys(samples.at(-1)?.byType ?? {}).map((k) => [
+          k,
+          growth((s) => s.byType[k] ?? null)
+        ])
+      ),
       errors
     }
     process.stdout.write(`\nSOAK SUMMARY ${JSON.stringify(summary)}\n`)
