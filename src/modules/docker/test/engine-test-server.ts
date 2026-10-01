@@ -118,6 +118,7 @@ export async function startEngineTestServer(): Promise<EngineTestServer> {
     return JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null') as unknown
   }
   const followers = new Map<string, Set<{ res: ServerResponse; tty: boolean }>>()
+  const cpuTicks = new Map<string, number>()
   const eventStreams = new Set<ServerResponse>()
   const timers = new Set<NodeJS.Timeout>()
 
@@ -307,9 +308,13 @@ export async function startEngineTestServer(): Promise<EngineTestServer> {
     }
     if ((m = /^\/containers\/([^/]+)\/stats$/.exec(p))) {
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      let n = 0
+      // Bộ đếm CPU tăng dần qua các lần gọi (như Docker thật); one-shot → không có precpu.
+      const id = m[1] ?? ''
+      let n = cpuTicks.get(id) ?? 0
+      const oneShot = url.searchParams.get('one-shot') === 'true'
       const tick = (): void => {
         n++
+        cpuTicks.set(id, n)
         res.write(
           `${JSON.stringify({
             read: new Date().toISOString(),
@@ -318,10 +323,12 @@ export async function startEngineTestServer(): Promise<EngineTestServer> {
               system_cpu_usage: 10_000_000 * n,
               online_cpus: 2
             },
-            precpu_stats: {
-              cpu_usage: { total_usage: 1_000_000 * (n - 1) },
-              system_cpu_usage: 10_000_000 * (n - 1)
-            },
+            precpu_stats: oneShot
+              ? { cpu_usage: { total_usage: 0 } }
+              : {
+                  cpu_usage: { total_usage: 1_000_000 * (n - 1) },
+                  system_cpu_usage: 10_000_000 * (n - 1)
+                },
             memory_stats: {
               usage: 60_000_000,
               limit: 1_000_000_000,

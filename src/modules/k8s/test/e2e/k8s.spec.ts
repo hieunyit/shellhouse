@@ -90,6 +90,23 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
       view.locator('[data-testid="k8s-row"][data-name="shop/web-2"]').getByText('CrashLoopBackOff')
     ).toBeVisible()
     await expect(describe.getByTestId('k8s-container')).toContainText('CrashLoopBackOff')
+    // Kéo mép trái để nới bảng chi tiết (nhớ cho lần sau); thu gọn / hiện thanh điều hướng.
+    const before = (await describe.boundingBox())?.width ?? 0
+    const handle = (await describe.getByTestId('side-panel-resize').boundingBox()) ?? {
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0
+    }
+    await page.mouse.move(handle.x + 2, handle.y + 200)
+    await page.mouse.down()
+    await page.mouse.move(handle.x - 98, handle.y + 200, { steps: 5 })
+    await page.mouse.up()
+    expect(Math.round(((await describe.boundingBox())?.width ?? 0) - before)).toBe(100)
+    await view.getByTestId('k8s-nav-toggle').click()
+    await expect(view.getByTestId('k8s-nav')).toHaveCount(0)
+    await view.getByTestId('k8s-nav-toggle').click()
+    await expect(view.getByTestId('k8s-nav')).toBeVisible()
     await describe.getByTestId('k8s-detail-tab-events').click()
     await expect(view.getByTestId('k8s-events')).toContainText('BackOff')
     await page.keyboard.press('Escape')

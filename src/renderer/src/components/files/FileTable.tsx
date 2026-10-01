@@ -1,7 +1,18 @@
-import { Fragment, useRef, type ReactNode } from 'react'
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { cx } from '../ui'
 import { defaultDir, type SortOption, type SortState } from '../SortMenu'
+
+/** Từ chừng này dòng trở lên chỉ vẽ phần đang thấy (+ đệm) — bảng 3000 pod vẫn mượt. */
+const VIRTUAL_MIN = 150
+/** Dòng vẽ thêm trên / dưới vùng thấy (cuộn nhanh không thấy trống). */
+const OVERSCAN = 15
+
+/** Chiều cao một dòng (h-8 = 2rem) theo cỡ chữ gốc hiện tại. */
+function rowHeight(): number {
+  const root = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+  return (Number.isFinite(root) && root > 0 ? root : 16) * 2
+}
 
 /** Một cột phụ (sau cột tên). `className` ẩn/hiện cột theo độ rộng khung (container query). */
 export interface FileColumn<T, K extends string> {
@@ -74,6 +85,38 @@ export function FileTable<T, K extends string>({
   const listRef = useRef<HTMLDivElement | null>(null)
   /** Mục "con trỏ" cho phím mũi tên và Shift+bấm. */
   const anchor = useRef<string | null>(null)
+  // Ảo hoá: vị trí cuộn + chiều cao khung (cập nhật theo khung hình, không theo từng sự kiện cuộn).
+  const [viewport, setViewport] = useState({ top: 0, height: 800 })
+  const frame = useRef<number | null>(null)
+  const virtual = items.length >= VIRTUAL_MIN
+  useEffect(() => {
+    const el = listRef.current
+    if (!el || !virtual) return
+    const measure = (): void => {
+      setViewport({ top: el.scrollTop, height: el.clientHeight })
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      if (frame.current !== null) cancelAnimationFrame(frame.current)
+    }
+  }, [virtual])
+  const onScroll = (): void => {
+    if (!virtual || frame.current !== null) return
+    frame.current = requestAnimationFrame(() => {
+      frame.current = null
+      const el = listRef.current
+      if (el) setViewport({ top: el.scrollTop, height: el.clientHeight })
+    })
+  }
+  const row = virtual ? rowHeight() : 32
+  // Hàng tiêu đề (sticky) cao bằng một dòng.
+  const first = virtual ? Math.max(0, Math.floor((viewport.top - row) / row) - OVERSCAN) : 0
+  const last = virtual
+    ? Math.min(items.length, Math.ceil((viewport.top + viewport.height) / row) + OVERSCAN)
+    : items.length
   const chosen = items.filter((i) => selected.has(getKey(i)))
   const one = chosen.length === 1 ? chosen[0] : undefined
 
@@ -111,9 +154,13 @@ export function FileTable<T, K extends string>({
     const key = getKey(item)
     anchor.current = key
     onSelect(new Set([key]))
-    listRef.current
-      ?.querySelector(`[data-key="${CSS.escape(key)}"]`)
-      ?.scrollIntoView({ block: 'nearest' })
+    // Theo chỉ số (dòng có thể chưa được vẽ khi ảo hoá): giữ dòng trong vùng thấy, dưới tiêu đề.
+    const el = listRef.current
+    if (!el) return
+    const h = rowHeight()
+    const top = (next + 1) * h
+    if (top < el.scrollTop + h) el.scrollTop = top - h
+    else if (top + h > el.scrollTop + el.clientHeight) el.scrollTop = top + h - el.clientHeight
   }
 
   const onKeyDown = (e: React.KeyboardEvent): void => {
@@ -184,6 +231,7 @@ export function FileTable<T, K extends string>({
       aria-multiselectable
       tabIndex={0}
       onKeyDown={onKeyDown}
+      onScroll={onScroll}
     >
       <div
         role="row"
@@ -210,7 +258,8 @@ export function FileTable<T, K extends string>({
           )
         )}
       </div>
-      {items.map((item) => {
+      {virtual && first > 0 && <div aria-hidden style={{ height: first * row }} />}
+      {(virtual ? items.slice(first, last) : items).map((item) => {
         const key = getKey(item)
         const isSelected = selected.has(key)
         const extra = rowProps?.(item) ?? {}
@@ -270,6 +319,9 @@ export function FileTable<T, K extends string>({
           </div>
         )
       })}
+      {virtual && last < items.length && (
+        <div aria-hidden style={{ height: (items.length - last) * row }} />
+      )}
       {children}
     </div>
   )

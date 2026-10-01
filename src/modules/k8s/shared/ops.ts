@@ -38,7 +38,12 @@ export const K8sOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('connect'), ref: ContextRef, readOnly: z.boolean() }),
   z.object({ op: z.literal('namespaces') }),
   /** Loại tài nguyên cluster có (gồm CRD) + loại người dùng không được list. */
-  z.object({ op: z.literal('discover'), namespace: Namespace.optional() }),
+  /** refresh = bỏ danh mục / quyền đã nhớ (nút Reload — thấy CRD vừa cài). */
+  z.object({
+    op: z.literal('discover'),
+    namespace: Namespace.optional(),
+    refresh: z.boolean().optional()
+  }),
   z.object({
     op: z.literal('list'),
     kind: Kind,

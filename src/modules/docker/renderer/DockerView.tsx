@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Boxes,
   Container,
+  Copy,
   Download,
   Eye,
   FileText,
@@ -421,6 +422,23 @@ export function DockerTab({
         inspect('container', c.id, c.name)
       }
     })
+    // Chỉ trong menu (không thành nút chính của bảng chi tiết).
+    out.push(
+      {
+        id: 'copy-name',
+        label: 'Copy name',
+        icon: <Copy size={14} />,
+        secondary: true,
+        run: () => void window.shellhouse.writeClipboard(c.name)
+      },
+      {
+        id: 'copy-id',
+        label: 'Copy ID',
+        icon: <Copy size={14} />,
+        secondary: true,
+        run: () => void window.shellhouse.writeClipboard(c.id)
+      }
+    )
     if (readOnly) return out
     if (running)
       out.push(
@@ -734,7 +752,9 @@ export function DockerTab({
         className: 'hidden @lg:block',
         render: (c) => {
           const s = sampleOf(c)
-          return c.state === 'running' && s ? `${s.cpuPercent.toFixed(1)}%` : '—'
+          return c.state === 'running' && s && s.cpuPercent >= 0
+            ? `${s.cpuPercent.toFixed(1)}%`
+            : '—'
         }
       },
       {

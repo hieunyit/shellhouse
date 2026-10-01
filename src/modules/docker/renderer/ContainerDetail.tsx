@@ -8,6 +8,7 @@ import {
   Pill,
   Sparkline,
   TabStrip,
+  SidePanel,
   type Tone
 } from '../../../renderer/src/components/panels'
 import { cleanError, formatSize } from '../../../renderer/src/lib/format'
@@ -25,6 +26,8 @@ export interface DetailAction {
   icon: React.ReactNode
   key?: string
   danger?: boolean
+  /** Chỉ trong menu "…" (Copy name…), không thành nút chính. */
+  secondary?: boolean
   run(): void
 }
 
@@ -72,7 +75,7 @@ function DetailHeader({
   onClose: () => void
 }): React.JSX.Element {
   const { menu, open } = useContextMenu()
-  const primary = actions.filter((a) => !a.danger).slice(0, 4)
+  const primary = actions.filter((a) => !a.danger && !a.secondary).slice(0, 4)
   return (
     <>
       <div className="flex items-start gap-2 border-b border-line px-3 py-2">
@@ -169,10 +172,7 @@ export function ContainerDetail({
   }, [request, c.id, c.state])
   const running = c.state === 'running'
   return (
-    <aside
-      className="flex w-[26rem] max-w-[45%] shrink-0 flex-col border-l border-line bg-surface"
-      data-testid="docker-detail"
-    >
+    <SidePanel storageKey="docker-detail" testId="docker-detail">
       <DetailHeader
         title={c.name}
         subtitle={`${c.image} · ${c.status}`}
@@ -207,7 +207,7 @@ export function ContainerDetail({
           </pre>
         )}
       </div>
-    </aside>
+    </SidePanel>
   )
 }
 
@@ -240,11 +240,11 @@ function Overview({
           <div>
             <div className="flex justify-between">
               <span className="text-muted">CPU</span>
-              <span className="text-fg tabular-nums">{last.cpuPercent.toFixed(1)}%</span>
+              <span className="text-fg tabular-nums">{cpuText(last.cpuPercent)}</span>
             </div>
             <Sparkline
-              values={stats.map((x) => x.cpuPercent)}
-              max={Math.max(100, ...stats.map((x) => x.cpuPercent))}
+              values={stats.map((x) => Math.max(0, x.cpuPercent))}
+              max={Math.max(100, ...stats.map((x) => Math.max(0, x.cpuPercent)))}
             />
           </div>
           <div>
@@ -402,9 +402,9 @@ function Stats({ running, stats }: { running: boolean; stats: StatsSample[] }): 
     <div className="flex flex-col gap-2" data-testid="docker-detail-stats">
       {chart(
         'CPU',
-        `${last.cpuPercent.toFixed(1)}%`,
-        stats.map((x) => x.cpuPercent),
-        Math.max(100, ...stats.map((x) => x.cpuPercent))
+        cpuText(last.cpuPercent),
+        stats.map((x) => Math.max(0, x.cpuPercent)),
+        Math.max(100, ...stats.map((x) => Math.max(0, x.cpuPercent)))
       )}
       {chart(
         'Memory',
@@ -569,10 +569,7 @@ export function ImageDetail({
     }
   }, [request, id])
   return (
-    <aside
-      className="flex w-[26rem] max-w-[45%] shrink-0 flex-col border-l border-line bg-surface"
-      data-testid="docker-image-detail"
-    >
+    <SidePanel storageKey="docker-detail" testId="docker-image-detail">
       <DetailHeader
         title={title}
         subtitle={`${formatSize(size)} · ${new Date(created).toLocaleDateString()}`}
@@ -613,6 +610,11 @@ export function ImageDetail({
           </div>
         )}
       </div>
-    </aside>
+    </SidePanel>
   )
+}
+
+/** % CPU; -1 = chưa có mẫu để so (lần lấy đầu tiên). */
+function cpuText(v: number): string {
+  return v >= 0 ? `${v.toFixed(1)}%` : '—'
 }

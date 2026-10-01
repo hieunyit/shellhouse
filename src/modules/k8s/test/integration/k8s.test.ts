@@ -211,6 +211,28 @@ describe('Kubernetes qua API server giả (HTTPS, chứng chỉ test)', () => {
     )
   })
 
+  it('discovery nhớ danh mục + quyền: đổi namespace không hỏi lại /apis, chỉ hỏi quyền loại có namespace; refresh hỏi lại', async () => {
+    const server = await api()
+    const { run } = service(cluster(server))
+    await run({ op: 'connect', ref, readOnly: false })
+    const count = (pred: (r: string) => boolean) => server.requests.filter(pred).length
+    const isGroups = (r: string) => /^GET \/apis(\?|$)/.test(r) || r.endsWith(' /apis')
+    const isReview = (r: string) => r.includes('selfsubjectaccessreviews')
+    await run({ op: 'discover', namespace: 'shop' })
+    const groups1 = count(isGroups)
+    const reviews1 = count(isReview)
+    await run({ op: 'discover', namespace: 'shop' })
+    expect(count(isGroups)).toBe(groups1)
+    expect(count(isReview)).toBe(reviews1)
+    const kinds = await run<DiscoveredKind[]>({ op: 'discover', namespace: 'restricted' })
+    expect(count(isGroups)).toBe(groups1)
+    // Chỉ loại có namespace được hỏi lại cho namespace mới.
+    expect(count(isReview) - reviews1).toBe(kinds.filter((k) => k.namespaced).length)
+    expect(kinds.find((k) => k.id === 'secrets')?.forbidden).toBe(true)
+    await run({ op: 'discover', namespace: 'shop', refresh: true })
+    expect(count(isGroups)).toBeGreaterThan(groups1)
+  })
+
   it('proxy cắt ngang luồng watch nhiều lần (Rancher…): nối lại im lặng, không báo lỗi, không mất sự kiện', async () => {
     const saved = { ...watchRetry }
     watchRetry.baseMs = 5

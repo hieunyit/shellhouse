@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { cx, Kbd } from './ui'
 
 /**
@@ -375,5 +375,81 @@ export function LabelChips({
         </span>
       ))}
     </div>
+  )
+}
+
+/** Độ rộng đã kéo của từng loại bảng chi tiết (tiện lợi theo máy — lỗi lưu trữ thì bỏ qua). */
+function savedWidth(key: string): number | null {
+  try {
+    const v = Number(window.localStorage.getItem(`shellhouse.panel.${key}`))
+    return Number.isFinite(v) && v > 0 ? v : null
+  } catch {
+    return null
+  }
+}
+function saveWidth(key: string, width: number | null): void {
+  try {
+    if (width === null) window.localStorage.removeItem(`shellhouse.panel.${key}`)
+    else window.localStorage.setItem(`shellhouse.panel.${key}`, String(Math.round(width)))
+  } catch {
+    // Bỏ qua.
+  }
+}
+
+/**
+ * Bảng chi tiết bên phải, kéo mép trái để đổi độ rộng (như Lens); bấm đúp mép để về mặc định. Độ
+ * rộng nhớ theo `storageKey`; không quá 70% khung.
+ */
+export function SidePanel({
+  storageKey,
+  defaultWidth = 416,
+  minWidth = 300,
+  testId,
+  children
+}: {
+  storageKey: string
+  defaultWidth?: number
+  minWidth?: number
+  testId?: string
+  children: ReactNode
+}): React.JSX.Element {
+  const [width, setWidth] = useState<number>(() => savedWidth(storageKey) ?? defaultWidth)
+  const drag = useRef<{ x: number; width: number } | null>(null)
+  return (
+    <aside
+      className="relative flex max-w-[70%] shrink-0 flex-col border-l border-line bg-surface"
+      style={{ width }}
+      data-testid={testId}
+    >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the panel"
+        title="Drag to resize · double-click to reset"
+        data-testid="side-panel-resize"
+        className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40"
+        onPointerDown={(e) => {
+          e.preventDefault()
+          e.currentTarget.setPointerCapture(e.pointerId)
+          drag.current = { x: e.clientX, width }
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current
+          if (!d) return
+          setWidth(Math.max(minWidth, d.width + (d.x - e.clientX)))
+        }}
+        onPointerUp={(e) => {
+          if (!drag.current) return
+          drag.current = null
+          e.currentTarget.releasePointerCapture(e.pointerId)
+          saveWidth(storageKey, width)
+        }}
+        onDoubleClick={() => {
+          setWidth(defaultWidth)
+          saveWidth(storageKey, null)
+        }}
+      />
+      {children}
+    </aside>
   )
 }

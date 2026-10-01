@@ -42,8 +42,25 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - **S3 sync**: choose how many objects are copied at once, see the time left, a smoother speed and
   the objects being copied right now.
 
+### Performance
+
+- **Large Kubernetes clusters stay smooth**: tables only draw the rows on screen and only recompute
+  rows that changed. With 3,000 pods updating continuously: list in ~0.3 s (was 1.5 s), 60 fps
+  while scrolling and updating (95th-percentile frame 18 ms, was 93 ms), filtering in ~70 ms, a
+  quarter of the memory. Files (SFTP / local) and S3 tables benefit too.
+- Kubernetes remembers which resource kinds the cluster has and what you may list for 5 minutes —
+  switching namespaces no longer re-asks the cluster about every kind (~150 requests on Rancher
+  clusters); **Reload** asks again.
+- Docker CPU / memory columns refresh in ~0.1 s instead of ~1 s per container (100 containers: was
+  ~13 s per refresh), with much less load on the Docker daemon.
+
 ### Changed
 
+- Detail panels (Kubernetes, Helm, Docker) can be resized by dragging their left edge — the width
+  is remembered; double-click the edge to reset. The Kubernetes resource list can be hidden with
+  the button left of the cluster name.
+- **Copy name** in the Kubernetes right-click menu (several selected → one name per line); **Copy
+  name** / **Copy ID** for Docker containers.
 - S3 bucket list export: a readable **Size** column (KB / MB / GB / TB) next to Size (bytes).
 - Kubernetes: double-click / Enter on a workload opens its details (Related tab) instead of jumping
   to its pods.

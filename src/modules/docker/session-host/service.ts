@@ -118,11 +118,12 @@ export class DockerService implements HostModuleSession {
       case 'statsAll.subscribe':
         // Một mẫu cho mọi container đang chạy mỗi STATS_ALL_MS (như cột của `docker stats`).
         return this.subscribe('statsAll', async (id, s) => {
-          while (!s.aborted) {
+          // Lần đầu chưa có mẫu CPU để so (one-shot) → lấy lại sau 1 giây cho cột CPU hiện sớm.
+          for (let round = 0; !s.aborted; round++) {
             const samples = await backend.statsOnce(s).catch(() => null)
             if (isAborted(s)) return
             if (samples) this.deps.emit('statsAll', { subscription: id, samples })
-            await new Promise((r) => setTimeout(r, STATS_ALL_MS))
+            await sleep(round === 0 ? 1000 : STATS_ALL_MS, s)
           }
         })
       case 'logs.subscribeMany':

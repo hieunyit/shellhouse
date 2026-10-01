@@ -69,6 +69,8 @@ function isBuiltinGroup(group: string): boolean {
 }
 
 const WATCH_FLUSH_MS = 100
+/** Danh mục loại / quyền list được nhớ chừng này (CRD mới cài hiện sau tối đa 5 phút / Reload). */
+const DISCOVERY_TTL_MS = 5 * 60_000
 /** Chờ trước khi nối lại watch sau lỗi: base × 2^lần, tối đa max (test rút ngắn được). */
 export const watchRetry = { baseMs: 1000, maxMs: 30_000 }
 
@@ -157,6 +159,10 @@ export class K8sService implements HostModuleSession {
         }
       }
       case 'discover':
+        if (op.refresh) {
+          this.catalog = null
+          this.access.clear()
+        }
         return this.discover(client, op.namespace, signal)
       case 'list': {
         const kind = this.kind(op.kind)
@@ -426,39 +432,58 @@ export class K8sService implements HostModuleSession {
    * Loại tài nguyên cluster có (gồm CRD), đánh dấu loại không list được trong namespace đang xem
    * (SelfSubjectAccessReview) để ẩn khỏi điều hướng.
    */
-  private async discover(
-    client: KubeClient,
-    namespace: string | undefined,
-    signal: AbortSignal
-  ): Promise<DiscoveredKind[]> {
+  /** Danh mục loại (CRD + loại có sẵn mà cluster phục vụ) — đổi rất ít, nhớ 5 phút. */
+  private catalog: { at: number; kinds: ResourceKind[] } | null = null
+  /** Quyền list theo loại + namespace — nhớ 5 phút (đổi namespace không hỏi lại từ đầu). */
+  private readonly access = new Map<string, { at: number; allowed: boolean }>()
+
+  /** Chạy `fn` cho từng phần tử, tối đa `limit` cùng lúc (không dồn hàng trăm request một lúc). */
+  private static async pool<T, R>(
+    items: readonly T[],
+    limit: number,
+    fn: (item: T) => Promise<R>
+  ): Promise<R[]> {
+    const out = new Array<R>(items.length)
+    let next = 0
+    await Promise.all(
+      Array.from({ length: Math.min(limit, items.length) }, async () => {
+        while (next < items.length) {
+          const i = next++
+          out[i] = await fn(items[i] as T)
+        }
+      })
+    )
+    return out
+  }
+
+  private async catalogOf(client: KubeClient, signal: AbortSignal): Promise<ResourceKind[]> {
+    if (this.catalog && Date.now() - this.catalog.at < DISCOVERY_TTL_MS) return this.catalog.kinds
     const custom: ResourceKind[] = []
     try {
       const groups = await client.json<{
         groups: { name: string; preferredVersion: { groupVersion: string; version: string } }[]
       }>('GET', '/apis', { signal })
       const others = groups.groups.filter((g) => !isBuiltinGroup(g.name))
-      await Promise.all(
-        others.slice(0, 64).map(async (g) => {
-          const list = await client
-            .json<{
-              resources: { name: string; kind: string; namespaced: boolean; verbs: string[] }[]
-            }>('GET', `/apis/${g.preferredVersion.groupVersion}`, { signal })
-            .catch(() => null)
-          for (const r of list?.resources ?? []) {
-            if (r.name.includes('/') || !r.verbs.includes('list')) continue
-            custom.push({
-              id: `${r.name}.${g.name}`,
-              group: g.name,
-              version: g.preferredVersion.version,
-              plural: r.name,
-              kind: r.kind,
-              namespaced: r.namespaced,
-              title: r.kind,
-              section: 'Custom resources'
-            })
-          }
-        })
-      )
+      await K8sService.pool(others.slice(0, 200), 12, async (g) => {
+        const list = await client
+          .json<{
+            resources: { name: string; kind: string; namespaced: boolean; verbs: string[] }[]
+          }>('GET', `/apis/${g.preferredVersion.groupVersion}`, { signal })
+          .catch(() => null)
+        for (const r of list?.resources ?? []) {
+          if (r.name.includes('/') || !r.verbs.includes('list')) continue
+          custom.push({
+            id: `${r.name}.${g.name}`,
+            group: g.name,
+            version: g.preferredVersion.version,
+            plural: r.name,
+            kind: r.kind,
+            namespaced: r.namespaced,
+            title: r.kind,
+            section: 'Custom resources'
+          })
+        }
+      })
     } catch (error) {
       this.deps.log(
         'warn',
@@ -474,54 +499,70 @@ export class K8sService implements HostModuleSession {
       )
     ]
     const served = new Map<string, Set<string> | null>()
-    await Promise.all(
-      groupVersions.map(async (gv) => {
-        const list = await client
-          .json<{ resources: { name: string }[] }>('GET', gv, { signal })
-          .catch((error: unknown) =>
-            error instanceof KubeError && error.status === 404 ? { resources: [] } : null
-          )
-        served.set(gv, list ? new Set(list.resources.map((r) => r.name)) : null)
-      })
-    )
+    await K8sService.pool(groupVersions, 12, async (gv) => {
+      const list = await client
+        .json<{ resources: { name: string }[] }>('GET', gv, { signal })
+        .catch((error: unknown) =>
+          error instanceof KubeError && error.status === 404 ? { resources: [] } : null
+        )
+      served.set(gv, list ? new Set(list.resources.map((r) => r.name)) : null)
+    })
     const exists = (k: ResourceKind): boolean => {
       const set = served.get(k.group ? `/apis/${k.group}/${k.version}` : `/api/${k.version}`)
       // Không hỏi được → coi như có (lỗi thật báo khi list).
       return !set || set.has(k.plural)
     }
-    const all = [
+    const kinds = [
       ...BUILTIN_KINDS.filter(exists),
       ...custom.sort((a, b) => a.id.localeCompare(b.id))
     ]
-    const allowed = await Promise.all(
-      all.map((k) =>
-        client
-          .json<{ status?: { allowed?: boolean } }>(
-            'POST',
-            '/apis/authorization.k8s.io/v1/selfsubjectaccessreviews',
-            {
-              body: {
-                apiVersion: 'authorization.k8s.io/v1',
-                kind: 'SelfSubjectAccessReview',
-                spec: {
-                  resourceAttributes: {
-                    verb: 'list',
-                    group: k.group,
-                    resource: k.plural,
-                    ...(k.namespaced && namespace ? { namespace } : {})
-                  }
+    this.catalog = { at: Date.now(), kinds }
+    return kinds
+  }
+
+  /**
+   * Loại tài nguyên + quyền list trong namespace đang xem. Danh mục và quyền được nhớ 5 phút: đổi
+   * namespace chỉ hỏi quyền những loại có namespace, mỗi loại một lần (cluster Rancher ~150 loại).
+   */
+  private async discover(
+    client: KubeClient,
+    namespace: string | undefined,
+    signal: AbortSignal
+  ): Promise<DiscoveredKind[]> {
+    const all = await this.catalogOf(client, signal)
+    const now = Date.now()
+    const keyOf = (k: ResourceKind): string => `${k.id}|${k.namespaced ? (namespace ?? '') : ''}`
+    const allowed = await K8sService.pool(all, 16, async (k) => {
+      const cached = this.access.get(keyOf(k))
+      if (cached && now - cached.at < DISCOVERY_TTL_MS) return cached.allowed
+      const ok = await client
+        .json<{ status?: { allowed?: boolean } }>(
+          'POST',
+          '/apis/authorization.k8s.io/v1/selfsubjectaccessreviews',
+          {
+            body: {
+              apiVersion: 'authorization.k8s.io/v1',
+              kind: 'SelfSubjectAccessReview',
+              spec: {
+                resourceAttributes: {
+                  verb: 'list',
+                  group: k.group,
+                  resource: k.plural,
+                  ...(k.namespaced && namespace ? { namespace } : {})
                 }
-              },
-              signal
-            }
-          )
-          .then(
-            (r) => r.status?.allowed !== false,
-            // Không hỏi được quyền → cứ hiện (lỗi thật sẽ báo khi list).
-            () => true
-          )
-      )
-    )
+              }
+            },
+            signal
+          }
+        )
+        .then(
+          (r) => r.status?.allowed !== false,
+          // Không hỏi được quyền → cứ hiện (lỗi thật sẽ báo khi list); không nhớ.
+          () => null
+        )
+      if (ok !== null) this.access.set(keyOf(k), { at: now, allowed: ok })
+      return ok ?? true
+    })
     return all.map((k, i) => ({
       id: k.id,
       group: k.group,

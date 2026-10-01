@@ -7,6 +7,7 @@ import {
   Heading,
   Pill,
   TabStrip,
+  SidePanel,
   type Tone
 } from '../../../renderer/src/components/panels'
 import type { SortState } from '../../../renderer/src/components/SortMenu'
@@ -226,10 +227,7 @@ function HelmDetail({
   }, [request, release.namespace, release.name])
   const d = detail ?? { ...release, values: '', notes: '', manifest: '', history: [] }
   return (
-    <aside
-      className="flex w-[28rem] max-w-[50%] shrink-0 flex-col border-l border-line bg-surface"
-      data-testid="k8s-helm-detail"
-    >
+    <SidePanel storageKey="k8s-helm" defaultWidth={448} testId="k8s-helm-detail">
       <div className="flex items-start gap-2 border-b border-line px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -321,7 +319,7 @@ function HelmDetail({
           </div>
         )}
       </div>
-    </aside>
+    </SidePanel>
   )
 }
 

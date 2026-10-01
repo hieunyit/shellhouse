@@ -172,3 +172,19 @@ describe('ngày của docker CLI', () => {
     expect(parseCliDate(undefined)).toBe(0)
   })
 })
+
+describe('stats one-shot (không có precpu)', () => {
+  const at = (total: number, system: number) => ({
+    read: '2026-10-01T00:00:00Z',
+    cpu_stats: { cpu_usage: { total_usage: total }, system_cpu_usage: system, online_cpus: 2 },
+    precpu_stats: { cpu_usage: { total_usage: 0 } },
+    memory_stats: { usage: 100, limit: 1000, stats: { inactive_file: 40 } }
+  })
+  it('lần đầu: CPU chưa biết (-1); có mẫu trước của mình: tính chênh lệch', () => {
+    expect(toStatsSample(at(500, 10_000))?.cpuPercent).toBe(-1)
+    expect(toStatsSample(at(1500, 20_000), { total: 500, system: 10_000 })?.cpuPercent).toBeCloseTo(
+      20
+    )
+    expect(toStatsSample(at(1500, 20_000))?.memUsage).toBe(60)
+  })
+})

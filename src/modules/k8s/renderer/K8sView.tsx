@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ArrowLeftRight,
+  PanelLeft,
   Box,
   ChevronRight,
   Copy,
@@ -12,8 +13,8 @@ import {
   Terminal,
   X
 } from 'lucide-react'
-import { Button, cx, Notice } from '../../../renderer/src/components/ui'
-import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
+import { Button, cx, IconButton, Notice } from '../../../renderer/src/components/ui'
+import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
 import { FileTable, type FileColumn } from '../../../renderer/src/components/files/FileTable'
 import { Empty } from '../../../renderer/src/components/files/parts'
 import { KeyHints, Pill, TONE_TEXT, type Tone } from '../../../renderer/src/components/panels'
@@ -84,7 +85,23 @@ function argoTone(text: string): Tone {
   return 'muted'
 }
 
+/**
+ * Dòng bảng nhớ theo đối tượng: watch thay đối tượng đổi bằng đối tượng mới, đối tượng không đổi
+ * giữ nguyên → chỉ tính lại dòng thay đổi (3000 pod, mỗi lô vài pod). Làm mới mỗi 30 giây cho
+ * cột tuổi.
+ */
+const rowCache = new WeakMap<K8sObject, { kind: string; bucket: number; row: ResourceRow }>()
+function cachedRow(kindId: string, obj: K8sObject): ResourceRow {
+  const bucket = Math.floor(Date.now() / 30_000)
+  const hit = rowCache.get(obj)
+  if (hit && hit.kind === kindId && hit.bucket === bucket) return hit.row
+  const row = toRow(kindId, obj)
+  rowCache.set(obj, { kind: kindId, bucket, row })
+  return row
+}
+
 const METRIC_EVERY_MS = 15_000
+const NAV_HIDDEN_KEY = 'shellhouse.k8s.navHidden'
 /** Thông báo thành công tự tắt sau chừng này (lỗi thì giữ tới khi người dùng đóng). */
 const NOTICE_MS = 4000
 
@@ -151,6 +168,16 @@ export function ClusterTab({
   const [showForwards, setShowForwards] = useState(false)
   const [dialog, setDialog] = useState<Dialog>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  /** Thu gọn thanh điều hướng (nhớ theo máy) — nhường chỗ cho bảng và chi tiết. */
+  const [navHidden, setNavHidden] = useState(() => {
+    try {
+      return window.localStorage.getItem(NAV_HIDDEN_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  /** reloadKey của lần discover gần nhất (khác → người dùng vừa bấm Reload). */
+  const discoveredAt = useRef(0)
   const [metrics, setMetrics] = useState<MetricsResult | null>(null)
   const [counts, setCounts] = useState<Record<string, number | null>>({})
   const [history, setHistory] = useState<Record<string, Usage[]>>({})
@@ -185,9 +212,13 @@ export function ClusterTab({
   useEffect(() => {
     if (!ready) return
     let cancelled = false
+    // Bấm Reload → hỏi lại danh mục loại + quyền (không dùng bản nhớ của Session Host).
+    const refresh = reloadKey !== discoveredAt.current
+    discoveredAt.current = reloadKey
     request<DiscoveredKind[]>({
       op: 'discover',
-      ...(nsForAccess ? { namespace: nsForAccess } : {})
+      ...(nsForAccess ? { namespace: nsForAccess } : {}),
+      ...(refresh ? { refresh: true } : {})
     }).then(
       (k) => {
         if (!cancelled) setKinds(k)
@@ -207,7 +238,7 @@ export function ClusterTab({
     return () => {
       cancelled = true
     }
-  }, [ready, request, nsForAccess, cluster?.namespace])
+  }, [ready, request, nsForAccess, cluster?.namespace, reloadKey])
 
   const top = drill.at(-1)
   const kindId = top?.kind ?? view
@@ -575,7 +606,7 @@ export function ClusterTab({
   const rows = ((): Row[] => {
     const items = [...(list.objects?.values() ?? [])].map((obj) => ({
       obj,
-      row: toRow(kindId, obj)
+      row: cachedRow(kindId, obj)
     }))
     const filtered = q
       ? items.filter(
@@ -950,6 +981,22 @@ export function ClusterTab({
     >
       {/* Thanh trên: context, namespace, lọc / lệnh, thao tác chung. */}
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-2">
+        <IconButton
+          label={navHidden ? 'Show the resource list' : 'Hide the resource list'}
+          size="sm"
+          active={!navHidden}
+          data-testid="k8s-nav-toggle"
+          onClick={() => {
+            setNavHidden(!navHidden)
+            try {
+              window.localStorage.setItem(NAV_HIDDEN_KEY, navHidden ? '0' : '1')
+            } catch {
+              // Bỏ qua: không lưu được thì chỉ áp dụng cho lần này.
+            }
+          }}
+        >
+          <PanelLeft size={14} />
+        </IconButton>
         <ContextPicker
           current={contextKey(params.ref)}
           label={params.label}
@@ -1096,16 +1143,18 @@ export function ClusterTab({
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <ResourceNav
-          kinds={kinds}
-          view={view}
-          drilled={Boolean(top)}
-          counts={
-            // Loại đang xem: số sống theo bảng (watch), không đợi lần đếm sau.
-            !top && list.objects ? { ...counts, [view]: list.objects.size } : counts
-          }
-          onGo={go}
-        />
+        {!navHidden && (
+          <ResourceNav
+            kinds={kinds}
+            view={view}
+            drilled={Boolean(top)}
+            counts={
+              // Loại đang xem: số sống theo bảng (watch), không đợi lần đếm sau.
+              !top && list.objects ? { ...counts, [view]: list.objects.size } : counts
+            }
+            onGo={go}
+          />
+        )}
 
         <div ref={tableRef} className="@container flex min-w-0 flex-1 flex-col">
           {!onOverview && (
@@ -1210,6 +1259,13 @@ export function ClusterTab({
               onOpen={open}
               onContextMenu={(e, items) => {
                 const first = items[0]
+                const copyNames: MenuEntry = {
+                  id: 'copy-name',
+                  label: items.length > 1 ? `Copy ${items.length} names` : 'Copy name',
+                  icon: <Copy size={14} />,
+                  onSelect: () =>
+                    void window.shellhouse.writeClipboard(items.map((r) => r.row.name).join('\n'))
+                }
                 if (first && items.length === 1)
                   openMenu(e, [
                     {
@@ -1220,8 +1276,10 @@ export function ClusterTab({
                         setDetailKey(first.row.key)
                       }
                     },
+                    copyNames,
                     ...toMenu(actionsFor(kindId, first.obj, readOnly, handlers))
                   ])
+                else if (items.length > 1) openMenu(e, [copyNames])
               }}
               ariaLabel={kind?.kind ?? 'Resources'}
               rowTestId="k8s-row"

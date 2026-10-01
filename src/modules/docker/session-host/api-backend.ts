@@ -85,13 +85,23 @@ export function toContainerRow(c: ApiContainer): ContainerRow {
   }
 }
 
-/** Mẫu stats của Docker → % CPU (như `docker stats`), RAM trừ page cache, tổng mạng. */
-export function toStatsSample(s: ApiStats): StatsSample | null {
+/**
+ * Mẫu stats của Docker → % CPU (như `docker stats`), RAM trừ page cache, tổng mạng. `previous` =
+ * mẫu CPU lần trước của chính mình (one-shot không có precpu); không có mẫu nào để so → CPU -1
+ * (chưa biết, giao diện hiện "—").
+ */
+export function toStatsSample(
+  s: ApiStats,
+  previous?: { total: number; system: number }
+): StatsSample | null {
   const cpu = s.cpu_stats
   const pre = s.precpu_stats
   if (!cpu?.cpu_usage?.total_usage || cpu.system_cpu_usage === undefined) return null
-  const cpuDelta = cpu.cpu_usage.total_usage - (pre?.cpu_usage?.total_usage ?? 0)
-  const sysDelta = cpu.system_cpu_usage - (pre?.system_cpu_usage ?? 0)
+  const preTotal = pre?.cpu_usage?.total_usage || previous?.total
+  const preSystem = pre?.system_cpu_usage || previous?.system
+  const known = preTotal !== undefined && preSystem !== undefined
+  const cpuDelta = cpu.cpu_usage.total_usage - (preTotal ?? 0)
+  const sysDelta = cpu.system_cpu_usage - (preSystem ?? 0)
   const cpus = cpu.online_cpus ?? cpu.cpu_usage.percpu_usage?.length ?? 1
   const mem = s.memory_stats ?? {}
   // cgroup v2: inactive_file; v1: cache.
@@ -104,7 +114,7 @@ export function toStatsSample(s: ApiStats): StatsSample | null {
   }
   return {
     at: s.read ? Date.parse(s.read) || Date.now() : Date.now(),
-    cpuPercent: sysDelta > 0 && cpuDelta > 0 ? (cpuDelta / sysDelta) * cpus * 100 : 0,
+    cpuPercent: !known ? -1 : sysDelta > 0 && cpuDelta > 0 ? (cpuDelta / sysDelta) * cpus * 100 : 0,
     memUsage: Math.max(0, (mem.usage ?? 0) - cache),
     memLimit: mem.limit ?? 0,
     netRx: rx,
@@ -489,22 +499,36 @@ export class ApiBackend implements DockerBackend {
     }
   }
 
+  /** Mẫu CPU lần trước theo container (one-shot không có precpu — tự tính chênh lệch). */
+  private readonly lastCpu = new Map<string, { total: number; system: number }>()
+
+  /**
+   * Một mẫu cho mọi container đang chạy. `one-shot=true` trả ngay (~10 ms) thay vì đợi 1 giây lấy
+   * mẫu thứ hai như `stream=false` — 100 container: 1 giây thay vì ~13 giây, dockerd đỡ tải.
+   */
   async statsOnce(signal: AbortSignal): Promise<Record<string, StatsSample>> {
     const running = await this.engine.json<ApiContainer[]>('GET', '/containers/json', { signal })
-    const samples = await mapLimit(running, 8, (c) =>
+    const raw = await mapLimit(running, 8, (c) =>
       this.engine
         .json<ApiStats>('GET', `/containers/${encodeURIComponent(c.Id)}/stats`, {
-          query: { stream: false },
+          query: { stream: false, 'one-shot': true },
           signal
         })
-        .then(toStatsSample)
         .catch(() => null)
     )
     const out: Record<string, StatsSample> = {}
+    const seen = new Set<string>()
     running.forEach((c, i) => {
-      const s = samples[i]
-      if (s) out[c.Id] = s
+      const s = raw[i]
+      if (!s) return
+      seen.add(c.Id)
+      const sample = toStatsSample(s, this.lastCpu.get(c.Id))
+      const total = s.cpu_stats?.cpu_usage?.total_usage
+      const system = s.cpu_stats?.system_cpu_usage
+      if (total !== undefined && system !== undefined) this.lastCpu.set(c.Id, { total, system })
+      if (sample) out[c.Id] = sample
     })
+    for (const id of this.lastCpu.keys()) if (!seen.has(id)) this.lastCpu.delete(id)
     return out
   }
 

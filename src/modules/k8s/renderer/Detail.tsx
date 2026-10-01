@@ -10,6 +10,7 @@ import {
   Pill,
   Sparkline,
   TabStrip,
+  SidePanel,
   type Tone
 } from '../../../renderer/src/components/panels'
 import { cleanError } from '../../../renderer/src/lib/format'
@@ -103,10 +104,7 @@ export function Detail({
   const statusText = row.cells['status'] ?? row.cells['ready'] ?? ''
 
   return (
-    <aside
-      className="flex w-[26rem] max-w-[45%] shrink-0 flex-col border-l border-line bg-surface"
-      data-testid="k8s-describe"
-    >
+    <SidePanel storageKey="k8s-detail" testId="k8s-describe">
       <div className="flex items-start gap-2 border-b border-line px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -201,7 +199,7 @@ export function Detail({
         {tab === 'yaml' && <YamlOf kindId={kindId} obj={obj} request={request} />}
       </div>
       {menu}
-    </aside>
+    </SidePanel>
   )
 }
 
