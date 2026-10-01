@@ -61,7 +61,8 @@ import {
   YamlEditor
 } from './dialogs'
 import { COLOR_DOT } from './K8sSection'
-import { OVERVIEW, parseCommand, suggest } from './nav'
+import { HelmView } from './HelmView'
+import { HELM, OVERVIEW, parseCommand, suggest } from './nav'
 import { ClusterOverview } from './Overview'
 import { useK8s } from './store'
 import { fitColumns } from '../shared/columns'
@@ -75,6 +76,14 @@ const TONE: Record<ResourceRow['tone'], Tone> = {
   bad: 'bad',
   muted: 'muted'
 }
+/** Màu trạng thái Argo CD (Health / Sync). */
+function argoTone(text: string): Tone {
+  if (text === 'Healthy' || text === 'Synced') return 'ok'
+  if (text === 'Degraded' || text === 'Missing') return 'bad'
+  if (text === 'Progressing' || text === 'OutOfSync' || text === 'Suspended') return 'warn'
+  return 'muted'
+}
+
 const METRIC_EVERY_MS = 15_000
 /** Thông báo thành công tự tắt sau chừng này (lỗi thì giữ tới khi người dùng đóng). */
 const NOTICE_MS = 4000
@@ -143,6 +152,7 @@ export function ClusterTab({
   const [dialog, setDialog] = useState<Dialog>(null)
   const [reloadKey, setReloadKey] = useState(0)
   const [metrics, setMetrics] = useState<MetricsResult | null>(null)
+  const [counts, setCounts] = useState<Record<string, number | null>>({})
   const [history, setHistory] = useState<Record<string, Usage[]>>({})
   const [helpOpen, setHelpOpen] = useState(false)
   const [tableWidth, setTableWidth] = useState(0)
@@ -204,6 +214,7 @@ export function ClusterTab({
   const kind = kinds?.find((k) => k.id === kindId) ?? BUILTIN_KINDS.find((k) => k.id === kindId)
   const scopeNs = top?.namespace ? [top.namespace] : (namespaces ?? [])
   const onOverview = view === OVERVIEW && !top
+  const onHelm = view === HELM && !top
   const listQuery =
     onOverview || namespaces === null || !kind
       ? null
@@ -215,6 +226,37 @@ export function ClusterTab({
           fieldSelector: top?.fieldSelector
         }
   const list = useResourceList(ready, request, bus, listQuery, reloadKey, active)
+
+  // Số đối tượng mỗi loại cho thanh điều hướng (như Rancher): khi đổi namespace / tải lại và
+  // 60 giây một lần khi tab đang hiện.
+  const countKey = (kinds ?? [])
+    .filter((k) => !k.forbidden)
+    .map((k) => k.id)
+    .join(',')
+  const countNs = (namespaces ?? []).join(',')
+  useEffect(() => {
+    if (!ready || !active || !countKey || namespaces === null) return
+    let cancelled = false
+    const poll = (): void => {
+      request<Record<string, number | null>>({
+        op: 'counts',
+        kinds: countKey.split(','),
+        namespaces: countNs ? countNs.split(',') : []
+      }).then(
+        (c) => {
+          if (!cancelled) setCounts(c)
+        },
+        () => undefined
+      )
+    }
+    poll()
+    const t = setInterval(poll, 60_000)
+    return () => {
+      cancelled = true
+      clearInterval(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- countKey / countNs đại diện cho kinds / namespaces
+  }, [ready, active, request, countKey, countNs, reloadKey])
 
   // CPU / RAM (metrics-server) cho pod và node, 15 giây một lần khi tab đang hiện.
   const metricScope = kindId === 'pods' ? 'pods' : kindId === 'nodes' ? 'nodes' : null
@@ -472,6 +514,46 @@ export function ClusterTab({
         notify(`Started job ${job}`)
       })
     },
+    argoSync: (obj, prune) => {
+      if (
+        prune &&
+        !window.confirm(
+          `Sync ${obj.metadata.name} and prune?\nResources that are no longer in Git are deleted from the cluster.`
+        )
+      )
+        return
+      if (
+        production &&
+        window.prompt(
+          `Sync ${obj.metadata.name} in a production context?\nType the name to confirm:`
+        ) !== obj.metadata.name
+      )
+        return
+      run(
+        'Sync failed',
+        () =>
+          request({
+            op: 'argoSync',
+            namespace: obj.metadata.namespace ?? '',
+            name: obj.metadata.name,
+            prune
+          }),
+        `Syncing ${obj.metadata.name}`
+      )
+    },
+    argoRefresh: (obj, hard) => {
+      run(
+        'Refresh failed',
+        () =>
+          request({
+            op: 'argoRefresh',
+            namespace: obj.metadata.namespace ?? '',
+            name: obj.metadata.name,
+            hard
+          }),
+        `${hard ? 'Hard refresh' : 'Refresh'} requested for ${obj.metadata.name}`
+      )
+    },
     suspend: (obj, suspend) => {
       run(
         'Failed',
@@ -533,14 +615,22 @@ export function ClusterTab({
     ...(COLUMNS[kindId] ?? []).map((c) => ({
       id: c.id,
       label: c.label,
-      render: (r: Row) =>
-        c.id === 'status' ? (
-          <span className="min-w-0" title={r.row.cells[c.id]}>
-            <Pill tone={TONE[r.row.tone]}>{r.row.cells[c.id]}</Pill>
+      render: (r: Row) => {
+        const text = r.row.cells[c.id] ?? ''
+        const tone =
+          c.id === 'status'
+            ? TONE[r.row.tone]
+            : c.id === 'health' || c.id === 'sync'
+              ? argoTone(text)
+              : null
+        return tone && text ? (
+          <span className="min-w-0" title={text}>
+            <Pill tone={tone}>{text}</Pill>
           </span>
         ) : (
-          (r.row.cells[c.id] ?? '')
+          text
         )
+      }
     })),
     ...(showMetrics
       ? [
@@ -801,7 +891,11 @@ export function ClusterTab({
     )
 
   const titleOf = (id: string): string =>
-    BUILTIN_KINDS.find((b) => b.id === id)?.title ?? kinds?.find((k) => k.id === id)?.kind ?? id
+    id === HELM
+      ? 'Helm releases'
+      : (BUILTIN_KINDS.find((b) => b.id === id)?.title ??
+        kinds?.find((k) => k.id === id)?.kind ??
+        id)
   const hintItems: (readonly [string, string])[] = [
     [':', 'go to'],
     ['/', 'filter'],
@@ -1002,7 +1096,16 @@ export function ClusterTab({
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <ResourceNav kinds={kinds} view={view} drilled={Boolean(top)} onGo={go} />
+        <ResourceNav
+          kinds={kinds}
+          view={view}
+          drilled={Boolean(top)}
+          counts={
+            // Loại đang xem: số sống theo bảng (watch), không đợi lần đếm sau.
+            !top && list.objects ? { ...counts, [view]: list.objects.size } : counts
+          }
+          onGo={go}
+        />
 
         <div ref={tableRef} className="@container flex min-w-0 flex-1 flex-col">
           {!onOverview && (
@@ -1066,6 +1169,10 @@ export function ClusterTab({
             >
               {session.status}
             </div>
+          ) : onHelm ? (
+            namespaces === null ? null : (
+              <HelmView request={request} namespaces={namespaces} active={active} filter={query} />
+            )
           ) : onOverview ? (
             namespaces === null ? null : (
               <ClusterOverview

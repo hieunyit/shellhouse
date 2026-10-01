@@ -88,6 +88,16 @@ export const K8sOp = z.discriminatedUnion('op', [
   }),
   /** Số liệu tổng quan cluster (kiểu Lens). */
   z.object({ op: z.literal('overview'), namespaces: z.array(Namespace).max(64) }),
+  /** Helm 3 releases (đọc Secret owner=helm — không cần cài helm). */
+  z.object({ op: z.literal('helm.releases'), namespaces: z.array(Namespace).max(64) }),
+  /** Chi tiết một release: values, notes, manifest, lịch sử revision. */
+  z.object({ op: z.literal('helm.release'), namespace: Namespace, name: Name }),
+  /** Số đối tượng mỗi loại (số trên thanh điều hướng, như Rancher). null = không đếm được. */
+  z.object({
+    op: z.literal('counts'),
+    kinds: z.array(Kind).max(200),
+    namespaces: z.array(Namespace).max(64)
+  }),
   /** Tài nguyên liên quan (kiểu Rancher): service, ConfigMap, Secret, PVC, HPA… / "Used by". */
   z.object({ op: z.literal('related'), kind: Kind, namespace: Namespace, name: Name }),
   z.object({ op: z.literal('rolloutHistory'), namespace: Namespace, name: Name }),
@@ -107,6 +117,10 @@ export const K8sOp = z.discriminatedUnion('op', [
     name: Name,
     suspend: z.boolean()
   }),
+  /** Argo CD: đồng bộ Application (như nút Sync), prune = xoá tài nguyên không còn trong Git. */
+  z.object({ op: z.literal('argoSync'), namespace: Namespace, name: Name, prune: z.boolean() }),
+  /** Argo CD: so lại với Git (hard = bỏ cache manifest). */
+  z.object({ op: z.literal('argoRefresh'), namespace: Namespace, name: Name, hard: z.boolean() }),
   z.object({
     op: z.literal('scale'),
     kind: z.enum(['deployments.apps', 'statefulsets.apps', 'replicasets.apps']),
@@ -186,7 +200,9 @@ export function isMutating(op: K8sOp): boolean {
     'cordon',
     'drain',
     'cronTrigger',
-    'cronSuspend'
+    'cronSuspend',
+    'argoSync',
+    'argoRefresh'
   ].includes(op.op)
 }
 
@@ -235,6 +251,28 @@ export interface MetricsResult {
   available: boolean
   /** "ns/pod" hoặc tên node → mức dùng. */
   items: Record<string, Usage>
+}
+
+export interface HelmRelease {
+  name: string
+  namespace: string
+  revision: number
+  /** deployed, failed, pending-install, pending-upgrade, superseded, uninstalling… */
+  status: string
+  chart: string
+  chartVersion: string
+  appVersion: string
+  /** ms, 0 = không rõ. */
+  updated: number
+  description: string
+}
+
+export interface HelmReleaseDetail extends HelmRelease {
+  /** Giá trị người dùng đặt (helm get values) — YAML. */
+  values: string
+  notes: string
+  manifest: string
+  history: Omit<HelmRelease, 'name' | 'namespace'>[]
 }
 
 /** Một tài nguyên liên quan; `missing` = được tham chiếu nhưng không tồn tại. */

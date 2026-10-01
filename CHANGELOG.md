@@ -23,6 +23,22 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   `kubectl config delete-context`, keeping a `.bak` copy. Nothing changes on the cluster.
 - **Kubernetes: Refresh** button, and `~/.kube` is read again whenever you come back to the app —
   newly downloaded kubeconfigs appear without restarting.
+- **Kubernetes sidebar like Rancher**: Workloads, Service Discovery (HorizontalPodAutoscalers,
+  Ingresses, IngressClasses, NetworkPolicies, Services), Storage (PersistentVolumes,
+  StorageClasses, ConfigMaps, PersistentVolumeClaims, Secrets), Policy (PodDisruptionBudgets,
+  ResourceQuotas, LimitRanges, PriorityClasses, admission policies and webhooks), Access Control
+  (ServiceAccounts, Roles, RoleBindings, ClusterRoles, ClusterRoleBindings) and Cluster — with
+  the number of objects next to each, for the namespaces you are looking at. Kinds the cluster
+  does not have are hidden.
+- **Kubernetes: Argo CD** (like Lens 2026.8): when Argo CD is installed, Applications,
+  ApplicationSets and AppProjects get their own group with Sync / Health / Source columns and
+  **Sync**, **Sync and prune**, **Refresh** and **Hard refresh** actions.
+- **Kubernetes: Gateway API** (like Lens 2026.5): Gateways, GatewayClasses and routes get their own
+  group; a Service's Related tab lists the HTTP / gRPC routes sending traffic to it, a Gateway
+  lists its routes and a route shows its gateways and backend services.
+- **Kubernetes: Helm releases** (Apps → Helm releases): chart, app version, status, revision and
+  last update of every release, with notes, values, manifest and history — read straight from the
+  cluster, no `helm` needed.
 - **S3 sync**: choose how many objects are copied at once, see the time left, a smoother speed and
   the objects being copied right now.
 
@@ -34,6 +50,9 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Fixed
 
+- Kubernetes: tables showed “aborted” after a few minutes on clusters behind Rancher, a load
+  balancer or another proxy that closes long requests. Live updates and followed logs now
+  reconnect silently from where they stopped.
 - Kubernetes was not suggested when `~/.kube` only had kubeconfigs not named `config` (common for
   files downloaded from Rancher or cloud consoles).
 - Docker via the `docker` command (WSL, or when the socket is not reachable): container and image

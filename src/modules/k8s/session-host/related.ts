@@ -298,6 +298,53 @@ async function usersOf(
   return group('used-by', 'Used by', 'workloads', items, errors[0])
 }
 
+const GATEWAY_API = '/apis/gateway.networking.k8s.io/v1'
+const ROUTE_KINDS = [
+  { id: 'httproutes.gateway.networking.k8s.io', plural: 'httproutes', label: 'HTTPRoute' },
+  { id: 'grpcroutes.gateway.networking.k8s.io', plural: 'grpcroutes', label: 'GRPCRoute' }
+] as const
+
+/** Service phía sau một route (rules[].backendRefs, kind mặc định Service). */
+function routeBackends(route: K8sObject): Set<string> {
+  const names = new Set<string>()
+  for (const r of a(o(route.spec)['rules']))
+    for (const b of a(r['backendRefs']))
+      if ((s(b['kind']) ?? 'Service') === 'Service' && s(b['name'])) names.add(s(b['name']) ?? '')
+  return names
+}
+
+/** Route (HTTP / gRPC) cùng namespace thoả `test` — Gateway API chưa cài → []. */
+async function routesWhere(
+  client: KubeClient,
+  namespace: string,
+  test: (route: K8sObject) => boolean,
+  signal?: AbortSignal
+): Promise<RelatedItem[]> {
+  const lists = await Promise.all(
+    ROUTE_KINDS.map((k) => listOr(client, `${GATEWAY_API}${nsPath(namespace)}/${k.plural}`, signal))
+  )
+  const items: RelatedItem[] = []
+  ROUTE_KINDS.forEach((k, i) => {
+    const list = lists[i]
+    if (!list || 'error' in list) return
+    for (const r of list.items) {
+      if (!test(r)) continue
+      const hosts = (
+        Array.isArray(o(r.spec)['hostnames']) ? (o(r.spec)['hostnames'] as unknown[]) : []
+      )
+        .map(s)
+        .filter(Boolean)
+      items.push({
+        kind: k.id,
+        name: r.metadata.name,
+        summary: `${k.label}${hosts.length ? ` · ${hosts.join(', ')}` : ''}`,
+        tone: 'ok'
+      })
+    }
+  })
+  return items
+}
+
 export async function related(
   client: KubeClient,
   kindId: string,
@@ -376,6 +423,44 @@ export async function related(
     })
     groups.push(group('workloads', 'Workloads', 'workloads', workloads))
     groups.push(ingressGroup(ingresses, new Set([obj.metadata.name])))
+    const routes = await routesWhere(
+      client,
+      namespace,
+      (r) => routeBackends(r).has(obj.metadata.name),
+      signal
+    )
+    if (routes.length) groups.push(group('routes', 'Routes (Gateway API)', 'routes', routes))
+    return { groups }
+  }
+
+  if (kindId === 'gateways.gateway.networking.k8s.io') {
+    const routes = await routesWhere(
+      client,
+      namespace,
+      (r) => a(o(r.spec)['parentRefs']).some((p) => s(p['name']) === obj.metadata.name),
+      signal
+    )
+    groups.push(group('routes', 'Routes', 'routes', routes))
+    return { groups }
+  }
+
+  if (ROUTE_KINDS.some((k) => k.id === kindId)) {
+    const gateways = a(o(obj.spec)['parentRefs'])
+      .map((p) => s(p['name']))
+      .filter((n): n is string => Boolean(n))
+    const gwList = await listOr(client, `${GATEWAY_API}${nsPath(namespace)}/gateways`, signal)
+    const gw = byName(
+      gateways,
+      gwList,
+      'gateways.gateway.networking.k8s.io',
+      (g) => s(o(g.spec)['gatewayClassName']) ?? ''
+    )
+    groups.push(
+      group('gateways', 'Gateways', 'gateways.gateway.networking.k8s.io', gw.items, gw.error)
+    )
+    const services = await listOr(client, base('/api/v1', 'services'), signal)
+    const svc = byName(routeBackends(obj), services, 'services', serviceSummary)
+    groups.push(group('services', 'Services', 'services', svc.items, svc.error))
     return { groups }
   }
 

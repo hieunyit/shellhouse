@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto'
-import { parseAllDocuments } from 'yaml'
+import { gunzipSync } from 'node:zlib'
+import { parseAllDocuments, stringify as toYamlText } from 'yaml'
 import type {
+  HelmRelease,
+  HelmReleaseDetail,
   ApplyResult,
   DrainResult,
   MetricsResult,
@@ -462,4 +465,225 @@ export async function logTargets(
           : [{ pod: p.metadata.name, container: containersOf(p)[0] }]
         : [{ pod: p.metadata.name, container: op.container }]
     )
+}
+
+/**
+ * Đếm đối tượng: `limit=1` + `metadata.remainingItemCount` (một request nhỏ mỗi loại / namespace);
+ * server không trả số → đếm theo trang (tối đa 5000). Lỗi / không có quyền → null.
+ */
+export async function counts(
+  client: KubeClient,
+  kinds: readonly ResourceKind[],
+  namespaces: readonly string[]
+): Promise<Record<string, number | null>> {
+  const countPath = async (path: string): Promise<number> => {
+    let total = 0
+    let cont: string | undefined
+    for (let page = 0; page < 10; page++) {
+      const r = await client.json<{
+        items: unknown[]
+        metadata?: { remainingItemCount?: number; continue?: string }
+      }>('GET', path, { query: { limit: page === 0 ? 1 : 500, continue: cont } })
+      total += r.items.length
+      if (page === 0 && typeof r.metadata?.remainingItemCount === 'number')
+        return total + r.metadata.remainingItemCount
+      cont = r.metadata?.continue || undefined
+      if (!cont) return total
+    }
+    return total
+  }
+  const out: Record<string, number | null> = {}
+  const jobs = kinds.map((k) => async () => {
+    try {
+      const scope = k.namespaced && namespaces.length > 0 ? namespaces : [undefined]
+      let n = 0
+      for (const ns of scope) n += await countPath(resourcePath(k, ns))
+      out[k.id] = n
+    } catch {
+      out[k.id] = null
+    }
+  })
+  // 6 loại cùng lúc — đủ nhanh, không dồn API server.
+  let next = 0
+  await Promise.all(
+    Array.from({ length: Math.min(6, jobs.length) }, async () => {
+      while (next < jobs.length) await jobs[next++]?.()
+    })
+  )
+  return out
+}
+
+/** Application của Argo CD (phiên bản API lấy từ discovery — thường v1alpha1). */
+function argoPath(version: string, namespace: string, name: string): string {
+  return `/apis/argoproj.io/${version}${ns(namespace)}/applications/${encodeURIComponent(name)}`
+}
+
+/**
+ * Sync như nút Sync của Argo CD: ghi trường `operation` — application controller thấy và chạy
+ * (cùng cách argocd CLI / UI làm). Đang có thao tác chạy → báo, không chồng lên.
+ */
+export async function argoSync(
+  client: KubeClient,
+  version: string,
+  namespace: string,
+  name: string,
+  prune: boolean
+): Promise<void> {
+  const app = await client.json<K8sObject>('GET', argoPath(version, namespace, name))
+  const running = (app as { operation?: unknown }).operation
+  if (running) throw new Error(`${name} is already syncing — wait for it to finish`)
+  const source = (app.spec?.['source'] ?? {}) as { targetRevision?: string }
+  await client.json('PATCH', argoPath(version, namespace, name), {
+    body: {
+      operation: {
+        initiatedBy: { username: 'shellhouse' },
+        sync: {
+          ...(source.targetRevision ? { revision: source.targetRevision } : {}),
+          prune,
+          syncStrategy: { hook: {} }
+        }
+      }
+    },
+    contentType: 'application/merge-patch+json'
+  })
+}
+
+/** Refresh: Argo CD so lại trạng thái với Git ngay (annotation, controller tự xoá sau khi xong). */
+export async function argoRefresh(
+  client: KubeClient,
+  version: string,
+  namespace: string,
+  name: string,
+  hard: boolean
+): Promise<void> {
+  await client.json('PATCH', argoPath(version, namespace, name), {
+    body: { metadata: { annotations: { 'argocd.argoproj.io/refresh': hard ? 'hard' : 'normal' } } },
+    contentType: 'application/merge-patch+json'
+  })
+}
+
+// ——— Helm 3 ———
+
+interface HelmSecret {
+  metadata: { name: string; namespace?: string; labels?: Record<string, string> }
+  data?: Record<string, string>
+}
+
+interface HelmRecord {
+  name?: string
+  namespace?: string
+  version?: number
+  info?: {
+    status?: string
+    last_deployed?: string
+    description?: string
+    notes?: string
+  }
+  chart?: { metadata?: { name?: string; version?: string; appVersion?: string } }
+  config?: Record<string, unknown> | null
+  manifest?: string
+}
+
+/** Secret của Helm: data.release = base64(base64(gzip(JSON))). */
+export function decodeHelmRelease(data: string): HelmRecord {
+  const inner = Buffer.from(Buffer.from(data, 'base64').toString('utf8'), 'base64')
+  const json = inner[0] === 0x1f && inner[1] === 0x8b ? gunzipSync(inner) : inner
+  return JSON.parse(json.toString('utf8')) as HelmRecord
+}
+
+function summary(r: HelmRecord, fallback: HelmSecret): HelmRelease {
+  const labels = fallback.metadata.labels ?? {}
+  return {
+    name: r.name ?? labels['name'] ?? '',
+    namespace: r.namespace ?? fallback.metadata.namespace ?? '',
+    revision: r.version ?? Number(labels['version'] ?? 0),
+    status: r.info?.status ?? labels['status'] ?? 'unknown',
+    chart: r.chart?.metadata?.name ?? '',
+    chartVersion: r.chart?.metadata?.version ?? '',
+    appVersion: r.chart?.metadata?.appVersion ?? '',
+    updated: Date.parse(r.info?.last_deployed ?? '') || 0,
+    description: r.info?.description ?? ''
+  }
+}
+
+async function helmSecrets(
+  client: KubeClient,
+  namespaces: readonly string[],
+  selector: string
+): Promise<HelmSecret[]> {
+  const path = (n?: string): string => `/api/v1${n ? ns(n) : ''}/secrets`
+  const query = { labelSelector: selector, fieldSelector: 'type=helm.sh/release.v1' }
+  if (namespaces.length === 0)
+    return (await client.json<{ items: HelmSecret[] }>('GET', path(), { query })).items
+  const lists = await Promise.all(
+    namespaces.map((n) => client.json<{ items: HelmSecret[] }>('GET', path(n), { query }))
+  )
+  return lists.flatMap((l) => l.items)
+}
+
+/** Mọi release (revision mới nhất của mỗi tên) — chỉ giải mã đúng revision đó. */
+export async function helmReleases(
+  client: KubeClient,
+  namespaces: readonly string[]
+): Promise<HelmRelease[]> {
+  const secrets = await helmSecrets(client, namespaces, 'owner=helm')
+  const latest = new Map<string, HelmSecret>()
+  for (const sec of secrets) {
+    const labels = sec.metadata.labels ?? {}
+    const key = `${sec.metadata.namespace ?? ''}/${labels['name'] ?? ''}`
+    const cur = latest.get(key)
+    if (!cur || Number(labels['version'] ?? 0) > Number(cur.metadata.labels?.['version'] ?? 0))
+      latest.set(key, sec)
+  }
+  const out: HelmRelease[] = []
+  for (const sec of latest.values()) {
+    let record: HelmRecord = {}
+    try {
+      if (sec.data?.['release']) record = decodeHelmRelease(sec.data['release'])
+    } catch {
+      // Hỏng / định dạng lạ: vẫn hiện theo nhãn.
+    }
+    out.push(summary(record, sec))
+  }
+  return out.sort((a, b) => a.namespace.localeCompare(b.namespace) || a.name.localeCompare(b.name))
+}
+
+/** Chi tiết release: revision mới nhất (values / notes / manifest) + lịch sử mọi revision. */
+export async function helmRelease(
+  client: KubeClient,
+  namespace: string,
+  name: string
+): Promise<HelmReleaseDetail> {
+  const secrets = await helmSecrets(client, [namespace], `owner=helm,name=${name}`)
+  if (secrets.length === 0) throw new Error(`Helm release ${name} was not found`)
+  const records = secrets
+    .map((sec) => {
+      try {
+        return { sec, r: sec.data?.['release'] ? decodeHelmRelease(sec.data['release']) : {} }
+      } catch {
+        return { sec, r: {} }
+      }
+    })
+    .sort((x, y) => summary(y.r, y.sec).revision - summary(x.r, x.sec).revision)
+  const top = records[0]
+  if (!top) throw new Error(`Helm release ${name} was not found`)
+  const config = top.r.config
+  return {
+    ...summary(top.r, top.sec),
+    values: config && Object.keys(config).length ? toYamlText(config) : '',
+    notes: top.r.info?.notes ?? '',
+    manifest: top.r.manifest ?? '',
+    history: records.map(({ r, sec }) => {
+      const x = summary(r, sec)
+      return {
+        revision: x.revision,
+        status: x.status,
+        chart: x.chart,
+        chartVersion: x.chartVersion,
+        appVersion: x.appVersion,
+        updated: x.updated,
+        description: x.description
+      }
+    })
+  }
 }

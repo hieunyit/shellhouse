@@ -7,6 +7,8 @@ import { BUILTIN_KINDS } from '../shared/resources'
  */
 
 export const OVERVIEW = 'overview'
+/** Trang Helm releases (đọc từ Secret của Helm 3). */
+export const HELM = 'helm-releases'
 
 const ALIASES: Record<string, string> = {
   po: 'pods',
@@ -28,6 +30,22 @@ const ALIASES: Record<string, string> = {
   job: 'jobs.batch',
   jobs: 'jobs.batch',
   cj: 'cronjobs.batch',
+  hpa: 'horizontalpodautoscalers.autoscaling',
+  netpol: 'networkpolicies.networking.k8s.io',
+  pv: 'persistentvolumes',
+  sc: 'storageclasses.storage.k8s.io',
+  pdb: 'poddisruptionbudgets.policy',
+  quota: 'resourcequotas',
+  sa: 'serviceaccounts',
+  role: 'roles.rbac.authorization.k8s.io',
+  rb: 'rolebindings.rbac.authorization.k8s.io',
+  crole: 'clusterroles.rbac.authorization.k8s.io',
+  crb: 'clusterrolebindings.rbac.authorization.k8s.io',
+  app: 'applications.argoproj.io',
+  apps: 'applications.argoproj.io',
+  gw: 'gateways.gateway.networking.k8s.io',
+  httproute: 'httproutes.gateway.networking.k8s.io',
+  helm: 'helm-releases',
   cronjob: 'cronjobs.batch',
   cronjobs: 'cronjobs.batch',
   svc: 'services',

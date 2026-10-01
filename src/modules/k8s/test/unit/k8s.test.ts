@@ -481,3 +481,72 @@ contexts:
     expect(() => deleteContextFromYaml(yaml, 'nope')).toThrow(/not in this kubeconfig/)
   })
 })
+
+describe('dòng bảng cho loại mới (Rancher / Lens)', () => {
+  const meta = { name: 'x', namespace: 'ns', creationTimestamp: new Date().toISOString() }
+  it('Argo CD Application: project, sync, health, nguồn; màu theo health', () => {
+    const row = toRow('applications.argoproj.io', {
+      metadata: meta,
+      spec: { project: 'default', source: { repoURL: 'https://github.com/a/b', path: 'k8s/prod' } },
+      status: { sync: { status: 'OutOfSync' }, health: { status: 'Degraded' } }
+    })
+    expect(row.cells).toMatchObject({
+      project: 'default',
+      sync: 'OutOfSync',
+      health: 'Degraded',
+      repo: 'github.com/a/b · k8s/prod'
+    })
+    expect(row.tone).toBe('bad')
+  })
+  it('HPA, PV, RoleBinding, StorageClass mặc định', () => {
+    expect(
+      toRow('horizontalpodautoscalers.autoscaling', {
+        metadata: meta,
+        spec: {
+          scaleTargetRef: { kind: 'Deployment', name: 'web' },
+          minReplicas: 2,
+          maxReplicas: 5,
+          metrics: [{ resource: { name: 'cpu', target: { averageUtilization: 70 } } }]
+        },
+        status: {
+          currentReplicas: 3,
+          currentMetrics: [{ resource: { name: 'cpu', current: { averageUtilization: 41 } } }]
+        }
+      }).cells
+    ).toMatchObject({
+      reference: 'Deployment/web',
+      targets: 'cpu 41%/70%',
+      minmax: '2–5',
+      replicas: '3'
+    })
+    expect(
+      toRow('persistentvolumes', {
+        metadata: { name: 'pv1' },
+        spec: {
+          capacity: { storage: '10Gi' },
+          claimRef: { namespace: 'shop', name: 'data' },
+          storageClassName: 'fast',
+          persistentVolumeReclaimPolicy: 'Delete'
+        },
+        status: { phase: 'Bound' }
+      }).cells
+    ).toMatchObject({ status: 'Bound', capacity: '10Gi', claim: 'shop/data', reclaim: 'Delete' })
+    expect(
+      toRow('rolebindings.rbac.authorization.k8s.io', {
+        metadata: meta,
+        roleRef: { kind: 'ClusterRole', name: 'view' },
+        subjects: [{ kind: 'User', name: 'an' }]
+      }).cells
+    ).toMatchObject({ role: 'ClusterRole/view', subjects: 'User:an' })
+    expect(
+      toRow('storageclasses.storage.k8s.io', {
+        metadata: {
+          name: 'fast',
+          annotations: { 'storageclass.kubernetes.io/is-default-class': 'true' }
+        },
+        provisioner: 'csi.example.com',
+        reclaimPolicy: 'Delete'
+      }).cells
+    ).toMatchObject({ provisioner: 'csi.example.com', reclaim: 'Delete', default: 'Yes' })
+  })
+})

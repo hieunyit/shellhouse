@@ -50,6 +50,9 @@ export const RELATED_KINDS = [
   'cronjobs.batch',
   'services',
   'ingresses.networking.k8s.io',
+  'gateways.gateway.networking.k8s.io',
+  'httproutes.gateway.networking.k8s.io',
+  'grpcroutes.gateway.networking.k8s.io',
   'configmaps',
   'secrets',
   'persistentvolumeclaims'

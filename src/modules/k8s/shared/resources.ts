@@ -13,7 +13,52 @@ export interface ResourceKind {
   namespaced: boolean
   title: string
   /** Nhóm trên thanh điều hướng. */
-  section: 'Workloads' | 'Network' | 'Config' | 'Storage' | 'Cluster' | 'Custom resources'
+  section: ResourceSection
+}
+
+/** Nhóm trên thanh điều hướng — như Rancher (Service Discovery, Storage, Policy…). */
+export type ResourceSection =
+  | 'Workloads'
+  | 'Service Discovery'
+  | 'Storage'
+  | 'Policy'
+  | 'Access Control'
+  | 'Cluster'
+  | 'Custom resources'
+
+/** Nhóm API có sẵn của Kubernetes (không phải CRD — kể cả nhóm đuôi .k8s.io như Gateway API). */
+export const BUILTIN_GROUPS = new Set([
+  '',
+  'apps',
+  'batch',
+  'autoscaling',
+  'policy',
+  'extensions',
+  'events.k8s.io',
+  'networking.k8s.io',
+  'storage.k8s.io',
+  'rbac.authorization.k8s.io',
+  'admissionregistration.k8s.io',
+  'apiextensions.k8s.io',
+  'apiregistration.k8s.io',
+  'authentication.k8s.io',
+  'authorization.k8s.io',
+  'certificates.k8s.io',
+  'coordination.k8s.io',
+  'discovery.k8s.io',
+  'flowcontrol.apiserver.k8s.io',
+  'node.k8s.io',
+  'scheduling.k8s.io',
+  'resource.k8s.io',
+  'storagemigration.k8s.io',
+  'internal.apiserver.k8s.io',
+  'metrics.k8s.io'
+])
+
+/** Nhóm CRD có mục riêng trên thanh điều hướng (như Lens). */
+export const CRD_SECTIONS: Record<string, string> = {
+  'gateway.networking.k8s.io': 'Gateway API',
+  'argoproj.io': 'Argo CD'
 }
 
 const k = (
@@ -22,7 +67,7 @@ const k = (
   plural: string,
   kind: string,
   title: string,
-  section: ResourceKind['section'],
+  section: ResourceSection,
   namespaced = true
 ): ResourceKind => ({
   id: group ? `${plural}.${group}` : plural,
@@ -43,14 +88,122 @@ export const BUILTIN_KINDS: readonly ResourceKind[] = [
   k('apps', 'v1', 'replicasets', 'ReplicaSet', 'ReplicaSets', 'Workloads'),
   k('batch', 'v1', 'jobs', 'Job', 'Jobs', 'Workloads'),
   k('batch', 'v1', 'cronjobs', 'CronJob', 'CronJobs', 'Workloads'),
-  k('', 'v1', 'services', 'Service', 'Services', 'Network'),
-  k('networking.k8s.io', 'v1', 'ingresses', 'Ingress', 'Ingresses', 'Network'),
-  k('', 'v1', 'configmaps', 'ConfigMap', 'ConfigMaps', 'Config'),
-  k('', 'v1', 'secrets', 'Secret', 'Secrets', 'Config'),
-  k('', 'v1', 'persistentvolumeclaims', 'PersistentVolumeClaim', 'PVCs', 'Storage'),
+  k(
+    'autoscaling',
+    'v2',
+    'horizontalpodautoscalers',
+    'HorizontalPodAutoscaler',
+    'HorizontalPodAutoscalers',
+    'Service Discovery'
+  ),
+  k('networking.k8s.io', 'v1', 'ingresses', 'Ingress', 'Ingresses', 'Service Discovery'),
+  k(
+    'networking.k8s.io',
+    'v1',
+    'ingressclasses',
+    'IngressClass',
+    'IngressClasses',
+    'Service Discovery',
+    false
+  ),
+  k(
+    'networking.k8s.io',
+    'v1',
+    'networkpolicies',
+    'NetworkPolicy',
+    'NetworkPolicies',
+    'Service Discovery'
+  ),
+  k('', 'v1', 'services', 'Service', 'Services', 'Service Discovery'),
+  k('', 'v1', 'persistentvolumes', 'PersistentVolume', 'PersistentVolumes', 'Storage', false),
+  k('storage.k8s.io', 'v1', 'storageclasses', 'StorageClass', 'StorageClasses', 'Storage', false),
+  k('', 'v1', 'configmaps', 'ConfigMap', 'ConfigMaps', 'Storage'),
+  k(
+    '',
+    'v1',
+    'persistentvolumeclaims',
+    'PersistentVolumeClaim',
+    'PersistentVolumeClaims',
+    'Storage'
+  ),
+  k('', 'v1', 'secrets', 'Secret', 'Secrets', 'Storage'),
+  k(
+    'policy',
+    'v1',
+    'poddisruptionbudgets',
+    'PodDisruptionBudget',
+    'PodDisruptionBudgets',
+    'Policy'
+  ),
+  k('', 'v1', 'resourcequotas', 'ResourceQuota', 'ResourceQuotas', 'Policy'),
+  k('', 'v1', 'limitranges', 'LimitRange', 'LimitRanges', 'Policy'),
+  k(
+    'scheduling.k8s.io',
+    'v1',
+    'priorityclasses',
+    'PriorityClass',
+    'PriorityClasses',
+    'Policy',
+    false
+  ),
+  k(
+    'admissionregistration.k8s.io',
+    'v1',
+    'validatingadmissionpolicies',
+    'ValidatingAdmissionPolicy',
+    'ValidatingAdmissionPolicies',
+    'Policy',
+    false
+  ),
+  k(
+    'admissionregistration.k8s.io',
+    'v1',
+    'validatingwebhookconfigurations',
+    'ValidatingWebhookConfiguration',
+    'ValidatingWebhooks',
+    'Policy',
+    false
+  ),
+  k(
+    'admissionregistration.k8s.io',
+    'v1',
+    'mutatingwebhookconfigurations',
+    'MutatingWebhookConfiguration',
+    'MutatingWebhooks',
+    'Policy',
+    false
+  ),
+  k('', 'v1', 'serviceaccounts', 'ServiceAccount', 'ServiceAccounts', 'Access Control'),
+  k('rbac.authorization.k8s.io', 'v1', 'roles', 'Role', 'Roles', 'Access Control'),
+  k(
+    'rbac.authorization.k8s.io',
+    'v1',
+    'rolebindings',
+    'RoleBinding',
+    'RoleBindings',
+    'Access Control'
+  ),
+  k(
+    'rbac.authorization.k8s.io',
+    'v1',
+    'clusterroles',
+    'ClusterRole',
+    'ClusterRoles',
+    'Access Control',
+    false
+  ),
+  k(
+    'rbac.authorization.k8s.io',
+    'v1',
+    'clusterrolebindings',
+    'ClusterRoleBinding',
+    'ClusterRoleBindings',
+    'Access Control',
+    false
+  ),
   k('', 'v1', 'nodes', 'Node', 'Nodes', 'Cluster', false),
-  k('', 'v1', 'events', 'Event', 'Events', 'Cluster'),
-  k('', 'v1', 'namespaces', 'Namespace', 'Namespaces', 'Cluster', false)
+  k('', 'v1', 'namespaces', 'Namespace', 'Namespaces', 'Cluster', false),
+  k('', 'v1', 'events', 'Event', 'Events', 'Cluster')
 ]
 
 export function builtinKind(id: string): ResourceKind | undefined {
@@ -164,6 +317,89 @@ export const COLUMNS: Record<string, Column[]> = {
     { id: 'status', label: 'Status' },
     { id: 'roles', label: 'Roles' },
     { id: 'version', label: 'Version' }
+  ],
+  'horizontalpodautoscalers.autoscaling': [
+    { id: 'reference', label: 'Reference' },
+    { id: 'targets', label: 'Targets' },
+    { id: 'minmax', label: 'Min / max' },
+    { id: 'replicas', label: 'Replicas' }
+  ],
+  'ingressclasses.networking.k8s.io': [
+    { id: 'controller', label: 'Controller' },
+    { id: 'default', label: 'Default' }
+  ],
+  'networkpolicies.networking.k8s.io': [
+    { id: 'podSelector', label: 'Pod selector' },
+    { id: 'policyTypes', label: 'Policy types' }
+  ],
+  persistentvolumes: [
+    { id: 'status', label: 'Status' },
+    { id: 'capacity', label: 'Capacity' },
+    { id: 'claim', label: 'Claim' },
+    { id: 'storageClass', label: 'Storage class' },
+    { id: 'reclaim', label: 'Reclaim' }
+  ],
+  'storageclasses.storage.k8s.io': [
+    { id: 'provisioner', label: 'Provisioner' },
+    { id: 'reclaim', label: 'Reclaim' },
+    { id: 'default', label: 'Default' }
+  ],
+  'poddisruptionbudgets.policy': [
+    { id: 'minmax', label: 'Min available / max unavailable' },
+    { id: 'disruptions', label: 'Allowed disruptions' }
+  ],
+  resourcequotas: [{ id: 'usage', label: 'Usage' }],
+  limitranges: [{ id: 'types', label: 'Types' }],
+  'priorityclasses.scheduling.k8s.io': [
+    { id: 'value', label: 'Value' },
+    { id: 'default', label: 'Global default' }
+  ],
+  'validatingadmissionpolicies.admissionregistration.k8s.io': [
+    { id: 'validations', label: 'Validations' },
+    { id: 'failurePolicy', label: 'Failure policy' }
+  ],
+  'validatingwebhookconfigurations.admissionregistration.k8s.io': [
+    { id: 'webhooks', label: 'Webhooks' }
+  ],
+  'mutatingwebhookconfigurations.admissionregistration.k8s.io': [
+    { id: 'webhooks', label: 'Webhooks' }
+  ],
+  'roles.rbac.authorization.k8s.io': [{ id: 'rules', label: 'Rules' }],
+  'clusterroles.rbac.authorization.k8s.io': [{ id: 'rules', label: 'Rules' }],
+  'rolebindings.rbac.authorization.k8s.io': [
+    { id: 'role', label: 'Role' },
+    { id: 'subjects', label: 'Subjects' }
+  ],
+  'clusterrolebindings.rbac.authorization.k8s.io': [
+    { id: 'role', label: 'Role' },
+    { id: 'subjects', label: 'Subjects' }
+  ],
+  // Argo CD (CRD)
+  'applications.argoproj.io': [
+    { id: 'project', label: 'Project' },
+    { id: 'sync', label: 'Sync' },
+    { id: 'health', label: 'Health' },
+    { id: 'repo', label: 'Source' }
+  ],
+  'applicationsets.argoproj.io': [{ id: 'generators', label: 'Generators' }],
+  'appprojects.argoproj.io': [{ id: 'destinations', label: 'Destinations' }],
+  // Gateway API (CRD)
+  'gatewayclasses.gateway.networking.k8s.io': [
+    { id: 'controller', label: 'Controller' },
+    { id: 'status', label: 'Accepted' }
+  ],
+  'gateways.gateway.networking.k8s.io': [
+    { id: 'class', label: 'Class' },
+    { id: 'address', label: 'Address' },
+    { id: 'status', label: 'Programmed' }
+  ],
+  'httproutes.gateway.networking.k8s.io': [
+    { id: 'hosts', label: 'Hostnames' },
+    { id: 'parents', label: 'Gateways' }
+  ],
+  'grpcroutes.gateway.networking.k8s.io': [
+    { id: 'hosts', label: 'Hostnames' },
+    { id: 'parents', label: 'Gateways' }
   ],
   events: [
     { id: 'type', label: 'Type' },
@@ -343,6 +579,173 @@ export function toRow(kindId: string, o: K8sObject): ResourceRow {
     case 'namespaces':
       cells['status'] = str(status['phase'])
       tone = str(status['phase']) === 'Active' ? 'ok' : 'warn'
+      break
+    case 'horizontalpodautoscalers.autoscaling': {
+      const ref = obj(spec['scaleTargetRef'])
+      cells['reference'] = `${str(ref['kind'])}/${str(ref['name'])}`
+      cells['targets'] = arr(status['currentMetrics'])
+        .map((m) => {
+          const r = obj(m['resource'])
+          const cur = obj(r['current'])
+          const target = arr(spec['metrics']).find(
+            (x) => str(obj(x['resource'])['name']) === str(r['name'])
+          )
+          const want = str(obj(obj(target?.['resource'])['target'])['averageUtilization'])
+          const have = str(cur['averageUtilization'])
+          return r['name'] ? `${str(r['name'])} ${have || '?'}%/${want || '?'}%` : ''
+        })
+        .filter(Boolean)
+        .join(', ')
+      cells['minmax'] = `${str(spec['minReplicas']) || '1'}–${str(spec['maxReplicas'])}`
+      cells['replicas'] = str(status['currentReplicas'])
+      tone = num(status['currentReplicas']) >= num(spec['maxReplicas']) ? 'warn' : 'ok'
+      break
+    }
+    case 'ingressclasses.networking.k8s.io':
+    case 'storageclasses.storage.k8s.io': {
+      const anns = o.metadata.annotations ?? {}
+      cells['controller'] = str(spec['controller'])
+      cells['provisioner'] = str(o['provisioner'])
+      cells['reclaim'] = str(o['reclaimPolicy'])
+      cells['default'] =
+        anns['ingressclass.kubernetes.io/is-default-class'] === 'true' ||
+        anns['storageclass.kubernetes.io/is-default-class'] === 'true'
+          ? 'Yes'
+          : ''
+      break
+    }
+    case 'networkpolicies.networking.k8s.io': {
+      const sel = obj(obj(spec['podSelector'])['matchLabels'])
+      cells['podSelector'] =
+        Object.entries(sel)
+          .map(([k, v]) => `${k}=${str(v)}`)
+          .join(', ') || 'all pods'
+      cells['policyTypes'] = (Array.isArray(spec['policyTypes']) ? spec['policyTypes'] : [])
+        .map(str)
+        .join(', ')
+      break
+    }
+    case 'persistentvolumes': {
+      const ref = obj(spec['claimRef'])
+      cells['status'] = str(status['phase'])
+      cells['capacity'] = str(obj(spec['capacity'])['storage'])
+      cells['claim'] = ref['name'] ? `${str(ref['namespace'])}/${str(ref['name'])}` : ''
+      cells['storageClass'] = str(spec['storageClassName'])
+      cells['reclaim'] = str(spec['persistentVolumeReclaimPolicy'])
+      tone =
+        str(status['phase']) === 'Bound'
+          ? 'ok'
+          : str(status['phase']) === 'Failed'
+            ? 'bad'
+            : 'muted'
+      break
+    }
+    case 'poddisruptionbudgets.policy':
+      cells['minmax'] =
+        spec['minAvailable'] !== undefined
+          ? `min ${str(spec['minAvailable'])}`
+          : `max ${str(spec['maxUnavailable'])}`
+      cells['disruptions'] = str(status['disruptionsAllowed'])
+      tone = num(status['disruptionsAllowed']) === 0 ? 'warn' : 'ok'
+      break
+    case 'resourcequotas': {
+      const hard = obj(status['hard'])
+      const used = obj(status['used'])
+      const full = Object.keys(hard).filter((k) => str(used[k]) === str(hard[k]))
+      cells['usage'] = Object.keys(hard)
+        .slice(0, 3)
+        .map((k) => `${k} ${str(used[k]) || '0'}/${str(hard[k])}`)
+        .join(', ')
+      tone = full.length ? 'warn' : 'ok'
+      break
+    }
+    case 'limitranges':
+      cells['types'] = arr(spec['limits'])
+        .map((l) => str(l['type']))
+        .join(', ')
+      break
+    case 'priorityclasses.scheduling.k8s.io':
+      cells['value'] = str(o['value'])
+      cells['default'] = o['globalDefault'] === true ? 'Yes' : ''
+      break
+    case 'validatingadmissionpolicies.admissionregistration.k8s.io':
+      cells['validations'] = String(arr(spec['validations']).length)
+      cells['failurePolicy'] = str(spec['failurePolicy']) || 'Fail'
+      break
+    case 'validatingwebhookconfigurations.admissionregistration.k8s.io':
+    case 'mutatingwebhookconfigurations.admissionregistration.k8s.io':
+      cells['webhooks'] = arr(o['webhooks'])
+        .map((w) => str(w['name']))
+        .join(', ')
+      break
+    case 'roles.rbac.authorization.k8s.io':
+    case 'clusterroles.rbac.authorization.k8s.io':
+      cells['rules'] = String(arr(o['rules']).length)
+      break
+    case 'rolebindings.rbac.authorization.k8s.io':
+    case 'clusterrolebindings.rbac.authorization.k8s.io': {
+      const ref = obj(o['roleRef'])
+      cells['role'] = `${str(ref['kind'])}/${str(ref['name'])}`
+      cells['subjects'] = arr(o['subjects'])
+        .map((x) => `${str(x['kind'])}:${str(x['name'])}`)
+        .join(', ')
+      break
+    }
+    case 'applications.argoproj.io': {
+      const src = obj(spec['source'])
+      const sync = str(obj(status['sync'])['status']) || 'Unknown'
+      const health = str(obj(status['health'])['status']) || 'Unknown'
+      cells['project'] = str(spec['project'])
+      cells['sync'] = sync
+      cells['health'] = health
+      cells['status'] = health
+      cells['repo'] = [
+        str(src['repoURL']).replace(/^https?:\/\//, ''),
+        str(src['path'] || src['chart'])
+      ]
+        .filter(Boolean)
+        .join(' · ')
+      tone =
+        health === 'Degraded' || health === 'Missing'
+          ? 'bad'
+          : health === 'Progressing' || sync === 'OutOfSync'
+            ? 'warn'
+            : health === 'Healthy'
+              ? 'ok'
+              : 'muted'
+      break
+    }
+    case 'applicationsets.argoproj.io':
+      cells['generators'] = arr(spec['generators'])
+        .map((g) => Object.keys(g)[0] ?? '')
+        .join(', ')
+      break
+    case 'appprojects.argoproj.io':
+      cells['destinations'] = arr(spec['destinations'])
+        .map((d) => `${str(d['server'] || d['name'])}/${str(d['namespace'])}`)
+        .join(', ')
+      break
+    case 'gatewayclasses.gateway.networking.k8s.io':
+    case 'gateways.gateway.networking.k8s.io': {
+      const want = kindId.startsWith('gatewayclasses') ? 'Accepted' : 'Programmed'
+      const cond = arr(status['conditions']).find((c) => c['type'] === want)
+      cells['controller'] = str(spec['controllerName'])
+      cells['class'] = str(spec['gatewayClassName'])
+      cells['address'] = arr(status['addresses'])
+        .map((a) => str(a['value']))
+        .join(', ')
+      cells['status'] = cond ? str(cond['status']) : 'Unknown'
+      tone = cond?.['status'] === 'True' ? 'ok' : cond ? 'bad' : 'muted'
+      break
+    }
+    case 'httproutes.gateway.networking.k8s.io':
+    case 'grpcroutes.gateway.networking.k8s.io':
+      cells['hosts'] = (Array.isArray(spec['hostnames']) ? spec['hostnames'] : [])
+        .map(str)
+        .join(', ')
+      cells['parents'] = arr(spec['parentRefs'])
+        .map((p) => str(p['name']))
+        .join(', ')
       break
   }
   cells['age'] = age(created)

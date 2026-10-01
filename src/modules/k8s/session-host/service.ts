@@ -14,6 +14,7 @@ import {
   type PortForwardInfo
 } from '../shared/ops'
 import {
+  BUILTIN_GROUPS,
   BUILTIN_KINDS,
   hideSecretValues,
   resourcePath,
@@ -28,6 +29,11 @@ import {
   cronSuspend,
   cronTrigger,
   drain,
+  argoRefresh,
+  argoSync,
+  counts,
+  helmRelease,
+  helmReleases,
   logTargets,
   metrics,
   overview,
@@ -57,12 +63,9 @@ export interface K8sServiceDeps {
 }
 
 /** Nhóm API có sẵn của Kubernetes — tài nguyên nhóm khác là CRD ("Custom resources"). */
+/** Nhóm có sẵn của Kubernetes (Gateway API… đuôi .k8s.io nhưng là CRD — vẫn liệt kê). */
 function isBuiltinGroup(group: string): boolean {
-  return (
-    group === '' ||
-    group.endsWith('.k8s.io') ||
-    ['apps', 'batch', 'autoscaling', 'policy', 'extensions', 'events'].includes(group)
-  )
+  return BUILTIN_GROUPS.has(group)
 }
 
 const WATCH_FLUSH_MS = 100
@@ -211,6 +214,23 @@ export class K8sService implements HostModuleSession {
         return metrics(client, op.scope, op.namespace, signal)
       case 'overview':
         return overview(client, op.namespaces)
+      case 'argoSync':
+      case 'argoRefresh': {
+        const version = this.kinds.get('applications.argoproj.io')?.version ?? 'v1alpha1'
+        if (op.op === 'argoSync') await argoSync(client, version, op.namespace, op.name, op.prune)
+        else await argoRefresh(client, version, op.namespace, op.name, op.hard)
+        return null
+      }
+      case 'helm.releases':
+        return helmReleases(client, op.namespaces)
+      case 'helm.release':
+        return helmRelease(client, op.namespace, op.name)
+      case 'counts':
+        return counts(
+          client,
+          op.kinds.map((id) => this.kinds.get(id)).filter((k) => k !== undefined),
+          op.namespaces
+        )
       case 'related': {
         const kind = this.kind(op.kind)
         const obj = await client.json<K8sObject>('GET', resourcePath(kind, op.namespace, op.name), {
@@ -291,31 +311,52 @@ export class K8sService implements HostModuleSession {
                 const decoder = new TextDecoder()
                 let partial = ''
                 const prefix = prefixed ? `[${t.pod}${t.container ? `/${t.container}` : ''}] ` : ''
-                await client.stream(
-                  'GET',
-                  `/api/v1/namespaces/${encodeURIComponent(op.namespace)}/pods/${encodeURIComponent(t.pod)}/log`,
-                  {
-                    query: {
-                      follow: !op.previous,
-                      previous: op.previous || undefined,
-                      container: t.container,
-                      tailLines: op.tail,
-                      timestamps: op.timestamps || undefined
-                    },
-                    signal: s
-                  },
-                  (chunk) => {
-                    const text = decoder.decode(chunk, { stream: true })
-                    if (!prefixed) {
-                      push(text)
-                      return
-                    }
-                    partial += text
-                    const lines = partial.split('\n')
-                    partial = lines.pop() ?? ''
-                    if (lines.length) push(lines.map((l) => `${prefix}${l}\n`).join(''))
+                const onChunk = (chunk: Buffer): void => {
+                  const text = decoder.decode(chunk, { stream: true })
+                  if (!prefixed) {
+                    push(text)
+                    return
                   }
-                )
+                  partial += text
+                  const lines = partial.split('\n')
+                  partial = lines.pop() ?? ''
+                  if (lines.length) push(lines.map((l) => `${prefix}${l}\n`).join(''))
+                }
+                // Follow: proxy (Rancher, load balancer…) cắt luồng giữa chừng → theo dõi tiếp từ
+                // lúc bị cắt (sinceTime), không tải lại từ đầu. Lỗi liên tiếp không có dữ liệu → dừng.
+                let since: string | null = null
+                for (let quickFailures = 0; ;) {
+                  const started = Date.now()
+                  const seen = { data: false }
+                  try {
+                    await client.stream(
+                      'GET',
+                      `/api/v1/namespaces/${encodeURIComponent(op.namespace)}/pods/${encodeURIComponent(t.pod)}/log`,
+                      {
+                        query: {
+                          follow: !op.previous,
+                          previous: op.previous || undefined,
+                          container: t.container,
+                          ...(since ? { sinceTime: since } : { tailLines: op.tail }),
+                          timestamps: op.timestamps || undefined
+                        },
+                        signal: s
+                      },
+                      (chunk) => {
+                        seen.data = true
+                        onChunk(chunk)
+                      }
+                    )
+                    break
+                  } catch (error) {
+                    if (s.aborted || op.previous || error instanceof KubeError) throw error
+                    const cut = seen.data || Date.now() - started > 10_000
+                    quickFailures = cut ? 0 : quickFailures + 1
+                    if (quickFailures >= 5) throw error
+                    since = new Date(Date.now() - 1000).toISOString()
+                    await new Promise((r) => setTimeout(r, cut ? 0 : 1000 * quickFailures))
+                  }
+                }
                 if (partial) push(`${prefix}${partial}\n`)
               })
             )
@@ -425,7 +466,33 @@ export class K8sService implements HostModuleSession {
       )
     }
     for (const k of custom) this.kinds.set(k.id, k)
-    const all = [...BUILTIN_KINDS, ...custom.sort((a, b) => a.id.localeCompare(b.id))]
+    // Loại có sẵn mà cluster không có (ValidatingAdmissionPolicy trước 1.30, HPA v2 trên cluster
+    // rất cũ…) → ẩn khỏi điều hướng thay vì báo 404 khi bấm.
+    const groupVersions = [
+      ...new Set(
+        BUILTIN_KINDS.map((k) => (k.group ? `/apis/${k.group}/${k.version}` : `/api/${k.version}`))
+      )
+    ]
+    const served = new Map<string, Set<string> | null>()
+    await Promise.all(
+      groupVersions.map(async (gv) => {
+        const list = await client
+          .json<{ resources: { name: string }[] }>('GET', gv, { signal })
+          .catch((error: unknown) =>
+            error instanceof KubeError && error.status === 404 ? { resources: [] } : null
+          )
+        served.set(gv, list ? new Set(list.resources.map((r) => r.name)) : null)
+      })
+    )
+    const exists = (k: ResourceKind): boolean => {
+      const set = served.get(k.group ? `/apis/${k.group}/${k.version}` : `/api/${k.version}`)
+      // Không hỏi được → coi như có (lỗi thật báo khi list).
+      return !set || set.has(k.plural)
+    }
+    const all = [
+      ...BUILTIN_KINDS.filter(exists),
+      ...custom.sort((a, b) => a.id.localeCompare(b.id))
+    ]
     const allowed = await Promise.all(
       all.map((k) =>
         client
@@ -563,6 +630,9 @@ export class K8sService implements HostModuleSession {
     while (!aborted() && !this.disposed) {
       let pending = ''
       let gone = false
+      // Object (không phải let): được gán trong callback, TS không theo dõi được.
+      const seen = { data: false }
+      const started = Date.now()
       try {
         await client.stream(
           'GET',
@@ -586,6 +656,7 @@ export class K8sService implements HostModuleSession {
               failures = 0
               this.flushWatch(w, { relist: true })
             }
+            seen.data = true
             pending += chunk.toString('utf8')
             let nl = pending.indexOf('\n')
             while (nl >= 0) {
@@ -618,7 +689,11 @@ export class K8sService implements HostModuleSession {
       } catch (error) {
         if (aborted()) return
         if (error instanceof KubeError && error.status === 410) gone = true
-        else {
+        else if (!(error instanceof KubeError) && (seen.data || Date.now() - started > 10_000)) {
+          // Proxy / load balancer (Rancher, ingress, NAT…) cắt luồng watch đang chạy ("aborted",
+          // ECONNRESET): như server đóng luồng — nối lại ngay từ resourceVersion, không phải lỗi.
+          failures = 0
+        } else {
           failures++
           this.deps.log(
             'warn',

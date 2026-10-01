@@ -211,6 +211,81 @@ describe('Kubernetes qua API server giả (HTTPS, chứng chỉ test)', () => {
     )
   })
 
+  it('proxy cắt ngang luồng watch nhiều lần (Rancher…): nối lại im lặng, không báo lỗi, không mất sự kiện', async () => {
+    const saved = { ...watchRetry }
+    watchRetry.baseMs = 5
+    try {
+      const server = await api()
+      const { run, events, until } = service(cluster(server))
+      await run({ op: 'connect', ref, readOnly: false })
+      const list = await run<{ resourceVersion: string }>({
+        op: 'list',
+        kind: 'pods',
+        namespace: 'shop',
+        limit: 100
+      })
+      await run({
+        op: 'watch',
+        kind: 'pods',
+        namespace: 'shop',
+        resourceVersion: list.resourceVersion
+      })
+      const watchData = () =>
+        events
+          .filter((e) => e.event === 'watch')
+          .map(
+            (e) =>
+              e.data as {
+                error?: string
+                relist?: boolean
+                events: { object: { metadata: { name: string } } }[]
+              }
+          )
+      for (let i = 0; i < 6; i++) {
+        await until(() => server.requests.filter((r) => r.includes('watch=true')).length > i)
+        await new Promise((r) => setTimeout(r, 30))
+        server.upsert('pods', {
+          apiVersion: 'v1',
+          kind: 'Pod',
+          metadata: { name: `cut-${i}`, namespace: 'shop' }
+        })
+        await until(() =>
+          watchData().some((d) => d.events.some((e) => e.object.metadata.name === `cut-${i}`))
+        )
+        server.cutWatches()
+      }
+      expect(watchData().filter((d) => d.error || d.relist)).toEqual([])
+    } finally {
+      Object.assign(watchRetry, saved)
+    }
+  })
+
+  it('log follow bị proxy cắt ngang: theo dõi tiếp từ lúc cắt (sinceTime), không gửi lại phần đầu, không báo hết', async () => {
+    const server = await api()
+    const { run, events, until } = service(cluster(server))
+    await run({ op: 'connect', ref, readOnly: false })
+    await run({
+      op: 'logs.subscribe',
+      namespace: 'shop',
+      pod: 'web-1',
+      container: 'app',
+      previous: false,
+      tail: 100,
+      timestamps: false
+    })
+    const text = () =>
+      events
+        .filter((e) => e.event === 'logs')
+        .map((e) => (e.data as { text: string }).text)
+        .join('')
+    await until(() => text().includes('log line 1 from web-1'))
+    server.cutLogs()
+    await until(() => text().includes('resumed web-1'))
+    expect(text().split('log line 1 from web-1').length).toBe(2)
+    expect(events.some((e) => e.event === 'logs-end')).toBe(false)
+    expect(server.requests.some((r) => r.includes('/log?') && r.includes('sinceTime='))).toBe(true)
+  })
+
   it('watch mất kết nối lâu: báo lỗi một lần, vẫn thử lại; nối lại được → báo list lại', async () => {
     const saved = { ...watchRetry }
     watchRetry.baseMs = 5

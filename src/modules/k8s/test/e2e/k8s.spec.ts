@@ -169,12 +169,58 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await page.keyboard.press('Escape')
     await expect(view.getByTestId('key-hints-sheet')).toHaveCount(0)
 
+    // Số đối tượng cạnh từng loại (như Rancher).
+    await expect(
+      view.getByTestId('k8s-nav-deployments.apps').getByTestId('k8s-nav-count')
+    ).toHaveText('1')
+
+    // Helm releases (đọc Secret của Helm 3) — nhóm Apps.
+    const { gzipSync } = await import('node:zlib')
+    const record = {
+      name: 'shop-db',
+      namespace: 'shop',
+      version: 3,
+      info: {
+        status: 'deployed',
+        last_deployed: new Date().toISOString(),
+        notes: 'Thanks for installing'
+      },
+      chart: { metadata: { name: 'postgresql', version: '15.1.0', appVersion: '16.4' } },
+      config: { auth: { database: 'shop' } },
+      manifest: 'kind: StatefulSet'
+    }
+    server.upsert('secrets', {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      type: 'helm.sh/release.v1',
+      metadata: {
+        name: 'sh.helm.release.v1.shop-db.v3',
+        namespace: 'shop',
+        labels: { owner: 'helm', name: 'shop-db', version: '3', status: 'deployed' }
+      },
+      data: {
+        release: Buffer.from(
+          gzipSync(Buffer.from(JSON.stringify(record))).toString('base64')
+        ).toString('base64')
+      }
+    })
+    await view.getByTestId('k8s-nav-group-Apps').click()
+    await view.getByTestId('k8s-nav-helm-releases').click()
+    const release = view.locator('[data-testid="k8s-helm-release"][data-name="shop/shop-db"]')
+    await expect(release).toContainText('postgresql-15.1.0')
+    await expect(release).toContainText('deployed')
+    await release.click()
+    await expect(view.getByTestId('k8s-helm-detail')).toContainText('Thanks for installing')
+    await view.getByTestId('k8s-helm-tab-values').click()
+    await expect(view.getByTestId('k8s-helm-detail')).toContainText('database: shop')
+    await view.getByTestId('k8s-nav-group-Apps').click()
+
     // Tổng quan cluster.
     await view.getByTestId('k8s-nav-overview').click()
     await expect(view.getByTestId('k8s-ov-nodes')).toContainText('1/2')
 
     // Secret: giá trị ẩn, bấm mới hiện.
-    await view.getByTestId('k8s-nav-group-Config').click()
+    await view.getByTestId('k8s-nav-group-Storage').click()
     await view.getByTestId('k8s-nav-secrets').click()
     await view.locator('[data-testid="k8s-row"][data-name="shop/db"]').click()
     await page.keyboard.press('d')

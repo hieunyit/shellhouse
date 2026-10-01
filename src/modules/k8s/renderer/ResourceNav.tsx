@@ -2,11 +2,20 @@ import { useState } from 'react'
 import { ChevronRight, LayoutDashboard } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import type { DiscoveredKind } from '../shared/ops'
-import { BUILTIN_KINDS } from '../shared/resources'
-import { OVERVIEW } from './nav'
+import { BUILTIN_KINDS, CRD_SECTIONS, type ResourceSection } from '../shared/resources'
+import { HELM, OVERVIEW } from './nav'
 
-const SECTIONS = ['Workloads', 'Network', 'Config', 'Storage', 'Cluster'] as const
+/** Thứ tự nhóm như Rancher; CRD có nhóm riêng (Gateway API, Argo CD) đứng sau, rồi Apps. */
+const SECTIONS: readonly ResourceSection[] = [
+  'Workloads',
+  'Service Discovery',
+  'Storage',
+  'Policy',
+  'Access Control',
+  'Cluster'
+]
 const CUSTOM = 'Custom resources'
+const APPS = 'Apps'
 const STORE_KEY = 'shellhouse.k8s.nav'
 
 /** Nhóm người dùng đã tự mở / đóng (nhớ giữa các lần mở app — chỉ là tiện lợi, lỗi thì bỏ qua). */
@@ -31,20 +40,33 @@ interface Item {
   title: string
 }
 
+/** "applicationsets" → "ApplicationSets" (tên CRD hiện ở số nhiều như Rancher / Lens). */
+function plural(kind: string): string {
+  return /(s|x|ch|sh)$/.test(kind)
+    ? `${kind}es`
+    : /[^aeiou]y$/.test(kind)
+      ? `${kind.slice(0, -1)}ies`
+      : `${kind}s`
+}
+
 /**
- * Thanh điều hướng kiểu Lens: các nhóm thu gọn được. Mặc định chỉ mở nhóm đang xem (và
- * Workloads); lựa chọn mở / đóng của người dùng được nhớ. CRD gom theo API group, đóng sẵn.
+ * Thanh điều hướng kiểu Rancher / Lens: nhóm thu gọn được (Workloads, Service Discovery, Storage,
+ * Policy, Access Control, Cluster; Gateway API / Argo CD khi cluster có), mỗi loại có số đối
+ * tượng. Mặc định mở Workloads và nhóm đang xem; lựa chọn mở / đóng được nhớ.
  */
 export function ResourceNav({
   kinds,
   view,
   drilled,
+  counts,
   onGo
 }: {
   kinds: DiscoveredKind[] | null
   view: string
   /** Đang đi sâu (breadcrumb) — không tô mục nào là "đang xem". */
   drilled: boolean
+  /** Số đối tượng theo loại (namespace đang chọn); thiếu / null = chưa biết. */
+  counts: Readonly<Record<string, number | null>>
   onGo: (id: string) => void
 }): React.JSX.Element {
   const [choices, setChoices] = useState<Record<string, boolean>>(loadChoices)
@@ -60,12 +82,20 @@ export function ResourceNav({
     if (items.length) groups.push({ id: section, title: section, items })
   }
   const custom = visible.filter((x) => !builtin.has(x.id))
+  for (const [group, title] of Object.entries(CRD_SECTIONS)) {
+    const items = custom
+      .filter((x) => x.group === group)
+      .map((x) => ({ id: x.id, title: plural(x.kind) }))
+      .sort((a, b) => a.title.localeCompare(b.title))
+    if (items.length) groups.push({ id: title, title, items })
+  }
+  groups.push({ id: APPS, title: APPS, items: [{ id: HELM, title: 'Helm releases' }] })
   const byGroup = new Map<string, Item[]>()
-  for (const x of custom)
-    byGroup.set(x.group || 'core', [
-      ...(byGroup.get(x.group || 'core') ?? []),
-      { id: x.id, title: x.kind }
-    ])
+  for (const x of custom) {
+    if (CRD_SECTIONS[x.group]) continue
+    const g = x.group || 'core'
+    byGroup.set(g, [...(byGroup.get(g) ?? []), { id: x.id, title: plural(x.kind) }])
+  }
   const crdGroups = [...byGroup.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([g, items]) => ({
@@ -86,6 +116,7 @@ export function ResourceNav({
 
   const item = (x: Item, indent: boolean): React.JSX.Element => {
     const current = view === x.id && !drilled
+    const n = counts[x.id]
     return (
       <button
         key={x.id}
@@ -94,7 +125,7 @@ export function ResourceNav({
         aria-current={current}
         title={x.id}
         className={cx(
-          'block w-full truncate rounded-md py-1 pr-2 text-left text-[13px]',
+          'flex w-full items-center gap-2 rounded-md py-1 pr-2 text-left text-[13px]',
           indent ? 'pl-9' : 'pl-7',
           current
             ? 'bg-surface font-medium text-fg shadow-sm'
@@ -104,7 +135,18 @@ export function ResourceNav({
           onGo(x.id)
         }}
       >
-        {x.title}
+        <span className="min-w-0 flex-1 truncate">{x.title}</span>
+        {typeof n === 'number' && (
+          <span
+            className={cx(
+              'shrink-0 text-[11px] tabular-nums',
+              n === 0 ? 'text-faint/70' : 'text-faint'
+            )}
+            data-testid="k8s-nav-count"
+          >
+            {n}
+          </span>
+        )}
       </button>
     )
   }
@@ -114,7 +156,6 @@ export function ResourceNav({
     title: string,
     open: boolean,
     active: boolean,
-    count: number,
     sub = false
   ): React.JSX.Element => (
     <button
@@ -137,7 +178,6 @@ export function ResourceNav({
       <span className="min-w-0 flex-1 truncate" title={title}>
         {title}
       </span>
-      {!open && <span className="text-[11px] font-normal text-faint tabular-nums">{count}</span>}
     </button>
   )
 
@@ -146,7 +186,7 @@ export function ResourceNav({
   const customOpen = isOpen(CUSTOM, customItems, false)
   return (
     <nav
-      className="flex w-48 shrink-0 flex-col gap-0.5 overflow-auto border-r border-line bg-subtle p-2"
+      className="flex w-60 shrink-0 flex-col gap-0.5 overflow-auto border-r border-line bg-subtle p-2"
       data-testid="k8s-nav"
     >
       <button
@@ -169,20 +209,20 @@ export function ResourceNav({
         const open = isOpen(g.id, g.items, g.id === 'Workloads')
         return (
           <div key={g.id}>
-            {header(g.id, g.title, open, has(g.items), g.items.length)}
+            {header(g.id, g.title, open, has(g.items))}
             {open && g.items.map((x) => item(x, false))}
           </div>
         )
       })}
       {crdGroups.length > 0 && (
         <div>
-          {header(CUSTOM, CUSTOM, customOpen, has(customItems), customItems.length)}
+          {header(CUSTOM, CUSTOM, customOpen, has(customItems))}
           {customOpen &&
             crdGroups.map((g) => {
               const open = isOpen(g.id, g.items, false)
               return (
                 <div key={g.id}>
-                  {header(g.id, g.title, open, has(g.items), g.items.length, true)}
+                  {header(g.id, g.title, open, has(g.items), true)}
                   {open && g.items.map((x) => item(x, true))}
                 </div>
               )

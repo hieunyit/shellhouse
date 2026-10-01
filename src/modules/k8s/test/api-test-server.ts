@@ -54,6 +54,10 @@ export interface ApiTestServer {
   expireWatches(): void
   /** Ngắt các watch đang mở; `n` lần watch tiếp theo trả 503 (mạng / API server chập chờn). */
   failWatches(n: number): void
+  /** Cắt ngang các watch đang chạy (proxy Rancher / load balancer đóng kết nối giữa chừng). */
+  cutWatches(): void
+  /** Cắt ngang các luồng log đang follow. */
+  cutLogs(): void
   close(): Promise<void>
 }
 
@@ -254,7 +258,8 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     ['serviceaccounts', new Map()],
     ['ingresses', new Map()],
     ['horizontalpodautoscalers', new Map()],
-    ['poddisruptionbudgets', new Map()]
+    ['poddisruptionbudgets', new Map()],
+    ['applications', new Map()]
   ])
   for (const rs of store.get('replicasets')?.values() ?? []) {
     rs.metadata.labels = { app: 'web' }
@@ -295,6 +300,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     p.metadata.labels = { app: p.metadata.name.startsWith('web') ? 'web' : 'tool' }
   const requests: string[] = []
   let failingWatches = 0
+  const logStreams = new Set<ServerResponse>()
   const watchers = new Set<{ plural: string; namespace: string | undefined; res: ServerResponse }>()
   let expired = false
   let metricsDisabled = false
@@ -324,6 +330,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       kind: 'PodDisruptionBudget',
       namespaced: true
     },
+    applications: { apiVersion: 'argoproj.io/v1alpha1', kind: 'Application', namespaced: true },
     widgets: { apiVersion: 'example.com/v1', kind: 'Widget', namespaced: true }
   }
 
@@ -385,9 +392,22 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         })
       // Discovery theo group/version (server-side apply tìm loại theo apiVersion + kind).
       const discovery: Record<string, string[]> = {
-        '/api/v1': ['pods', 'services', 'secrets', 'events', 'namespaces', 'nodes', 'configmaps'],
+        '/api/v1': [
+          'pods',
+          'services',
+          'secrets',
+          'events',
+          'namespaces',
+          'nodes',
+          'configmaps',
+          'persistentvolumeclaims',
+          'serviceaccounts'
+        ],
         '/apis/apps/v1': ['deployments', 'replicasets'],
-        '/apis/batch/v1': ['cronjobs', 'jobs']
+        '/apis/batch/v1': ['cronjobs', 'jobs'],
+        '/apis/networking.k8s.io/v1': ['ingresses'],
+        '/apis/autoscaling/v2': ['horizontalpodautoscalers'],
+        '/apis/policy/v1': ['poddisruptionbudgets']
       }
       const group = discovery[p]
       if (group)
@@ -432,7 +452,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         return json(res, 201, { status: { allowed } })
       }
       const m =
-        /^\/(?:api\/v1|apis\/([^/]+)\/v[12])(?:\/namespaces\/([^/]+))?\/([a-z]+)(?:\/([^/]+))?(?:\/([a-z]+))?$/.exec(
+        /^\/(?:api\/v1|apis\/([^/]+)\/v[0-9a-z]+)(?:\/namespaces\/([^/]+))?\/([a-z]+)(?:\/([^/]+))?(?:\/([a-z]+))?$/.exec(
           p
         )
       if (!m)
@@ -514,11 +534,14 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
           items = items.filter(
             (o) => (o.spec as { nodeName?: string } | undefined)?.nodeName === nodeField
           )
+        const typeField = /(?:^|,)type=([^,]+)/.exec(field ?? '')?.[1]
+        if (typeField) items = items.filter((o) => o['type'] === typeField)
         const selector = url.searchParams.get('labelSelector')
-        if (selector) {
-          const [k, v] = selector.split('=')
-          items = items.filter((o) => o.metadata.labels?.[k ?? ''] === v)
-        }
+        if (selector)
+          for (const pair of selector.split(',')) {
+            const [k, v] = pair.split('=')
+            items = items.filter((o) => o.metadata.labels?.[k ?? ''] === v)
+          }
         const limit = Number(url.searchParams.get('limit') ?? '0') || items.length
         const start = Number(url.searchParams.get('continue') ?? '0')
         const page = items.slice(start, start + limit)
@@ -527,7 +550,12 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
           apiVersion: meta.apiVersion,
           metadata: {
             resourceVersion: String(rv),
-            ...(start + limit < items.length ? { continue: String(start + limit) } : {})
+            ...(start + limit < items.length
+              ? {
+                  continue: String(start + limit),
+                  remainingItemCount: items.length - start - limit
+                }
+              : {})
           },
           items: page
         })
@@ -536,11 +564,16 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       const current = table.get(k)
       if (sub === 'log') {
         res.writeHead(200, { 'Content-Type': 'text/plain' })
+        // Theo dõi tiếp (sinceTime): không gửi lại phần đầu.
         res.write(
-          `log line 1 from ${name}\nlog line 2 (container ${url.searchParams.get('container') ?? '-'})\n`
+          url.searchParams.get('sinceTime')
+            ? `resumed ${name}\n`
+            : `log line 1 from ${name}\nlog line 2 (container ${url.searchParams.get('container') ?? '-'})\n`
         )
         if (url.searchParams.get('follow') !== 'true') res.end()
         else {
+          logStreams.add(res)
+          res.on('close', () => logStreams.delete(res))
           const t = setInterval(() => {
             res.write(`tick ${Date.now()}\n`)
           }, 200)
@@ -612,8 +645,19 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         return json(res, 200, next)
       }
       if (req.method === 'PATCH') {
-        const body = (await readBody(req)) as { spec?: Record<string, unknown> }
-        current.spec = { ...current.spec, ...body.spec }
+        // Merge patch (rút gọn): spec gộp nông; trường cấp trên khác (operation…) gán thẳng;
+        // annotations gộp.
+        const body = (await readBody(req)) as Obj & { spec?: Record<string, unknown> }
+        const { spec, metadata, ...rest } = body
+        if (spec) current.spec = { ...current.spec, ...spec }
+        Object.assign(current, rest)
+        const anns = (metadata as { annotations?: Record<string, string> } | undefined)?.annotations
+        if (anns) {
+          const meta = current.metadata as Obj['metadata'] & {
+            annotations?: Record<string, string>
+          }
+          meta.annotations = { ...meta.annotations, ...anns }
+        }
         current.metadata.resourceVersion = nextRv()
         notify(plural, 'MODIFIED', current)
         return json(res, 200, current)
@@ -728,6 +772,12 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     expireWatches: () => {
       expired = true
       for (const w of watchers) w.res.end()
+    },
+    cutLogs: () => {
+      for (const r of logStreams) r.socket?.destroy()
+    },
+    cutWatches: () => {
+      for (const w of watchers) w.res.socket?.destroy()
     },
     failWatches: (n) => {
       failingWatches = n

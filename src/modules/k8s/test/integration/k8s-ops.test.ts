@@ -6,6 +6,8 @@ import type {
   ApplyResult,
   DrainResult,
   MetricsResult,
+  HelmRelease,
+  HelmReleaseDetail,
   OverviewResult,
   RelatedResult,
   RolloutRevision
@@ -291,6 +293,104 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
       ['workloads', ['api']],
       ['ingresses', ['api']]
     ])
+  })
+
+  it('số đối tượng cho thanh điều hướng (remainingItemCount), Helm releases từ Secret, Argo CD Sync / Refresh', async () => {
+    const { server, run } = await setup()
+    const counts = await run<Record<string, number | null>>({
+      op: 'counts',
+      kinds: ['pods', 'services', 'nodes', 'deployments.apps'],
+      namespaces: ['shop']
+    })
+    expect(counts).toEqual({
+      pods: server.list('pods').filter((p) => p.metadata.namespace === 'shop').length,
+      services: 1,
+      nodes: server.list('nodes').length,
+      'deployments.apps': 1
+    })
+
+    // Helm 3: data.release = base64(base64(gzip(JSON))); mỗi revision một Secret.
+    const { gzipSync } = await import('node:zlib')
+    const helmSecret = (revision: number, status: string, chartVersion: string) => {
+      const record = {
+        name: 'shop-db',
+        namespace: 'shop',
+        version: revision,
+        info: {
+          status,
+          last_deployed: '2026-09-30T10:00:00Z',
+          description: `Rev ${revision}`,
+          notes: 'Thanks!'
+        },
+        chart: { metadata: { name: 'postgresql', version: chartVersion, appVersion: '16.4' } },
+        config: { auth: { database: 'shop' } },
+        manifest: '---\nkind: StatefulSet\n'
+      }
+      const inner = gzipSync(Buffer.from(JSON.stringify(record))).toString('base64')
+      server.upsert('secrets', {
+        apiVersion: 'v1',
+        kind: 'Secret',
+        type: 'helm.sh/release.v1',
+        metadata: {
+          name: `sh.helm.release.v1.shop-db.v${revision}`,
+          namespace: 'shop',
+          labels: { owner: 'helm', name: 'shop-db', version: String(revision), status }
+        },
+        data: { release: Buffer.from(inner).toString('base64') }
+      })
+    }
+    helmSecret(1, 'superseded', '15.0.0')
+    helmSecret(2, 'deployed', '15.1.0')
+    const releases = await run<HelmRelease[]>({ op: 'helm.releases', namespaces: [] })
+    expect(releases).toEqual([
+      {
+        name: 'shop-db',
+        namespace: 'shop',
+        revision: 2,
+        status: 'deployed',
+        chart: 'postgresql',
+        chartVersion: '15.1.0',
+        appVersion: '16.4',
+        updated: Date.parse('2026-09-30T10:00:00Z'),
+        description: 'Rev 2'
+      }
+    ])
+    const detail = await run<HelmReleaseDetail>({
+      op: 'helm.release',
+      namespace: 'shop',
+      name: 'shop-db'
+    })
+    expect(detail.values).toContain('database: shop')
+    expect(detail.notes).toBe('Thanks!')
+    expect(detail.history.map((h) => [h.revision, h.status])).toEqual([
+      [2, 'deployed'],
+      [1, 'superseded']
+    ])
+
+    // Argo CD: Sync ghi `operation`, Refresh ghi annotation; đang sync → không chồng lên.
+    server.upsert('applications', {
+      apiVersion: 'argoproj.io/v1alpha1',
+      kind: 'Application',
+      metadata: { name: 'shop', namespace: 'shop' },
+      spec: {
+        project: 'default',
+        source: { repoURL: 'https://git/x', path: 'k8s', targetRevision: 'main' }
+      }
+    })
+    await run({ op: 'argoRefresh', namespace: 'shop', name: 'shop', hard: true })
+    expect(server.get('applications', 'shop', 'shop')?.metadata).toMatchObject({
+      annotations: { 'argocd.argoproj.io/refresh': 'hard' }
+    })
+    await run({ op: 'argoSync', namespace: 'shop', name: 'shop', prune: true })
+    expect(server.get('applications', 'shop', 'shop')).toMatchObject({
+      operation: {
+        initiatedBy: { username: 'shellhouse' },
+        sync: { revision: 'main', prune: true }
+      }
+    })
+    await expect(
+      run({ op: 'argoSync', namespace: 'shop', name: 'shop', prune: false })
+    ).rejects.toThrow(/already syncing/)
   })
 
   it('lịch sử rollout + rollback về revision cũ (bỏ pod-template-hash)', async () => {

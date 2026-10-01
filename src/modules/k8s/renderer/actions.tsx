@@ -8,6 +8,7 @@ import {
   Pencil,
   Play,
   PlayCircle,
+  RefreshCcwDot,
   RotateCw,
   Scale,
   SquareTerminal,
@@ -50,6 +51,9 @@ export interface ActionHandlers {
   drain(obj: K8sObject): void
   trigger(obj: K8sObject): void
   suspend(obj: K8sObject, suspend: boolean): void
+  /** Argo CD Application. */
+  argoSync(obj: K8sObject, prune: boolean): void
+  argoRefresh(obj: K8sObject, hard: boolean): void
 }
 
 const WORKLOADS = ['deployments.apps', 'statefulsets.apps', 'daemonsets.apps']
@@ -226,6 +230,44 @@ export function actionsFor(
         h.drain(obj)
       }
     })
+  }
+  if (kindId === 'applications.argoproj.io') {
+    out.push(
+      {
+        id: 'argo-sync',
+        label: 'Sync',
+        icon: <RefreshCcwDot size={14} />,
+        run: () => {
+          h.argoSync(obj, false)
+        }
+      },
+      {
+        id: 'argo-refresh',
+        label: 'Refresh',
+        icon: <RotateCw size={14} />,
+        key: 'r',
+        run: () => {
+          h.argoRefresh(obj, false)
+        }
+      },
+      {
+        id: 'argo-hard-refresh',
+        label: 'Hard refresh',
+        icon: <RotateCw size={14} />,
+        run: () => {
+          h.argoRefresh(obj, true)
+        }
+      },
+      {
+        id: 'argo-sync-prune',
+        label: 'Sync and prune…',
+        icon: <RefreshCcwDot size={14} />,
+        danger: true,
+        run: () => {
+          h.argoSync(obj, true)
+        }
+      }
+    )
   }
   if (kindId === 'cronjobs.batch') {
     const suspended = obj.spec?.['suspend'] === true
