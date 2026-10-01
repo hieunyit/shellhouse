@@ -7,7 +7,7 @@ import {
   type IDockviewPanelProps
 } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
-import { Columns2, Copy, RotateCw, Rows2, X } from 'lucide-react'
+import { Columns2, Copy, RotateCcw, RotateCw, Rows2, X } from 'lucide-react'
 import { useContextMenu } from './ContextMenu'
 import { controllers } from '../terminal/registry'
 import { useTabStatus } from '../stores/tab-status'
@@ -138,6 +138,19 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
           }
         },
         'separator',
+        ...(tabs.closed.length
+          ? [
+              {
+                id: 'tab-reopen',
+                label: `Reopen “${tabs.closed.at(-1)?.title ?? ''}”`,
+                icon: <RotateCcw size={14} />,
+                hint: key('tab.reopen'),
+                onSelect: () => {
+                  tabs.reopenClosed()
+                }
+              }
+            ]
+          : []),
         {
           id: 'tab-close',
           label: 'Close tab',

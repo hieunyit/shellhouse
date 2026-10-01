@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useTerminalFind } from '../stores/terminal-find'
+import { FindBar } from './FindBar'
 import '@xterm/xterm/css/xterm.css'
-import { ArrowLeftRight, Columns2, FolderOpen, KeyRound } from 'lucide-react'
+import { ArrowLeftRight, Columns2, FolderOpen, KeyRound, Search } from 'lucide-react'
 import { LocalPanel } from './LocalPanel'
 import type { LocalTarget, SftpActions } from './SftpPanel'
 import { connectionLabel, cx, StatusDot } from '../components/ui'
 import type { ForwardStatus } from '@shared/forwards'
 import { hostBorderClass, hostTileClass } from '../components/hostColors'
-import { useHosts } from '../stores/hosts'
+import { hostAddress, useHosts } from '../stores/hosts'
 import { useTabStatus } from '../stores/tab-status'
 import { useBroadcast } from './broadcast'
 import { useTerminalMenu } from './TerminalMenu'
@@ -85,7 +87,22 @@ export function TerminalView({
   // Terminal của module: không có SFTP / forwarding / deploy key trên kênh này.
   const isSsh = protocol === 'ssh' && target.kind !== 'module-terminal'
   const multiExec = useBroadcast((s) => s.enabled)
+  // Địa chỉ đích trên thanh phiên (host đã lưu: sau kế thừa từ nhóm).
+  const address = useHosts((s) => {
+    if (target.kind === 'ssh')
+      return `${target.username}@${target.host}${target.port === 22 ? '' : `:${String(target.port)}`}`
+    if (target.kind !== 'host') return ''
+    const h = s.tree.hosts.find((x) => x.id === target.hostId)
+    return h ? hostAddress(h, s.effective.get(h.id)) : ''
+  })
   const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
+  // Đếm số lần vào trạng thái "connected" (kết nối lại → đồng hồ chạy lại từ 0).
+  const [connectedSeq, setConnectedSeq] = useState(0)
+  const [lastState, setLastState] = useState(state)
+  if (lastState !== state) {
+    setLastState(state)
+    if (state === 'connected') setConnectedSeq((n) => n + 1)
+  }
   const runSftp = useCallback(
     (op: SftpOp) =>
       controllers.get(tabId)?.sftp(op) ?? Promise.reject(new Error('The tab was closed')),
@@ -155,7 +172,18 @@ export function TerminalView({
           <span className="flex items-center gap-2 pl-1" data-testid="session-state">
             <StatusDot state={state} />
             <span className="hidden text-muted @xs:inline">{connectionLabel[state]}</span>
+            {/* Đồng hồ phiên: gắn lại mỗi lần kết nối (key) — đếm từ lúc vào được server. */}
+            {state === 'connected' && <SessionClock key={`clock-${String(connectedSeq)}`} />}
           </span>
+          {address && (
+            <span
+              className="ml-2 hidden min-w-0 truncate font-mono text-[11px] text-faint @lg:inline"
+              data-testid="session-address"
+              title={address}
+            >
+              {address}
+            </span>
+          )}
           {protocol === 'telnet' && (
             <span
               className="ml-2 shrink-0 rounded bg-warning-soft px-1.5 py-px text-xs font-medium text-warning"
@@ -195,6 +223,15 @@ export function TerminalView({
             </span>
           )}
           <div className="flex-1" />
+          <ToolbarButton
+            testId="open-find"
+            icon={<Search size={13} />}
+            onClick={() => {
+              useTerminalFind.getState().open(tabId)
+            }}
+          >
+            Find
+          </ToolbarButton>
           {isSsh && (
             <>
               <ToolbarButton
@@ -252,6 +289,7 @@ export function TerminalView({
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1 bg-terminal">
+            <FindBar tabId={tabId} />
             {view === 'files' && (
               <div className="absolute inset-0 z-10 flex bg-surface" data-testid="file-manager">
                 <LocalPanel
@@ -357,5 +395,35 @@ function ToolbarButton({
       {icon}
       <span className="hidden @lg:inline">{children}</span>
     </button>
+  )
+}
+
+/** "12s", "4m", "1h 05m" — thời gian từ lúc phiên vào được server. */
+function SessionClock(): React.JSX.Element {
+  const [start] = useState(() => Date.now())
+  const [now, setNow] = useState(start)
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      setNow(Date.now())
+    }, 15_000)
+    return () => {
+      window.clearInterval(t)
+    }
+  }, [])
+  const s = Math.floor((now - start) / 1000)
+  const text =
+    s < 60
+      ? 'just now'
+      : s < 3600
+        ? `${String(Math.floor(s / 60))}m`
+        : `${String(Math.floor(s / 3600))}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`
+  return (
+    <span
+      className="hidden text-faint tabular-nums @sm:inline"
+      data-testid="session-clock"
+      title={`Connected since ${new Date(start).toLocaleTimeString()}`}
+    >
+      · {text}
+    </span>
   )
 }

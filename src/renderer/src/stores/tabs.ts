@@ -58,9 +58,21 @@ export interface OpenHostOptions {
   view?: 'files'
 }
 
+/** Tab đã đóng (mở lại được, như trình duyệt) — mới nhất ở cuối. */
+export interface ClosedTab {
+  title: string
+  target: TabTarget
+  view?: 'files'
+}
+
+const MAX_CLOSED = 10
+
 interface TabsState {
   tabs: Tab[]
   activeId: string | null
+  closed: ClosedTab[]
+  /** Mở lại tab đóng gần nhất (null = không còn). */
+  reopenClosed: () => string | null
   /** Tab terminal local; `shellId` = shell cụ thể (không có = shell mặc định). */
   addLocal: (shellId?: string) => string
   /** Mở (hoặc chuyển tới) tab Home. */
@@ -91,6 +103,14 @@ interface TabsState {
 
 let localCounter = 0
 
+/** Nhớ tab vừa đóng (bỏ Home và terminal của module — mở lại không có nghĩa). */
+function remember(closed: ClosedTab[], tabs: Tab[]): ClosedTab[] {
+  const add = tabs
+    .filter((t) => t.target.kind !== 'home' && t.target.kind !== 'module-terminal')
+    .map((t) => ({ title: t.title, target: t.target, ...(t.view ? { view: t.view } : {}) }))
+  return [...closed, ...add].slice(-MAX_CLOSED)
+}
+
 export const useTabs = create<TabsState>((set, get) => {
   const add = (
     title: string,
@@ -119,6 +139,17 @@ export const useTabs = create<TabsState>((set, get) => {
   return {
     tabs: [],
     activeId: null,
+    closed: [],
+    reopenClosed: () => {
+      const last = get().closed.at(-1)
+      if (!last) return null
+      set((s) => ({ closed: s.closed.slice(0, -1) }))
+      const title =
+        last.target.kind === 'local'
+          ? (shellName(last.target.shellId) ?? `Local ${++localCounter}`)
+          : last.title
+      return add(title, last.target, undefined, undefined, last.view)
+    },
     addLocal: (shellId) => {
       const title = shellName(shellId) ?? `Local ${++localCounter}`
       return add(title, shellId ? { kind: 'local', shellId } : { kind: 'local' })
@@ -205,7 +236,14 @@ export const useTabs = create<TabsState>((set, get) => {
       )
     },
     closeOthers: (id) => {
-      set((s) => ({ tabs: s.tabs.filter((t) => t.id === id), activeId: id }))
+      set((s) => ({
+        tabs: s.tabs.filter((t) => t.id === id),
+        activeId: id,
+        closed: remember(
+          s.closed,
+          s.tabs.filter((t) => t.id !== id)
+        )
+      }))
     },
     close: (id) => {
       set((s) => {
@@ -214,7 +252,8 @@ export const useTabs = create<TabsState>((set, get) => {
         const tabs = s.tabs.filter((t) => t.id !== id)
         let activeId = s.activeId
         if (activeId === id) activeId = (tabs[index] ?? tabs[index - 1] ?? null)?.id ?? null
-        return { tabs, activeId }
+        const gone = s.tabs[index]
+        return { tabs, activeId, closed: gone ? remember(s.closed, [gone]) : s.closed }
       })
     },
     activate: (id) => {

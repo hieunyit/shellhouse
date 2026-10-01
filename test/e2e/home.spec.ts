@@ -35,6 +35,13 @@ test('Home: mở bằng nút Home (một tab duy nhất), kết nối gần đâ
     .click({ timeout: 5000 })
     .catch(() => undefined)
   await waitForText(page, await activeTab(page), 'welcome to test server')
+  // Thanh phiên: địa chỉ đích, đồng hồ phiên, nút Find mở thanh tìm trong terminal.
+  await expect(page.getByTestId('session-address').last()).toContainText('u@127.0.0.1')
+  await expect(page.getByTestId('session-clock').last()).toContainText('just now')
+  await page.getByTestId('open-find').last().click()
+  await expect(page.getByTestId('terminal-find-input')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('terminal-find')).toHaveCount(0)
 
   // Home: một tab duy nhất dù bấm hai lần; kết nối gần đây có host vừa dùng.
   await page.getByTestId('open-home').click()

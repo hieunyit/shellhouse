@@ -13,6 +13,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: 'tab.prev', title: 'Previous tab', keys: ['Ctrl+Shift+Tab', 'Ctrl+Shift+Tab'] },
   { id: 'tab.reconnect', title: 'Reconnect tab', keys: ['Meta+Shift+R', 'Ctrl+Shift+R'] },
   { id: 'tab.duplicate', title: 'Duplicate tab', keys: [null, null] },
+  { id: 'tab.reopen', title: 'Reopen closed tab', keys: ['Meta+Alt+T', 'Ctrl+Alt+T'] },
   { id: 'sidebar.toggle', title: 'Show / hide sidebar', keys: ['Meta+B', 'Ctrl+Shift+B'] },
   { id: 'pane.splitRight', title: 'Split right', keys: ['Meta+D', 'Ctrl+Shift+D'] },
   { id: 'pane.splitDown', title: 'Split down', keys: ['Meta+E', 'Ctrl+Shift+E'] },
@@ -33,6 +34,10 @@ export const COMMANDS: readonly CommandDef[] = [
     title: 'MultiExec: type into all terminals',
     keys: ['Meta+Shift+M', 'Ctrl+Shift+M']
   },
+  { id: 'terminal.find', title: 'Find in terminal', keys: ['Meta+F', 'Ctrl+Shift+F'] },
+  { id: 'terminal.zoomIn', title: 'Terminal: bigger text', keys: ['Meta+=', 'Ctrl+='] },
+  { id: 'terminal.zoomOut', title: 'Terminal: smaller text', keys: ['Meta+-', 'Ctrl+-'] },
+  { id: 'terminal.zoomReset', title: 'Terminal: default text size', keys: ['Meta+0', 'Ctrl+0'] },
   { id: 'workspaces.open', title: 'Workspaces: save or open a layout', keys: [null, null] },
   { id: 'modules.browse', title: 'Modules: Browse', keys: [null, null] },
   { id: 'diagnostics.toggle', title: 'Toggle diagnostics', keys: [null, null] }

@@ -22,6 +22,14 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   to, technology badges (Prometheus, Grafana, Argo CD, CoreDNS, NGINX, PostgreSQL, Redis… from
   the image), a Helm badge, and a **Blast radius** for any object: what is affected if it
   changes or fails.
+- **Find in terminal** (Ctrl+Shift+F / ⌘F, or the Find button on the session bar) — searches the
+  whole scrollback, highlights every match, shows "3 of 12", with match case, whole word and
+  regex; Enter / Shift+Enter move between matches, Esc closes.
+- **Terminal text size** — Ctrl+= / Ctrl+- / Ctrl+0 (⌘ on macOS) make the text bigger, smaller
+  or back to the default.
+- **Session bar** — shows where you are connected (user@host:port) and for how long.
+- **Reopen closed tab** — Ctrl+Alt+T (⌘⌥T), the command palette or the tab menu bring back the
+  last closed tabs (up to 10), including SFTP file manager tabs.
 - **Home** — Shellhouse now opens on a home page: a large quick-connect box, your recent
   connections and favorites as cards (Connect, open files, edit), ways to get started and the
   main shortcuts. Open it any time with the Home button; Settings → Appearance chooses whether

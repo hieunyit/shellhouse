@@ -113,3 +113,22 @@ test('ẩn mục Recent / Favorites ở thanh bên (chuột phải tiêu đề m
   await page.keyboard.press('Escape')
   await expect(favorites).toBeVisible()
 })
+
+test('mở lại tab vừa đóng: Ctrl+Alt+T và menu tab; Home không vào danh sách', async ({ page }) => {
+  await page.getByTestId('new-tab').click()
+  await expect(page.getByTestId('tab')).toHaveCount(2)
+  const title = await page.getByTestId('tab').last().textContent()
+  await page.getByTestId('tab-close').last().click()
+  await expect(page.getByTestId('tab')).toHaveCount(1)
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Alt+T' : 'Control+Alt+T')
+  await expect(page.getByTestId('tab')).toHaveCount(2)
+  await expect(page.getByTestId('tab').last()).toContainText(
+    (title ?? '').replace(/\d+$/, '').trim()
+  )
+
+  // Đóng Home không thêm gì vào danh sách mở lại.
+  await page.getByTestId('open-home').click()
+  await page.getByTestId('tab').filter({ hasText: 'Home' }).getByTestId('tab-close').click()
+  await page.getByTestId('tab').last().click({ button: 'right' })
+  await expect(page.getByText('Reopen “Home”')).toHaveCount(0)
+})

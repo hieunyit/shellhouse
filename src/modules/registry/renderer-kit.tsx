@@ -37,6 +37,29 @@ import type { ModuleState } from './types'
 
 let registered: readonly RendererModule[] = []
 
+/**
+ * Đợi Session Host chạy lại (sau khi khởi động lại) — mở phiên mới lúc nó chưa sẵn sàng sẽ hỏng.
+ * Hết thời hạn vẫn trả về (để phiên tự báo lỗi rõ ràng).
+ */
+export function whenHostRunning(timeoutMs = 15_000): Promise<void> {
+  return new Promise((resolve) => {
+    const ok = (): boolean => useHostStatus.getState().status?.state === 'running'
+    if (ok()) {
+      resolve()
+      return
+    }
+    const timer = setTimeout(done, timeoutMs)
+    const unsub = useHostStatus.subscribe(() => {
+      if (ok()) done()
+    })
+    function done(): void {
+      clearTimeout(timer)
+      unsub()
+      resolve()
+    }
+  })
+}
+
 /** Thông báo nổi (toast) của app — module dùng để báo kết quả thao tác. */
 export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
 export function registerRendererModules(modules: readonly RendererModule[]): void {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PromptRequest } from '@shared/stream-protocol'
-import { ModuleSessionClient, setTabState } from '../../registry/renderer-kit'
+import { ModuleSessionClient, whenHostRunning, setTabState } from '../../registry/renderer-kit'
 import type { DockerOp } from '../shared/ops'
 import { wslDistroOf } from '../shared/ipc'
 import { useDocker } from './store'
@@ -94,13 +94,13 @@ export function useDockerSession(
         },
         onHostRestart: () => {
           if (cancelled) return
-          // Session Host vừa khởi động lại: mở phiên mới (kết nối lại cluster) thay vì treo.
+          // Session Host vừa khởi động lại: đợi nó chạy rồi mở phiên mới (kết nối lại) thay vì treo.
           setStatus('The session host restarted — reconnecting…')
-          setTimeout(() => {
+          void whenHostRunning().then(() => {
             if (cancelled) return
             setReady(false)
             setAttempt((a) => a + 1)
-          }, 800)
+          })
         }
       }
     ).then(

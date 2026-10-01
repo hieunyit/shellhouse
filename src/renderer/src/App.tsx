@@ -5,6 +5,8 @@ import type { SettingsSectionId } from './components/settings/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { TabBar } from './components/TabBar'
 import { Toaster } from './components/Toaster'
+import { toast } from './stores/toasts'
+import { useTerminalFind } from './stores/terminal-find'
 import { Workspace } from './components/Workspace'
 import { WorkspacesDialog } from './components/WorkspacesDialog'
 import { preloadLazyParts, SettingsDialog, SnippetsDialog } from './lazy'
@@ -103,6 +105,9 @@ export function App(): React.JSX.Element {
       case 'tab.reconnect':
         if (tabs.activeId) controllers.get(tabs.activeId)?.reconnect()
         break
+      case 'tab.reopen':
+        if (!tabs.reopenClosed()) toast.info('No recently closed tabs', { group: 'reopen' })
+        break
       case 'tab.duplicate':
         if (tabs.activeId) tabs.duplicate(tabs.activeId)
         break
@@ -156,6 +161,25 @@ export function App(): React.JSX.Element {
       case 'modules.browse':
         setOverlay({ kind: 'settings', section: 'modules' })
         break
+      case 'terminal.find':
+        if (tabs.activeId && controllers.has(tabs.activeId))
+          useTerminalFind.getState().open(tabs.activeId)
+        break
+      case 'terminal.zoomIn':
+      case 'terminal.zoomOut':
+      case 'terminal.zoomReset': {
+        const { settings, update } = useSettings.getState()
+        const size =
+          id === 'terminal.zoomReset'
+            ? 14
+            : Math.max(
+                8,
+                Math.min(32, settings.terminal.fontSize + (id === 'terminal.zoomIn' ? 1 : -1))
+              )
+        void update({ terminal: { fontSize: size } })
+        toast.info(`Terminal text size ${String(size)}`, { group: 'font-size', duration: 1500 })
+        break
+      }
       case 'vault.lock':
         void window.shellhouse.lockVault()
         break
