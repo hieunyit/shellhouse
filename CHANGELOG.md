@@ -18,6 +18,32 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   to highlight everything connected to it and see its pods, traffic sources, volumes, autoscaler
   and network policies, with **Open details**, **Logs** and **Shell**. Drawn on a canvas and only
   what is on screen, so clusters with thousands of workloads stay smooth; refreshes every 20 s.
+  The map also shows Gateways attached to routes, NetworkPolicies and the workloads they apply
+  to, technology badges (Prometheus, Grafana, Argo CD, CoreDNS, NGINX, PostgreSQL, Redis… from
+  the image), a Helm badge, and a **Blast radius** for any object: what is affected if it
+  changes or fails.
+- **Kubernetes: Topology tab** — every pod, workload, service, Ingress / route / Gateway,
+  ConfigMap, Secret, PVC, ServiceAccount and node now has a relationship graph: ownership
+  (Deployment → ReplicaSet → Pod), scheduling (Pod → Node), traffic (Gateway → Route / Ingress →
+  Service → workload), config and storage (ConfigMap / Secret / PVC → PV), policies (HPA, PDB,
+  NetworkPolicy) and access (ServiceAccount → RoleBinding → Role, risky roles in red). Directed
+  arrows, filters per kind of relationship, missing references flagged. Shared objects such as
+  nodes are not expanded until you ask (**Expand**); **Blast radius** highlights everything that
+  depends on the selected object — e.g. which workloads, pods, services and routes a ConfigMap
+  change would hit.
+- **Kubernetes: workload page** — Deployments, StatefulSets and DaemonSets open on a full page:
+  rollout status (Available, Rolling out, Stalled, Paused) with desired / ready / up-to-date /
+  available / unavailable, pod phases counted from the real pods, Strategy, Resources and limits
+  per container (missing values highlighted, totals for all replicas, probes), a pod grid that
+  uses the full width (failing pods first; click a pod to open it, click its node to open the
+  node) and ReplicaSets by revision with **Roll back**. The detail panel can be expanded to full
+  width.
+- **Kubernetes: Metrics and Security tabs** — Metrics shows CPU / memory of all pods of a
+  workload with history, against requests and limits, and per pod. Security lists risky pod
+  settings (privileged, host network / PID / paths, root, added capabilities, `:latest`, missing
+  limits or probes) and answers "if this is compromised, what can it reach?" — every RBAC
+  permission of its ServiceAccount with the binding it comes from, sensitive ones (reading
+  Secrets, exec into pods, escalation) first.
 
 ## [1.2.0-beta.4] - 2026-10-01
 

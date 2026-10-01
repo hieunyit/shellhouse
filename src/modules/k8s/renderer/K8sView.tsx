@@ -720,11 +720,6 @@ export function ClusterTab({
     setDetailKey(null)
   }
 
-  /** Mở một tài nguyên liên quan (tab Related): sang loại đó, chọn và mở chi tiết. */
-  const openRelated = (from: K8sObject, kind: string, name: string): void => {
-    openRef(kind, from.metadata.namespace, name)
-  }
-
   /** Từ bản đồ: namespace → xem tài nguyên của nó; còn lại → bảng của loại đó + chi tiết. */
   const openFromMap = (ref: MapRef): void => {
     if (ref.kind === 'namespaces') {
@@ -1169,7 +1164,8 @@ export function ClusterTab({
         />
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      {/* Chi tiết phóng to (trang đầy đủ) → ẩn bảng. */}
+      <div className="flex min-h-0 flex-1 [&:has(>aside[data-expanded])>[data-main]]:hidden">
         {!navHidden && (
           <ResourceNav
             kinds={kinds}
@@ -1183,7 +1179,7 @@ export function ClusterTab({
           />
         )}
 
-        <div ref={tableRef} className="@container flex min-w-0 flex-1 flex-col">
+        <div ref={tableRef} data-main className="@container flex min-w-0 flex-1 flex-col">
           {!onOverview && !onMap && (
             <div
               className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-3 text-xs"
@@ -1431,8 +1427,19 @@ export function ClusterTab({
               setDetailKey(objectKey(pod))
             }}
             initialTab={detailTab}
-            onNavigate={(kind, name) => {
-              openRelated(detail.obj, kind, name)
+            onNavigate={(kind, name, namespace) => {
+              const info =
+                BUILTIN_KINDS.find((k) => k.id === kind) ?? (kinds ?? []).find((k) => k.id === kind)
+              openRef(
+                kind,
+                namespace ??
+                  (info?.namespaced === false ? undefined : detail.obj.metadata.namespace),
+                name
+              )
+            }}
+            readOnly={readOnly}
+            onNotify={(text, tone) => {
+              notify(text, tone ?? 'success')
             }}
             {...(HAS_PODS.includes(kindId)
               ? {

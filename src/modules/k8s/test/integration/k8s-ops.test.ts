@@ -10,7 +10,9 @@ import type {
   HelmRelease,
   HelmReleaseDetail,
   OverviewResult,
+  RbacReach,
   RelatedResult,
+  TopologyResult,
   RolloutRevision
 } from '../../shared/ops'
 import { startApiTestServer, TEST_CA, TOKEN, type ApiTestServer } from '../api-test-server'
@@ -516,8 +518,21 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
         name: 'api',
         hosts: ['api.example.com'],
         backends: ['api']
+      },
+      {
+        kind: 'httproutes.gateway.networking.k8s.io',
+        ns: 'shop',
+        name: 'web',
+        hosts: ['shop.example.com'],
+        backends: ['web'],
+        parents: [{ ns: 'shop', name: 'public' }]
       }
     ])
+    expect(d.gateways).toEqual([
+      { ns: 'shop', name: 'public', className: 'nginx', listeners: 'HTTP:80' }
+    ])
+    // Nhận diện công nghệ theo image (nginx:1.27).
+    expect(d.workloads.find((w) => w.name === 'web')?.tech).toBe('nginx')
     expect(d.pvcs).toEqual([
       { ns: 'shop', name: 'api-data', status: 'Bound', capacity: '5Gi', tone: 'ok' }
     ])
@@ -530,9 +545,105 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
       expect.arrayContaining([
         'route:r:ingresses.networking.k8s.io:shop/api>s:shop/api',
         'select:s:shop/api>w:deployments.apps:shop/api',
-        'storage:w:deployments.apps:shop/api>v:shop/api-data'
+        'storage:w:deployments.apps:shop/api>v:shop/api-data',
+        // Gateway → HTTPRoute → Service; NetworkPolicy (podSelector rỗng) áp lên mọi workload.
+        'attach:gw:shop/public>r:httproutes.gateway.networking.k8s.io:shop/web',
+        'route:r:httproutes.gateway.networking.k8s.io:shop/web>s:shop/web',
+        'policy:w:deployments.apps:shop/web>np:shop/default-deny',
+        'policy:w:deployments.apps:shop/api>np:shop/default-deny'
       ])
     )
+  })
+
+  it('topology: Deployment → ReplicaSet → Pod → Node, traffic, ConfigMap, ServiceAccount → RBAC; mở rộng / người dùng', async () => {
+    const { run } = await setup()
+    const g = await run<TopologyResult>({
+      op: 'topology',
+      kind: 'deployments.apps',
+      namespace: 'shop',
+      name: 'web'
+    })
+    const id = (kind: string, name: string, ns = 'shop'): string => `${kind}|${ns}|${name}`
+    expect(g.root).toBe(id('deployments.apps', 'web'))
+    const edges = g.edges.map(
+      (e) => `${e.type}:${e.from.split('|')[2] ?? ''}>${e.to.split('|')[2] ?? ''}`
+    )
+    expect(edges).toEqual(
+      expect.arrayContaining([
+        'owns:web>web-rs2',
+        'owns:web>web-rs1',
+        'owns:web-rs2>web-1',
+        'owns:web-rs2>web-2',
+        'runs-on:web-1>node-1',
+        'selects:web>web',
+        'routes:web>web',
+        'attaches:public>web',
+        'uses:web>web-config',
+        'identity:web>web-sa',
+        'subject:web-sa>web-reader',
+        'grants:web-reader>secret-reader',
+        'isolates:default-deny>web'
+      ])
+    )
+    // Pod lỗi (CrashLoopBackOff) đứng trước trong nhóm pod; node dùng chung không tự bung ra.
+    const node = g.nodes.find((n) => n.id === id('nodes', 'node-1', ''))
+    expect(node).toMatchObject({ kindLabel: 'Node', tone: 'ok', expandable: true })
+    expect(g.nodes.find((n) => n.id === g.root)?.expandable).toBeUndefined()
+    // Role đọc Secret → đỏ.
+    expect(g.nodes.find((n) => n.name === 'secret-reader')).toMatchObject({
+      tone: 'bad',
+      summary: 'Can read secrets (tokens, passwords)'
+    })
+
+    // Pod: owner đi lên (ReplicaSet → Deployment) + node.
+    const pod = await run<TopologyResult>({
+      op: 'topology',
+      kind: 'pods',
+      namespace: 'shop',
+      name: 'web-2'
+    })
+    expect(
+      pod.edges.map((e) => `${e.type}:${e.from.split('|')[2] ?? ''}>${e.to.split('|')[2] ?? ''}`)
+    ).toEqual(
+      expect.arrayContaining(['owns:web-rs2>web-2', 'owns:web>web-rs2', 'runs-on:web-2>node-1'])
+    )
+
+    // ConfigMap: ai dùng nó (sửa thì ảnh hưởng tới đâu).
+    const cm = await run<TopologyResult>({
+      op: 'topology',
+      kind: 'configmaps',
+      namespace: 'shop',
+      name: 'web-config'
+    })
+    expect(cm.edges).toEqual([
+      { from: id('deployments.apps', 'web'), to: id('configmaps', 'web-config'), type: 'uses' }
+    ])
+
+    // Node: workload có pod trên node (gộp theo Deployment nhờ pod-template-hash).
+    const n1 = await run<TopologyResult>({ op: 'topology', kind: 'nodes', name: 'node-1' })
+    expect(n1.nodes.map((n) => n.name).sort()).toEqual(['node-1', 'tool', 'web-rs2'].sort())
+
+    // RBAC: web-sa đọc được Secret (nhạy cảm), không có quyền khác.
+    const reach = await run<RbacReach>({
+      op: 'rbacReach',
+      namespace: 'shop',
+      serviceAccount: 'web-sa'
+    })
+    expect(reach.bindings).toEqual([
+      {
+        kind: 'RoleBinding',
+        name: 'web-reader',
+        namespace: 'shop',
+        role: 'secret-reader',
+        roleKind: 'Role'
+      }
+    ])
+    expect(reach.grants.map((x) => [x.resource, x.verbs.join(','), x.risk, x.scope])).toEqual([
+      ['secrets', 'get,list', 'high', 'shop'],
+      ['configmaps', 'get', 'low', 'shop']
+    ])
+    // Không bao giờ có giá trị Secret.
+    expect(JSON.stringify(g)).not.toContain(Buffer.from('s3cr3t').toString('base64'))
   })
 
   it('lịch sử rollout + rollback về revision cũ (bỏ pod-template-hash)', async () => {

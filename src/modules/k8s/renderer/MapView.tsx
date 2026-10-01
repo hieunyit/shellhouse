@@ -16,6 +16,8 @@ import { cx } from '../../../renderer/src/components/ui'
 import { Heading, Pill, SidePanel } from '../../../renderer/src/components/panels'
 import { cleanError } from '../../../renderer/src/lib/format'
 import {
+  TECH,
+  impactOf,
   layoutMap,
   workloadKindLabel,
   type MapData,
@@ -109,9 +111,11 @@ function loadOptions(): { hideSystem: boolean; pods: boolean; edges: boolean } {
 const Z: Record<MapNode['kind'], number> = {
   region: 0,
   namespace: 1,
+  gateway: 2,
   route: 2,
   service: 2,
   pvc: 2,
+  policy: 2,
   workload: 3,
   pod: 4
 }
@@ -123,7 +127,20 @@ const KIND_TITLE: Record<MapNode['kind'], string> = {
   pod: 'Pod',
   service: 'Service',
   route: 'Route',
-  pvc: 'Persistent volume claim'
+  gateway: 'Gateway',
+  pvc: 'Persistent volume claim',
+  policy: 'NetworkPolicy'
+}
+
+const isPill = (k: MapNode['kind']): boolean =>
+  k === 'route' || k === 'service' || k === 'pvc' || k === 'gateway' || k === 'policy'
+
+const PILL_ICON: Partial<Record<MapNode['kind'], string>> = {
+  gateway: '⇉',
+  route: '⇢',
+  service: '◆',
+  pvc: '▤',
+  policy: '◇'
 }
 
 function routeTitle(kind: string): string {
@@ -163,6 +180,7 @@ export function MapView({
   const [tick, setTick] = useState(0)
   const [options, setOptions] = useState(loadOptions)
   const [problemsOnly, setProblemsOnly] = useState(false)
+  const [impactMode, setImpactMode] = useState(false)
   const [selectedRaw, setSelected] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const [wrapWidth, setWrapWidth] = useState(0)
@@ -247,11 +265,17 @@ export function MapView({
     const node = index.byId.get(focusId)
     // Namespace / vùng: không làm mờ gì (chỉ viền chọn).
     if (!node || node.kind === 'namespace' || node.kind === 'region') return set
+    // Blast radius: chỉ những gì bị ảnh hưởng khi mục đang chọn đổi / hỏng.
+    if (impactMode && selected && layout && focusId === selected) {
+      for (const id of impactOf(layout, selected)) set.add(id)
+      set.add(selected)
+      return set
+    }
     // Pod → nhìn theo workload của nó.
     visit(node.kind === 'pod' && node.parent ? node.parent : focusId, 3)
     set.add(focusId)
     return set
-  }, [focusId, index])
+  }, [focusId, index, impactMode, selected, layout])
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -333,6 +357,26 @@ export function MapView({
       ctx.fillText(t, x, y)
     }
 
+    /** Huy hiệu công nghệ: vòng tròn màu + 2 chữ. */
+    const badge = (
+      x: number,
+      y: number,
+      r: number,
+      info: { short: string; color: string }
+    ): void => {
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fillStyle = info.color
+      ctx.fill()
+      if (r >= 6) {
+        ctx.font = `700 ${Math.round(r * 0.95)}px ui-sans-serif, system-ui, sans-serif`
+        ctx.fillStyle = '#ffffff'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(info.short, x, y + 0.5)
+      }
+    }
+
     // 1) Vùng + namespace.
     for (const n of index.ordered) {
       if (n.kind !== 'region' && n.kind !== 'namespace') continue
@@ -395,6 +439,16 @@ export function MapView({
             x += w
           }
         }
+        // Công nghệ chính trong namespace (huy hiệu dưới tên).
+        if (n.techs?.length && n.w * s > 60) {
+          const r = Math.max(5, Math.min(11, fs * 0.6))
+          const total = n.techs.length * (2 * r + 4) - 4
+          n.techs.forEach((id, i) => {
+            const info = TECH[id]
+            if (!info) return
+            badge(cx0 - total / 2 + r + i * (2 * r + 4), cy0 + fs * 0.7 + r + 8, r, info)
+          })
+        }
       } else
         text(n.label, sx(n.x + 16), sy(n.y + 18), n.w * s - 32, Math.min(15, 9 + 8 * s), p.fg, 600)
     }
@@ -417,6 +471,8 @@ export function MapView({
         )
           continue
         const hot = related.size > 0 && related.has(e.from) && related.has(e.to)
+        // Policy áp lên cả namespace → rất nhiều cạnh; chỉ vẽ khi đang xem quan hệ.
+        if (e.kind === 'policy' && !hot) continue
         if (related.size > 0 && !hot) ctx.globalAlpha = 0.12
         else ctx.globalAlpha = hot ? 1 : 0.45
         const ax = sx(a.x + a.w / 2)
@@ -430,8 +486,8 @@ export function MapView({
         const mid = (y0 + by) / 2
         ctx.bezierCurveTo(ax, mid, bx, mid, bx, fromBelow ? by : sy(b.y + b.h))
         ctx.lineWidth = hot ? 2 : 1.2
-        ctx.strokeStyle = e.kind === 'storage' ? p.muted : p.accent
-        ctx.setLineDash(e.kind === 'storage' ? [4, 3] : [])
+        ctx.strokeStyle = e.kind === 'storage' ? p.muted : e.kind === 'policy' ? p.warn : p.accent
+        ctx.setLineDash(e.kind === 'storage' ? [4, 3] : e.kind === 'policy' ? [6, 3] : [])
         ctx.stroke()
         ctx.setLineDash([])
       }
@@ -441,33 +497,40 @@ export function MapView({
     // 3) Route / service / PVC (viên thuốc).
     if (s >= LOD.pills)
       for (const n of index.ordered) {
-        if (n.kind !== 'route' && n.kind !== 'service' && n.kind !== 'pvc') continue
+        if (!isPill(n.kind)) continue
         if (!visible(n)) continue
         ctx.globalAlpha = dim(n) ? 0.25 : 1
-        roundRect(n.x, n.y, n.w, n.h, n.kind === 'pvc' ? 4 : n.h / 2)
-        ctx.fillStyle = n.kind === 'pvc' ? p.subtle : p.surface
+        roundRect(n.x, n.y, n.w, n.h, n.kind === 'pvc' || n.kind === 'policy' ? 4 : n.h / 2)
+        ctx.fillStyle = n.kind === 'pvc' || n.kind === 'policy' ? p.subtle : p.surface
         ctx.fill()
         ctx.lineWidth = selected === n.id ? 2.5 : 1.2
         ctx.strokeStyle =
           selected === n.id
             ? p.accent
-            : n.kind === 'route'
+            : n.kind === 'route' || n.kind === 'gateway'
               ? p.accent
               : n.kind === 'pvc'
                 ? toneColor(p, n.tone)
-                : p.lineStrong
-        if (n.kind === 'route') ctx.setLineDash([5, 3])
+                : n.kind === 'policy'
+                  ? p.warn
+                  : p.lineStrong
+        if (n.kind === 'route' || n.kind === 'policy') ctx.setLineDash([5, 3])
+        if (n.kind === 'gateway') ctx.lineWidth += 1
         ctx.stroke()
         ctx.setLineDash([])
         if (s >= LOD.pillText) {
-          const icon = n.kind === 'route' ? '⇢' : n.kind === 'service' ? '◆' : '▤'
+          const icon = PILL_ICON[n.kind] ?? '•'
           text(
             icon,
             sx(n.x + 12),
             sy(n.y + n.h / 2),
             14,
             11 * Math.min(1, s * 1.4),
-            n.kind === 'route' ? p.accent : p.muted
+            n.kind === 'route' || n.kind === 'gateway'
+              ? p.accent
+              : n.kind === 'policy'
+                ? p.warn
+                : p.muted
           )
           text(
             n.label,
@@ -507,7 +570,7 @@ export function MapView({
           n.label,
           sx(n.x + 12),
           sy(n.y + 15),
-          (n.w - 20) * s,
+          (n.w - (n.tech ? 40 : 20)) * s,
           Math.min(13, 6 + 9 * s),
           p.fg,
           600
@@ -516,11 +579,13 @@ export function MapView({
           `${n.sub}${n.badges?.length ? ` · ${n.badges.join(' · ')}` : ''}`,
           sx(n.x + 12),
           sy(n.y + 32),
-          (n.w - 20) * s,
+          (n.w - (n.tech ? 40 : 20)) * s,
           Math.min(11, 5 + 7 * s),
           p.faint
         )
       }
+      const tech = n.tech ? TECH[n.tech] : undefined
+      if (tech && s >= LOD.cardText) badge(sx(n.x + n.w - 16), sy(n.y + 16), 10 * s, tech)
     }
     ctx.globalAlpha = 1
 
@@ -541,6 +606,13 @@ export function MapView({
       }
     ctx.globalAlpha = 1
   }, [layout, index, related, selected, hover, options.edges, options.pods, problemsOnly])
+
+  // Đổi mục chọn → tắt blast radius (bật lại khi cần).
+  const [impactFor, setImpactFor] = useState<string | null>(null)
+  if (impactFor !== selected) {
+    setImpactFor(selected)
+    if (impactMode) setImpactMode(false)
+  }
 
   // Minimap: vùng + namespace + khung đang thấy.
   const drawMini = useCallback(() => {
@@ -716,8 +788,7 @@ export function MapView({
         if (!n) continue
         if (n.kind === 'pod' && (!options.pods || s < LOD.pods)) continue
         if (n.kind === 'workload' && s < LOD.cards) continue
-        if ((n.kind === 'service' || n.kind === 'route' || n.kind === 'pvc') && s < LOD.pills)
-          continue
+        if (isPill(n.kind) && s < LOD.pills) continue
         // Pod nhỏ: nới vùng bấm cho dễ trúng.
         const slack = n.kind === 'pod' ? 2 : 0
         if (
@@ -1170,7 +1241,7 @@ export function MapView({
             <Legend color="bg-success" label="Healthy" />
             <Legend color="bg-warning" label="Degraded" />
             <Legend color="bg-danger-solid" label="Failing" />
-            <span>⇢ route · ◆ service · ▤ volume</span>
+            <span>⇉ gateway · ⇢ route · ◆ service · ▤ volume · ◇ policy</span>
           </div>
         </div>
       </div>
@@ -1192,6 +1263,8 @@ export function MapView({
               onLogs(ref, w?.labels ?? null)
             }}
             onShell={onShell}
+            impact={impactMode}
+            onImpact={setImpactMode}
           />
         </SidePanel>
       )}
@@ -1276,7 +1349,9 @@ function MapPanel({
   onGo,
   onOpen,
   onLogs,
-  onShell
+  onShell,
+  impact,
+  onImpact
 }: {
   node: MapNode
   layout: MapLayout | null
@@ -1286,7 +1361,27 @@ function MapPanel({
   onOpen: (ref: MapRef) => void
   onLogs: (ref: MapRef) => void
   onShell: (ref: MapRef) => void
+  impact: boolean
+  onImpact: (on: boolean) => void
 }): React.JSX.Element {
+  const affected = useMemo(
+    () =>
+      layout && node.kind !== 'region' && node.kind !== 'namespace'
+        ? impactOf(layout, node.id)
+        : null,
+    [layout, node]
+  )
+  const affectedCounts = (() => {
+    const counts = new Map<string, number>()
+    for (const id of affected ?? []) {
+      const n = index.byId.get(id)
+      if (!n) continue
+      const label = n.kind === 'route' ? 'route' : n.kind === 'pvc' ? 'volume' : n.kind
+      counts.set(label, (counts.get(label) ?? 0) + 1)
+    }
+    return [...counts.entries()].map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`)
+  })()
+  const tech = node.tech ? TECH[node.tech] : undefined
   const kindTitle =
     node.kind === 'route'
       ? routeTitle(node.ref?.kind ?? '')
@@ -1300,7 +1395,8 @@ function MapPanel({
       .map((e) => index.byId.get(dir === 'in' ? e.from : e.to))
       .filter((n): n is MapNode => Boolean(n))
   const incoming = linked('in')
-  const outgoing = linked('out')
+  // NetworkPolicy có mục riêng — không lẫn vào "Uses".
+  const outgoing = linked('out').filter((n) => n.kind !== 'policy')
   const children = index.ordered.filter((n) => n.parent === node.id)
   const parent = node.parent ? index.byId.get(node.parent) : undefined
   const policies = layout?.policies[node.id] ?? []
@@ -1418,6 +1514,51 @@ function MapPanel({
         data-testid="k8s-map-details"
       >
         <p className="text-xs text-muted">{node.sub}</p>
+        {tech && (
+          <p className="flex items-center gap-1.5 text-xs text-muted" data-testid="k8s-map-tech">
+            <span
+              className="inline-flex size-4 items-center justify-center rounded-full text-[8px] font-bold text-white"
+              style={{ background: tech.color }}
+            >
+              {tech.short}
+            </span>
+            {tech.label}
+          </p>
+        )}
+        {node.techs && node.techs.length > 0 && (
+          <p className="text-xs text-muted">
+            Runs {node.techs.map((id) => TECH[id]?.label ?? id).join(', ')}
+          </p>
+        )}
+        {affected && (
+          <section data-testid="k8s-map-impact">
+            <Heading
+              action={
+                <button
+                  type="button"
+                  aria-pressed={impact}
+                  data-testid="k8s-map-impact-toggle"
+                  className={cx(
+                    'rounded px-1.5 py-0.5 text-[11px] font-medium',
+                    impact ? 'bg-warning-soft text-warning' : 'text-accent hover:bg-hover'
+                  )}
+                  onClick={() => {
+                    onImpact(!impact)
+                  }}
+                >
+                  {impact ? 'Showing' : 'Show on map'}
+                </button>
+              }
+            >
+              Blast radius
+            </Heading>
+            <p className="text-xs text-muted" data-testid="k8s-map-impact-summary">
+              {affected.size === 0
+                ? 'Nothing else on the map depends on it.'
+                : `If it changes or fails: ${affectedCounts.join(' · ')}.`}
+            </p>
+          </section>
+        )}
         {node.badges && node.badges.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {node.badges.map((b) => (
@@ -1466,13 +1607,24 @@ function MapPanel({
             </div>
           </section>
         )}
-        {section(node.kind === 'workload' ? 'Traffic from' : 'Linked from', incoming)}
+        {section(
+          node.kind === 'workload'
+            ? 'Traffic from'
+            : node.kind === 'policy'
+              ? 'Applies to'
+              : node.kind === 'route'
+                ? 'Gateways'
+                : 'Linked from',
+          incoming
+        )}
         {section(
           node.kind === 'service'
             ? 'Sends traffic to'
             : node.kind === 'route'
               ? 'Routes to'
-              : 'Uses',
+              : node.kind === 'gateway'
+                ? 'Routes attached'
+                : 'Uses',
           outgoing
         )}
         {policies.length > 0 && (

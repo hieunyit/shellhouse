@@ -405,16 +405,29 @@ export function SidePanel({
   defaultWidth = 416,
   minWidth = 300,
   testId,
+  expanded = false,
   children
 }: {
   storageKey: string
   defaultWidth?: number
   minWidth?: number
   testId?: string
+  /** Phóng to hết chỗ (che nội dung bên cạnh) — vd. trang chi tiết đầy đủ. */
+  expanded?: boolean
   children: ReactNode
 }): React.JSX.Element {
   const [width, setWidth] = useState<number>(() => savedWidth(storageKey) ?? defaultWidth)
   const drag = useRef<{ x: number; width: number } | null>(null)
+  if (expanded)
+    return (
+      <aside
+        className="relative flex min-w-0 flex-1 flex-col border-l border-line bg-surface"
+        data-testid={testId}
+        data-expanded="true"
+      >
+        {children}
+      </aside>
+    )
   return (
     <aside
       className="relative flex max-w-[70%] shrink-0 flex-col border-l border-line bg-surface"

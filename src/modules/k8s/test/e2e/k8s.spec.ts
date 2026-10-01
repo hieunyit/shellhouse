@@ -440,10 +440,25 @@ test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi t
     await expect(panel.locator('[data-testid="k8s-map-link"][data-name="web"]')).toContainText(
       'Service'
     )
+    // Icon công nghệ (image nginx) + blast radius của workload.
+    await expect(panel.getByTestId('k8s-map-tech')).toContainText('NGINX')
+    await expect(panel.getByTestId('k8s-map-impact-summary')).toContainText('2 pods')
+    await expect(panel.getByTestId('k8s-map-impact-summary')).toContainText('1 service')
+    await panel.getByTestId('k8s-map-impact-toggle').click()
+    await expect(panel.getByTestId('k8s-map-impact-toggle')).toHaveAttribute('aria-pressed', 'true')
 
     // Bấm service trong bảng → chọn service; quay lại.
     await panel.locator('[data-testid="k8s-map-link"][data-name="web"]').click()
     await expect(panel).toContainText('Service · shop')
+
+    // Gateway API: Gateway → HTTPRoute (đổi gateway → route gắn vào bị ảnh hưởng).
+    await map.getByTestId('k8s-map-search').fill('public')
+    await map.getByTestId('k8s-map-result').filter({ hasText: 'Gateway' }).first().click()
+    await expect(panel).toContainText('Gateway · shop')
+    await expect(panel.locator('[data-testid="k8s-map-link"][data-name="web"]')).toContainText(
+      'HTTPRoute'
+    )
+    await expect(panel.getByTestId('k8s-map-impact-summary')).toContainText('1 route')
 
     // Lỗi tiếp theo: deployment web (1/2 ready) + pod CrashLoopBackOff.
     await map.getByTestId('k8s-map-next-problem').click()
@@ -464,6 +479,91 @@ test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi t
       'true'
     )
     await expect(view.getByTestId('k8s-describe')).toContainText('web')
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})
+
+test('Kubernetes: trang Deployment (Status / Strategy / Resources / Pods / ReplicaSets), Topology, Security, Metrics', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await page.setViewportSize({ width: 1366, height: 820 })
+    await view.getByTestId('k8s-nav-deployments.apps').click()
+    await view.locator('[data-testid="k8s-row"][data-name="shop/web"]').click()
+    await page.keyboard.press('d')
+    const detail = view.getByTestId('k8s-describe')
+
+    // Overview: trạng thái rollout, lưới pod (pod lỗi trước), ReplicaSet có Roll back.
+    await expect(detail.getByTestId('k8s-rollout-state')).toHaveText('Rolling out')
+    await expect(detail.getByTestId('k8s-replicas')).toHaveText('2')
+    await expect(detail.getByTestId('k8s-pod-phases')).toContainText('CrashLoopBackOff')
+    const tiles = detail.getByTestId('k8s-pod-tile')
+    await expect(tiles).toHaveCount(2)
+    await expect(tiles.first()).toHaveAttribute('data-name', 'web-2')
+    await expect(detail.getByTestId('k8s-resources-table')).toContainText('nginx:1.27')
+    await expect(detail.getByTestId('k8s-replicaset-row')).toHaveCount(2)
+    await expect(detail.getByTestId('k8s-replicaset-rollback')).toHaveCount(1)
+
+    // Phóng to thành cả trang.
+    await detail.getByTestId('k8s-detail-wide').click()
+    await expect(detail).toHaveAttribute('data-expanded', 'true')
+
+    // Topology: Deployment → ReplicaSet → Pod → Node, ConfigMap, ServiceAccount → RBAC.
+    await detail.getByTestId('k8s-detail-tab-topology').click()
+    const topo = detail.getByTestId('k8s-topology')
+    const node = (kind: string, name: string) =>
+      topo.locator(`[data-testid="k8s-topology-node"][data-kind="${kind}"][data-name="${name}"]`)
+    await expect(node('deployments.apps', 'web')).toHaveAttribute('data-root', 'true')
+    await expect(node('replicasets.apps', 'web-rs2')).toHaveCount(1)
+    await expect(node('pods', 'web-2')).toHaveCount(1)
+    await expect(node('nodes', 'node-1')).toHaveCount(1)
+    await expect(node('roles.rbac.authorization.k8s.io', 'secret-reader')).toHaveCount(1)
+    await expect(node('gateways.gateway.networking.k8s.io', 'public')).toHaveCount(1)
+    // Blast radius của ConfigMap: deployment, pod, service, route…
+    // Đồ thị lớn mở ở mức đọc được; Fit → thấy toàn bộ.
+    await topo.getByTestId('k8s-topology-fit').click()
+    await node('configmaps', 'web-config').click()
+    await topo.getByTestId('k8s-topology-impact').click()
+    await expect(topo.getByTestId('k8s-topology-impact-summary')).toContainText('1 Deployment')
+    await expect(topo.getByTestId('k8s-topology-impact-summary')).toContainText('2 Pods')
+    await expect(node('pods', 'web-1')).toHaveAttribute('data-affected', 'true')
+    // Mở rộng node dùng chung → thấy pod khác chạy trên nó.
+    await node('nodes', 'node-1').click()
+    await topo.getByTestId('k8s-topology-expand').click()
+    await expect(node('pods', 'tool')).toHaveCount(1)
+    // Tắt nhóm Access (RBAC) → bỏ nhánh role.
+    await topo.locator('[data-testid="k8s-topology-filter"][data-category="rbac"]').click()
+    await expect(node('roles.rbac.authorization.k8s.io', 'secret-reader')).toHaveCount(0)
+
+    // Security: cấu hình pod + ServiceAccount đọc được Secret.
+    await detail.getByTestId('k8s-detail-tab-security').click()
+    await expect(
+      detail.locator('[data-testid="k8s-security-finding"][data-id="no-memory-limit"]')
+    ).toHaveCount(1)
+    await expect(
+      detail.locator('[data-testid="k8s-rbac-grant"][data-risk="high"]').first()
+    ).toContainText('secrets')
+
+    // Metrics: tổng CPU / RAM và theo pod.
+    await detail.getByTestId('k8s-detail-tab-metrics').click()
+    await expect(detail.getByTestId('k8s-metrics')).toContainText('By pod')
+    await expect(detail.getByTestId('k8s-metrics')).toContainText('web-1')
+
+    // Overview: bấm node của pod → mở Node.
+    await detail.getByTestId('k8s-detail-tab-overview').click()
+    await detail.getByTestId('k8s-pod-node').first().click()
+    await expect(view.getByTestId('k8s-nav-nodes')).toHaveAttribute('aria-current', 'true')
+    await expect(view.getByTestId('k8s-describe')).toContainText('node-1')
   } finally {
     await launched.close()
     await server.close()

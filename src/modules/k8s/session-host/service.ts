@@ -43,6 +43,7 @@ import {
 } from './operations'
 import { mapData } from './map'
 import { related } from './related'
+import { rbacReach, topology } from './topology'
 
 /** Kết quả `fromMain('resolve')` (xem main/kubeconfig.ts). */
 export interface ResolvedClusterConfig {
@@ -247,6 +248,15 @@ export class K8sService implements HostModuleSession {
         })
         return related(client, kind.id, obj, signal)
       }
+      case 'topology': {
+        const kind = this.kind(op.kind)
+        const obj = await client.json<K8sObject>('GET', resourcePath(kind, op.namespace, op.name), {
+          signal
+        })
+        return topology(client, kind.id, obj, signal)
+      }
+      case 'rbacReach':
+        return rbacReach(client, op.namespace, op.serviceAccount, signal)
       case 'rolloutHistory':
         return rolloutHistory(client, op.namespace, op.name)
       case 'rollback':

@@ -19,6 +19,10 @@ export interface MapWorkload {
   tone: MapTone
   /** PVC mà pod template dùng (kể cả volumeClaimTemplates của StatefulSet đã tạo). */
   pvcs: string[]
+  /** Công nghệ nhận ra (prometheus, grafana, argocd…) — xem TECH. */
+  tech?: string
+  /** Cài bằng Helm (nhãn managed-by / helm.sh/chart). */
+  helm?: boolean
 }
 
 export interface MapPod {
@@ -48,6 +52,16 @@ export interface MapRoute {
   hosts: string[]
   /** Tên service phía sau (cùng namespace). */
   backends: string[]
+  /** Gateway API: Gateway cha (parentRefs). */
+  parents?: { ns: string; name: string }[]
+}
+
+export interface MapGateway {
+  ns: string
+  name: string
+  className: string
+  /** "HTTPS:443, HTTP:80". */
+  listeners: string
 }
 
 export interface MapPvc {
@@ -83,6 +97,8 @@ export interface MapData {
   pvcs: MapPvc[]
   hpas: MapHpa[]
   policies: MapPolicy[]
+  /** Gateway API (không có CRD → rỗng / thiếu). */
+  gateways?: MapGateway[]
   nodes: { total: number; ready: number }
   /** Cluster quá lớn — một số loại chỉ lấy phần đầu. */
   truncated: boolean
@@ -128,6 +144,138 @@ export function regionOf(ns: string): MapRegion {
   return 'Applications'
 }
 
+// ——— Công nghệ (icon) ———
+
+export interface TechInfo {
+  label: string
+  /** 1–2 ký tự vẽ trong huy hiệu. */
+  short: string
+  color: string
+}
+
+/** Thứ tự quan trọng: cụ thể trước chung (alertmanager trước prometheus, loki trước grafana…). */
+const TECH_RULES: readonly (readonly [string, RegExp, TechInfo])[] = [
+  ['alertmanager', /alertmanager/, { label: 'Alertmanager', short: 'Am', color: '#e6522c' }],
+  ['node-exporter', /node-exporter/, { label: 'Node exporter', short: 'Ne', color: '#e6522c' }],
+  [
+    'kube-state-metrics',
+    /kube-state-metrics/,
+    { label: 'kube-state-metrics', short: 'Ks', color: '#326ce5' }
+  ],
+  ['prometheus', /prometheus/, { label: 'Prometheus', short: 'Pr', color: '#e6522c' }],
+  ['loki', /\bloki\b/, { label: 'Loki', short: 'Lk', color: '#f2cc0c' }],
+  [
+    'promtail',
+    /promtail|grafana-agent|\balloy\b/,
+    { label: 'Grafana Agent', short: 'Ga', color: '#f46800' }
+  ],
+  ['tempo', /\btempo\b/, { label: 'Tempo', short: 'Tp', color: '#f46800' }],
+  ['grafana', /grafana/, { label: 'Grafana', short: 'Gf', color: '#f46800' }],
+  ['jaeger', /jaeger/, { label: 'Jaeger', short: 'Jg', color: '#60d0e4' }],
+  [
+    'otel',
+    /opentelemetry|otel-collector|otelcol/,
+    { label: 'OpenTelemetry', short: 'Ot', color: '#425cc7' }
+  ],
+  ['fluent', /fluent-?bit|fluentd/, { label: 'Fluent', short: 'Fl', color: '#0e83c8' }],
+  [
+    'elasticsearch',
+    /elasticsearch|opensearch(?!-dashboards)/,
+    { label: 'Elasticsearch', short: 'Es', color: '#00bfb3' }
+  ],
+  ['kibana', /kibana|opensearch-dashboards/, { label: 'Kibana', short: 'Kb', color: '#e8478b' }],
+  ['argocd', /argocd|argo-cd/, { label: 'Argo CD', short: 'Ar', color: '#ef7b4d' }],
+  [
+    'argo',
+    /argoproj|workflow-controller|argo-rollouts/,
+    { label: 'Argo', short: 'Ar', color: '#ef7b4d' }
+  ],
+  [
+    'flux',
+    /fluxcd|source-controller|kustomize-controller|helm-controller/,
+    { label: 'Flux', short: 'Fx', color: '#5468ff' }
+  ],
+  ['coredns', /coredns|kube-dns/, { label: 'CoreDNS', short: 'Dn', color: '#2b7ccd' }],
+  [
+    'ingress-nginx',
+    /ingress-nginx|nginx-ingress/,
+    { label: 'NGINX Ingress', short: 'Ng', color: '#009639' }
+  ],
+  ['traefik', /traefik/, { label: 'Traefik', short: 'Tr', color: '#24a1c1' }],
+  ['istio', /istio|pilot-discovery|proxyv2/, { label: 'Istio', short: 'Is', color: '#466bb0' }],
+  ['linkerd', /linkerd/, { label: 'Linkerd', short: 'Ld', color: '#2beda7' }],
+  ['envoy', /envoy|contour/, { label: 'Envoy', short: 'Ev', color: '#ac6199' }],
+  ['haproxy', /haproxy/, { label: 'HAProxy', short: 'Ha', color: '#106da9' }],
+  ['cilium', /cilium/, { label: 'Cilium', short: 'Ci', color: '#8061a9' }],
+  ['calico', /calico|tigera/, { label: 'Calico', short: 'Ca', color: '#fb8c00' }],
+  ['kube-proxy', /kube-proxy/, { label: 'kube-proxy', short: 'Kp', color: '#326ce5' }],
+  ['metrics-server', /metrics-server/, { label: 'metrics-server', short: 'Ms', color: '#326ce5' }],
+  ['etcd', /\betcd\b/, { label: 'etcd', short: 'Et', color: '#419eda' }],
+  ['cert-manager', /cert-manager/, { label: 'cert-manager', short: 'Cm', color: '#326ce5' }],
+  ['external-dns', /external-dns/, { label: 'ExternalDNS', short: 'Ed', color: '#326ce5' }],
+  [
+    'external-secrets',
+    /external-secrets/,
+    { label: 'External Secrets', short: 'Xs', color: '#326ce5' }
+  ],
+  ['vault', /\bvault\b/, { label: 'Vault', short: 'Va', color: '#ffd814' }],
+  ['keda', /\bkeda\b/, { label: 'KEDA', short: 'Kd', color: '#326ce5' }],
+  ['kyverno', /kyverno/, { label: 'Kyverno', short: 'Ky', color: '#ff8f00' }],
+  ['gatekeeper', /gatekeeper/, { label: 'Gatekeeper', short: 'Gk', color: '#566366' }],
+  ['velero', /velero/, { label: 'Velero', short: 'Vl', color: '#3f9cd6' }],
+  ['longhorn', /longhorn/, { label: 'Longhorn', short: 'Lh', color: '#5f224b' }],
+  ['minio', /minio/, { label: 'MinIO', short: 'Mn', color: '#c72e49' }],
+  ['rancher', /rancher|cattle|fleet-agent/, { label: 'Rancher', short: 'Rc', color: '#2453ff' }],
+  ['harbor', /harbor/, { label: 'Harbor', short: 'Hb', color: '#60b932' }],
+  [
+    'postgres',
+    /postgres|postgis|cloudnative-pg|timescale/,
+    { label: 'PostgreSQL', short: 'Pg', color: '#336791' }
+  ],
+  ['mysql', /mysql|percona/, { label: 'MySQL', short: 'My', color: '#00758f' }],
+  ['mariadb', /mariadb/, { label: 'MariaDB', short: 'Md', color: '#003545' }],
+  ['mongodb', /mongo/, { label: 'MongoDB', short: 'Mg', color: '#47a248' }],
+  ['redis', /redis|valkey|keydb/, { label: 'Redis', short: 'Rd', color: '#dc382d' }],
+  ['memcached', /memcached/, { label: 'Memcached', short: 'Mc', color: '#2a7bb5' }],
+  ['kafka', /kafka|strimzi|redpanda/, { label: 'Kafka', short: 'Kf', color: '#231f20' }],
+  ['zookeeper', /zookeeper/, { label: 'ZooKeeper', short: 'Zk', color: '#6b8e23' }],
+  ['rabbitmq', /rabbitmq/, { label: 'RabbitMQ', short: 'Rb', color: '#ff6600' }],
+  ['nats', /\bnats\b/, { label: 'NATS', short: 'Na', color: '#27aae1' }],
+  ['keycloak', /keycloak/, { label: 'Keycloak', short: 'Kc', color: '#4d4d4d' }],
+  ['jenkins', /jenkins/, { label: 'Jenkins', short: 'Jk', color: '#d24939' }],
+  ['gitlab', /gitlab/, { label: 'GitLab', short: 'Gl', color: '#fc6d26' }],
+  ['nginx', /nginx/, { label: 'NGINX', short: 'Ng', color: '#009639' }]
+]
+
+export const TECH: Readonly<Record<string, TechInfo>> = Object.fromEntries(
+  TECH_RULES.map(([id, , info]) => [id, info])
+)
+
+/** Nhận diện công nghệ từ image (bỏ tag / digest), nhãn app và tên workload. */
+export function detectTech(
+  images: readonly string[],
+  labels: Readonly<Record<string, string>>,
+  name: string
+): string | undefined {
+  const hay = [
+    ...images.map(
+      (i) =>
+        i
+          .toLowerCase()
+          .split('@')[0]
+          ?.replace(/:[^/]*$/, '') ?? ''
+    ),
+    labels['app.kubernetes.io/name'] ?? '',
+    labels['app.kubernetes.io/part-of'] ?? '',
+    labels['app'] ?? '',
+    labels['k8s-app'] ?? '',
+    name
+  ]
+    .join(' ')
+    .toLowerCase()
+  return TECH_RULES.find(([, re]) => re.test(hay))?.[0]
+}
+
 // ——— Selector ———
 
 /** LabelSelector (matchLabels + matchExpressions) hoặc map phẳng của Service khớp nhãn không. */
@@ -166,7 +314,8 @@ export function selectorMatches(
 
 // ——— Bố cục ———
 
-export type MapNodeKind = 'region' | 'namespace' | 'workload' | 'pod' | 'service' | 'route' | 'pvc'
+export type MapNodeKind =
+  'region' | 'namespace' | 'workload' | 'pod' | 'gateway' | 'service' | 'route' | 'pvc' | 'policy'
 
 export interface MapNode {
   id: string
@@ -189,9 +338,16 @@ export interface MapNode {
   badges?: string[]
   /** Namespace / region: số liệu cho nhìn xa. */
   stats?: { workloads: number; pods: number; warn: number; bad: number }
+  /** Workload: công nghệ (TECH); namespace: vài công nghệ chính bên trong. */
+  tech?: string
+  techs?: string[]
 }
 
-export type MapEdgeKind = 'route' | 'select' | 'storage'
+/**
+ * route: route → service; select: service → workload; storage: workload → PVC; attach: gateway →
+ * route; policy: workload → NetworkPolicy áp lên nó.
+ */
+export type MapEdgeKind = 'route' | 'select' | 'storage' | 'attach' | 'policy'
 
 export interface MapEdge {
   from: string
@@ -375,6 +531,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
         .map((p) => p.name)
       if (pol.length) policies[id] = pol
       const badges = [
+        ...(w.helm ? ['Helm'] : []),
         ...(hpa ? [`HPA ${hpa.min}–${hpa.max}`] : []),
         ...(pol.length ? [`${pol.length} polic${pol.length === 1 ? 'y' : 'ies'}`] : [])
       ]
@@ -392,6 +549,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
         ref: { kind: w.kind, ns, name: w.name },
         parent: nsId,
         ...(badges.length ? { badges } : {}),
+        ...(w.tech ? { tech: w.tech } : {}),
         pods
       })
     }
@@ -421,6 +579,34 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       ref: MapNode['ref'],
       w = PILL_W
     ): MapNode => ({ id, kind, x: 0, y: 0, w, h: PILL_H, label, sub, tone, ns, ref, parent: nsId })
+    const gatewayNodes = (data.gateways ?? [])
+      .filter((g) => g.ns === ns)
+      .sort(byName)
+      .map((g) =>
+        pill(
+          `gw:${ns}/${g.name}`,
+          'gateway',
+          g.name,
+          [g.className, g.listeners].filter(Boolean).join(' · '),
+          'ok',
+          { kind: 'gateways.gateway.networking.k8s.io', ns, name: g.name }
+        )
+      )
+    const nsPolicies = data.policies.filter((p) => p.ns === ns).sort(byName)
+    const policyNodes = nsPolicies.map((p) =>
+      pill(
+        `np:${ns}/${p.name}`,
+        'policy',
+        p.name,
+        (() => {
+          const n = workloads.filter((w) => selectorMatches(p.selector, w.labels, true)).length
+          return `NetworkPolicy · ${n} workload${n === 1 ? '' : 's'}`
+        })(),
+        'muted',
+        { kind: 'networkpolicies.networking.k8s.io', ns, name: p.name },
+        150
+      )
+    )
     const routeNodes = routes.map((r) =>
       pill(`r:${r.kind}:${ns}/${r.name}`, 'route', r.name, r.hosts.join(', ') || 'any host', 'ok', {
         kind: r.kind,
@@ -459,7 +645,12 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
 
     // Chiều rộng hàng: theo diện tích thẻ (đảo vuông vừa phải), trong [380, 1600].
     const width = clamp(Math.sqrt(area(cards)) * 1.6, 380, 1600)
-    const rows = [routeNodes, serviceNodes, cards, pvcNodes].filter((r) => r.length > 0)
+    const rows = [
+      [...gatewayNodes, ...routeNodes],
+      serviceNodes,
+      cards,
+      [...pvcNodes, ...policyNodes]
+    ].filter((r) => r.length > 0)
     let y = NS_HEADER
     let w = 260
     for (const row of rows) {
@@ -474,6 +665,13 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
     }
     const h = Math.max(y - GAP + PAD, NS_HEADER + 40)
     const podCount = cards.reduce((n, c) => n + c.pods.length, 0)
+    // Công nghệ chính (nhiều workload nhất) cho nhìn xa.
+    const techCount = new Map<string, number>()
+    for (const c of cards) if (c.tech) techCount.set(c.tech, (techCount.get(c.tech) ?? 0) + 1)
+    const techs = [...techCount.entries()]
+      .sort((p, q) => q[1] - p[1] || p[0].localeCompare(q[0]))
+      .slice(0, 4)
+      .map(([id]) => id)
     const tones = [...cards.map((c) => c.tone), ...pvcNodes.map((p) => p.tone)]
     const node: MapNode = {
       id: nsId,
@@ -487,6 +685,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       tone: worst(tones),
       ns,
       ref: { kind: 'namespaces', name: ns },
+      ...(techs.length ? { techs } : {}),
       stats: {
         workloads: cards.length,
         pods: podCount,
@@ -516,11 +715,13 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       })
     }
     children.push(
+      ...gatewayNodes,
       ...routeNodes,
       ...serviceNodes,
       ...cards.map(withoutPods),
       ...podNodes,
-      ...pvcNodes
+      ...pvcNodes,
+      ...policyNodes
     )
 
     // Cạnh: route → service → workload → PVC.
@@ -540,8 +741,30 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       for (const v of w.pvcs)
         if (pvcs.some((p) => p.name === v))
           edges.push({ from: `w:${w.kind}:${ns}/${w.name}`, to: `v:${ns}/${v}`, kind: 'storage' })
+    for (const p of nsPolicies)
+      for (const w of workloads)
+        if (selectorMatches(p.selector, w.labels, true))
+          edges.push({
+            from: `w:${w.kind}:${ns}/${w.name}`,
+            to: `np:${ns}/${p.name}`,
+            kind: 'policy'
+          })
 
     islands.push({ ns, node, children, w, h })
+  }
+
+  // Gateway → route (gateway có thể ở namespace khác — vd. gateway dùng chung).
+  const shown = new Set(nsNames)
+  const gatewayIds = new Set(
+    (data.gateways ?? []).filter((g) => shown.has(g.ns)).map((g) => `gw:${g.ns}/${g.name}`)
+  )
+  for (const r of data.routes) {
+    if (!shown.has(r.ns)) continue
+    for (const p of r.parents ?? []) {
+      const gid = `gw:${p.ns}/${p.name}`
+      if (gatewayIds.has(gid))
+        edges.push({ from: gid, to: `r:${r.kind}:${r.ns}/${r.name}`, kind: 'attach' })
+    }
   }
 
   // Vùng: đảo xếp kệ trong vùng; vùng xếp kệ trên toàn bản đồ.
@@ -603,4 +826,33 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
     })
   })
   return { nodes, edges, width: placed.w, height: placed.h, policies }
+}
+
+/**
+ * Phạm vi ảnh hưởng (blast radius) khi một node đổi / hỏng: pod của workload, route gắn vào
+ * gateway, và mọi thứ dựa vào nó — service chọn workload, route tới service, workload dùng PVC /
+ * chịu NetworkPolicy — lan tiếp theo cùng quy tắc.
+ */
+export function impactOf(layout: Pick<MapLayout, 'nodes' | 'edges'>, id: string): Set<string> {
+  const out = new Set<string>()
+  const children = new Map<string, string[]>()
+  for (const n of layout.nodes)
+    if (n.kind === 'pod' && n.parent)
+      children.set(n.parent, [...(children.get(n.parent) ?? []), n.id])
+  const queue = [id]
+  const push = (x: string): void => {
+    if (x === id || out.has(x)) return
+    out.add(x)
+    queue.push(x)
+  }
+  while (queue.length) {
+    const cur = queue.shift() ?? ''
+    for (const c of children.get(cur) ?? []) push(c)
+    for (const e of layout.edges) {
+      if (e.kind === 'attach') {
+        if (e.from === cur) push(e.to)
+      } else if (e.to === cur) push(e.from)
+    }
+  }
+  return out
 }

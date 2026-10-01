@@ -143,7 +143,16 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
               selector: { matchLabels: { app: 'web' } },
               template: {
                 metadata: { labels: { app: 'web' } },
-                spec: { containers: [{ name: 'app', image: 'nginx:1.27' }] }
+                spec: {
+                  serviceAccountName: 'web-sa',
+                  containers: [
+                    {
+                      name: 'app',
+                      image: 'nginx:1.27',
+                      envFrom: [{ configMapRef: { name: 'web-config' } }]
+                    }
+                  ]
+                }
               }
             },
             status: { readyReplicas: 1, updatedReplicas: 2, availableReplicas: 1 }
@@ -253,9 +262,91 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       ])
     ],
     ['jobs', new Map()],
-    ['configmaps', new Map()],
+    [
+      'configmaps',
+      new Map([
+        [
+          'shop/web-config',
+          make('v1', 'ConfigMap', 'web-config', 'shop', { data: { MODE: 'prod' } })
+        ]
+      ])
+    ],
     ['persistentvolumeclaims', new Map()],
-    ['serviceaccounts', new Map()],
+    ['persistentvolumes', new Map()],
+    ['serviceaccounts', new Map([['shop/web-sa', make('v1', 'ServiceAccount', 'web-sa', 'shop')]])],
+    // RBAC: web-sa đọc được Secret trong shop (quyền nhạy cảm — tab Security / Topology).
+    [
+      'roles',
+      new Map([
+        [
+          'shop/secret-reader',
+          make('rbac.authorization.k8s.io/v1', 'Role', 'secret-reader', 'shop', {
+            rules: [
+              { apiGroups: [''], resources: ['secrets'], verbs: ['get', 'list'] },
+              { apiGroups: [''], resources: ['configmaps'], verbs: ['get'] }
+            ]
+          })
+        ]
+      ])
+    ],
+    [
+      'rolebindings',
+      new Map([
+        [
+          'shop/web-reader',
+          make('rbac.authorization.k8s.io/v1', 'RoleBinding', 'web-reader', 'shop', {
+            subjects: [{ kind: 'ServiceAccount', name: 'web-sa', namespace: 'shop' }],
+            roleRef: {
+              apiGroup: 'rbac.authorization.k8s.io',
+              kind: 'Role',
+              name: 'secret-reader'
+            }
+          })
+        ]
+      ])
+    ],
+    ['clusterroles', new Map()],
+    ['clusterrolebindings', new Map()],
+    [
+      'networkpolicies',
+      new Map([
+        [
+          'shop/default-deny',
+          make('networking.k8s.io/v1', 'NetworkPolicy', 'default-deny', 'shop', {
+            spec: { podSelector: {}, policyTypes: ['Ingress'] }
+          })
+        ]
+      ])
+    ],
+    [
+      'gateways',
+      new Map([
+        [
+          'shop/public',
+          make('gateway.networking.k8s.io/v1', 'Gateway', 'public', 'shop', {
+            spec: {
+              gatewayClassName: 'nginx',
+              listeners: [{ name: 'http', protocol: 'HTTP', port: 80 }]
+            }
+          })
+        ]
+      ])
+    ],
+    [
+      'httproutes',
+      new Map([
+        [
+          'shop/web',
+          make('gateway.networking.k8s.io/v1', 'HTTPRoute', 'web', 'shop', {
+            spec: {
+              parentRefs: [{ name: 'public' }],
+              hostnames: ['shop.example.com'],
+              rules: [{ backendRefs: [{ name: 'web', port: 80 }] }]
+            }
+          })
+        ]
+      ])
+    ],
     ['ingresses', new Map()],
     ['horizontalpodautoscalers', new Map()],
     ['poddisruptionbudgets', new Map()],
@@ -336,6 +427,34 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       namespaced: true
     },
     applications: { apiVersion: 'argoproj.io/v1alpha1', kind: 'Application', namespaced: true },
+    persistentvolumes: { apiVersion: 'v1', kind: 'PersistentVolume', namespaced: false },
+    roles: { apiVersion: 'rbac.authorization.k8s.io/v1', kind: 'Role', namespaced: true },
+    rolebindings: {
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'RoleBinding',
+      namespaced: true
+    },
+    clusterroles: {
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'ClusterRole',
+      namespaced: false
+    },
+    clusterrolebindings: {
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'ClusterRoleBinding',
+      namespaced: false
+    },
+    networkpolicies: {
+      apiVersion: 'networking.k8s.io/v1',
+      kind: 'NetworkPolicy',
+      namespaced: true
+    },
+    gateways: { apiVersion: 'gateway.networking.k8s.io/v1', kind: 'Gateway', namespaced: true },
+    httproutes: {
+      apiVersion: 'gateway.networking.k8s.io/v1',
+      kind: 'HTTPRoute',
+      namespaced: true
+    },
     widgets: { apiVersion: 'example.com/v1', kind: 'Widget', namespaced: true }
   }
 

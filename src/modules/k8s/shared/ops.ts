@@ -107,6 +107,18 @@ export const K8sOp = z.discriminatedUnion('op', [
   }),
   /** Tài nguyên liên quan (kiểu Rancher): service, ConfigMap, Secret, PVC, HPA… / "Used by". */
   z.object({ op: z.literal('related'), kind: Kind, namespace: Namespace, name: Name }),
+  /**
+   * Đồ thị quan hệ của một đối tượng (Object Topology): owner, pod, node, service / route,
+   * ConfigMap / Secret / PVC / PV, HPA / PDB / NetworkPolicy, ServiceAccount → RBAC.
+   */
+  z.object({
+    op: z.literal('topology'),
+    kind: Kind,
+    namespace: Namespace.optional(),
+    name: Name
+  }),
+  /** ServiceAccount với tới được gì (gộp mọi RoleBinding / ClusterRoleBinding của nó). */
+  z.object({ op: z.literal('rbacReach'), namespace: Namespace, serviceAccount: Name }),
   z.object({ op: z.literal('rolloutHistory'), namespace: Namespace, name: Name }),
   z.object({
     op: z.literal('rollback'),
@@ -303,6 +315,79 @@ export interface RelatedGroup {
 
 export interface RelatedResult {
   groups: RelatedGroup[]
+}
+
+/** Quan hệ trong đồ thị topology (đọc theo chiều mũi tên: from → to). */
+export type TopologyEdgeType =
+  | 'owns'
+  | 'selects'
+  | 'routes'
+  | 'attaches'
+  | 'uses'
+  | 'mounts'
+  | 'runs-on'
+  | 'bound'
+  | 'scales'
+  | 'protects'
+  | 'isolates'
+  | 'identity'
+  | 'grants'
+  | 'subject'
+
+export interface TopologyNode {
+  /** `${kind}|${namespace}|${name}` (namespace rỗng với loại cluster). */
+  id: string
+  /** Id loại kiểu kubectl (pods, deployments.apps…); '' = nhóm gộp ("+12 pods"). */
+  kind: string
+  /** Pod, Deployment… */
+  kindLabel: string
+  name: string
+  namespace?: string
+  summary: string
+  tone: 'ok' | 'warn' | 'bad' | 'muted'
+  /** Được tham chiếu nhưng không tồn tại. */
+  missing?: boolean
+  /** Có thể mở rộng (xem quan hệ của chính nó) — đối tượng dùng chung không tự bung ra. */
+  expandable?: boolean
+}
+
+export interface TopologyEdge {
+  from: string
+  to: string
+  type: TopologyEdgeType
+  /** Chi tiết: "env", "volume", "image pull", "80→8080"… */
+  label?: string
+}
+
+export interface TopologyResult {
+  root: string
+  nodes: TopologyNode[]
+  edges: TopologyEdge[]
+  /** Phần không xem được (thiếu quyền…) / đã rút gọn. */
+  notes: string[]
+}
+
+/** Một quyền RBAC đã gộp: tài nguyên + động từ + nguồn (binding → role). */
+export interface RbacGrant {
+  /** "secrets", "pods/exec", "*"… (kèm apiGroup nếu khác core: "deployments.apps"). */
+  resource: string
+  verbs: string[]
+  /** Giới hạn theo tên (resourceNames) — rỗng = mọi đối tượng. */
+  names: string[]
+  /** Namespace áp dụng; '*' = toàn cluster. */
+  scope: string
+  via: string
+  risk: 'high' | 'medium' | 'low'
+  reason?: string
+}
+
+export interface RbacReach {
+  serviceAccount: string
+  namespace: string
+  bindings: { kind: string; name: string; namespace?: string; role: string; roleKind: string }[]
+  grants: RbacGrant[]
+  /** Không đọc được binding / role (thiếu quyền). */
+  error?: string
 }
 
 export interface OverviewResult {

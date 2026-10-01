@@ -98,7 +98,7 @@ export function podRefs(spec: Obj): PodRefs {
   return r
 }
 
-const podTone = (p: K8sObject): RelatedItem['tone'] => {
+export const podTone = (p: K8sObject): RelatedItem['tone'] => {
   const phase = s(o(p.status)['phase'])
   if (phase === 'Succeeded') return 'muted'
   const statuses = a(o(p.status)['containerStatuses'])
@@ -107,7 +107,7 @@ const podTone = (p: K8sObject): RelatedItem['tone'] => {
   return phase === 'Failed' ? 'bad' : 'warn'
 }
 
-function podSummary(p: K8sObject): string {
+export function podSummary(p: K8sObject): string {
   const statuses = a(o(p.status)['containerStatuses'])
   const ready = statuses.filter((c) => c['ready'] === true).length
   const waiting = statuses
@@ -118,7 +118,7 @@ function podSummary(p: K8sObject): string {
   return `${phase} · ${ready}/${statuses.length || a(o(p.spec)['containers']).length} ready${restarts ? ` · ${restarts} restarts` : ''}`
 }
 
-function serviceSummary(svc: K8sObject): string {
+export function serviceSummary(svc: K8sObject): string {
   const spec = o(svc.spec)
   const ports = a(spec['ports'])
     .map(
@@ -129,7 +129,7 @@ function serviceSummary(svc: K8sObject): string {
   return [s(spec['type']) ?? 'ClusterIP', s(spec['clusterIP']), ports].filter(Boolean).join(' · ')
 }
 
-function workloadSummary(
+export function workloadSummary(
   kindId: string,
   w: K8sObject
 ): { summary: string; tone: RelatedItem['tone'] } {
@@ -156,7 +156,7 @@ function workloadSummary(
   return { summary: `${ready}/${want} ready`, tone: ready >= want ? 'ok' : ready ? 'warn' : 'bad' }
 }
 
-const KIND_LABEL: Record<string, string> = {
+export const KIND_LABEL: Record<string, string> = {
   'deployments.apps': 'Deployment',
   'statefulsets.apps': 'StatefulSet',
   'daemonsets.apps': 'DaemonSet',
@@ -165,7 +165,7 @@ const KIND_LABEL: Record<string, string> = {
 }
 
 /** Liệt kê một loại trong namespace; không có quyền / API không có → null (nhóm báo lỗi riêng). */
-async function listOr(
+export async function listOr(
   client: KubeClient,
   path: string,
   signal?: AbortSignal
@@ -274,7 +274,7 @@ const ROUTE_KINDS = [
 ] as const
 
 /** Service phía sau một route (rules[].backendRefs, kind mặc định Service). */
-function routeBackends(route: K8sObject): Set<string> {
+export function routeBackends(route: K8sObject): Set<string> {
   const names = new Set<string>()
   for (const r of a(o(route.spec)['rules']))
     for (const b of a(r['backendRefs']))
@@ -597,7 +597,7 @@ export async function related(
 }
 
 /** Tên Service mà Ingress chuyển tới (rules + defaultBackend). */
-function backendServices(ing: K8sObject): Set<string> {
+export function backendServices(ing: K8sObject): Set<string> {
   const spec = o(ing.spec)
   const names = new Set<string>()
   const add = (b: unknown): void => {

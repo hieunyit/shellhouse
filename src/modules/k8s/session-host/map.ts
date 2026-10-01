@@ -1,5 +1,7 @@
+import { detectTech } from '../shared/map'
 import type {
   MapData,
+  MapGateway,
   MapHpa,
   MapPod,
   MapPolicy,
@@ -115,6 +117,7 @@ export async function mapData(
     pvcs,
     hpas,
     policies,
+    gateways,
     ...workloadLists
   ] = await Promise.all([
     namespaces.length
@@ -133,6 +136,7 @@ export async function mapData(
     listAll(client, '/api/v1', 'persistentvolumeclaims', namespaces, signal),
     listAll(client, '/apis/autoscaling/v2', 'horizontalpodautoscalers', namespaces, signal),
     listAll(client, '/apis/networking.k8s.io/v1', 'networkpolicies', namespaces, signal),
+    listAll(client, '/apis/gateway.networking.k8s.io/v1', 'gateways', namespaces, signal),
     ...WORKLOAD_KINDS.map((k) => listAll(client, k.path, k.plural, namespaces, signal))
   ])
 
@@ -200,11 +204,18 @@ export async function mapData(
           : k.id === 'jobs.batch'
             ? (row.cells['status'] ?? '')
             : `${ready}/${desired} ready`
+      const labels = (o(templateOf(k.id, w)['metadata'])['labels'] ?? {}) as Record<string, string>
+      const images = a(o(templateOf(k.id, w)['spec'])['containers']).map((c) => s(c['image']))
+      const tech = detectTech(images, { ...(w.metadata.labels ?? {}), ...labels }, w.metadata.name)
+      const meta = w.metadata.labels ?? {}
+      const helm = meta['app.kubernetes.io/managed-by'] === 'Helm' || 'helm.sh/chart' in meta
       workloads.push({
         kind: k.id,
         ns: w.metadata.namespace ?? '',
         name: w.metadata.name,
-        labels: (o(templateOf(k.id, w)['metadata'])['labels'] ?? {}) as Record<string, string>,
+        labels,
+        ...(tech ? { tech } : {}),
+        ...(helm ? { helm } : {}),
         ready,
         desired,
         status,
@@ -272,14 +283,18 @@ export async function mapData(
           for (const b of a(rule['backendRefs']))
             if ((s(b['kind']) || 'Service') === 'Service' && s(b['name']))
               backends.add(s(b['name']))
+        const ns = r.metadata.namespace ?? ''
         return {
           kind,
-          ns: r.metadata.namespace ?? '',
+          ns,
           name: r.metadata.name,
           hosts: (Array.isArray(spec['hostnames']) ? (spec['hostnames'] as unknown[]) : [])
             .map(s)
             .filter(Boolean),
-          backends: [...backends]
+          backends: [...backends],
+          parents: a(spec['parentRefs'])
+            .filter((p) => (s(p['kind']) || 'Gateway') === 'Gateway' && s(p['name']))
+            .map((p) => ({ ns: s(p['namespace']) || ns, name: s(p['name']) }))
         }
       })
     )
@@ -316,6 +331,18 @@ export async function mapData(
     selector: o(p.spec)['podSelector'] ?? {}
   }))
 
+  const mapGateways: MapGateway[] = gateways.items.map((g) => {
+    const spec = o(g.spec)
+    return {
+      ns: g.metadata.namespace ?? '',
+      name: g.metadata.name,
+      className: s(spec['gatewayClassName']),
+      listeners: a(spec['listeners'])
+        .map((l) => `${s(l['protocol'])}:${String(num(l['port']))}`)
+        .join(', ')
+    }
+  })
+
   const nodeReady = nodes.items.filter((n) =>
     a(o(n.status)['conditions']).some((c) => c['type'] === 'Ready' && c['status'] === 'True')
   ).length
@@ -332,6 +359,7 @@ export async function mapData(
     pvcs: mapPvcs,
     hpas: mapHpas,
     policies: mapPolicies,
+    gateways: mapGateways,
     nodes: { total: nodes.items.length, ready: nodeReady },
     truncated: [pods, rs, services, ...workloadLists].some((l) => l.truncated)
   }

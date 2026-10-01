@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Copy, Eye, MoreHorizontal, RefreshCw, Rows3, X } from 'lucide-react'
+import { Copy, Eye, Maximize2, Minimize2, MoreHorizontal, RefreshCw, Rows3, X } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
 import {
@@ -27,6 +27,14 @@ import {
   type K8sObject
 } from '../shared/resources'
 import { HAS_PODS, keyLabel, toMenu, type K8sAction } from './actions'
+import { TOPOLOGY_KINDS, TopologyOf } from './Topology'
+import {
+  MetricsOf,
+  POD_TEMPLATE_KINDS,
+  SecurityOf,
+  WORKLOAD_VIEW_KINDS,
+  WorkloadOverview
+} from './WorkloadView'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 type Obj = Record<string, unknown>
@@ -38,7 +46,17 @@ const s = (v: unknown): string =>
 
 const TONE: Record<string, Tone> = { ok: 'ok', warn: 'warn', bad: 'bad', muted: 'muted' }
 
-export type DetailTab = 'overview' | 'related' | 'pods' | 'data' | 'events' | 'yaml'
+export type DetailTab =
+  'overview' | 'topology' | 'related' | 'pods' | 'metrics' | 'security' | 'data' | 'events' | 'yaml'
+
+const WIDE_KEY = 'shellhouse.k8s.detail.wide'
+const loadWide = (): boolean => {
+  try {
+    return window.localStorage.getItem(WIDE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 /** Loại có tab Related (kiểu Rancher). */
 export const RELATED_KINDS = [
@@ -59,7 +77,10 @@ export const RELATED_KINDS = [
   'persistentvolumeclaims'
 ]
 
-/** Bảng chi tiết bên phải (kiểu Lens): tab Overview / Pods / Data / Events / YAML + thao tác. */
+/**
+ * Bảng chi tiết bên phải (kiểu Lens / K8Studio): Overview / Topology / Related / Pods / Metrics /
+ * Security / Data / Events / YAML + thao tác; phóng to được thành cả trang.
+ */
 export function Detail({
   kindId,
   obj,
@@ -71,7 +92,9 @@ export function Detail({
   onOpenPod,
   initialTab = 'overview',
   onNavigate,
-  onShowPods
+  onShowPods,
+  readOnly = false,
+  onNotify
 }: {
   kindId: string
   obj: K8sObject
@@ -85,18 +108,26 @@ export function Detail({
   onOpenPod: (pod: K8sObject) => void
   /** Tab mở sẵn (bấm đúp workload → Related, như Rancher). */
   initialTab?: DetailTab
-  /** Mở một tài nguyên liên quan (cùng namespace). */
-  onNavigate?: (kind: string, name: string) => void
+  /** Mở một tài nguyên liên quan (namespace mặc định = của đối tượng; loại cluster → không có). */
+  onNavigate?: (kind: string, name: string, namespace?: string) => void
   /** Xem pod của workload trong bảng chính (kiểu k9s). */
   onShowPods?: () => void
+  readOnly?: boolean
+  onNotify?: (text: string, tone?: 'danger') => void
 }): React.JSX.Element {
   const ns = obj.metadata.namespace
   const hasPods = HAS_PODS.includes(kindId) || kindId === 'nodes'
   const hasData = kindId === 'configmaps' || kindId === 'secrets'
   const hasRelated = RELATED_KINDS.includes(kindId) && Boolean(ns)
+  const hasTopology = TOPOLOGY_KINDS.has(kindId)
+  const hasTemplate = POD_TEMPLATE_KINDS.has(kindId) || kindId === 'pods'
+  const hasMetrics = POD_TEMPLATE_KINDS.has(kindId) && kindId !== 'cronjobs.batch'
   const [tab, setTab] = useState<DetailTab>(
-    initialTab === 'related' && !hasRelated ? 'overview' : initialTab
+    (initialTab === 'related' && !hasRelated) || (initialTab === 'topology' && !hasTopology)
+      ? 'overview'
+      : initialTab
   )
+  const [wide, setWide] = useState(loadWide)
   const { menu, open: openMenu } = useContextMenu()
   const primary = actions.filter((x) => !x.danger).slice(0, 3)
   const row = toRow(kindId, obj)
@@ -104,7 +135,7 @@ export function Detail({
   const statusText = row.cells['status'] ?? row.cells['ready'] ?? ''
 
   return (
-    <SidePanel storageKey="k8s-detail" testId="k8s-describe">
+    <SidePanel storageKey="k8s-detail" testId="k8s-describe" expanded={wide}>
       <div className="flex items-start gap-2 border-b border-line px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -118,6 +149,25 @@ export function Detail({
             {ns ? ` · ${ns}` : ''} · {age(Date.parse(obj.metadata.creationTimestamp ?? ''))} old
           </div>
         </div>
+        <button
+          type="button"
+          aria-label={wide ? 'Restore panel' : 'Expand to full width'}
+          title={wide ? 'Restore panel' : 'Expand to full width'}
+          className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+          data-testid="k8s-detail-wide"
+          onClick={() => {
+            setWide((w) => {
+              try {
+                window.localStorage.setItem(WIDE_KEY, w ? '0' : '1')
+              } catch {
+                // Bỏ qua.
+              }
+              return !w
+            })
+          }}
+        >
+          {wide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
         <button
           type="button"
           aria-label="More actions"
@@ -163,8 +213,13 @@ export function Detail({
         testIdPrefix="k8s-detail-tab"
         tabs={[
           { id: 'overview', label: 'Overview' },
+          ...(hasTopology ? [{ id: 'topology' as const, label: 'Topology' }] : []),
           ...(hasRelated ? [{ id: 'related' as const, label: 'Related' }] : []),
-          ...(hasPods ? [{ id: 'pods' as const, label: 'Pods' }] : []),
+          ...(hasPods && !WORKLOAD_VIEW_KINDS.has(kindId)
+            ? [{ id: 'pods' as const, label: 'Pods' }]
+            : []),
+          ...(hasMetrics ? [{ id: 'metrics' as const, label: 'Metrics' }] : []),
+          ...(hasTemplate ? [{ id: 'security' as const, label: 'Security' }] : []),
           ...(hasData
             ? [
                 {
@@ -178,9 +233,41 @@ export function Detail({
           { id: 'yaml', label: 'YAML' }
         ]}
       />
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div
+        className={cx(
+          'min-h-0 flex-1 p-3',
+          tab === 'topology' ? 'flex flex-col overflow-hidden' : 'overflow-auto'
+        )}
+      >
         {tab === 'overview' && (
-          <Overview kindId={kindId} obj={obj} usage={usage} nodeUsage={nodeUsage} />
+          <Overview
+            kindId={kindId}
+            obj={obj}
+            usage={usage}
+            nodeUsage={nodeUsage}
+            request={request}
+            readOnly={readOnly}
+            onOpenPod={onOpenPod}
+            {...(onNavigate ? { onNavigate } : {})}
+            {...(onNotify ? { onNotify } : {})}
+          />
+        )}
+        {tab === 'topology' && (
+          <TopologyOf
+            kindId={kindId}
+            obj={obj}
+            request={request}
+            {...(onNavigate ? { onNavigate } : {})}
+          />
+        )}
+        {tab === 'metrics' && <MetricsOf kindId={kindId} obj={obj} request={request} />}
+        {tab === 'security' && (
+          <SecurityOf
+            kindId={kindId}
+            obj={obj}
+            request={request}
+            {...(onNavigate ? { onNavigate } : {})}
+          />
         )}
         {tab === 'related' && (
           <RelatedOf
@@ -354,12 +441,22 @@ function Overview({
   kindId,
   obj,
   usage,
-  nodeUsage
+  nodeUsage,
+  request,
+  readOnly,
+  onOpenPod,
+  onNavigate,
+  onNotify
 }: {
   kindId: string
   obj: K8sObject
   usage: Usage[] | null
   nodeUsage: Usage | null
+  request: Request
+  readOnly: boolean
+  onOpenPod: (pod: K8sObject) => void
+  onNavigate?: (kind: string, name: string, namespace?: string) => void
+  onNotify?: (text: string, tone?: 'danger') => void
 }): React.JSX.Element {
   const spec = o(obj.spec)
   const status = o(obj.status)
@@ -421,7 +518,24 @@ function Overview({
                     {st.text}
                   </Pill>
                 ],
-                ['Node', s(spec['nodeName']) || '—'],
+                [
+                  'Node',
+                  spec['nodeName'] && onNavigate ? (
+                    <button
+                      key="n"
+                      type="button"
+                      className="text-left hover:text-accent hover:underline"
+                      data-testid="k8s-pod-node-link"
+                      onClick={() => {
+                        onNavigate('nodes', s(spec['nodeName']))
+                      }}
+                    >
+                      {s(spec['nodeName'])}
+                    </button>
+                  ) : (
+                    s(spec['nodeName']) || '—'
+                  )
+                ],
                 ['Pod IP', s(status['podIP']) || '—'],
                 ['QoS', s(status['qosClass']) || '—'],
                 ['Service acct', s(spec['serviceAccountName']) || 'default'],
@@ -464,15 +578,26 @@ function Overview({
     case 'deployments.apps':
     case 'statefulsets.apps':
     case 'daemonsets.apps':
+      return (
+        <WorkloadOverview
+          kindId={kindId}
+          obj={obj}
+          request={request}
+          readOnly={readOnly}
+          onOpenPod={onOpenPod}
+          {...(onNavigate ? { onNavigate } : {})}
+          {...(onNotify ? { onNotify } : {})}
+          common={
+            <>
+              <Conditions list={a(status['conditions'])} />
+              {common}
+            </>
+          }
+        />
+      )
     case 'replicasets.apps': {
-      const want =
-        kindId === 'daemonsets.apps'
-          ? Number(status['desiredNumberScheduled'] ?? 0)
-          : Number(spec['replicas'] ?? 0)
-      const ready =
-        kindId === 'daemonsets.apps'
-          ? Number(status['numberReady'] ?? 0)
-          : Number(status['readyReplicas'] ?? 0)
+      const want = Number(spec['replicas'] ?? 0)
+      const ready = Number(status['readyReplicas'] ?? 0)
       const template = o(o(spec['template'])['spec'])
       return (
         <>
