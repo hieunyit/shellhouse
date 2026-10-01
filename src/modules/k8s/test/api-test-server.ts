@@ -48,6 +48,11 @@ export interface ApiTestServer {
   remove(plural: string, namespace: string | undefined, name: string): void
   /** Giả cluster không có metrics-server. */
   disableMetrics(): void
+  /**
+   * Cài Caretta giả: một pod agent (DaemonSet) xuất `caretta_links_observed` tăng theo thời gian.
+   * forbidden = có agent nhưng không được đọc metric (pods/proxy).
+   */
+  enableCaretta(options?: { forbidden?: boolean }): void
   get(plural: string, namespace: string | undefined, name: string): Obj | undefined
   list(plural: string): Obj[]
   /** Làm các watch sau nhận 410 Gone. */
@@ -400,6 +405,25 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
   const watchers = new Set<{ plural: string; namespace: string | undefined; res: ServerResponse }>()
   let expired = false
   let metricsDisabled = false
+  let caretta: { forbidden: boolean; start: number } | null = null
+  /** Kết nối giả (byte / giây): Internet → Service web; web → pod tool; web → DB bên ngoài. */
+  const CARETTA_LINKS = [
+    {
+      labels:
+        'client_kind="external",client_name="203.0.113.7",client_namespace="",server_kind="Service",server_name="web",server_namespace="shop",server_port="80"',
+      rate: 51_200
+    },
+    {
+      labels:
+        'client_kind="Deployment",client_name="web",client_namespace="shop",server_kind="Pod",server_name="tool",server_namespace="default",server_port="8080"',
+      rate: 307_200
+    },
+    {
+      labels:
+        'client_kind="Deployment",client_name="web",client_namespace="shop",server_kind="external",server_name="db.example.com",server_namespace="",server_port="5432"',
+      rate: 2_097_152
+    }
+  ]
 
   const kindOf: Record<string, { apiVersion: string; kind: string; namespaced: boolean }> = {
     namespaces: { apiVersion: 'v1', kind: 'Namespace', namespaced: false },
@@ -574,6 +598,26 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         const attrs = body.spec.resourceAttributes
         const allowed = !(attrs.resource === 'secrets' && attrs.namespace === 'restricted')
         return json(res, 201, { status: { allowed } })
+      }
+      // Caretta: proxy tới /metrics của pod agent.
+      if (/^\/api\/v1\/namespaces\/caretta\/pods\/caretta-agent-1:7117\/proxy\/metrics$/.test(p)) {
+        if (!caretta) return json(res, 404, statusBody(404, 'NotFound', 'no caretta'))
+        if (caretta.forbidden)
+          return json(res, 403, statusBody(403, 'Forbidden', 'cannot get pods/proxy'))
+        const secs = (Date.now() - caretta.start) / 1000 + 60
+        const body = [
+          '# HELP caretta_links_observed total bytes_sent value of links observed by caretta',
+          '# TYPE caretta_links_observed gauge',
+          ...CARETTA_LINKS.flatMap((l, i) => [
+            `caretta_links_observed{link_id="${String(i)}",${l.labels},role="1"} ${String(Math.round(l.rate * secs))}`,
+            // Cùng kết nối thấy từ phía server (ít hơn chút) — không được đếm hai lần.
+            `caretta_links_observed{link_id="${String(i)}",${l.labels},role="2"} ${String(Math.round(l.rate * secs * 0.98))}`
+          ]),
+          'go_goroutines 12'
+        ].join('\n')
+        res.writeHead(200, { 'Content-Type': 'text/plain' })
+        res.end(body)
+        return true
       }
       const m =
         /^\/(?:api\/v1|apis\/([^/]+)\/v[0-9a-z]+)(?:\/namespaces\/([^/]+))?\/([a-z]+)(?:\/([^/]+))?(?:\/([a-z]+))?$/.exec(
@@ -884,6 +928,35 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       if (!obj) return
       table?.delete(key)
       notify(plural, 'DELETED', obj)
+    },
+    enableCaretta: (options = {}) => {
+      caretta = { forbidden: options.forbidden ?? false, start: Date.now() }
+      const pods = store.get('pods')
+      if (!store.get('namespaces')?.has('caretta'))
+        store
+          .get('namespaces')
+          ?.set(
+            'caretta',
+            make('v1', 'Namespace', 'caretta', undefined, { status: { phase: 'Active' } })
+          )
+      pods?.set(
+        'caretta/caretta-agent-1',
+        make('v1', 'Pod', 'caretta-agent-1', 'caretta', {
+          spec: {
+            nodeName: 'node-1',
+            containers: [
+              {
+                name: 'caretta',
+                image: 'quay.io/groundcover/caretta:v0.0.4',
+                ports: [{ name: 'prom-metric', containerPort: 7117 }]
+              }
+            ]
+          },
+          status: RUNNING
+        })
+      )
+      const agent = pods?.get('caretta/caretta-agent-1')
+      if (agent) agent.metadata.labels = { 'app.kubernetes.io/name': 'caretta' }
     },
     disableMetrics: () => {
       metricsDisabled = true

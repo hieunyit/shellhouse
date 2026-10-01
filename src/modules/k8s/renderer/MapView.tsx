@@ -12,6 +12,18 @@ import {
   SquareTerminal,
   X
 } from 'lucide-react'
+import {
+  Background,
+  BackgroundVariant,
+  MarkerType,
+  MiniMap,
+  ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
+  useStore,
+  type Viewport
+} from '@xyflow/react'
+import '@xyflow/react/dist/base.css'
 import { cx } from '../../../renderer/src/components/ui'
 import { Heading, Pill, SidePanel } from '../../../renderer/src/components/panels'
 import { cleanError } from '../../../renderer/src/lib/format'
@@ -27,6 +39,27 @@ import {
   type MapTone
 } from '../shared/map'
 import type { K8sOp } from '../shared/ops'
+import {
+  BANDS,
+  WORKLOAD_KIND_ID,
+  byPair,
+  formatRate,
+  type TrafficPeer,
+  type TrafficRate
+} from '../shared/traffic'
+import {
+  EDGE_TYPES,
+  MapContext,
+  NEAR_ZOOM,
+  NODE_TYPES,
+  sides,
+  type Band,
+  type MapCtx,
+  type MapFlowEdge,
+  type MapFlowNode
+} from './MapFlow'
+import { TechIcon } from './icons'
+import { useTraffic, type TrafficState } from './useTraffic'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 
@@ -36,17 +69,8 @@ export interface MapRef {
   name: string
 }
 
-interface Viewport {
-  /** Dịch (px màn hình) và tỉ lệ: màn hình = thế giới × scale + (x, y). */
-  x: number
-  y: number
-  scale: number
-}
-
-/** Mức chi tiết theo tỉ lệ (zoom). */
-const LOD = { cards: 0.34, pills: 0.34, edges: 0.34, cardText: 0.34, pods: 0.42, pillText: 0.4 }
-const MIN_SCALE = 0.02
-const MAX_SCALE = 3
+const MIN_ZOOM = 0.02
+const MAX_ZOOM = 3
 const REFRESH_MS = 20_000
 const OPTIONS_KEY = 'shellhouse.k8s.map'
 
@@ -54,21 +78,12 @@ const OPTIONS_KEY = 'shellhouse.k8s.map'
 const savedViewports = new Map<string, Viewport>()
 
 interface Palette {
-  canvas: string
-  surface: string
-  subtle: string
-  line: string
-  lineStrong: string
-  fg: string
-  muted: string
-  faint: string
   accent: string
-  ok: string
+  muted: string
   warn: string
-  bad: string
-  okSoft: string
-  warnSoft: string
-  badSoft: string
+  faint: string
+  traffic: string
+  trafficHot: string
 }
 
 function readPalette(): Palette {
@@ -76,48 +91,31 @@ function readPalette(): Palette {
   const v = (name: string, fallback: string): string =>
     css.getPropertyValue(name).trim() || fallback
   return {
-    canvas: v('--sh-canvas', '#f4f5f7'),
-    surface: v('--sh-surface', '#ffffff'),
-    subtle: v('--sh-subtle', '#f0f2f5'),
-    line: v('--sh-line', '#e2e5ea'),
-    lineStrong: v('--sh-line-strong', '#cdd2d9'),
-    fg: v('--sh-fg', '#1a1d21'),
-    muted: v('--sh-muted', '#4b5360'),
-    faint: v('--sh-faint', '#606977'),
     accent: v('--sh-accent', '#0f766e'),
-    ok: v('--sh-success', '#137a3f'),
+    muted: v('--sh-muted', '#4b5360'),
     warn: v('--sh-warning', '#a15c07'),
-    bad: v('--sh-danger', '#c42e17'),
-    okSoft: v('--sh-success-soft', '#e5f5ec'),
-    warnSoft: v('--sh-warning-soft', '#fdf3e2'),
-    badSoft: v('--sh-danger-soft', '#fdecea')
+    faint: v('--sh-faint', '#606977'),
+    traffic: '#2f7de1',
+    trafficHot: '#e8590c'
   }
 }
 
-const toneColor = (p: Palette, t: MapTone): string =>
-  t === 'bad' ? p.bad : t === 'warn' ? p.warn : t === 'ok' ? p.ok : p.faint
+interface Options {
+  hideSystem: boolean
+  pods: boolean
+  edges: boolean
+  traffic: boolean
+}
 
-function loadOptions(): { hideSystem: boolean; pods: boolean; edges: boolean } {
+function loadOptions(): Options {
+  const base: Options = { hideSystem: true, pods: true, edges: true, traffic: true }
   try {
     const raw = window.localStorage.getItem(OPTIONS_KEY)
-    if (raw) return { hideSystem: true, pods: true, edges: true, ...(JSON.parse(raw) as object) }
+    if (raw) return { ...base, ...(JSON.parse(raw) as Partial<Options>) }
   } catch {
     // Bỏ qua.
   }
-  return { hideSystem: true, pods: true, edges: true }
-}
-
-/** Thứ tự vẽ / bấm: vùng dưới cùng, pod trên cùng. */
-const Z: Record<MapNode['kind'], number> = {
-  region: 0,
-  namespace: 1,
-  gateway: 2,
-  route: 2,
-  service: 2,
-  pvc: 2,
-  policy: 2,
-  workload: 3,
-  pod: 4
+  return base
 }
 
 const KIND_TITLE: Record<MapNode['kind'], string> = {
@@ -132,15 +130,17 @@ const KIND_TITLE: Record<MapNode['kind'], string> = {
   policy: 'NetworkPolicy'
 }
 
-const isPill = (k: MapNode['kind']): boolean =>
-  k === 'route' || k === 'service' || k === 'pvc' || k === 'gateway' || k === 'policy'
-
-const PILL_ICON: Partial<Record<MapNode['kind'], string>> = {
-  gateway: '⇉',
-  route: '⇢',
-  service: '◆',
-  pvc: '▤',
-  policy: '◇'
+/** Thứ tự chồng: vùng dưới cùng, thẻ trên cùng. */
+const Z: Record<MapNode['kind'], number> = {
+  region: 0,
+  namespace: 1,
+  gateway: 2,
+  route: 2,
+  service: 2,
+  pvc: 2,
+  policy: 2,
+  workload: 3,
+  pod: 4
 }
 
 function routeTitle(kind: string): string {
@@ -150,12 +150,50 @@ function routeTitle(kind: string): string {
   return 'Route'
 }
 
+const titleOf = (n: MapNode): string =>
+  n.kind === 'route'
+    ? routeTitle(n.ref?.kind ?? '')
+    : n.kind === 'workload' && n.ref
+      ? workloadKindLabel(n.ref.kind)
+      : KIND_TITLE[n.kind]
+
+const peerLabel = (p: TrafficPeer): string =>
+  p.kind === 'external' || !p.ns ? `${p.name} (${p.kind || 'external'})` : `${p.ns}/${p.name}`
+
 /**
- * Bản đồ cluster (kiểu "Google Maps cho Kubernetes"): vùng → namespace → workload → pod, cùng
- * route → service → workload → PVC. Vẽ bằng canvas, chỉ phần đang thấy, chi tiết theo mức zoom —
- * cluster hàng nghìn workload vẫn mượt. Dữ liệu tự làm mới khi tab đang mở.
+ * Bản đồ cluster (kiểu "Google Maps cho Kubernetes") trên React Flow: vùng → namespace → workload
+ * → pod, cùng gateway → route → service → workload → PVC, NetworkPolicy, và đường traffic live từ
+ * Caretta (độ dày theo băng cố định). Chi tiết theo mức zoom; chỉ vẽ phần đang thấy.
  */
-export function MapView({
+export function MapView(props: {
+  tabId: string
+  request: Request
+  namespaces: readonly string[]
+  active: boolean
+  onOpen: (ref: MapRef) => void
+  onLogs: (ref: MapRef, labels: Record<string, string> | null) => void
+  onShell: (ref: MapRef) => void
+}): React.JSX.Element {
+  return (
+    <ReactFlowProvider>
+      <MapInner {...props} />
+    </ReactFlowProvider>
+  )
+}
+
+function ZoomLabel(): React.JSX.Element {
+  const pct = useStore((s) => Math.round(s.transform[2] * 100))
+  return (
+    <span
+      className="flex w-12 items-center justify-center border-x border-line text-[11px] text-faint tabular-nums"
+      data-testid="k8s-map-zoom"
+    >
+      {pct}%
+    </span>
+  )
+}
+
+function MapInner({
   tabId,
   request,
   namespaces,
@@ -168,11 +206,11 @@ export function MapView({
   request: Request
   namespaces: readonly string[]
   active: boolean
-  /** Mở tài nguyên trong bảng (chọn + chi tiết). */
   onOpen: (ref: MapRef) => void
   onLogs: (ref: MapRef, labels: Record<string, string> | null) => void
   onShell: (ref: MapRef) => void
 }): React.JSX.Element {
+  const rf = useReactFlow<MapFlowNode, MapFlowEdge>()
   const [data, setData] = useState<MapData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -182,24 +220,18 @@ export function MapView({
   const [problemsOnly, setProblemsOnly] = useState(false)
   const [impactMode, setImpactMode] = useState(false)
   const [selectedRaw, setSelected] = useState<string | null>(null)
-  const [dragging, setDragging] = useState(false)
-  const [wrapWidth, setWrapWidth] = useState(0)
-  const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [hover, setHover] = useState<{ id: string; x: number; y: number; w: number } | null>(null)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
-  const [zoomPct, setZoomPct] = useState(100)
+  const [band, setBand] = useState<Band>(() =>
+    (savedViewports.get(tabId)?.zoom ?? 0.5) >= NEAR_ZOOM ? 'near' : 'far'
+  )
+  const [palette, setPalette] = useState<Palette>(readPalette)
   const wrapRef = useRef<HTMLDivElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const miniRef = useRef<HTMLCanvasElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
-  const view = useRef<Viewport>(savedViewports.get(tabId) ?? { x: 40, y: 40, scale: 0.5 })
   const fitted = useRef(savedViewports.has(tabId))
-  const dirty = useRef(true)
-  const frame = useRef<number | null>(null)
-  const palette = useRef<Palette | null>(null)
-  const drag = useRef<{ x: number; y: number; vx: number; vy: number; moved: boolean } | null>(null)
-  const anim = useRef<number | null>(null)
   const nsKey = namespaces.join(',')
+  const traffic = useTraffic(request, active && options.traffic)
 
   // ——— Dữ liệu ———
   useEffect(() => {
@@ -230,6 +262,26 @@ export function MapView({
     }
   }, [request, nsKey, active, tick])
 
+  // Theme đổi → đọc lại màu (cạnh vẽ bằng màu cụ thể).
+  useEffect(() => {
+    const mo = new MutationObserver(() => {
+      setPalette(readPalette())
+    })
+    mo.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme', 'style']
+    })
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onScheme = (): void => {
+      setPalette(readPalette())
+    }
+    mq.addEventListener('change', onScheme)
+    return () => {
+      mo.disconnect()
+      mq.removeEventListener('change', onScheme)
+    }
+  }, [])
+
   const layout = useMemo<MapLayout | null>(
     () => (data ? layoutMap(data, { hideSystem: options.hideSystem }) : null),
     [data, options.hideSystem]
@@ -237,23 +289,65 @@ export function MapView({
   const index = useMemo(() => {
     const byId = new Map<string, MapNode>()
     const edgesOf = new Map<string, MapEdge[]>()
+    const podsOf = new Map<string, MapNode[]>()
     const ordered = [...(layout?.nodes ?? [])].sort((a, b) => Z[a.kind] - Z[b.kind])
-    for (const n of ordered) byId.set(n.id, n)
+    for (const n of ordered) {
+      byId.set(n.id, n)
+      if (n.kind === 'pod' && n.parent) podsOf.set(n.parent, [...(podsOf.get(n.parent) ?? []), n])
+    }
     for (const e of layout?.edges ?? []) {
       edgesOf.set(e.from, [...(edgesOf.get(e.from) ?? []), e])
       edgesOf.set(e.to, [...(edgesOf.get(e.to) ?? []), e])
     }
-    return { byId, edgesOf, ordered }
+    return { byId, edgesOf, ordered, podsOf }
   }, [layout])
 
   // Mục đang chọn biến mất sau khi làm mới (pod bị thay…) → coi như không chọn.
   const selected = selectedRaw && index.byId.has(selectedRaw) ? selectedRaw : null
 
-  // Liên quan tới mục đang chọn / trỏ: chính nó, cha, con, và mọi thứ nối qua cạnh (2 bước).
+  // Đổi mục chọn → tắt blast radius (bật lại khi cần).
+  const [impactFor, setImpactFor] = useState<string | null>(null)
+  if (impactFor !== selected) {
+    setImpactFor(selected)
+    if (impactMode) setImpactMode(false)
+  }
+
+  // ——— Traffic: peer Caretta → node trên bản đồ ———
+  const peerNode = useCallback(
+    (p: TrafficPeer): string | null => {
+      const kind = WORKLOAD_KIND_ID[p.kind]
+      if (kind) {
+        const id = `w:${kind}:${p.ns}/${p.name}`
+        return index.byId.has(id) ? id : null
+      }
+      if (p.kind === 'Pod') return index.byId.get(`p:${p.ns}/${p.name}`)?.parent ?? null
+      return null
+    },
+    [index]
+  )
+  const trafficEdges = useMemo(() => {
+    const out: { from: string; to: string; rate: number }[] = []
+    for (const r of byPair(traffic.rates)) {
+      const a = peerNode(r.client)
+      const b = peerNode(r.server)
+      if (!a || !b || a === b) continue
+      out.push({ from: a, to: b, rate: r.rate })
+    }
+    return out
+  }, [traffic.rates, peerNode])
+
+  // Liên quan tới mục đang chọn / trỏ: chính nó, cha, con, và mọi thứ nối qua cạnh (3 bước).
   const focusId = selected ?? hover?.id ?? null
   const related = useMemo(() => {
     const set = new Set<string>()
     if (!focusId) return set
+    const node = index.byId.get(focusId)
+    if (!node || node.kind === 'namespace' || node.kind === 'region') return set
+    if (impactMode && selected && layout && focusId === selected) {
+      for (const id of impactOf(layout, selected)) set.add(id)
+      set.add(selected)
+      return set
+    }
     const visit = (id: string, depth: number): void => {
       set.add(id)
       if (depth === 0) return
@@ -262,20 +356,17 @@ export function MapView({
         if (!set.has(other)) visit(other, depth - 1)
       }
     }
-    const node = index.byId.get(focusId)
-    // Namespace / vùng: không làm mờ gì (chỉ viền chọn).
-    if (!node || node.kind === 'namespace' || node.kind === 'region') return set
-    // Blast radius: chỉ những gì bị ảnh hưởng khi mục đang chọn đổi / hỏng.
-    if (impactMode && selected && layout && focusId === selected) {
-      for (const id of impactOf(layout, selected)) set.add(id)
-      set.add(selected)
-      return set
+    const start = node.kind === 'pod' && node.parent ? node.parent : focusId
+    visit(start, 3)
+    // Traffic trực tiếp của workload đang xem.
+    for (const t of trafficEdges) {
+      if (t.from === start) set.add(t.to)
+      if (t.to === start) set.add(t.from)
     }
-    // Pod → nhìn theo workload của nó.
-    visit(node.kind === 'pod' && node.parent ? node.parent : focusId, 3)
     set.add(focusId)
+    for (const p of index.podsOf.get(start) ?? []) set.add(p.id)
     return set
-  }, [focusId, index, impactMode, selected, layout])
+  }, [focusId, index, impactMode, selected, layout, trafficEdges])
 
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -290,465 +381,112 @@ export function MapView({
       .slice(0, 12)
   }, [query, index])
 
-  const invalidate = useCallback(() => {
-    dirty.current = true
-  }, [])
-
-  // ——— Vẽ ———
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current
-    const wrap = wrapRef.current
-    if (!canvas || !wrap) return
-    const dpr = window.devicePixelRatio || 1
-    const W = wrap.clientWidth
-    const H = wrap.clientHeight
-    if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
-      canvas.width = Math.round(W * dpr)
-      canvas.height = Math.round(H * dpr)
-      canvas.style.width = `${W}px`
-      canvas.style.height = `${H}px`
-    }
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const p = (palette.current ??= readPalette())
-    const { x: tx, y: ty, scale: s } = view.current
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.fillStyle = p.canvas
-    ctx.fillRect(0, 0, W, H)
-    if (!layout) return
-    // Vùng thế giới đang thấy (+ lề) — chỉ vẽ phần này.
-    const wx0 = -tx / s - 50
-    const wy0 = -ty / s - 50
-    const wx1 = (W - tx) / s + 50
-    const wy1 = (H - ty) / s + 50
-    const visible = (n: MapNode): boolean =>
-      n.x < wx1 && n.x + n.w > wx0 && n.y < wy1 && n.y + n.h > wy0
-    const sx = (x: number): number => x * s + tx
-    const sy = (y: number): number => y * s + ty
-    const dim = (n: MapNode): boolean =>
-      (problemsOnly &&
-        (n.kind === 'workload' || n.kind === 'pod' || n.kind === 'pvc') &&
-        n.tone === 'ok') ||
-      (related.size > 0 && n.kind !== 'region' && n.kind !== 'namespace' && !related.has(n.id))
-    const roundRect = (x: number, y: number, w: number, h: number, r: number): void => {
-      ctx.beginPath()
-      ctx.roundRect(sx(x), sy(y), w * s, h * s, Math.min(r * s, (w * s) / 2, (h * s) / 2))
-    }
-    const text = (
-      str: string,
-      x: number,
-      y: number,
-      maxW: number,
-      size: number,
-      color: string,
-      weight = 400,
-      align: CanvasTextAlign = 'left'
-    ): void => {
-      if (maxW < 12 || size < 7) return
-      ctx.font = `${weight} ${size}px ui-sans-serif, system-ui, sans-serif`
-      ctx.fillStyle = color
-      ctx.textAlign = align
-      ctx.textBaseline = 'middle'
-      let t = str
-      if (ctx.measureText(t).width > maxW) {
-        while (t.length > 1 && ctx.measureText(`${t}…`).width > maxW) t = t.slice(0, -1)
-        t = `${t}…`
-      }
-      ctx.fillText(t, x, y)
-    }
-
-    /** Huy hiệu công nghệ: vòng tròn màu + 2 chữ. */
-    const badge = (
-      x: number,
-      y: number,
-      r: number,
-      info: { short: string; color: string }
-    ): void => {
-      ctx.beginPath()
-      ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.fillStyle = info.color
-      ctx.fill()
-      if (r >= 6) {
-        ctx.font = `700 ${Math.round(r * 0.95)}px ui-sans-serif, system-ui, sans-serif`
-        ctx.fillStyle = '#ffffff'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        ctx.fillText(info.short, x, y + 0.5)
-      }
-    }
-
-    // 1) Vùng + namespace.
+  // ——— Node / cạnh cho React Flow ———
+  const nodes = useMemo<MapFlowNode[]>(() => {
+    const out: MapFlowNode[] = []
     for (const n of index.ordered) {
-      if (n.kind !== 'region' && n.kind !== 'namespace') continue
-      if (!visible(n)) continue
-      if (n.kind === 'region') {
-        roundRect(n.x, n.y, n.w, n.h, 18)
-        ctx.fillStyle = p.subtle
-        ctx.fill()
-        ctx.lineWidth = 1
-        ctx.strokeStyle = p.line
-        ctx.stroke()
-        // Nhãn vùng vừa phần đầu vùng (44 đơn vị) — không đè lên tên namespace bên dưới.
-        const head = 44 * s
-        text(
-          n.label.toUpperCase(),
-          sx(n.x) + Math.max(8, 24 * s),
-          sy(n.y) + head * 0.5,
-          n.w * s - 16,
-          Math.max(8, Math.min(16, head * 0.42)),
-          p.muted,
-          600
-        )
-        continue
-      }
-      roundRect(n.x, n.y, n.w, n.h, 12)
-      ctx.fillStyle = p.surface
-      ctx.fill()
-      const sel = selected === n.id
-      ctx.lineWidth = sel ? 2.5 : n.tone === 'bad' || n.tone === 'warn' ? 1.5 : 1
-      ctx.strokeStyle = sel
-        ? p.accent
-        : n.tone === 'bad'
-          ? p.bad
-          : n.tone === 'warn'
-            ? p.warn
-            : p.lineStrong
-      ctx.stroke()
-      if (s < LOD.cards) {
-        // Nhìn xa: tên to ở giữa + số liệu + thanh tình trạng.
-        const cx0 = sx(n.x + n.w / 2)
-        const cy0 = sy(n.y + n.h / 2)
-        const fs = Math.max(9, Math.min(16, n.w * s * 0.09))
-        text(n.label, cx0, cy0 - fs * 0.6, n.w * s - 12, fs, p.fg, 600, 'center')
-        text(n.sub, cx0, cy0 + fs * 0.7, n.w * s - 12, Math.max(8, fs - 3), p.faint, 400, 'center')
-        const st = n.stats
-        if (st && st.workloads > 0 && n.w * s > 30) {
-          const bw = n.w * s - 16
-          const bx = sx(n.x) + 8
-          const by = sy(n.y + n.h) - 10
-          const okN = Math.max(0, st.workloads - st.warn - st.bad)
-          let x = bx
-          for (const [count, color] of [
-            [okN, p.ok],
-            [st.warn, p.warn],
-            [st.bad, p.bad]
-          ] as const) {
-            const w = (count / st.workloads) * bw
-            ctx.fillStyle = color
-            ctx.fillRect(x, by, w, 4)
-            x += w
-          }
-        }
-        // Công nghệ chính trong namespace (huy hiệu dưới tên).
-        if (n.techs?.length && n.w * s > 60) {
-          const r = Math.max(5, Math.min(11, fs * 0.6))
-          const total = n.techs.length * (2 * r + 4) - 4
-          n.techs.forEach((id, i) => {
-            const info = TECH[id]
-            if (!info) return
-            badge(cx0 - total / 2 + r + i * (2 * r + 4), cy0 + fs * 0.7 + r + 8, r, info)
-          })
-        }
-      } else
-        text(n.label, sx(n.x + 16), sy(n.y + 18), n.w * s - 32, Math.min(15, 9 + 8 * s), p.fg, 600)
+      if (n.kind === 'pod') continue
+      if (band === 'far' && n.kind !== 'region' && n.kind !== 'namespace') continue
+      out.push({
+        id: n.id,
+        type: n.kind,
+        position: { x: n.x, y: n.y },
+        width: n.w,
+        height: n.h,
+        zIndex: Z[n.kind],
+        data: { node: n },
+        draggable: false,
+        selectable: false,
+        connectable: false
+      })
     }
-    if (s < LOD.cards) return
+    return out
+  }, [index, band])
 
-    // 2) Cạnh (dưới thẻ): route → service → workload → PVC.
-    if (options.edges && s >= LOD.edges) {
+  const edges = useMemo<MapFlowEdge[]>(() => {
+    const out: MapFlowEdge[] = []
+    const arrow = (color: string): MapFlowEdge['markerEnd'] => ({
+      type: MarkerType.ArrowClosed,
+      color,
+      width: 14,
+      height: 14
+    })
+    if (band === 'near' && options.edges && layout)
       for (const e of layout.edges) {
-        const a = index.byId.get(e.from)
-        const b = index.byId.get(e.to)
-        if (!a || !b) continue
-        if (
-          !visible({
-            ...a,
-            x: Math.min(a.x, b.x),
-            y: Math.min(a.y, b.y),
-            w: Math.abs(a.x - b.x) + a.w + b.w,
-            h: Math.abs(a.y - b.y) + a.h + b.h
-          })
-        )
-          continue
-        const hot = related.size > 0 && related.has(e.from) && related.has(e.to)
+        const hot = related.has(e.from) && related.has(e.to)
         // Policy áp lên cả namespace → rất nhiều cạnh; chỉ vẽ khi đang xem quan hệ.
         if (e.kind === 'policy' && !hot) continue
-        if (related.size > 0 && !hot) ctx.globalAlpha = 0.12
-        else ctx.globalAlpha = hot ? 1 : 0.45
-        const ax = sx(a.x + a.w / 2)
-        const ay = sy(a.y + a.h)
-        const bx = sx(b.x + b.w / 2)
-        const by = sy(e.kind === 'storage' ? b.y : b.y)
-        const fromBelow = b.y >= a.y + a.h
-        const y0 = fromBelow ? ay : sy(a.y)
-        ctx.beginPath()
-        ctx.moveTo(ax, y0)
-        const mid = (y0 + by) / 2
-        ctx.bezierCurveTo(ax, mid, bx, mid, bx, fromBelow ? by : sy(b.y + b.h))
-        ctx.lineWidth = hot ? 2 : 1.2
-        ctx.strokeStyle = e.kind === 'storage' ? p.muted : e.kind === 'policy' ? p.warn : p.accent
-        ctx.setLineDash(e.kind === 'storage' ? [4, 3] : e.kind === 'policy' ? [6, 3] : [])
-        ctx.stroke()
-        ctx.setLineDash([])
+        const color =
+          e.kind === 'storage' ? palette.muted : e.kind === 'policy' ? palette.warn : palette.accent
+        out.push({
+          id: `${e.kind}:${e.from}>${e.to}`,
+          source: e.from,
+          target: e.to,
+          sourceHandle: 'sb',
+          targetHandle: 'tt',
+          type: 'map',
+          zIndex: 2,
+          data: { kind: e.kind, color },
+          ...(e.kind === 'storage' || e.kind === 'policy' ? {} : { markerEnd: arrow(color) })
+        })
       }
-      ctx.globalAlpha = 1
-    }
-
-    // 3) Route / service / PVC (viên thuốc).
-    if (s >= LOD.pills)
-      for (const n of index.ordered) {
-        if (!isPill(n.kind)) continue
-        if (!visible(n)) continue
-        ctx.globalAlpha = dim(n) ? 0.25 : 1
-        roundRect(n.x, n.y, n.w, n.h, n.kind === 'pvc' || n.kind === 'policy' ? 4 : n.h / 2)
-        ctx.fillStyle = n.kind === 'pvc' || n.kind === 'policy' ? p.subtle : p.surface
-        ctx.fill()
-        ctx.lineWidth = selected === n.id ? 2.5 : 1.2
-        ctx.strokeStyle =
-          selected === n.id
-            ? p.accent
-            : n.kind === 'route' || n.kind === 'gateway'
-              ? p.accent
-              : n.kind === 'pvc'
-                ? toneColor(p, n.tone)
-                : n.kind === 'policy'
-                  ? p.warn
-                  : p.lineStrong
-        if (n.kind === 'route' || n.kind === 'policy') ctx.setLineDash([5, 3])
-        if (n.kind === 'gateway') ctx.lineWidth += 1
-        ctx.stroke()
-        ctx.setLineDash([])
-        if (s >= LOD.pillText) {
-          const icon = PILL_ICON[n.kind] ?? '•'
-          text(
-            icon,
-            sx(n.x + 12),
-            sy(n.y + n.h / 2),
-            14,
-            11 * Math.min(1, s * 1.4),
-            n.kind === 'route' || n.kind === 'gateway'
-              ? p.accent
-              : n.kind === 'policy'
-                ? p.warn
-                : p.muted
-          )
-          text(
-            n.label,
-            sx(n.x + 24),
-            sy(n.y + n.h / 2),
-            (n.w - 30) * s,
-            Math.min(12, 6 + 9 * s),
-            p.fg,
-            500
-          )
-        }
+    if (options.traffic && trafficEdges.length) {
+      const list =
+        band === 'near'
+          ? trafficEdges
+          : // Nhìn xa: gộp theo cặp namespace.
+            [
+              ...trafficEdges
+                .reduce((m, t) => {
+                  const a = index.byId.get(t.from)?.ns
+                  const b = index.byId.get(t.to)?.ns
+                  if (!a || !b || a === b) return m
+                  const key = `n:${a}>n:${b}`
+                  const prev = m.get(key)
+                  m.set(key, { from: `n:${a}`, to: `n:${b}`, rate: (prev?.rate ?? 0) + t.rate })
+                  return m
+                }, new Map<string, { from: string; to: string; rate: number }>())
+                .values()
+            ]
+      for (const t of list) {
+        const color = t.rate >= BANDS[3].max ? palette.trafficHot : palette.traffic
+        out.push({
+          id: `traffic:${t.from}>${t.to}`,
+          source: t.from,
+          target: t.to,
+          ...(() => {
+            const sa = index.byId.get(t.from)
+            const sb = index.byId.get(t.to)
+            return sa && sb ? sides(sa, sb) : { sourceHandle: 'sr', targetHandle: 'tl' }
+          })(),
+          type: 'map',
+          // Dưới thẻ workload (thẻ che phần đường đi qua) — không đè chữ.
+          zIndex: 2,
+          data: { kind: 'traffic', rate: t.rate, color },
+          markerEnd: arrow(color)
+        })
       }
-    ctx.globalAlpha = 1
-
-    // 4) Thẻ workload.
-    for (const n of index.ordered) {
-      if (n.kind !== 'workload' || !visible(n)) continue
-      ctx.globalAlpha = dim(n) ? 0.25 : 1
-      roundRect(n.x, n.y, n.w, n.h, 8)
-      ctx.fillStyle = n.tone === 'bad' ? p.badSoft : n.tone === 'warn' ? p.warnSoft : p.surface
-      ctx.fill()
-      const sel = selected === n.id
-      ctx.lineWidth = sel ? 2.5 : 1
-      ctx.strokeStyle = sel
-        ? p.accent
-        : n.tone === 'bad'
-          ? p.bad
-          : n.tone === 'warn'
-            ? p.warn
-            : p.lineStrong
-      ctx.stroke()
-      // Sọc trạng thái bên trái.
-      ctx.fillStyle = toneColor(p, n.tone)
-      ctx.fillRect(sx(n.x), sy(n.y + 6), Math.max(2, 3 * s), (n.h - 12) * s)
-      if (s >= LOD.cardText) {
-        text(
-          n.label,
-          sx(n.x + 12),
-          sy(n.y + 15),
-          (n.w - (n.tech ? 40 : 20)) * s,
-          Math.min(13, 6 + 9 * s),
-          p.fg,
-          600
-        )
-        text(
-          `${n.sub}${n.badges?.length ? ` · ${n.badges.join(' · ')}` : ''}`,
-          sx(n.x + 12),
-          sy(n.y + 32),
-          (n.w - (n.tech ? 40 : 20)) * s,
-          Math.min(11, 5 + 7 * s),
-          p.faint
-        )
-      }
-      const tech = n.tech ? TECH[n.tech] : undefined
-      if (tech && s >= LOD.cardText) badge(sx(n.x + n.w - 16), sy(n.y + 16), 10 * s, tech)
     }
-    ctx.globalAlpha = 1
+    return out
+  }, [band, options.edges, options.traffic, layout, related, palette, trafficEdges, index])
 
-    // 5) Pod (chấm).
-    if (options.pods && s >= LOD.pods)
-      for (const n of index.ordered) {
-        if (n.kind !== 'pod' || !visible(n)) continue
-        ctx.globalAlpha = dim(n) ? 0.25 : 1
-        ctx.beginPath()
-        ctx.arc(sx(n.x + n.w / 2), sy(n.y + n.h / 2), (n.w / 2) * s, 0, Math.PI * 2)
-        ctx.fillStyle = toneColor(p, n.tone)
-        ctx.fill()
-        if (selected === n.id || hover?.id === n.id) {
-          ctx.lineWidth = 2
-          ctx.strokeStyle = p.fg
-          ctx.stroke()
-        }
-      }
-    ctx.globalAlpha = 1
-  }, [layout, index, related, selected, hover, options.edges, options.pods, problemsOnly])
-
-  // Đổi mục chọn → tắt blast radius (bật lại khi cần).
-  const [impactFor, setImpactFor] = useState<string | null>(null)
-  if (impactFor !== selected) {
-    setImpactFor(selected)
-    if (impactMode) setImpactMode(false)
-  }
-
-  // Minimap: vùng + namespace + khung đang thấy.
-  const drawMini = useCallback(() => {
-    const mini = miniRef.current
-    const wrap = wrapRef.current
-    if (!mini || !wrap || !layout) return
-    const ctx = mini.getContext('2d')
-    if (!ctx) return
-    const p = (palette.current ??= readPalette())
-    const dpr = window.devicePixelRatio || 1
-    const MW = 180
-    const MH = 120
-    mini.width = MW * dpr
-    mini.height = MH * dpr
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.fillStyle = p.surface
-    ctx.fillRect(0, 0, MW, MH)
-    const k = Math.min((MW - 8) / Math.max(1, layout.width), (MH - 8) / Math.max(1, layout.height))
-    const ox = (MW - layout.width * k) / 2
-    const oy = (MH - layout.height * k) / 2
-    for (const n of index.ordered) {
-      if (n.kind !== 'region' && n.kind !== 'namespace') continue
-      ctx.fillStyle =
-        n.kind === 'region'
-          ? p.subtle
-          : n.tone === 'bad'
-            ? p.bad
-            : n.tone === 'warn'
-              ? p.warn
-              : p.lineStrong
-      ctx.fillRect(ox + n.x * k, oy + n.y * k, Math.max(1, n.w * k), Math.max(1, n.h * k))
-    }
-    const { x, y, scale } = view.current
-    ctx.strokeStyle = p.accent
-    ctx.lineWidth = 1.5
-    ctx.strokeRect(
-      ox + (-x / scale) * k,
-      oy + (-y / scale) * k,
-      (wrap.clientWidth / scale) * k,
-      (wrap.clientHeight / scale) * k
-    )
-  }, [layout, index])
-
-  // Vòng vẽ: chỉ vẽ lại khi có thay đổi (pan / zoom / dữ liệu / chọn).
-  useEffect(() => {
-    dirty.current = true
-    const loop = (): void => {
-      if (dirty.current) {
-        dirty.current = false
-        draw()
-        drawMini()
-        savedViewports.set(tabId, view.current)
-      }
-      frame.current = requestAnimationFrame(loop)
-    }
-    frame.current = requestAnimationFrame(loop)
-    return () => {
-      if (frame.current !== null) cancelAnimationFrame(frame.current)
-    }
-  }, [draw, drawMini, tabId])
-
-  // Kích thước khung / theme đổi → vẽ lại (đọc lại màu).
-  useEffect(() => {
-    const wrap = wrapRef.current
-    if (!wrap) return
-    const ro = new ResizeObserver(() => {
-      dirty.current = true
-      setWrapWidth(wrap.clientWidth)
-    })
-    ro.observe(wrap)
-    const mo = new MutationObserver(() => {
-      palette.current = null
-      dirty.current = true
-    })
-    mo.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class', 'data-theme', 'style']
-    })
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const onScheme = (): void => {
-      palette.current = null
-      dirty.current = true
-    }
-    mq.addEventListener('change', onScheme)
-    return () => {
-      ro.disconnect()
-      mo.disconnect()
-      mq.removeEventListener('change', onScheme)
-    }
-  }, [])
-
-  const setView = useCallback((v: Viewport) => {
-    view.current = { ...v, scale: Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale)) }
-    dirty.current = true
-    setZoomPct(Math.round(view.current.scale * 100))
-  }, [])
-
-  /** Bay tới khung (animation 350 ms, như bản đồ). */
+  // ——— Điều khiển khung nhìn ———
   const flyTo = useCallback(
-    (box: { x: number; y: number; w: number; h: number }, maxScale = 1.2) => {
+    (box: { x: number; y: number; w: number; h: number }, maxZoom = 1.2) => {
       const wrap = wrapRef.current
       if (!wrap) return
-      const W = wrap.clientWidth
-      const H = wrap.clientHeight
       const pad = 60
-      const scale = Math.max(
-        MIN_SCALE,
-        Math.min(maxScale, (W - 2 * pad) / Math.max(1, box.w), (H - 2 * pad) / Math.max(1, box.h))
-      )
-      const target = {
-        scale,
-        x: W / 2 - (box.x + box.w / 2) * scale,
-        y: H / 2 - (box.y + box.h / 2) * scale
-      }
-      const from = { ...view.current }
-      const start = performance.now()
-      if (anim.current !== null) cancelAnimationFrame(anim.current)
-      const step = (now: number): void => {
-        const t = Math.min(1, (now - start) / 350)
-        const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2
-        // Nội suy log cho tỉ lệ (zoom mượt như bản đồ).
-        const scaleT = Math.exp(
-          Math.log(from.scale) + (Math.log(target.scale) - Math.log(from.scale)) * e
+      const zoom = Math.max(
+        MIN_ZOOM,
+        Math.min(
+          maxZoom,
+          (wrap.clientWidth - 2 * pad) / Math.max(1, box.w),
+          (wrap.clientHeight - 2 * pad) / Math.max(1, box.h)
         )
-        const cxw =
-          (W / 2 - from.x) / from.scale +
-          ((W / 2 - target.x) / target.scale - (W / 2 - from.x) / from.scale) * e
-        const cyw =
-          (H / 2 - from.y) / from.scale +
-          ((H / 2 - target.y) / target.scale - (H / 2 - from.y) / from.scale) * e
-        setView({ scale: scaleT, x: W / 2 - cxw * scaleT, y: H / 2 - cyw * scaleT })
-        anim.current = t < 1 ? requestAnimationFrame(step) : null
-      }
-      anim.current = requestAnimationFrame(step)
+      )
+      void rf.setCenter(box.x + box.w / 2, box.y + box.h / 2, { zoom, duration: 350 })
     },
-    [setView]
+    [rf]
   )
 
   const fit = useCallback(() => {
@@ -756,101 +494,38 @@ export function MapView({
     flyTo({ x: 0, y: 0, w: layout.width, h: layout.height }, 1)
   }, [layout, flyTo])
 
-  // Lần đầu có dữ liệu: vừa khung.
+  // Lần đầu có dữ liệu: vừa khung (không animation).
   useEffect(() => {
     if (!layout || fitted.current) return
     const wrap = wrapRef.current
-    if (!wrap) return
+    if (!wrap || !wrap.clientWidth) return
     fitted.current = true
-    const scale = Math.min(
+    const zoom = Math.min(
       1,
       (wrap.clientWidth - 80) / Math.max(1, layout.width),
       (wrap.clientHeight - 80) / Math.max(1, layout.height)
     )
-    setView({
-      scale,
-      x: (wrap.clientWidth - layout.width * scale) / 2,
-      y: (wrap.clientHeight - layout.height * scale) / 2
+    void rf.setViewport({
+      zoom,
+      x: (wrap.clientWidth - layout.width * zoom) / 2,
+      y: (wrap.clientHeight - layout.height * zoom) / 2
     })
-  }, [layout, setView])
+  }, [layout, rf])
 
-  // Dữ liệu / tuỳ chọn đổi → vẽ lại.
-  useEffect(invalidate, [layout, related, selected, hover, options, problemsOnly, invalidate])
-
-  /** Node ở điểm màn hình (sâu nhất, theo mức chi tiết đang vẽ). */
-  const hitTest = useCallback(
-    (px: number, py: number): MapNode | null => {
-      const { x, y, scale: s } = view.current
-      const wx = (px - x) / s
-      const wy = (py - y) / s
-      for (let i = index.ordered.length - 1; i >= 0; i--) {
-        const n = index.ordered[i]
-        if (!n) continue
-        if (n.kind === 'pod' && (!options.pods || s < LOD.pods)) continue
-        if (n.kind === 'workload' && s < LOD.cards) continue
-        if (isPill(n.kind) && s < LOD.pills) continue
-        // Pod nhỏ: nới vùng bấm cho dễ trúng.
-        const slack = n.kind === 'pod' ? 2 : 0
-        if (
-          wx >= n.x - slack &&
-          wx <= n.x + n.w + slack &&
-          wy >= n.y - slack &&
-          wy <= n.y + n.h + slack
-        )
-          return n
-      }
-      return null
-    },
-    [index, options.pods]
-  )
-
-  const local = (e: { clientX: number; clientY: number }): { x: number; y: number } => {
-    const r = canvasRef.current?.getBoundingClientRect()
-    return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0) }
-  }
-
-  const zoomAt = (px: number, py: number, factor: number): void => {
-    const v = view.current
-    const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, v.scale * factor))
-    const k = scale / v.scale
-    setView({ scale, x: px - (px - v.x) * k, y: py - (py - v.y) * k })
-  }
-
-  // Wheel: phải gắn listener không passive để chặn cuộn trang.
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const onWheel = (e: WheelEvent): void => {
-      e.preventDefault()
-      const r = canvas.getBoundingClientRect()
-      const px = e.clientX - r.left
-      const py = e.clientY - r.top
-      // Trackpad cuộn hai ngón (không Ctrl) → di chuyển; chuột lăn / pinch (Ctrl) → zoom.
-      if (!e.ctrlKey && Math.abs(e.deltaX) > 0 && Math.abs(e.deltaY) < 40) {
-        const v = view.current
-        setView({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY })
-        return
-      }
-      const v = view.current
-      const scale = Math.max(
-        MIN_SCALE,
-        Math.min(MAX_SCALE, v.scale * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)))
-      )
-      const k = scale / v.scale
-      setView({ scale, x: px - (px - v.x) * k, y: py - (py - v.y) * k })
-    }
-    canvas.addEventListener('wheel', onWheel, { passive: false })
-    return () => {
-      canvas.removeEventListener('wheel', onWheel)
-    }
-  }, [setView])
-
-  const onKeyDown = (e: React.KeyboardEvent): void => {
+  const zoomBy = (factor: number): void => {
+    const v = rf.getViewport()
     const wrap = wrapRef.current
     if (!wrap) return
-    const cxp = wrap.clientWidth / 2
-    const cyp = wrap.clientHeight / 2
-    const v = view.current
+    const zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.zoom * factor))
+    const cx0 = wrap.clientWidth / 2
+    const cy0 = wrap.clientHeight / 2
+    const k = zoom / v.zoom
+    void rf.setViewport({ zoom, x: cx0 - (cx0 - v.x) * k, y: cy0 - (cy0 - v.y) * k })
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent): void => {
+    if ((e.target as HTMLElement).tagName === 'INPUT') return
+    const v = rf.getViewport()
     const step = 80
     const handled = (): void => {
       e.preventDefault()
@@ -858,25 +533,18 @@ export function MapView({
     }
     if (e.key === '+' || e.key === '=') {
       handled()
-      zoomAt(cxp, cyp, 1.25)
+      zoomBy(1.25)
     } else if (e.key === '-' || e.key === '_') {
       handled()
-      zoomAt(cxp, cyp, 0.8)
+      zoomBy(0.8)
     } else if (e.key === '0') {
       handled()
       fit()
-    } else if (e.key === 'ArrowLeft') {
+    } else if (e.key.startsWith('Arrow')) {
       handled()
-      setView({ ...v, x: v.x + step })
-    } else if (e.key === 'ArrowRight') {
-      handled()
-      setView({ ...v, x: v.x - step })
-    } else if (e.key === 'ArrowUp') {
-      handled()
-      setView({ ...v, y: v.y + step })
-    } else if (e.key === 'ArrowDown') {
-      handled()
-      setView({ ...v, y: v.y - step })
+      const dx = e.key === 'ArrowLeft' ? step : e.key === 'ArrowRight' ? -step : 0
+      const dy = e.key === 'ArrowUp' ? step : e.key === 'ArrowDown' ? -step : 0
+      void rf.setViewport({ ...v, x: v.x + dx, y: v.y + dy })
     } else if (e.key === 'Escape' && selected) {
       handled()
       setSelected(null)
@@ -892,10 +560,6 @@ export function MapView({
     }
   }
 
-  const select = (n: MapNode | null): void => {
-    setSelected(n?.id ?? null)
-  }
-
   const selectedNode = selected ? index.byId.get(selected) : undefined
   const hoverNode = hover ? index.byId.get(hover.id) : undefined
   const counts = useMemo(() => {
@@ -909,7 +573,7 @@ export function MapView({
     return out
   }, [layout])
 
-  const setOpt = (patch: Partial<typeof options>): void => {
+  const setOpt = (patch: Partial<Options>): void => {
     const next = { ...options, ...patch }
     setOptions(next)
     try {
@@ -924,8 +588,11 @@ export function MapView({
     setQuery('')
     setSearchOpen(false)
     const parent = n.kind === 'pod' && n.parent ? index.byId.get(n.parent) : undefined
-    flyTo(parent ?? n, n.kind === 'namespace' ? 1 : 1.4)
-    canvasRef.current?.focus()
+    // Bảng bên phải mở ra làm khung hẹp lại — đợi bố cục xong rồi mới bay tới (đúng tâm).
+    setTimeout(() => {
+      flyTo(parent ?? n, n.kind === 'namespace' ? 1 : 1.4)
+    }, 40)
+    wrapRef.current?.focus()
   }
 
   /** Bay tới mục có vấn đề tiếp theo (workload / PVC đỏ trước, rồi vàng). */
@@ -941,6 +608,44 @@ export function MapView({
     const next = list[(at + 1) % list.length]
     if (next) goTo(next)
   }
+
+  const local = (e: { clientX: number; clientY: number }): { x: number; y: number; w: number } => {
+    const r = wrapRef.current?.getBoundingClientRect()
+    return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0), w: r?.width ?? 600 }
+  }
+
+  const ctx = useMemo<MapCtx>(
+    () => ({
+      band,
+      selected,
+      related,
+      problemsOnly,
+      showPods: options.pods,
+      podsOf: index.podsOf,
+      onSelect: (id) => {
+        setSelected(id)
+      },
+      onHoverPod: (pod, e) => {
+        setHover(pod && e ? { id: pod.id, ...local(e) } : null)
+      }
+    }),
+    [band, selected, related, problemsOnly, options.pods, index]
+  )
+
+  /** Traffic của mục đang chọn (bảng bên phải). */
+  const nodeTraffic = useMemo(() => {
+    if (!selectedNode || selectedNode.kind !== 'workload' || !selectedNode.ref) return null
+    const ref = selectedNode.ref
+    const self = (p: TrafficPeer): boolean =>
+      WORKLOAD_KIND_ID[p.kind] === ref.kind && p.ns === ref.ns && p.name === ref.name
+    const rates = byPair(traffic.rates)
+    return {
+      status: traffic.status,
+      reason: traffic.reason,
+      incoming: rates.filter((r) => self(r.server)).sort((a, b) => b.rate - a.rate),
+      outgoing: rates.filter((r) => self(r.client)).sort((a, b) => b.rate - a.rate)
+    }
+  }, [selectedNode, traffic])
 
   return (
     <div className="flex min-h-0 flex-1" data-testid="k8s-map">
@@ -975,7 +680,7 @@ export function MapView({
                     goTo(matches[0])
                   } else if (e.key === 'Escape') {
                     setQuery('')
-                    canvasRef.current?.focus()
+                    wrapRef.current?.focus()
                   }
                 }}
               />
@@ -1033,6 +738,23 @@ export function MapView({
             Connections
           </Chip>
           <Chip
+            on={options.traffic}
+            testId="k8s-map-traffic"
+            title={
+              traffic.status === 'unavailable'
+                ? (traffic.reason ?? 'Live traffic is not available')
+                : 'Live traffic between workloads (Caretta)'
+            }
+            onClick={() => {
+              setOpt({ traffic: !options.traffic })
+            }}
+          >
+            <span className="inline-flex items-center gap-1.5">
+              Traffic
+              {options.traffic && <TrafficDot status={traffic.status} />}
+            </span>
+          </Chip>
+          <Chip
             on={problemsOnly}
             testId="k8s-map-problems"
             onClick={() => {
@@ -1076,80 +798,114 @@ export function MapView({
             This cluster is very large — only part of it is on the map. Pick fewer namespaces.
           </p>
         )}
+        {options.traffic && traffic.status === 'unavailable' && (
+          <p
+            className="border-b border-line px-3 py-1.5 text-xs text-faint"
+            data-testid="k8s-map-traffic-note"
+          >
+            No live traffic data — {traffic.reason ?? 'Caretta is not available'}. Install{' '}
+            <span className="font-mono">groundcover-com/caretta</span> to see traffic roads.
+          </p>
+        )}
         <div
           ref={wrapRef}
-          className="relative min-h-0 flex-1 overflow-hidden"
+          tabIndex={0}
+          role="application"
+          aria-label="Cluster map — drag to move, scroll to zoom, click to select"
+          data-testid="k8s-map-canvas"
+          className="k8s-map relative min-h-0 flex-1 overflow-hidden bg-canvas outline-none"
+          onKeyDown={onKeyDown}
           onPointerLeave={() => {
             setHover(null)
           }}
         >
-          <canvas
-            ref={canvasRef}
-            tabIndex={0}
-            role="application"
-            aria-label="Cluster map — drag to move, scroll to zoom, click to select"
-            data-testid="k8s-map-canvas"
-            className={cx(
-              'block size-full outline-none',
-              dragging ? 'cursor-grabbing' : 'cursor-default'
-            )}
-            onKeyDown={onKeyDown}
-            onPointerDown={(e) => {
-              if (e.button !== 0) return
-              e.currentTarget.setPointerCapture(e.pointerId)
-              const v = view.current
-              drag.current = { x: e.clientX, y: e.clientY, vx: v.x, vy: v.y, moved: false }
-              e.currentTarget.focus()
-            }}
-            onPointerMove={(e) => {
-              const d = drag.current
-              if (d) {
-                const dx = e.clientX - d.x
-                const dy = e.clientY - d.y
-                if (!d.moved && Math.abs(dx) + Math.abs(dy) < 4) return
-                if (!d.moved) setDragging(true)
-                d.moved = true
+          <MapContext.Provider value={ctx}>
+            <ReactFlow<MapFlowNode, MapFlowEdge>
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={NODE_TYPES}
+              edgeTypes={EDGE_TYPES}
+              defaultViewport={savedViewports.get(tabId) ?? { x: 40, y: 40, zoom: 0.5 }}
+              minZoom={MIN_ZOOM}
+              maxZoom={MAX_ZOOM}
+              nodesDraggable={false}
+              nodesConnectable={false}
+              elementsSelectable={false}
+              nodesFocusable={false}
+              edgesFocusable={false}
+              disableKeyboardA11y
+              onlyRenderVisibleElements
+              zoomOnDoubleClick
+              proOptions={{ hideAttribution: true }}
+              onMove={(_, v) => {
+                const next: Band = v.zoom >= NEAR_ZOOM ? 'near' : 'far'
+                if (next !== band) setBand(next)
+              }}
+              onMoveEnd={(_, v) => {
+                savedViewports.set(tabId, v)
+              }}
+              onMoveStart={() => {
                 setHover(null)
-                setView({ ...view.current, x: d.vx + dx, y: d.vy + dy })
-                return
-              }
-              const { x, y } = local(e)
-              const n = hitTest(x, y)
-              const hid = n && n.kind !== 'region' ? n.id : null
-              if (
-                hid !== (hover?.id ?? null) ||
-                (hid && hover && (Math.abs(hover.x - x) > 12 || Math.abs(hover.y - y) > 12))
-              )
-                setHover(hid ? { id: hid, x, y } : null)
-            }}
-            onPointerUp={(e) => {
-              const d = drag.current
-              drag.current = null
-              setDragging(false)
-              if (e.currentTarget.hasPointerCapture(e.pointerId))
-                e.currentTarget.releasePointerCapture(e.pointerId)
-              // Chỉ khi nhấn cũng trên canvas (nhả chuột sau khi bấm kết quả tìm kiếm không tính).
-              if (!d || d.moved) return
-              const { x, y } = local(e)
-              select(hitTest(x, y))
-            }}
-            onDoubleClick={(e) => {
-              const { x, y } = local(e)
-              const n = hitTest(x, y)
-              if (n) flyTo(n.kind === 'pod' && n.parent ? (index.byId.get(n.parent) ?? n) : n, 1.4)
-              else zoomAt(x, y, 1.6)
-            }}
-          />
+              }}
+              onNodeClick={(_, n) => {
+                setSelected(n.id)
+                wrapRef.current?.focus()
+              }}
+              onNodeDoubleClick={(_, n) => {
+                const m = index.byId.get(n.id)
+                if (m) flyTo(m, 1.4)
+              }}
+              onPaneClick={() => {
+                setSelected(null)
+                wrapRef.current?.focus()
+              }}
+              onNodeMouseEnter={(e, n) => {
+                if (n.type === 'region') return
+                setHover({ id: n.id, ...local(e) })
+              }}
+              onNodeMouseLeave={() => {
+                setHover(null)
+              }}
+            >
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={24}
+                size={1}
+                className="!bg-canvas"
+              />
+              <MiniMap
+                pannable
+                zoomable
+                position="bottom-right"
+                className="!m-3 !mb-12 overflow-hidden rounded-md border border-line !bg-surface shadow-sm"
+                style={{ width: 180, height: 120 }}
+                maskColor="rgb(120 130 145 / 0.18)"
+                nodeColor={(n) => {
+                  const m = (n.data as { node?: MapNode } | undefined)?.node
+                  if (!m) return 'transparent'
+                  if (m.kind === 'region') return 'rgb(150 160 175 / 0.2)'
+                  if (m.kind === 'namespace')
+                    return m.tone === 'bad'
+                      ? 'rgb(217 56 30 / 0.25)'
+                      : m.tone === 'warn'
+                        ? 'rgb(194 122 14 / 0.25)'
+                        : 'rgb(150 160 175 / 0.35)'
+                  return m.tone === 'bad' ? '#d9381e' : m.tone === 'warn' ? '#c27a0e' : '#9aa3b0'
+                }}
+                nodeStrokeWidth={0}
+              />
+            </ReactFlow>
+          </MapContext.Provider>
           {!data && !error && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-faint">
               Drawing the cluster map…
             </div>
           )}
-          {hoverNode && hover && !dragging && (
+          {hoverNode && hover && (
             <div
               className="pointer-events-none absolute z-20 max-w-72 rounded-md border border-line bg-elevated px-2 py-1.5 text-xs shadow-lg"
               style={{
-                left: Math.min(hover.x + 14, wrapWidth - 280),
+                left: Math.min(hover.x + 14, hover.w - 280),
                 top: hover.y + 14
               }}
               data-testid="k8s-map-tooltip"
@@ -1159,89 +915,47 @@ export function MapView({
                 <span className="truncate font-medium text-fg">{hoverNode.label}</span>
               </div>
               <div className="mt-0.5 text-faint">
-                {hoverNode.kind === 'route'
-                  ? routeTitle(hoverNode.ref?.kind ?? '')
-                  : KIND_TITLE[hoverNode.kind]}
+                {titleOf(hoverNode)}
                 {hoverNode.sub ? ` · ${hoverNode.sub}` : ''}
               </div>
             </div>
           )}
-          {/* Điều khiển zoom + minimap + chú giải */}
-          <div className="absolute right-3 bottom-3 flex flex-col items-end gap-2">
-            <div className="flex overflow-hidden rounded-md border border-line bg-surface shadow-sm">
-              <MapButton
-                label="Zoom out ( - )"
-                onClick={() => {
-                  zoomAt(
-                    (wrapRef.current?.clientWidth ?? 0) / 2,
-                    (wrapRef.current?.clientHeight ?? 0) / 2,
-                    0.8
-                  )
-                }}
-              >
-                <Minus size={13} />
-              </MapButton>
-              <span
-                className="flex w-12 items-center justify-center border-x border-line text-[11px] text-faint tabular-nums"
-                data-testid="k8s-map-zoom"
-              >
-                {zoomPct}%
-              </span>
-              <MapButton
-                label="Zoom in ( + )"
-                onClick={() => {
-                  zoomAt(
-                    (wrapRef.current?.clientWidth ?? 0) / 2,
-                    (wrapRef.current?.clientHeight ?? 0) / 2,
-                    1.25
-                  )
-                }}
-              >
-                <Plus size={13} />
-              </MapButton>
-              <MapButton label="Fit the whole cluster ( 0 )" testId="k8s-map-fit" onClick={fit}>
-                <Maximize size={13} />
-              </MapButton>
-            </div>
-            <canvas
-              ref={miniRef}
-              className="h-[120px] w-[180px] cursor-pointer rounded-md border border-line shadow-sm"
-              data-testid="k8s-map-minimap"
-              onPointerDown={(e) => {
-                const mini = e.currentTarget
-                const move = (ev: { clientX: number; clientY: number }): void => {
-                  const wrap = wrapRef.current
-                  if (!layout || !wrap) return
-                  const r = mini.getBoundingClientRect()
-                  const k = Math.min(
-                    172 / Math.max(1, layout.width),
-                    112 / Math.max(1, layout.height)
-                  )
-                  const ox = (180 - layout.width * k) / 2
-                  const oy = (120 - layout.height * k) / 2
-                  const wx = (ev.clientX - r.left - ox) / k
-                  const wy = (ev.clientY - r.top - oy) / k
-                  const v = view.current
-                  setView({
-                    ...v,
-                    x: wrap.clientWidth / 2 - wx * v.scale,
-                    y: wrap.clientHeight / 2 - wy * v.scale
-                  })
-                }
-                move(e)
-                mini.setPointerCapture(e.pointerId)
-                mini.onpointermove = move
-                mini.onpointerup = () => {
-                  mini.onpointermove = null
-                }
+          {/* Điều khiển zoom + chú giải */}
+          <div className="absolute right-3 bottom-3 z-10 flex overflow-hidden rounded-md border border-line bg-surface shadow-sm">
+            <MapButton
+              label="Zoom out ( - )"
+              onClick={() => {
+                zoomBy(0.8)
               }}
-            />
+            >
+              <Minus size={13} />
+            </MapButton>
+            <ZoomLabel />
+            <MapButton
+              label="Zoom in ( + )"
+              onClick={() => {
+                zoomBy(1.25)
+              }}
+            >
+              <Plus size={13} />
+            </MapButton>
+            <MapButton label="Fit the whole cluster ( 0 )" testId="k8s-map-fit" onClick={fit}>
+              <Maximize size={13} />
+            </MapButton>
           </div>
-          <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-3 rounded-md border border-line bg-surface/90 px-2 py-1 text-[11px] text-faint">
+          <div className="pointer-events-none absolute bottom-3 left-3 z-10 flex items-center gap-3 rounded-md border border-line bg-surface/90 px-2 py-1 text-[11px] text-faint">
             <Legend color="bg-success" label="Healthy" />
             <Legend color="bg-warning" label="Degraded" />
             <Legend color="bg-danger-solid" label="Failing" />
-            <span>⇉ gateway · ⇢ route · ◆ service · ▤ volume · ◇ policy</span>
+            {options.traffic && traffic.status === 'live' && (
+              <span className="flex items-center gap-1" data-testid="k8s-map-traffic-legend">
+                <svg width="34" height="10" aria-hidden>
+                  <line x1="0" y1="5" x2="14" y2="5" stroke={palette.traffic} strokeWidth="1.5" />
+                  <line x1="18" y1="5" x2="34" y2="5" stroke={palette.trafficHot} strokeWidth="6" />
+                </svg>
+                traffic {BANDS[0].label} … {BANDS[BANDS.length - 1]?.label}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -1265,10 +979,79 @@ export function MapView({
             onShell={onShell}
             impact={impactMode}
             onImpact={setImpactMode}
+            traffic={nodeTraffic}
           />
         </SidePanel>
       )}
     </div>
+  )
+}
+
+function TrafficDot({ status }: { status: TrafficState['status'] }): React.JSX.Element {
+  return (
+    <span
+      className={cx(
+        'size-1.5 rounded-full',
+        status === 'live'
+          ? 'bg-success'
+          : status === 'connecting'
+            ? 'animate-pulse bg-warning'
+            : 'bg-line-strong'
+      )}
+      data-testid="k8s-map-traffic-status"
+      data-status={status}
+    />
+  )
+}
+
+/** Traffic của workload đang chọn (bảng bên phải). */
+function TrafficSection({
+  traffic
+}: {
+  traffic: {
+    status: TrafficState['status']
+    reason: string | undefined
+    incoming: TrafficRate[]
+    outgoing: TrafficRate[]
+  }
+}): React.JSX.Element {
+  const row = (r: TrafficRate, peer: TrafficPeer): React.JSX.Element => (
+    <div
+      key={`${peer.kind}|${peer.ns}|${peer.name}`}
+      className="flex h-6 items-center gap-2 text-xs"
+      data-testid="k8s-map-traffic-row"
+    >
+      <span className="min-w-0 flex-1 truncate font-mono text-fg" title={peerLabel(peer)}>
+        {peerLabel(peer)}
+      </span>
+      <span className="shrink-0 text-faint tabular-nums">{formatRate(r.rate)}</span>
+    </div>
+  )
+  return (
+    <section data-testid="k8s-map-node-traffic">
+      <Heading>Live traffic</Heading>
+      {traffic.status === 'unavailable' && (
+        <p className="text-xs text-faint">Unavailable — {traffic.reason ?? 'no Caretta'}.</p>
+      )}
+      {traffic.status === 'connecting' && (
+        <p className="text-xs text-faint">Connecting to Caretta…</p>
+      )}
+      {traffic.status === 'live' && !traffic.incoming.length && !traffic.outgoing.length && (
+        <p className="text-xs text-faint">No traffic observed in the last interval.</p>
+      )}
+      {traffic.incoming.length > 0 && (
+        <>
+          <div className="mt-1 text-[11px] text-faint">In</div>
+          {traffic.incoming.map((r) => row(r, r.client))}
+        </>
+      )}
+      {traffic.outgoing.length > 0 && (
+        <>
+          <div className="mt-1 text-[11px] text-faint">Out</div>
+          {traffic.outgoing.map((r) => row(r, r.server))}
+        </>
+      )}
+    </section>
   )
 }
 
@@ -1283,17 +1066,20 @@ function Chip({
   on,
   onClick,
   testId,
+  title,
   children
 }: {
   on: boolean
   onClick: () => void
   testId?: string
+  title?: string
   children: React.ReactNode
 }): React.JSX.Element {
   return (
     <button
       type="button"
       aria-pressed={on}
+      title={title}
       data-testid={testId}
       className={cx(
         'h-7 rounded-md border px-2 font-medium whitespace-nowrap',
@@ -1351,7 +1137,8 @@ function MapPanel({
   onLogs,
   onShell,
   impact,
-  onImpact
+  onImpact,
+  traffic
 }: {
   node: MapNode
   layout: MapLayout | null
@@ -1363,6 +1150,7 @@ function MapPanel({
   onShell: (ref: MapRef) => void
   impact: boolean
   onImpact: (on: boolean) => void
+  traffic: React.ComponentProps<typeof TrafficSection>['traffic'] | null
 }): React.JSX.Element {
   const affected = useMemo(
     () =>
@@ -1516,12 +1304,7 @@ function MapPanel({
         <p className="text-xs text-muted">{node.sub}</p>
         {tech && (
           <p className="flex items-center gap-1.5 text-xs text-muted" data-testid="k8s-map-tech">
-            <span
-              className="inline-flex size-4 items-center justify-center rounded-full text-[8px] font-bold text-white"
-              style={{ background: tech.color }}
-            >
-              {tech.short}
-            </span>
+            {node.tech && <TechIcon tech={node.tech} size={18} />}
             {tech.label}
           </p>
         )}
@@ -1584,6 +1367,7 @@ function MapPanel({
             />
           </div>
         )}
+        {traffic && traffic.status !== 'off' && <TrafficSection traffic={traffic} />}
         {podTones.length > 0 && (
           <section>
             <Heading>

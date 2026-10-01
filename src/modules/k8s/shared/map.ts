@@ -178,10 +178,11 @@ const TECH_RULES: readonly (readonly [string, RegExp, TechInfo])[] = [
     { label: 'OpenTelemetry', short: 'Ot', color: '#425cc7' }
   ],
   ['fluent', /fluent-?bit|fluentd/, { label: 'Fluent', short: 'Fl', color: '#0e83c8' }],
+  ['elasticsearch', /elasticsearch/, { label: 'Elasticsearch', short: 'Es', color: '#00bfb3' }],
   [
-    'elasticsearch',
-    /elasticsearch|opensearch(?!-dashboards)/,
-    { label: 'Elasticsearch', short: 'Es', color: '#00bfb3' }
+    'opensearch',
+    /opensearch(?!-dashboards)/,
+    { label: 'OpenSearch', short: 'Os', color: '#005eb8' }
   ],
   ['kibana', /kibana|opensearch-dashboards/, { label: 'Kibana', short: 'Kb', color: '#e8478b' }],
   ['argocd', /argocd|argo-cd/, { label: 'Argo CD', short: 'Ar', color: '#ef7b4d' }],
@@ -244,7 +245,46 @@ const TECH_RULES: readonly (readonly [string, RegExp, TechInfo])[] = [
   ['keycloak', /keycloak/, { label: 'Keycloak', short: 'Kc', color: '#4d4d4d' }],
   ['jenkins', /jenkins/, { label: 'Jenkins', short: 'Jk', color: '#d24939' }],
   ['gitlab', /gitlab/, { label: 'GitLab', short: 'Gl', color: '#fc6d26' }],
-  ['nginx', /nginx/, { label: 'NGINX', short: 'Ng', color: '#009639' }]
+  [
+    'victoriametrics',
+    /victoria-?metrics|vmagent|vmselect|vminsert|vmstorage/,
+    { label: 'VictoriaMetrics', short: 'Vm', color: '#621773' }
+  ],
+  ['thanos', /thanos/, { label: 'Thanos', short: 'Th', color: '#6d41ff' }],
+  ['clickhouse', /clickhouse/, { label: 'ClickHouse', short: 'Ch', color: '#ffcc01' }],
+  ['cassandra', /cassandra|scylla/, { label: 'Cassandra', short: 'Cs', color: '#1287b1' }],
+  ['couchbase', /couchbase/, { label: 'Couchbase', short: 'Cb', color: '#ea2328' }],
+  ['cockroachdb', /cockroach/, { label: 'CockroachDB', short: 'Cr', color: '#6933ff' }],
+  ['neo4j', /neo4j/, { label: 'Neo4j', short: 'N4', color: '#4581c3' }],
+  ['influxdb', /influx/, { label: 'InfluxDB', short: 'If', color: '#22adf6' }],
+  ['kong', /\bkong\b/, { label: 'Kong', short: 'Kg', color: '#003459' }],
+  ['caddy', /\bcaddy\b/, { label: 'Caddy', short: 'Cd', color: '#1f88c0' }],
+  ['nexus', /nexus|sonatype/, { label: 'Nexus', short: 'Nx', color: '#1b1c30' }],
+  ['wordpress', /wordpress/, { label: 'WordPress', short: 'Wp', color: '#21759b' }],
+  ['nextcloud', /nextcloud/, { label: 'Nextcloud', short: 'Nc', color: '#0082c9' }],
+  [
+    'registry',
+    /(^|\s|\/)registry(\s|$)|distribution\/registry/,
+    { label: 'Docker registry', short: 'Dr', color: '#2496ed' }
+  ],
+  ['nginx', /nginx/, { label: 'NGINX', short: 'Ng', color: '#009639' }],
+  ['httpd', /\bhttpd\b|apache2/, { label: 'Apache HTTP', short: 'Ap', color: '#d22128' }],
+  // Ngôn ngữ / runtime (image gốc) — đoán sau cùng.
+  ['nodejs', /(^|\s|\/)node(js)?(\s|$)/, { label: 'Node.js', short: 'Js', color: '#5fa04e' }],
+  [
+    'python',
+    /python|django|flask|fastapi|uvicorn|gunicorn/,
+    { label: 'Python', short: 'Py', color: '#3776ab' }
+  ],
+  ['go', /golang|distroless\/static/, { label: 'Go', short: 'Go', color: '#00add8' }],
+  [
+    'java',
+    /openjdk|temurin|corretto|\bjava\b|spring|tomcat|jetty/,
+    { label: 'Java', short: 'Jv', color: '#6db33f' }
+  ],
+  ['php', /\bphp\b|php-fpm|laravel/, { label: 'PHP', short: 'Ph', color: '#777bb4' }],
+  ['dotnet', /dotnet|aspnet/, { label: '.NET', short: 'Ne', color: '#512bd4' }],
+  ['ruby', /\bruby\b|\brails\b/, { label: 'Ruby', short: 'Rb', color: '#cc342d' }]
 ]
 
 export const TECH: Readonly<Record<string, TechInfo>> = Object.fromEntries(

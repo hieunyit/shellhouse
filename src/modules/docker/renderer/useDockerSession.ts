@@ -91,6 +91,16 @@ export function useDockerSession(
         },
         onEvent: (event, data) => {
           onEventRef.current(event, data)
+        },
+        onHostRestart: () => {
+          if (cancelled) return
+          // Session Host vừa khởi động lại: mở phiên mới (kết nối lại cluster) thay vì treo.
+          setStatus('The session host restarted — reconnecting…')
+          setTimeout(() => {
+            if (cancelled) return
+            setReady(false)
+            setAttempt((a) => a + 1)
+          }, 800)
         }
       }
     ).then(

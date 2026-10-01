@@ -22,6 +22,18 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   to, technology badges (Prometheus, Grafana, Argo CD, CoreDNS, NGINX, PostgreSQL, Redis… from
   the image), a Helm badge, and a **Blast radius** for any object: what is affected if it
   changes or fails.
+- **Kubernetes: Map and Topology redrawn** with React Flow — cards, icons and edges are proper
+  UI components that follow the light / dark theme. Every resource uses the official Kubernetes
+  icon set, and recognised applications show their logo (Prometheus, Grafana, Argo CD, NGINX,
+  PostgreSQL, Redis, Kafka, Istio… and language runtimes such as Node.js, Python, Java, Go).
+- **Kubernetes: live traffic from Caretta** — when [Caretta](https://github.com/groundcover-com/caretta)
+  runs in the cluster, the Map draws traffic roads between workloads (direction, colour and width
+  by fixed absolute bands, so clusters are comparable; aggregated between namespaces when zoomed
+  out) and Deployments, StatefulSets and DaemonSets get a **Traffic** tab: total, incoming and
+  outgoing throughput with history and per peer and port. Traffic sent to a Service is counted
+  for the workloads behind it. Read straight from the Caretta agents through the API server — no
+  Prometheus needed. The states are explicit: connecting, live, no traffic, or unavailable with
+  the reason (not installed, not allowed to read `pods/proxy`).
 - **Kubernetes: Topology tab** — every pod, workload, service, Ingress / route / Gateway,
   ConfigMap, Secret, PVC, ServiceAccount and node now has a relationship graph: ownership
   (Deployment → ReplicaSet → Pod), scheduling (Pod → Node), traffic (Gateway → Route / Ingress →
@@ -44,6 +56,14 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   limits or probes) and answers "if this is compromised, what can it reach?" — every RBAC
   permission of its ServiceAccount with the binding it comes from, sensitive ones (reading
   Secrets, exec into pods, escalation) first.
+
+### Fixed
+
+- The session host could crash when a Kubernetes request was cancelled while its connection was
+  still opening (an unhandled "socket hang up"). Tabs of the Kubernetes and Docker modules then
+  waited forever ("Loading…"); they now notice the session host restarting and reconnect on
+  their own, and a stuck TLS handshake with the API server times out and is retried instead of
+  hanging.
 
 ## [1.2.0-beta.4] - 2026-10-01
 

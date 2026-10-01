@@ -498,7 +498,13 @@ test('Kubernetes: trang Deployment (Status / Strategy / Resources / Pods / Repli
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
     await page.setViewportSize({ width: 1366, height: 820 })
+    // Đợi bảng pod tải xong lần đầu rồi mới đổi loại (không đua với lần tải đầu).
+    await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toBeVisible()
     await view.getByTestId('k8s-nav-deployments.apps').click()
+    await expect(view.getByTestId('k8s-nav-deployments.apps')).toHaveAttribute(
+      'aria-current',
+      'true'
+    )
     await view.locator('[data-testid="k8s-row"][data-name="shop/web"]').click()
     await page.keyboard.press('d')
     const detail = view.getByTestId('k8s-describe')
@@ -559,11 +565,101 @@ test('Kubernetes: trang Deployment (Status / Strategy / Resources / Pods / Repli
     await expect(detail.getByTestId('k8s-metrics')).toContainText('By pod')
     await expect(detail.getByTestId('k8s-metrics')).toContainText('web-1')
 
+    // Traffic: không có Caretta → báo rõ "Unavailable" (không nhầm với "không có traffic").
+    await detail.getByTestId('k8s-detail-tab-traffic').click()
+    await expect(detail.getByTestId('k8s-traffic')).toHaveAttribute('data-status', 'unavailable')
+    await expect(detail.getByTestId('k8s-traffic')).toContainText('Caretta is not installed')
+
     // Overview: bấm node của pod → mở Node.
     await detail.getByTestId('k8s-detail-tab-overview').click()
     await detail.getByTestId('k8s-pod-node').first().click()
     await expect(view.getByTestId('k8s-nav-nodes')).toHaveAttribute('aria-current', 'true')
     await expect(view.getByTestId('k8s-describe')).toContainText('node-1')
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})
+
+test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đồ, tab Traffic của Deployment', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  server.enableCaretta()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await page.setViewportSize({ width: 1366, height: 820 })
+    // Thêm namespace default (web ở shop gửi tới pod tool ở default).
+    await view.getByTestId('k8s-namespace').click()
+    await view.getByTestId('k8s-ns-default').click()
+    await expect(view.getByTestId('k8s-ns-default')).toBeChecked()
+    await page.keyboard.press('Escape')
+    await view.getByTestId('k8s-nav-map').click()
+    const map = view.getByTestId('k8s-map')
+    // Lấy hai mẫu (5 s) → live; đường traffic web → standalone pods (tool).
+    await expect(map.getByTestId('k8s-map-traffic-status')).toHaveAttribute('data-status', 'live', {
+      timeout: 15_000
+    })
+    await map.getByTestId('k8s-map-search').fill('web')
+    await map.getByTestId('k8s-map-result').filter({ hasText: 'Workload' }).first().click()
+    await expect(
+      map.locator(
+        '[data-testid="k8s-map-traffic-edge"][data-source="w:deployments.apps:shop/web"][data-target="w:pods:default/standalone"]'
+      )
+    ).toHaveCount(1)
+    const panel = view.getByTestId('k8s-map-panel')
+    await expect(panel.getByTestId('k8s-map-node-traffic')).toContainText('db.example.com')
+    await expect(panel.getByTestId('k8s-map-node-traffic')).toContainText('MB/s')
+
+    // Tab Traffic của Deployment: vào (Internet → Service web, quy về Deployment), ra (DB, tool).
+    await panel.getByTestId('k8s-map-open').click()
+    const detail = view.getByTestId('k8s-describe')
+    await detail.getByTestId('k8s-detail-tab-traffic').click()
+    const traffic = detail.getByTestId('k8s-traffic')
+    await expect(traffic).toHaveAttribute('data-status', 'live', { timeout: 15_000 })
+    await expect(
+      traffic.locator('[data-testid="k8s-traffic-peer"][data-name="203.0.113.7"]')
+    ).toHaveCount(1)
+    await expect(
+      traffic.locator('[data-testid="k8s-traffic-peer"][data-name="db.example.com"]')
+    ).toContainText(':5432')
+    await expect(traffic.locator('[data-testid="k8s-traffic-peer"][data-name="tool"]')).toHaveCount(
+      1
+    )
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})
+
+test('Kubernetes: Session Host chết giữa chừng → tab tự kết nối lại, không treo "Loading…"', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toBeVisible()
+    await page.evaluate(() => window.shellhouse.crashSessionHostForTest())
+    // Phiên mới được mở tự động; bảng tải lại và thao tác tiếp được.
+    await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toBeVisible({
+      timeout: 20_000
+    })
+    await view.getByTestId('k8s-nav-deployments.apps').click()
+    await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web"]')).toBeVisible({
+      timeout: 20_000
+    })
   } finally {
     await launched.close()
     await server.close()

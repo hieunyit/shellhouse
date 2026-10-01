@@ -1,4 +1,5 @@
 import { createElement, lazy, Suspense, useMemo, type ComponentType } from 'react'
+import { useHostStatus } from '../../renderer/src/stores/host-status'
 import { create } from 'zustand'
 import {
   Boxes,
@@ -274,6 +275,11 @@ export interface ModuleSessionEvents {
   onPrompt?(prompt: { id: number; request: PromptRequest } | null): void
   onError?(message: string): void
   onExit?(reason: ExitReason): void
+  /**
+   * Session Host vừa khởi động lại (tiến trình cũ chết): phiên này đã mất, mọi thao tác đang chờ
+   * bị huỷ — mở phiên mới để tiếp tục.
+   */
+  onHostRestart?(): void
 }
 
 /** Chạy module ở đâu: phiên riêng của module, hoặc gắn vào kết nối SSH tới host đã lưu. */
@@ -283,6 +289,7 @@ export type ModuleSessionTarget =
 /** Đầu renderer của một phiên module: gửi thao tác, nhận kết quả / sự kiện / tiến độ truyền file. */
 export class ModuleSessionClient {
   private readonly prompts: { id: number; request: PromptRequest }[] = []
+  private unwatchHost: (() => void) | null = null
 
   private constructor(
     private readonly module: string,
@@ -338,6 +345,16 @@ export class ModuleSessionClient {
       }
     })
     if (target.kind === 'ssh') self.client.attachModule(module)
+    // Session Host chết / khởi động lại → port của phiên chết theo, thao tác đang chờ sẽ không bao
+    // giờ có kết quả: huỷ chúng ngay và báo để mở phiên mới (như terminal).
+    const epoch = useHostStatus.getState().status?.restarts ?? null
+    self.unwatchHost = useHostStatus.subscribe(({ status }) => {
+      if (!status) return
+      const lost = status.state !== 'running' || (epoch !== null && status.restarts !== epoch)
+      if (!lost || !self.client) return
+      self.close()
+      events.onHostRestart?.()
+    })
     return self
   }
 
@@ -354,6 +371,8 @@ export class ModuleSessionClient {
   }
 
   close(): void {
+    this.unwatchHost?.()
+    this.unwatchHost = null
     this.client?.close()
     this.client = null
   }

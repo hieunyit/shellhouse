@@ -232,6 +232,13 @@ describe('Map — công nghệ, gateway, policy, blast radius', () => {
       'redis'
     )
     expect(detectTech(['myco/api:1.0'], {}, 'api')).toBeUndefined()
+    // Tên registry trong đường dẫn image không phải "Docker registry".
+    expect(detectTech(['registry.k8s.io/pause:3.9'], {}, 'x')).toBeUndefined()
+    expect(detectTech(['docker.io/library/registry:2'], {}, 'x')).toBe('registry')
+    expect(detectTech(['ghcr.io/acme/shop-api:1.2'], {}, 'api')).toBeUndefined()
+    expect(detectTech(['node:20-alpine'], {}, 'api')).toBe('nodejs')
+    expect(detectTech(['registry.k8s.io/node-problem-detector:v0.8'], {}, 'npd')).toBeUndefined()
+    expect(detectTech(['eclipse-temurin:21'], {}, 'api')).toBe('java')
   })
 
   it('gateway → route (khác namespace), policy → workload, blast radius của PVC / gateway', () => {

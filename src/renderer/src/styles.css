@@ -339,3 +339,31 @@ select.sh-select option {
   color: var(--sh-faint);
   opacity: 0.85;
 }
+
+/* Bản đồ K8s: chấm chạy dọc đường traffic theo hướng client → server. */
+@keyframes k8s-traffic-flow {
+  to {
+    stroke-dashoffset: -32;
+  }
+}
+.k8s-traffic-flow {
+  animation: k8s-traffic-flow 1.2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .k8s-traffic-flow {
+    animation: none;
+  }
+}
+/* React Flow trong app: không viền focus mặc định, nền theo theme. */
+.k8s-map .react-flow__pane,
+.k8s-topology-flow .react-flow__pane {
+  cursor: grab;
+}
+.k8s-map .react-flow__pane.dragging,
+.k8s-topology-flow .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+.k8s-map .react-flow__node,
+.k8s-topology-flow .react-flow__node {
+  cursor: pointer;
+}

@@ -1,36 +1,40 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Box,
-  Boxes,
-  Clock,
-  Copy,
-  Database,
-  DoorOpen,
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
+import {
+  Background,
+  BackgroundVariant,
+  EdgeLabelRenderer,
+  getBezierPath,
+  Handle,
+  Position,
+  ReactFlow,
+  type Edge,
+  type EdgeProps,
+  type Node,
+  type NodeProps
+} from '@xyflow/react'
+import '@xyflow/react/dist/base.css'
+import {
   ExternalLink,
-  FileText,
-  Gauge,
-  Globe,
-  HardDrive,
-  KeyRound,
-  Layers,
-  Link2,
-  Lock,
   Maximize,
   Minus,
-  Network,
-  Play,
   Plus,
   RefreshCw,
-  Server,
-  Shield,
-  ShieldCheck,
   Target,
   UnfoldHorizontal,
-  UserRound,
   Zap
 } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
+import { KindIcon } from './icons'
 import type { K8sOp, TopologyEdge, TopologyNode, TopologyResult } from '../shared/ops'
 import type { K8sObject } from '../shared/resources'
 import {
@@ -69,34 +73,6 @@ export const TOPOLOGY_KINDS = new Set([
   'nodes'
 ])
 
-const ICON: Record<string, typeof Box> = {
-  pods: Box,
-  'deployments.apps': Layers,
-  'statefulsets.apps': Database,
-  'daemonsets.apps': Boxes,
-  'replicasets.apps': Copy,
-  'jobs.batch': Play,
-  'cronjobs.batch': Clock,
-  services: Network,
-  'ingresses.networking.k8s.io': Globe,
-  'httproutes.gateway.networking.k8s.io': Globe,
-  'grpcroutes.gateway.networking.k8s.io': Globe,
-  'gateways.gateway.networking.k8s.io': DoorOpen,
-  configmaps: FileText,
-  secrets: KeyRound,
-  persistentvolumeclaims: HardDrive,
-  persistentvolumes: HardDrive,
-  nodes: Server,
-  serviceaccounts: UserRound,
-  'rolebindings.rbac.authorization.k8s.io': Link2,
-  'clusterrolebindings.rbac.authorization.k8s.io': Link2,
-  'roles.rbac.authorization.k8s.io': Lock,
-  'clusterroles.rbac.authorization.k8s.io': Lock,
-  'horizontalpodautoscalers.autoscaling': Gauge,
-  'poddisruptionbudgets.policy': ShieldCheck,
-  'networkpolicies.networking.k8s.io': Shield
-}
-
 /** Màu + nét theo nhóm quan hệ. */
 const STYLE: Record<TopologyCategory, { color: string; dash?: string }> = {
   ownership: { color: 'text-faint' },
@@ -122,13 +98,6 @@ const EDGE_TEXT: Record<TopologyEdge['type'], string> = {
   identity: 'runs as',
   subject: 'bound by',
   grants: 'grants'
-}
-
-const TONE_STROKE: Record<TopologyNode['tone'], string> = {
-  ok: 'text-success',
-  warn: 'text-warning',
-  bad: 'text-danger',
-  muted: 'text-line-strong'
 }
 
 /** Tỉ lệ nhỏ nhất khi vừa khung mà chữ còn đọc được. */
@@ -168,7 +137,6 @@ export function TopologyOf({
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [view, setView] = useState<View | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
-  const drag = useRef<{ x: number; y: number; vx: number; vy: number; moved: boolean } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -287,28 +255,6 @@ export function TopologyOf({
     fit()
   }, [fitKey, view, fit])
 
-  useEffect(() => {
-    const wrap = wrapRef.current
-    if (!wrap) return
-    const onWheel = (e: WheelEvent): void => {
-      e.preventDefault()
-      const r = wrap.getBoundingClientRect()
-      const px = e.clientX - r.left
-      const py = e.clientY - r.top
-      setView((v) => {
-        if (!v) return v
-        if (!e.ctrlKey && Math.abs(e.deltaX) > 0 && Math.abs(e.deltaY) < 40)
-          return { ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }
-        const k = Math.max(0.15, Math.min(2.5, v.k * Math.exp(-e.deltaY * 0.0015)))
-        return { k, x: px - ((px - v.x) * k) / v.k, y: py - ((py - v.y) * k) / v.k }
-      })
-    }
-    wrap.addEventListener('wheel', onWheel, { passive: false })
-    return () => {
-      wrap.removeEventListener('wheel', onWheel)
-    }
-  }, [])
-
   const zoom = (factor: number): void => {
     const wrap = wrapRef.current
     if (!wrap) return
@@ -345,6 +291,61 @@ export function TopologyOf({
   const open = (n: TopologyNode): void => {
     if (n.kind && !n.missing) onNavigate?.(n.kind, n.name, n.namespace)
   }
+
+  // ——— React Flow ———
+  const flowNodes = useMemo<TopoFlowNode[]>(
+    () =>
+      (layout?.nodes ?? []).map((n) => ({
+        id: n.id,
+        type: 'topo',
+        position: { x: n.x, y: n.y },
+        width: TOPO_NODE_W,
+        height: TOPO_NODE_H,
+        data: { node: n },
+        draggable: false,
+        selectable: false,
+        connectable: false
+      })),
+    [layout]
+  )
+  const flowEdges = useMemo<TopoFlowEdge[]>(() => {
+    if (!layout) return []
+    const pos = new Map(layout.nodes.map((n) => [n.id, n]))
+    return layout.edges.map((e) => {
+      const a = pos.get(e.from)
+      const b = pos.get(e.to)
+      // Cạnh ngang (khác cột khi trái → phải, cùng hàng khi trên → dưới) hay dọc.
+      const horizontal =
+        layout.direction === 'lr' ? (a?.x ?? 0) !== (b?.x ?? 0) : (a?.y ?? 0) === (b?.y ?? 0)
+      const forward = horizontal ? (b?.x ?? 0) > (a?.x ?? 0) : (b?.y ?? 0) > (a?.y ?? 0)
+      return {
+        id: `${e.from}>${e.to}>${e.type}`,
+        source: e.from,
+        target: e.to,
+        sourceHandle: horizontal ? (forward ? 'sr' : 'sl') : forward ? 'sb' : 'st',
+        targetHandle: horizontal ? (forward ? 'tl' : 'tr') : forward ? 'tt' : 'tb',
+        type: 'topo',
+        data: { edge: e }
+      }
+    })
+  }, [layout])
+  const ctx = useMemo<TopoCtx>(
+    () => ({
+      root: graph?.root ?? '',
+      selected,
+      lit,
+      affected,
+      expanded,
+      expanding,
+      showLabels: (view?.k ?? 1) >= 1.3,
+      onOpen: (n) => {
+        open(n)
+      }
+    }),
+    // open dùng onNavigate (ổn định theo props).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [graph?.root, selected, lit, affected, expanded, expanding, view?.k]
+  )
 
   if (error && !graph) return <p className="text-xs text-danger">{error}</p>
   if (!graph || !layout) return <p className="text-xs text-faint">Mapping relationships…</p>
@@ -439,70 +440,50 @@ export function TopologyOf({
       )}
       <div
         ref={wrapRef}
-        className={cx(
-          'relative min-h-0 flex-1 cursor-grab touch-none overflow-hidden rounded-md border border-line bg-canvas select-none active:cursor-grabbing'
-        )}
+        className="k8s-topology-flow relative min-h-0 flex-1 overflow-hidden rounded-md border border-line bg-canvas"
         data-testid="k8s-topology-canvas"
-        onPointerDown={(e) => {
-          if (!view) return
-          drag.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: false }
-        }}
-        onPointerMove={(e) => {
-          const d = drag.current
-          if (!d) return
-          const dx = e.clientX - d.x
-          const dy = e.clientY - d.y
-          if (!d.moved && Math.hypot(dx, dy) < 4) return
-          if (!d.moved) e.currentTarget.setPointerCapture(e.pointerId)
-          d.moved = true
-          setView((v) => (v ? { ...v, x: d.vx + dx, y: d.vy + dy } : v))
-        }}
-        onPointerUp={(e) => {
-          const d = drag.current
-          drag.current = null
-          if (e.currentTarget.hasPointerCapture(e.pointerId))
-            e.currentTarget.releasePointerCapture(e.pointerId)
-          // Bấm vào nền (không kéo) → bỏ chọn.
-          if (d && !d.moved && e.target === e.currentTarget.querySelector('svg')) setSelected(null)
-        }}
       >
         {view && (
-          <svg className="absolute inset-0 h-full w-full">
-            <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-              {layout.edges.map((e) => (
-                <EdgePath
-                  key={`${e.from}>${e.to}>${e.type}`}
-                  direction={layout.direction}
-                  edge={e}
-                  a={byId.get(e.from)}
-                  b={byId.get(e.to)}
-                  lit={lit}
-                  showLabel={Boolean(lit && lit.has(e.from) && lit.has(e.to)) || view.k >= 1.3}
-                />
-              ))}
-              {layout.nodes.map((n) => (
-                <NodeBox
-                  key={n.id}
-                  node={n}
-                  root={n.id === graph.root}
-                  selected={n.id === selected}
-                  dim={Boolean(lit && !lit.has(n.id))}
-                  affected={Boolean(affected?.has(n.id))}
-                  expanded={expanded.has(n.id)}
-                  busy={expanding === n.id}
-                  onSelect={() => {
-                    if (!drag.current?.moved) setSelected(n.id === selected ? null : n.id)
-                  }}
-                  onOpen={() => {
-                    open(n)
-                  }}
-                  onHover={(on) => {
-                    setHover(on ? n.id : null)
-                  }}
-                />
-              ))}
-            </g>
-          </svg>
+          <TopoContext.Provider value={ctx}>
+            <ReactFlow<TopoFlowNode, TopoFlowEdge>
+              nodes={flowNodes}
+              edges={flowEdges}
+              nodeTypes={TOPO_NODE_TYPES}
+              edgeTypes={TOPO_EDGE_TYPES}
+              viewport={{ x: view.x, y: view.y, zoom: view.k }}
+              onViewportChange={(v) => {
+                setView({ x: v.x, y: v.y, k: v.zoom })
+              }}
+              minZoom={0.15}
+              maxZoom={2.5}
+              nodesDraggable={false}
+              nodesConnectable={false}
+              elementsSelectable={false}
+              nodesFocusable={false}
+              edgesFocusable={false}
+              disableKeyboardA11y
+              zoomOnDoubleClick={false}
+              proOptions={{ hideAttribution: true }}
+              onNodeClick={(_, n) => {
+                setSelected(n.id === selected ? null : n.id)
+              }}
+              onNodeDoubleClick={(_, n) => {
+                const m = byId.get(n.id)
+                if (m) open(m)
+              }}
+              onNodeMouseEnter={(_, n) => {
+                setHover(n.id)
+              }}
+              onNodeMouseLeave={() => {
+                setHover(null)
+              }}
+              onPaneClick={() => {
+                setSelected(null)
+              }}
+            >
+              <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+            </ReactFlow>
+          </TopoContext.Provider>
         )}
       </div>
       {sel ? (
@@ -565,190 +546,165 @@ function IconButton({
   )
 }
 
-function EdgePath({
-  edge,
-  direction,
-  a,
-  b,
-  lit,
-  showLabel
-}: {
-  edge: TopologyEdge
-  direction: 'lr' | 'tb'
-  a: PlacedNode | undefined
-  b: PlacedNode | undefined
+interface TopoCtx {
+  root: string
+  selected: string | null
   lit: Set<string> | null
-  showLabel: boolean
-}): React.JSX.Element | null {
-  if (!a || !b) return null
-  const style = STYLE[EDGE_CATEGORY[edge.type]]
-  const W = TOPO_NODE_W
-  const H = TOPO_NODE_H
-  // Cạnh ngang (khác cột khi trái → phải, cùng hàng khi trên → dưới) hay dọc.
-  const horizontal = direction === 'lr' ? b.x !== a.x : b.y === a.y
-  let x1: number
-  let y1: number
-  let x2: number
-  let y2: number
-  let d: string
-  let head: string
-  if (horizontal) {
-    const right = b.x > a.x
-    x1 = right ? a.x + W : a.x
-    y1 = a.y + H / 2
-    x2 = right ? b.x - 6 : b.x + W + 6
-    y2 = b.y + H / 2
-    const bend = right ? 40 : -40
-    d = `M${x1},${y1} C${x1 + bend},${y1} ${x2 - bend},${y2} ${x2},${y2}`
-    head = right
-      ? `M${x2},${y2 - 4} L${x2 + 6},${y2} L${x2},${y2 + 4} Z`
-      : `M${x2},${y2 - 4} L${x2 - 6},${y2} L${x2},${y2 + 4} Z`
-  } else {
-    const down = b.y > a.y
-    x1 = a.x + W / 2
-    y1 = down ? a.y + H : a.y
-    x2 = b.x + W / 2
-    y2 = down ? b.y - 6 : b.y + H + 6
-    const mid = (y1 + y2) / 2
-    d = `M${x1},${y1} C${x1},${mid} ${x2},${mid} ${x2},${y2}`
-    head = down
-      ? `M${x2 - 4},${y2} L${x2},${y2 + 6} L${x2 + 4},${y2} Z`
-      : `M${x2 - 4},${y2} L${x2},${y2 - 6} L${x2 + 4},${y2} Z`
-  }
-  const hot = lit ? lit.has(edge.from) && lit.has(edge.to) : false
+  affected: Set<string> | null
+  expanded: Set<string>
+  expanding: string | null
+  showLabels: boolean
+  onOpen: (n: TopologyNode) => void
+}
+const TopoContext = createContext<TopoCtx | null>(null)
+const useTopo = (): TopoCtx => {
+  const c = useContext(TopoContext)
+  if (!c) throw new Error('TopoContext missing')
+  return c
+}
+
+type TopoFlowNode = Node<{ node: PlacedNode }, 'topo'>
+type TopoFlowEdge = Edge<{ edge: TopologyEdge }, 'topo'>
+
+/** Màu nét theo nhóm (giá trị thật cho SVG — đổi theo theme qua biến CSS). */
+const STROKE: Record<TopologyCategory, string> = {
+  ownership: 'var(--sh-faint)',
+  network: 'var(--sh-accent)',
+  config: 'var(--sh-muted)',
+  scheduling: 'var(--sh-faint)',
+  policy: 'var(--sh-warning)',
+  rbac: 'var(--sh-danger)'
+}
+
+const TopoEdgeComp = memo(function TopoEdgeComp(
+  props: EdgeProps<TopoFlowEdge>
+): React.JSX.Element | null {
+  const ctx = useTopo()
+  const edge = props.data?.edge
+  if (!edge) return null
+  const cat = EDGE_CATEGORY[edge.type]
+  const [path, lx, ly] = getBezierPath(props)
+  const hot = ctx.lit ? ctx.lit.has(edge.from) && ctx.lit.has(edge.to) : false
+  const color = STROKE[cat]
+  const { targetX: x, targetY: y } = props
+  // Mũi tên theo hướng vào node đích.
+  const head =
+    props.targetPosition === Position.Left
+      ? `M${x - 7},${y - 4} L${x},${y} L${x - 7},${y + 4} Z`
+      : props.targetPosition === Position.Right
+        ? `M${x + 7},${y - 4} L${x},${y} L${x + 7},${y + 4} Z`
+        : props.targetPosition === Position.Top
+          ? `M${x - 4},${y - 7} L${x},${y} L${x + 4},${y - 7} Z`
+          : `M${x - 4},${y + 7} L${x},${y} L${x + 4},${y + 7} Z`
   const label = edge.label ? `${EDGE_TEXT[edge.type]} · ${edge.label}` : EDGE_TEXT[edge.type]
   return (
     <g
-      className={style.color}
-      opacity={lit ? (hot ? 1 : 0.15) : 0.75}
+      opacity={ctx.lit ? (hot ? 1 : 0.15) : 0.8}
       data-testid="k8s-topology-edge"
       data-type={edge.type}
     >
       <path
-        d={d}
+        d={path}
         fill="none"
-        stroke="currentColor"
-        strokeWidth={hot ? 2 : 1.3}
-        strokeDasharray={style.dash}
+        stroke={color}
+        strokeWidth={hot ? 2.2 : 1.4}
+        strokeDasharray={STYLE[cat].dash}
       >
         <title>{label}</title>
       </path>
-      <path d={head} fill="currentColor" />
-      {showLabel && (
-        <text
-          x={(x1 + x2) / 2}
-          y={(y1 + y2) / 2 - 4}
-          textAnchor="middle"
-          className="fill-current text-[9px]"
-          paintOrder="stroke"
-          stroke="var(--sh-canvas)"
-          strokeWidth={3}
-        >
-          {label.length > 34 ? `${label.slice(0, 33)}…` : label}
-        </text>
+      <path d={head} fill={color} />
+      {(hot || ctx.showLabels) && (
+        <EdgeLabelRenderer>
+          <div
+            className="pointer-events-none absolute rounded bg-canvas/90 px-1 text-[9.5px] whitespace-nowrap"
+            style={{
+              transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`,
+              color
+            }}
+          >
+            {label.length > 34 ? `${label.slice(0, 33)}…` : label}
+          </div>
+        </EdgeLabelRenderer>
       )}
     </g>
   )
+})
+
+const TONE_RING: Record<TopologyNode['tone'], string> = {
+  ok: 'border-l-success',
+  warn: 'border-l-warning',
+  bad: 'border-l-danger',
+  muted: 'border-l-line-strong'
 }
 
-/** Cắt chữ theo bề rộng ước lượng (SVG không tự "…"). */
-const clip = (text: string, px: number, size: number): string => {
-  const max = Math.floor(px / (size * 0.58))
-  return text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text
-}
-
-function NodeBox({
-  node,
-  root,
-  selected,
-  dim,
-  affected,
-  expanded,
-  busy,
-  onSelect,
-  onOpen,
-  onHover
-}: {
-  node: PlacedNode
-  root: boolean
-  selected: boolean
-  dim: boolean
-  affected: boolean
-  expanded: boolean
-  busy: boolean
-  onSelect: () => void
-  onOpen: () => void
-  onHover: (on: boolean) => void
-}): React.JSX.Element {
-  const Icon = ICON[node.kind] ?? (node.kind ? Box : UnfoldHorizontal)
+const TopoNodeComp = memo(function TopoNodeComp({
+  data
+}: NodeProps<TopoFlowNode>): React.JSX.Element {
+  const ctx = useTopo()
+  const node = data.node
+  const root = node.id === ctx.root
+  const selected = node.id === ctx.selected
+  const affected = Boolean(ctx.affected?.has(node.id))
+  const dim = Boolean(ctx.lit && !ctx.lit.has(node.id))
+  const expanded = ctx.expanded.has(node.id)
+  const hcls = '!pointer-events-none !size-1 !min-h-0 !min-w-0 !border-0 !bg-transparent'
   return (
-    <g
-      transform={`translate(${node.x} ${node.y})`}
-      opacity={dim ? 0.3 : 1}
-      className="cursor-pointer"
+    <div
+      className={cx(
+        'flex size-full items-center gap-2 rounded-lg border border-l-[3px] px-2 shadow-xs transition-opacity',
+        node.missing
+          ? 'border-dashed border-danger bg-danger-soft'
+          : root
+            ? 'bg-accent-soft'
+            : 'bg-surface',
+        !node.kind && 'border-dashed bg-subtle',
+        selected
+          ? 'border-accent ring-2 ring-accent/40'
+          : affected
+            ? 'border-warning ring-2 ring-warning/40'
+            : 'border-line-strong',
+        TONE_RING[node.tone],
+        dim && 'opacity-30'
+      )}
       data-testid="k8s-topology-node"
       data-kind={node.kind}
       data-name={node.name}
       data-root={root ? 'true' : undefined}
       data-affected={affected ? 'true' : undefined}
-      onClick={(e) => {
-        e.stopPropagation()
-        onSelect()
-      }}
-      onDoubleClick={(e) => {
-        e.stopPropagation()
-        onOpen()
-      }}
-      onPointerEnter={() => {
-        onHover(true)
-      }}
-      onPointerLeave={() => {
-        onHover(false)
-      }}
+      title={`${node.kindLabel} ${node.name}${node.namespace ? ` (${node.namespace})` : ''} — ${node.summary}`}
     >
-      <title>
-        {node.kindLabel} {node.name}
-        {node.namespace ? ` (${node.namespace})` : ''} — {node.summary}
-      </title>
-      <rect
-        width={TOPO_NODE_W}
-        height={TOPO_NODE_H}
-        rx={8}
-        className={cx(
-          node.missing ? 'fill-danger-soft' : root ? 'fill-accent-soft' : 'fill-surface',
-          selected ? 'text-accent' : affected ? 'text-warning' : TONE_STROKE[node.tone]
-        )}
-        stroke="currentColor"
-        strokeWidth={selected || root || affected ? 2 : 1}
-        strokeDasharray={node.missing || !node.kind ? '4 3' : undefined}
-      />
-      <rect
-        x={0}
-        y={8}
-        width={3}
-        height={TOPO_NODE_H - 16}
-        className={cx('fill-current', TONE_STROKE[node.tone])}
-      />
-      <Icon x={10} y={8} width={14} height={14} className="text-muted" aria-hidden />
-      <text x={30} y={19} className="fill-faint text-[10px]">
-        {clip(node.kindLabel, 80, 10)}
-      </text>
-      {node.namespace && (
-        <text x={TOPO_NODE_W - 8} y={19} textAnchor="end" className="fill-faint text-[9px]">
-          {clip(node.namespace, 80, 9)}
-        </text>
+      {node.kind ? (
+        <KindIcon kind={node.kind} size={26} />
+      ) : (
+        <UnfoldHorizontal size={18} className="text-faint" />
       )}
-      <text x={10} y={36} className="fill-fg text-[11.5px] font-semibold">
-        {clip(node.name, TOPO_NODE_W - 20 - (node.expandable && !expanded ? 14 : 0), 11.5)}
-      </text>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1 text-[10px] text-faint">
+          <span className="truncate">{node.kindLabel}</span>
+          {node.namespace && <span className="ml-auto truncate">{node.namespace}</span>}
+        </div>
+        <div className="truncate text-[12px] leading-tight font-semibold text-fg">{node.name}</div>
+        <div className="truncate text-[10px] text-muted">{node.summary}</div>
+      </div>
       {node.expandable && !expanded && (
-        <text x={TOPO_NODE_W - 10} y={37} textAnchor="end" className="fill-faint text-[11px]">
-          {busy ? '…' : '+'}
-        </text>
+        <span className="shrink-0 text-[13px] text-faint" title="Can be expanded">
+          {ctx.expanding === node.id ? '…' : '+'}
+        </span>
       )}
-    </g>
+      <Handle id="tl" type="target" position={Position.Left} className={hcls} />
+      <Handle id="tr" type="target" position={Position.Right} className={hcls} />
+      <Handle id="tt" type="target" position={Position.Top} className={hcls} />
+      <Handle id="tb" type="target" position={Position.Bottom} className={hcls} />
+      <Handle id="sl" type="source" position={Position.Left} className={hcls} />
+      <Handle id="sr" type="source" position={Position.Right} className={hcls} />
+      <Handle id="st" type="source" position={Position.Top} className={hcls} />
+      <Handle id="sb" type="source" position={Position.Bottom} className={hcls} />
+    </div>
   )
-}
+})
+
+const TOPO_NODE_TYPES = { topo: TopoNodeComp }
+const TOPO_EDGE_TYPES = { topo: TopoEdgeComp }
 
 function SelectionBar({
   node,

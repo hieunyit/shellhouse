@@ -15,6 +15,7 @@ import type {
   TopologyResult,
   RolloutRevision
 } from '../../shared/ops'
+import type { TrafficSample } from '../../shared/traffic'
 import { startApiTestServer, TEST_CA, TOKEN, type ApiTestServer } from '../api-test-server'
 
 const cleanups: (() => Promise<void> | void)[] = []
@@ -644,6 +645,43 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     ])
     // Không bao giờ có giá trị Secret.
     expect(JSON.stringify(g)).not.toContain(Buffer.from('s3cr3t').toString('base64'))
+  })
+
+  it('traffic (Caretta): không cài → unavailable; không được đọc → lý do; có → link, Service quy về Deployment', async () => {
+    const { server, run } = await setup()
+    const none = await run<TrafficSample>({ op: 'traffic' })
+    expect(none).toMatchObject({
+      status: 'unavailable',
+      reason: 'Caretta is not installed in this cluster'
+    })
+
+    server.enableCaretta({ forbidden: true })
+    const denied = await run<TrafficSample>({ op: 'traffic' })
+    expect(denied.status).toBe('unavailable')
+    expect(denied.reason).toMatch(/not allowed to read its metrics/)
+
+    const t0 = Date.now()
+    server.enableCaretta()
+    const s = await run<TrafficSample>({ op: 'traffic' })
+    const elapsed = (Date.now() - t0) / 1000
+    expect(s.status).toBe('ok')
+    expect(s.agents).toBe(1)
+    const pairs = s.links.map(
+      (l) => `${l.client.kind}/${l.client.name}>${l.server.kind}/${l.server.name}:${l.port}`
+    )
+    // Internet → Service web → quy về Deployment web (selector app=web).
+    expect(pairs.sort()).toEqual(
+      [
+        'external/203.0.113.7>Deployment/web:80',
+        'Deployment/web>Pod/tool:8080',
+        'Deployment/web>external/db.example.com:5432'
+      ].sort()
+    )
+    // Phía client (role 1) lớn hơn phía server — lấy một, không cộng.
+    const toTool = s.links.find((l) => l.server.name === 'tool')
+    // Agent giả báo byte = tốc độ × (60 s + thời gian từ lúc cài); cộng hai phía sẽ gần gấp đôi.
+    expect(toTool?.bytes).toBeGreaterThan(307_200 * 59)
+    expect(toTool?.bytes).toBeLessThanOrEqual(307_200 * (61 + elapsed))
   })
 
   it('lịch sử rollout + rollback về revision cũ (bỏ pod-template-hash)', async () => {

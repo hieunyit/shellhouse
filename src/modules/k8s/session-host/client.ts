@@ -94,6 +94,12 @@ export function statusMessage(status: number, body: Buffer): { message: string; 
   return { message: body.toString('utf8').trim() || `The API server answered HTTP ${status}` }
 }
 
+/** Bắt tay TLS lâu hơn chừng này coi như treo (test chỉnh được). */
+export const handshake = { ms: 10_000, attempts: 3 }
+
+/** Bắt tay TLS treo / bị cắt — thử lại bằng kết nối mới được. */
+class HandshakeError extends Error {}
+
 export class KubeClient {
   private readonly url: URL
 
@@ -114,8 +120,21 @@ export class KubeClient {
     return Number(this.url.port) || (this.secure ? 443 : 80)
   }
 
-  /** Kết nối (TLS nếu https) sẵn sàng để gửi request. */
+  /**
+   * Kết nối (TLS nếu https) sẵn sàng để gửi request. Bắt tay TLS treo (mạng chập chờn, proxy /
+   * bastion kẹt) → bỏ sau handshake.ms và thử kết nối mới — không để request (và bảng) chờ mãi.
+   */
   async socket(creds: Credentials): Promise<Duplex> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.socketOnce(creds)
+      } catch (error) {
+        if (!(error instanceof HandshakeError) || attempt >= handshake.attempts) throw error
+      }
+    }
+  }
+
+  private async socketOnce(creds: Credentials): Promise<Duplex> {
     const raw = await this.connect(this.url.hostname, this.port)
     if (!this.secure) return raw
     return new Promise<TLSSocket>((resolve, reject) => {
@@ -134,13 +153,26 @@ export class KubeClient {
         rejectUnauthorized: !this.endpoint.insecure,
         ALPNProtocols: ['http/1.1']
       })
+      const timer = setTimeout(() => {
+        socket.destroy()
+        raw.destroy()
+        reject(new HandshakeError(`TLS handshake with ${this.url.host} timed out`))
+      }, handshake.ms)
       socket.once('secureConnect', () => {
+        clearTimeout(timer)
         socket.removeListener('error', reject)
         resolve(socket)
       })
       socket.once('error', (e: unknown) => {
+        clearTimeout(timer)
         raw.destroy()
-        reject(e instanceof Error ? e : new Error(String(e)))
+        const err = e instanceof Error ? e : new Error(String(e))
+        // Lỗi chứng chỉ không thử lại; kết nối bị cắt giữa chừng thì có.
+        reject(
+          /ECONNRESET|socket hang up|EPIPE/i.test(err.message)
+            ? new HandshakeError(err.message)
+            : err
+        )
       })
     })
   }
@@ -159,6 +191,12 @@ export class KubeClient {
         : Buffer.from(
             typeof options.body === 'string' ? options.body : JSON.stringify(options.body)
           )
+    // Huỷ trong lúc đang mở kết nối → không tạo request (request bị huỷ trước khi gắn listener
+    // lỗi sẽ phát "socket hang up" không ai bắt và làm sập cả Session Host).
+    if (options.signal?.aborted) {
+      socket.destroy()
+      throw new Error('Cancelled')
+    }
     return new Promise<IncomingMessage>((resolve, reject) => {
       // Kết nối đã là TLS nếu cần → dùng http.request trên nó; Host đặt tường minh (có cổng).
       const req = httpRequest({
@@ -179,14 +217,15 @@ export class KubeClient {
             : {})
         }
       })
+      // Gắn listener lỗi ngay khi tạo request — mọi lỗi về sau (huỷ, kết nối đứt) đều được bắt.
+      req.on('error', (e) => {
+        options.signal?.removeEventListener('abort', abort)
+        socket.destroy()
+        reject(e)
+      })
       const abort = (): void => {
         req.destroy(new Error('Cancelled'))
         socket.destroy()
-      }
-      if (options.signal?.aborted) {
-        abort()
-        reject(new Error('Cancelled'))
-        return
       }
       options.signal?.addEventListener('abort', abort, { once: true })
       req.on('response', (res) => {
@@ -195,11 +234,6 @@ export class KubeClient {
           socket.destroy()
         })
         resolve(res)
-      })
-      req.on('error', (e) => {
-        options.signal?.removeEventListener('abort', abort)
-        socket.destroy()
-        reject(e)
       })
       req.end(body)
     })

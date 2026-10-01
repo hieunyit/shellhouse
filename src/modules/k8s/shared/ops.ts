@@ -119,6 +119,8 @@ export const K8sOp = z.discriminatedUnion('op', [
   }),
   /** ServiceAccount với tới được gì (gộp mọi RoleBinding / ClusterRoleBinding của nó). */
   z.object({ op: z.literal('rbacReach'), namespace: Namespace, serviceAccount: Name }),
+  /** Traffic live từ Caretta (đọc agent qua API proxy) — byte tích luỹ, renderer tính tốc độ. */
+  z.object({ op: z.literal('traffic') }),
   z.object({ op: z.literal('rolloutHistory'), namespace: Namespace, name: Name }),
   z.object({
     op: z.literal('rollback'),

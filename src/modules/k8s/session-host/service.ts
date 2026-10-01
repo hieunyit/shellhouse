@@ -44,6 +44,7 @@ import {
 import { mapData } from './map'
 import { related } from './related'
 import { rbacReach, topology } from './topology'
+import { trafficSample } from './traffic'
 
 /** Kết quả `fromMain('resolve')` (xem main/kubeconfig.ts). */
 export interface ResolvedClusterConfig {
@@ -255,6 +256,8 @@ export class K8sService implements HostModuleSession {
         })
         return topology(client, kind.id, obj, signal)
       }
+      case 'traffic':
+        return trafficSample(client, signal)
       case 'rbacReach':
         return rbacReach(client, op.namespace, op.serviceAccount, signal)
       case 'rolloutHistory':

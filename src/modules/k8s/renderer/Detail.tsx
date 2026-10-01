@@ -28,6 +28,7 @@ import {
 } from '../shared/resources'
 import { HAS_PODS, keyLabel, toMenu, type K8sAction } from './actions'
 import { TOPOLOGY_KINDS, TopologyOf } from './Topology'
+import { TRAFFIC_KINDS, TrafficOf } from './TrafficTab'
 import {
   MetricsOf,
   POD_TEMPLATE_KINDS,
@@ -47,7 +48,16 @@ const s = (v: unknown): string =>
 const TONE: Record<string, Tone> = { ok: 'ok', warn: 'warn', bad: 'bad', muted: 'muted' }
 
 export type DetailTab =
-  'overview' | 'topology' | 'related' | 'pods' | 'metrics' | 'security' | 'data' | 'events' | 'yaml'
+  | 'overview'
+  | 'topology'
+  | 'related'
+  | 'pods'
+  | 'metrics'
+  | 'traffic'
+  | 'security'
+  | 'data'
+  | 'events'
+  | 'yaml'
 
 const WIDE_KEY = 'shellhouse.k8s.detail.wide'
 const loadWide = (): boolean => {
@@ -219,6 +229,7 @@ export function Detail({
             ? [{ id: 'pods' as const, label: 'Pods' }]
             : []),
           ...(hasMetrics ? [{ id: 'metrics' as const, label: 'Metrics' }] : []),
+          ...(TRAFFIC_KINDS.has(kindId) ? [{ id: 'traffic' as const, label: 'Traffic' }] : []),
           ...(hasTemplate ? [{ id: 'security' as const, label: 'Security' }] : []),
           ...(hasData
             ? [
@@ -261,6 +272,14 @@ export function Detail({
           />
         )}
         {tab === 'metrics' && <MetricsOf kindId={kindId} obj={obj} request={request} />}
+        {tab === 'traffic' && (
+          <TrafficOf
+            kindId={kindId}
+            obj={obj}
+            request={request}
+            {...(onNavigate ? { onNavigate } : {})}
+          />
+        )}
         {tab === 'security' && (
           <SecurityOf
             kindId={kindId}
