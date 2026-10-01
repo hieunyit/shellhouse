@@ -72,7 +72,9 @@ const AppearanceSettings = z.object({
   sidebarHidden: z.boolean().catch(false),
   /** Mục "Favorites" / "Recent" ở đầu thanh bên (host đã có trong cây nhóm — lặp lại cho nhanh). */
   showFavorites: z.boolean().catch(true),
-  showRecent: z.boolean().catch(true)
+  showRecent: z.boolean().catch(true),
+  /** Mở app: trang Home hay một terminal local; chưa chọn = Home. */
+  startup: z.enum(['home', 'terminal']).optional().catch(undefined)
 })
 
 const FileSettings = z.object({

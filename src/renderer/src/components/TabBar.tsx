@@ -15,7 +15,8 @@ import {
   ScrollText,
   Settings,
   SquareTerminal,
-  Zap
+  Zap,
+  House
 } from 'lucide-react'
 import { parseQuickConnect } from '@shared/quick-connect'
 import { keybindingFor } from '@shared/commands'
@@ -107,6 +108,15 @@ export function TabBar({
         onClick={() => void updateSettings({ appearance: { sidebarHidden: !sidebarHidden } })}
       >
         {sidebarHidden ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+      </IconButton>
+      <IconButton
+        label="Home"
+        data-testid="open-home"
+        onClick={() => {
+          useTabs.getState().openHome()
+        }}
+      >
+        <House size={15} />
       </IconButton>
       <div className="mx-0.5 h-4 w-px bg-line" />
       <button

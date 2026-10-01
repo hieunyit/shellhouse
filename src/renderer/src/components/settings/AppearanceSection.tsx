@@ -1,6 +1,6 @@
 import { Monitor, Moon, Sun } from 'lucide-react'
 import { useSettings } from '../../stores/settings'
-import { Checkbox, cx, SectionTitle } from '../ui'
+import { Checkbox, cx, SectionTitle, Segmented } from '../ui'
 
 const OPTIONS = [
   { value: 'system', label: 'System', icon: Monitor, hint: 'Follow the operating system' },
@@ -56,6 +56,19 @@ export function AppearanceSection(): React.JSX.Element {
             onChange={(e) => void update({ appearance: { showRecent: e.target.checked } })}
           />
         </div>
+      </div>
+      <div>
+        <h3 className="text-[13px] font-semibold text-fg">When Shellhouse starts</h3>
+        <p className="mt-0.5 mb-2 text-xs text-muted">What the first tab shows.</p>
+        <Segmented
+          value={settings.appearance.startup ?? 'home'}
+          testIdPrefix="setting-startup"
+          options={[
+            { value: 'home', label: 'Home' },
+            { value: 'terminal', label: 'Local terminal' }
+          ]}
+          onChange={(startup) => void update({ appearance: { startup } })}
+        />
       </div>
     </div>
   )

@@ -31,7 +31,12 @@ export interface ModuleTabTarget {
   params: unknown
 }
 
-export type TabTarget = TerminalTarget | ModuleTabTarget
+/** Trang chủ: kết nối gần đây, yêu thích, thao tác nhanh (một tab duy nhất). */
+export interface HomeTarget {
+  kind: 'home'
+}
+
+export type TabTarget = TerminalTarget | ModuleTabTarget | HomeTarget
 
 export interface Tab {
   id: string
@@ -58,6 +63,8 @@ interface TabsState {
   activeId: string | null
   /** Tab terminal local; `shellId` = shell cụ thể (không có = shell mặc định). */
   addLocal: (shellId?: string) => string
+  /** Mở (hoặc chuyển tới) tab Home. */
+  openHome: () => string
   addSsh: (target: { host: string; port: number; username: string }) => string
   addHost: (host: { id: string; label: string }, options?: OpenHostOptions) => string
   /** Mở tab của module (dùng `openModuleTab` của registry — nó kiểm tham số, đặt tiêu đề). */
@@ -116,6 +123,14 @@ export const useTabs = create<TabsState>((set, get) => {
       const title = shellName(shellId) ?? `Local ${++localCounter}`
       return add(title, shellId ? { kind: 'local', shellId } : { kind: 'local' })
     },
+    openHome: () => {
+      const existing = get().tabs.find((t) => t.target.kind === 'home')
+      if (existing) {
+        set({ activeId: existing.id })
+        return existing.id
+      }
+      return add('Home', { kind: 'home' })
+    },
     addSsh: (t) =>
       add(`${t.username}@${t.host}${t.port === 22 ? '' : `:${t.port}`}`, { kind: 'ssh', ...t }),
     addHost: (host, options) => {
@@ -167,7 +182,7 @@ export const useTabs = create<TabsState>((set, get) => {
     split: (direction) => {
       const { tabs, activeId } = get()
       const source = tabs.find((t) => t.id === activeId)
-      if (!source) return null
+      if (!source || source.target.kind === 'home') return null
       const title =
         source.target.kind === 'local'
           ? (shellName(source.target.shellId) ?? `Local ${++localCounter}`)
@@ -176,7 +191,7 @@ export const useTabs = create<TabsState>((set, get) => {
     },
     duplicate: (id) => {
       const source = get().tabs.find((t) => t.id === id)
-      if (!source) return null
+      if (!source || source.target.kind === 'home') return null
       const title =
         source.target.kind === 'local'
           ? (shellName(source.target.shellId) ?? `Local ${++localCounter}`)

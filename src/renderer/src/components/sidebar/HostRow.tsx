@@ -1,11 +1,12 @@
 import type { DragEvent, MouseEvent } from 'react'
-import { Pencil, Server, Star } from 'lucide-react'
+import { FolderOpen, Pencil, Play, Star } from 'lucide-react'
 import type { HostSummary } from '@shared/hosts'
 import { hostAddress, useHosts } from '../../stores/hosts'
 import { useTabStatus } from '../../stores/tab-status'
 import { useTabs } from '../../stores/tabs'
-import { hostTileClass } from '../hostColors'
-import { cx, IconButton, StatusDot, type ConnectionState } from '../ui'
+import { HostAvatar } from '../HostAvatar'
+import { cx, IconButton, type ConnectionState } from '../ui'
+import { connect } from './actions'
 
 const RANK: Record<ConnectionState, number> = {
   connected: 5,
@@ -105,20 +106,7 @@ export function HostRow({
       {...(dnd ?? {})}
     >
       <DropLine pos={dropPos ?? null} />
-      <span
-        className={cx(
-          'relative flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
-          host.color ? hostTileClass[host.color] : 'bg-subtle text-muted'
-        )}
-      >
-        <Server size={14} />
-        {session && (
-          <StatusDot
-            state={session}
-            className="absolute -right-0.5 -bottom-0.5 size-2 ring-2 ring-surface"
-          />
-        )}
-      </span>
+      <HostAvatar host={host} session={session} />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1">
           <span className="truncate text-[13px] text-fg">{host.label}</span>
@@ -131,18 +119,45 @@ export function HostRow({
           {address}
         </span>
       </span>
-      <IconButton
-        label={`Edit ${host.label}`}
-        size="sm"
-        data-testid="host-edit"
-        className="opacity-0 group-hover:opacity-100 focus:opacity-100"
-        onClick={(e) => {
-          e.stopPropagation()
-          onEdit()
-        }}
-      >
-        <Pencil size={13} />
-      </IconButton>
+      {/* Thao tác nhanh khi rê chuột: mở file (SFTP), sửa, kết nối. */}
+      <span className="hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
+        {host.protocol === 'ssh' && (
+          <IconButton
+            label={`Open files on ${host.label}`}
+            size="sm"
+            data-testid="host-sftp"
+            onClick={(e) => {
+              e.stopPropagation()
+              connect(host, { view: 'files' })
+            }}
+          >
+            <FolderOpen size={13} />
+          </IconButton>
+        )}
+        <IconButton
+          label={`Edit ${host.label}`}
+          size="sm"
+          data-testid="host-edit"
+          onClick={(e) => {
+            e.stopPropagation()
+            onEdit()
+          }}
+        >
+          <Pencil size={13} />
+        </IconButton>
+        <IconButton
+          label={`Connect to ${host.label}`}
+          size="sm"
+          data-testid="host-connect"
+          className="text-accent hover:text-accent"
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpen()
+          }}
+        >
+          <Play size={13} />
+        </IconButton>
+      </span>
     </div>
   )
 }

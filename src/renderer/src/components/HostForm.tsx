@@ -1,6 +1,7 @@
+import { toast } from '../stores/toasts'
 import { useMemo, useState, type SyntheticEvent } from 'react'
 import { inheritedDefaults } from '@shared/inherit'
-import { KeyRound, X } from 'lucide-react'
+import { KeyRound, X, ChevronRight } from 'lucide-react'
 import {
   HostInput,
   MAX_JUMPS,
@@ -59,6 +60,10 @@ export function HostForm({
   const [mode, setMode] = useState<HostMode>(host?.mode ?? 'builtin')
   const [direct, setDirect] = useState(host?.direct ?? false)
   const [legacy, setLegacy] = useState(host?.legacyAlgorithms ?? false)
+  // Mục Advanced mở sẵn khi host đang dùng một tuỳ chọn trong đó (không giấu cấu hình đang bật).
+  const [advancedOpen, setAdvancedOpen] = useState(
+    Boolean(host?.legacyAlgorithms) || host?.mode === 'system'
+  )
   const groupTree = useHosts((s) => s.groupTree)
   const inherited = useMemo(() => inheritedDefaults(groupTree, groupId), [groupTree, groupId])
   const from = (g: { groupName: string } | undefined): string => (g ? ` (from ${g.groupName})` : '')
@@ -114,8 +119,12 @@ export function HostForm({
       setSaving(true)
       const result = await window.shellhouse.saveHost(parsed.data)
       setSaving(false)
-      if (result.ok) onClose()
-      else setError(result.message)
+      if (result.ok) {
+        toast.success(host ? `Saved ${parsed.data.label}` : `Added ${parsed.data.label}`, {
+          group: 'host-saved'
+        })
+        onClose()
+      } else setError(result.message)
       return
     }
     const draft = {
@@ -155,13 +164,21 @@ export function HostForm({
     setSaving(false)
     setPassword('')
     setPassphrase('')
-    if (result.ok) onClose()
-    else setError(result.message)
+    if (result.ok) {
+      toast.success(
+        host ? `Saved ${parsed.data.label || 'host'}` : `Added ${parsed.data.label || 'host'}`,
+        {
+          description: host ? undefined : 'Double-click it in the sidebar to connect.'
+        }
+      )
+      onClose()
+    } else setError(result.message)
   }
 
   const remove = async (): Promise<void> => {
     if (!host) return
     await window.shellhouse.deleteHost(host.id)
+    toast.success(`Deleted ${host.label}`)
     onClose()
   }
 
@@ -476,26 +493,51 @@ export function HostForm({
         </div>
 
         {isSsh && (
-          <>
-            <Checkbox
-              data-testid="host-legacy"
-              checked={legacy}
-              onChange={(e) => {
-                setLegacy(e.target.checked)
-              }}
-              label="Allow legacy algorithms"
-              description="For old switches, routers and servers that only offer ssh-rsa (SHA-1), SHA-1 key exchange or CBC ciphers. Weaker security — enable only for devices that need it."
-            />
-            <Checkbox
-              data-testid="host-mode-system"
-              checked={mode === 'system'}
-              onChange={(e) => {
-                setMode(e.target.checked ? 'system' : 'builtin')
-              }}
-              label="Compatibility mode: use the system ssh command"
-              description="For GSSAPI/Kerberos, FIDO hardware keys or complex ssh_config setups. OpenSSH asks for passwords and host keys in the terminal. SFTP, port forwarding and passwords/keys stored in the vault are not available."
-            />
-          </>
+          <details
+            className="group rounded-lg border border-line"
+            open={advancedOpen}
+            onToggle={(e) => {
+              setAdvancedOpen(e.currentTarget.open)
+            }}
+          >
+            <summary
+              className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[13px] font-medium text-fg select-none"
+              data-testid="host-advanced"
+            >
+              <ChevronRight
+                size={14}
+                className="text-faint transition-transform group-open:rotate-90"
+              />
+              Advanced
+              <span className="text-xs font-normal text-faint">
+                {legacy || mode === 'system'
+                  ? [legacy && 'legacy algorithms', mode === 'system' && 'system ssh']
+                      .filter(Boolean)
+                      .join(' · ')
+                  : 'Legacy algorithms, system ssh'}
+              </span>
+            </summary>
+            <div className="flex flex-col gap-3 border-t border-line px-3 py-3">
+              <Checkbox
+                data-testid="host-legacy"
+                checked={legacy}
+                onChange={(e) => {
+                  setLegacy(e.target.checked)
+                }}
+                label="Allow legacy algorithms"
+                description="For old switches, routers and servers that only offer ssh-rsa (SHA-1), SHA-1 key exchange or CBC ciphers. Weaker security — enable only for devices that need it."
+              />
+              <Checkbox
+                data-testid="host-mode-system"
+                checked={mode === 'system'}
+                onChange={(e) => {
+                  setMode(e.target.checked ? 'system' : 'builtin')
+                }}
+                label="Compatibility mode: use the system ssh command"
+                description="For GSSAPI/Kerberos, FIDO hardware keys or complex ssh_config setups. OpenSSH asks for passwords and host keys in the terminal. SFTP, port forwarding and passwords/keys stored in the vault are not available."
+              />
+            </div>
+          </details>
         )}
 
         {host?.keyFile && (

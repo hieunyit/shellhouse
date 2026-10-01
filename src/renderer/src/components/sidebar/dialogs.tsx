@@ -1,3 +1,4 @@
+import { toast } from '../../stores/toasts'
 import { useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import type { HostSummary } from '@shared/hosts'
@@ -67,6 +68,9 @@ export function DeleteHostsDialog({
       danger
       onConfirm={async () => {
         await window.shellhouse.deleteHosts(hosts.map((h) => h.id))
+        toast.success(
+          single ? `Deleted ${single.label}` : `Deleted ${plural(hosts.length, 'host')}`
+        )
         onDone()
       }}
       onClose={onClose}

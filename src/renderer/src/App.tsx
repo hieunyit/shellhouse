@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { TEST_HOOKS_GLOBAL } from '@shared/test-hooks'
 import { CommandPalette } from './components/CommandPalette'
 import type { SettingsSectionId } from './components/settings/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
@@ -74,7 +75,13 @@ export function App(): React.JSX.Element {
       .load()
       .catch(() => undefined)
       .finally(() => {
-        if (useTabs.getState().tabs.length === 0) useTabs.getState().addLocal()
+        if (useTabs.getState().tabs.length > 0) return
+        // Chưa chọn: Home (E2E giữ terminal như trước để các kịch bản cũ không đổi).
+        const startup =
+          useSettings.getState().settings.appearance.startup ??
+          (TEST_HOOKS_GLOBAL in window ? 'terminal' : 'home')
+        if (startup === 'home') useTabs.getState().openHome()
+        else useTabs.getState().addLocal()
       })
   }, [])
 

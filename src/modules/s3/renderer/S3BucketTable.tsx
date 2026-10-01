@@ -25,7 +25,11 @@ export const BUCKET_SORT_OPTIONS = [
 ] as const satisfies readonly SortOption<BucketSortKey>[]
 export const BUCKET_SORT_KEYS: readonly BucketSortKey[] = BUCKET_SORT_OPTIONS.map((o) => o.key)
 
-const monthYear = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: '2-digit' })
+const monthYear = new Intl.DateTimeFormat(undefined, {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric'
+})
 
 /** Name, [Region], [Created], Objects, Size, ghim — Region / Created ẩn khi khung hẹp. */
 const COLUMNS = {

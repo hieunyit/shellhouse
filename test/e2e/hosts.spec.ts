@@ -247,6 +247,7 @@ test('tuỳ chọn "Allow legacy algorithms" được lưu theo host', async ({ 
   await form.getByTestId('host-hostname').fill('10.0.0.1')
   await form.getByTestId('host-username').fill('admin')
   await form.getByTestId('host-label').fill('old-switch')
+  await form.getByTestId('host-advanced').click()
   await form.getByTestId('host-legacy').check()
   await form.getByTestId('host-save').click()
   await expect(form).toHaveCount(0)

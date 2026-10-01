@@ -7,18 +7,7 @@ import {
   type IDockviewPanelProps
 } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
-import {
-  Columns2,
-  Copy,
-  FileInput,
-  Puzzle,
-  RotateCw,
-  Rows2,
-  Server,
-  SquareTerminal,
-  X,
-  Zap
-} from 'lucide-react'
+import { Columns2, Copy, RotateCw, Rows2, X } from 'lucide-react'
 import { useContextMenu } from './ContextMenu'
 import { controllers } from '../terminal/registry'
 import { useTabStatus } from '../stores/tab-status'
@@ -27,10 +16,8 @@ import { hostColorClass } from './hostColors'
 import { keybindingFor } from '@shared/commands'
 import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useSettings } from '../stores/settings'
-import { connectionLabel, cx, Kbd, StatusDot } from './ui'
-import { Logo } from './Logo'
-import { focusQuickConnect, openSidebarDialog } from '../stores/ui-requests'
-import { browseModules } from '../stores/module-ui'
+import { connectionLabel, cx, StatusDot } from './ui'
+import { HomeView } from './Home'
 import { useTabs } from '../stores/tabs'
 import { TerminalView } from '../terminal/TerminalView'
 import { ModuleTabView, TabIcon } from './ModuleTabView'
@@ -61,6 +48,7 @@ function TerminalPanel(props: IDockviewPanelProps<PanelParams>): React.JSX.Eleme
   }, [props.api])
 
   if (!tab) return null
+  if (tab.target.kind === 'home') return <HomeView />
   if (tab.target.kind === 'module')
     return <ModuleTabView tabId={tab.id} target={tab.target} active={active} visible={visible} />
   return <TerminalView tabId={tab.id} target={tab.target} active={active} visible={visible} />
@@ -98,62 +86,77 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
     e.preventDefault()
     const tabs = useTabs.getState()
     const others = tabs.tabs.length > 1
-    openMenu(e, [
-      {
-        id: 'tab-reconnect',
-        label: kind === 'local' ? 'Restart shell' : 'Reconnect',
-        icon: <RotateCw size={14} />,
-        hint: key('tab.reconnect'),
-        onSelect: () => {
-          tabs.activate(tabId)
-          controllers.get(tabId)?.reconnect()
+    // Tab Home: không có kết nối / không nhân bản / không chia màn hình.
+    const skip =
+      kind === 'home'
+        ? new Set(['tab-reconnect', 'tab-duplicate', 'tab-split-right', 'tab-split-below'])
+        : null
+    const menuOf = (items: Parameters<typeof openMenu>[1]): Parameters<typeof openMenu>[1] =>
+      skip
+        ? items.filter((it, i, all) => {
+            if (it === 'separator') return i > 0 && all[i - 1] !== 'separator'
+            return !skip.has(it.id)
+          })
+        : items
+    openMenu(
+      e,
+      menuOf([
+        {
+          id: 'tab-reconnect',
+          label: kind === 'local' ? 'Restart shell' : 'Reconnect',
+          icon: <RotateCw size={14} />,
+          hint: key('tab.reconnect'),
+          onSelect: () => {
+            tabs.activate(tabId)
+            controllers.get(tabId)?.reconnect()
+          }
+        },
+        {
+          id: 'tab-duplicate',
+          label: 'Duplicate tab',
+          icon: <Copy size={14} />,
+          onSelect: () => {
+            tabs.duplicate(tabId)
+          }
+        },
+        {
+          id: 'tab-split-right',
+          label: 'Split right',
+          icon: <Columns2 size={14} />,
+          onSelect: () => {
+            tabs.activate(tabId)
+            tabs.split('right')
+          }
+        },
+        {
+          id: 'tab-split-below',
+          label: 'Split down',
+          icon: <Rows2 size={14} />,
+          onSelect: () => {
+            tabs.activate(tabId)
+            tabs.split('below')
+          }
+        },
+        'separator',
+        {
+          id: 'tab-close',
+          label: 'Close tab',
+          icon: <X size={14} />,
+          hint: key('tab.close'),
+          onSelect: () => {
+            tabs.close(tabId)
+          }
+        },
+        {
+          id: 'tab-close-others',
+          label: 'Close other tabs',
+          disabled: !others,
+          onSelect: () => {
+            tabs.closeOthers(tabId)
+          }
         }
-      },
-      {
-        id: 'tab-duplicate',
-        label: 'Duplicate tab',
-        icon: <Copy size={14} />,
-        onSelect: () => {
-          tabs.duplicate(tabId)
-        }
-      },
-      {
-        id: 'tab-split-right',
-        label: 'Split right',
-        icon: <Columns2 size={14} />,
-        onSelect: () => {
-          tabs.activate(tabId)
-          tabs.split('right')
-        }
-      },
-      {
-        id: 'tab-split-below',
-        label: 'Split down',
-        icon: <Rows2 size={14} />,
-        onSelect: () => {
-          tabs.activate(tabId)
-          tabs.split('below')
-        }
-      },
-      'separator',
-      {
-        id: 'tab-close',
-        label: 'Close tab',
-        icon: <X size={14} />,
-        hint: key('tab.close'),
-        onSelect: () => {
-          tabs.close(tabId)
-        }
-      },
-      {
-        id: 'tab-close-others',
-        label: 'Close other tabs',
-        disabled: !others,
-        onSelect: () => {
-          tabs.closeOthers(tabId)
-        }
-      }
-    ])
+      ])
+    )
   }
   return (
     <>
@@ -185,7 +188,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         <span className="relative flex shrink-0">
           <TabIcon target={target} size={13} className={active ? 'text-fg' : 'text-faint'} />
           {/* Terminal local luôn "connected" — chỉ hiện chấm khi là phiên từ xa hoặc đã kết thúc. */}
-          {(kind !== 'local' || state === 'exited') && (
+          {((kind !== 'local' && kind !== 'home') || state === 'exited') && (
             <StatusDot
               state={state}
               className={cx(
@@ -218,118 +221,6 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
   )
 }
 
-/** Một lựa chọn trên màn chào. */
-function StartCard({
-  icon,
-  title,
-  text,
-  hint,
-  testId,
-  className,
-  onClick
-}: {
-  icon: React.ReactNode
-  title: string
-  text: string
-  hint?: string
-  testId: string
-  className?: string
-  onClick: () => void
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      className={cx(
-        className,
-        'group flex items-start gap-3 rounded-xl border border-line bg-surface p-3.5 text-left shadow-xs transition-[border-color,box-shadow] duration-150 hover:border-accent/50 hover:shadow-md focus-visible:border-accent'
-      )}
-      onClick={onClick}
-    >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent">
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2 text-[13px] font-semibold text-fg">
-          {title}
-          {hint && <Kbd>{hint}</Kbd>}
-        </span>
-        <span className="mt-0.5 block text-xs text-muted">{text}</span>
-      </span>
-    </button>
-  )
-}
-
-/** Không còn tab nào: màn chào với các cách bắt đầu. */
-function Empty(): React.JSX.Element {
-  const overrides = useSettings((s) => s.settings.keybindings)
-  const hasHosts = useHosts((s) => s.tree.hosts.length > 0)
-  const key = (id: string): string => displayKeybinding(keybindingFor(id, overrides, isMac))
-  return (
-    <div
-      className="animate-fade-in flex h-full flex-col items-center justify-center gap-6 overflow-auto bg-canvas p-6"
-      data-testid="welcome"
-    >
-      <div className="flex flex-col items-center text-center">
-        <Logo size={52} className="drop-shadow-md" />
-        <h1 className="mt-3 text-lg font-semibold tracking-tight text-fg">
-          {hasHosts ? 'No open sessions' : 'Welcome to Shellhouse'}
-        </h1>
-        <p className="mt-1 max-w-sm text-[13px] text-muted">
-          {hasHosts
-            ? 'Double-click a host in the sidebar, or start something new.'
-            : 'SSH, SFTP, Telnet, serial and more in one place. How would you like to start?'}
-        </p>
-      </div>
-      <div className="grid w-full max-w-xl grid-cols-1 gap-2.5 sm:grid-cols-2">
-        <StartCard
-          icon={<Server size={18} />}
-          title="Add a host"
-          text="Save a server with its login — connect later in one click."
-          testId="welcome-add-host"
-          onClick={() => void openSidebarDialog('new-host')}
-        />
-        <StartCard
-          icon={<FileInput size={18} />}
-          title="Import hosts"
-          text="From ~/.ssh/config, MobaXterm, Termius or a CSV file."
-          testId="welcome-import"
-          onClick={() => void openSidebarDialog('import-hosts')}
-        />
-        <StartCard
-          icon={<Zap size={18} />}
-          title="Quick connect"
-          text="Type user@host:port — nothing is saved."
-          testId="welcome-quick-connect"
-          onClick={focusQuickConnect}
-        />
-        <StartCard
-          icon={<SquareTerminal size={18} />}
-          title="Local terminal"
-          text="Open a shell on this computer."
-          hint={key('tab.new')}
-          testId="welcome-new-terminal"
-          onClick={() => useTabs.getState().addLocal()}
-        />
-        <StartCard
-          icon={<Puzzle size={18} />}
-          title="Add tools"
-          text="S3 storage and more — turn on the modules you need."
-          testId="welcome-add-tools"
-          className="sm:col-span-2"
-          onClick={() => {
-            browseModules()
-          }}
-        />
-      </div>
-      <p className="text-xs text-faint">
-        Search hosts <Kbd>{key('hosts.search')}</Kbd> · Command palette{' '}
-        <Kbd>{key('palette.open')}</Kbd>
-      </p>
-    </div>
-  )
-}
-
 const components = { terminal: TerminalPanel }
 
 /** Dockview đang hiển thị — để chụp bố cục khi lưu workspace. */
@@ -343,7 +234,10 @@ export function captureWorkspaceItems(): WorkspaceItem[] {
   const { tabs } = useTabs.getState()
   return layoutToItems(grid.root, grid.orientation, (panelId) => {
     const tab = tabs.find((t) => t.id === panelId)
-    return tab ? { target: tab.target, title: tab.title, view: tab.view } : null
+    // Tab Home không thuộc bố cục làm việc — không lưu vào workspace.
+    return tab && tab.target.kind !== 'home'
+      ? { target: tab.target, title: tab.title, view: tab.view }
+      : null
   })
 }
 
@@ -416,7 +310,7 @@ export function Workspace(): React.JSX.Element {
       theme={shellhouseTheme}
       components={components}
       tabComponents={tabComponents}
-      watermarkComponent={Empty}
+      watermarkComponent={HomeView}
       defaultRenderer="always"
       onReady={(event) => {
         apiRef.current = event.api

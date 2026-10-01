@@ -6,6 +6,7 @@ import { moduleTab } from '../../../modules/registry/renderer-kit'
 
 /** Tab gõ lệnh được: terminal (kể cả terminal của module) và tab module khai báo `multiExec`. */
 export function joinsMultiExec(target: TabTarget): boolean {
+  if (target.kind === 'home') return false
   return target.kind !== 'module' || moduleTab(target.module, target.tab)?.multiExec === true
 }
 

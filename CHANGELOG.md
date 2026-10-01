@@ -22,6 +22,16 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   to, technology badges (Prometheus, Grafana, Argo CD, CoreDNS, NGINX, PostgreSQL, Redis… from
   the image), a Helm badge, and a **Blast radius** for any object: what is affected if it
   changes or fails.
+- **Home** — Shellhouse now opens on a home page: a large quick-connect box, your recent
+  connections and favorites as cards (Connect, open files, edit), ways to get started and the
+  main shortcuts. Open it any time with the Home button; Settings → Appearance chooses whether
+  the app starts on Home or a local terminal.
+- **Sidebar** — hosts show a coloured avatar with their initials (the host colour, or a stable
+  colour from the name) and quick buttons on hover: Connect, open files (SFTP) and Edit.
+- **Host form** — rarely used options (legacy algorithms, system ssh) moved under a collapsible
+  **Advanced** section that opens by itself when one of them is on.
+- Saving, adding, duplicating and deleting hosts and copying the SSH command now confirm with a
+  toast. S3 bucket dates show the full date.
 - **Kubernetes: create resources with forms** (like Rancher / Lens) — Deployment,
   StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, ConfigMap, Secret (key / value,
   registry login, TLS, username / password), volume claim, autoscaler and namespace. Pick

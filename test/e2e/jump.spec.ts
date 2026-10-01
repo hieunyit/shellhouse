@@ -39,7 +39,10 @@ async function createHost(
     await form.getByTestId('jump-add').selectOption(value ?? '')
     await expect(form.getByTestId('jump-list')).toContainText(opts.jumpLabel)
   }
-  if (opts.system) await form.getByTestId('host-mode-system').check()
+  if (opts.system) {
+    await form.getByTestId('host-advanced').click()
+    await form.getByTestId('host-mode-system').check()
+  }
   await form.getByTestId('host-save').click()
   await expect(form).toHaveCount(0)
 }

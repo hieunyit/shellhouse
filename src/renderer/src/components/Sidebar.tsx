@@ -1,3 +1,4 @@
+import { toast } from '../stores/toasts'
 import {
   forwardRef,
   useEffect,
@@ -153,11 +154,15 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
   useEffect(
     () =>
       useUiRequests.subscribe((state, prev) => {
-        if (!state.sidebar || state.sidebar === prev.sidebar) return
+        const req = state.sidebar
+        if (!req || req === prev.sidebar) return
+        if (req.kind === 'edit-host') {
+          const host = useHosts.getState().tree.hosts.find((h) => h.id === req.hostId)
+          if (host) setDialog({ kind: 'host', host, groupId: host.groupId })
+          return
+        }
         setDialog(
-          state.sidebar.kind === 'new-host'
-            ? { kind: 'host', host: null, groupId: null }
-            : { kind: 'import' }
+          req.kind === 'new-host' ? { kind: 'host', host: null, groupId: null } : { kind: 'import' }
         )
       }),
     []
@@ -368,7 +373,10 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
                 id: 'copy-ssh',
                 label: 'Copy SSH command',
                 icon: <Copy size={14} />,
-                onSelect: () => void window.shellhouse.writeClipboard(sshCommandFor(host))
+                onSelect: () =>
+                  void window.shellhouse.writeClipboard(sshCommandFor(host)).then(() => {
+                    toast.success('SSH command copied', { description: sshCommandFor(host) })
+                  })
               }
             ]
           : []),
@@ -378,7 +386,10 @@ export const Sidebar = forwardRef<HTMLInputElement>(function Sidebar(_props, sea
           icon: <CopyPlus size={14} />,
           onSelect: () =>
             void window.shellhouse.duplicateHost(host.id).then((r) => {
-              if (r.ok) setSelection(new Set([r.id]))
+              if (r.ok) {
+                setSelection(new Set([r.id]))
+                toast.success(`Duplicated ${host.label}`)
+              } else toast.error(`Could not duplicate ${host.label}`)
             })
         },
         'separator',
