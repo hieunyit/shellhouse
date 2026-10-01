@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Copy, Eye, MoreHorizontal, X } from 'lucide-react'
+import { Copy, Eye, MoreHorizontal, RefreshCw, Rows3, X } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
 import {
@@ -13,7 +13,7 @@ import {
   type Tone
 } from '../../../renderer/src/components/panels'
 import { cleanError } from '../../../renderer/src/lib/format'
-import type { K8sOp, Usage } from '../shared/ops'
+import type { K8sOp, RelatedGroup, RelatedItem, RelatedResult, Usage } from '../shared/ops'
 import {
   age,
   formatCpu,
@@ -37,7 +37,23 @@ const s = (v: unknown): string =>
 
 const TONE: Record<string, Tone> = { ok: 'ok', warn: 'warn', bad: 'bad', muted: 'muted' }
 
-type DetailTab = 'overview' | 'pods' | 'data' | 'events' | 'yaml'
+export type DetailTab = 'overview' | 'related' | 'pods' | 'data' | 'events' | 'yaml'
+
+/** Loại có tab Related (kiểu Rancher). */
+export const RELATED_KINDS = [
+  'pods',
+  'deployments.apps',
+  'statefulsets.apps',
+  'daemonsets.apps',
+  'replicasets.apps',
+  'jobs.batch',
+  'cronjobs.batch',
+  'services',
+  'ingresses.networking.k8s.io',
+  'configmaps',
+  'secrets',
+  'persistentvolumeclaims'
+]
 
 /** Bảng chi tiết bên phải (kiểu Lens): tab Overview / Pods / Data / Events / YAML + thao tác. */
 export function Detail({
@@ -48,7 +64,10 @@ export function Detail({
   usage,
   nodeUsage,
   onClose,
-  onOpenPod
+  onOpenPod,
+  initialTab = 'overview',
+  onNavigate,
+  onShowPods
 }: {
   kindId: string
   obj: K8sObject
@@ -60,11 +79,20 @@ export function Detail({
   nodeUsage: Usage | null
   onClose: () => void
   onOpenPod: (pod: K8sObject) => void
+  /** Tab mở sẵn (bấm đúp workload → Related, như Rancher). */
+  initialTab?: DetailTab
+  /** Mở một tài nguyên liên quan (cùng namespace). */
+  onNavigate?: (kind: string, name: string) => void
+  /** Xem pod của workload trong bảng chính (kiểu k9s). */
+  onShowPods?: () => void
 }): React.JSX.Element {
   const ns = obj.metadata.namespace
   const hasPods = HAS_PODS.includes(kindId) || kindId === 'nodes'
   const hasData = kindId === 'configmaps' || kindId === 'secrets'
-  const [tab, setTab] = useState<DetailTab>('overview')
+  const hasRelated = RELATED_KINDS.includes(kindId) && Boolean(ns)
+  const [tab, setTab] = useState<DetailTab>(
+    initialTab === 'related' && !hasRelated ? 'overview' : initialTab
+  )
   const { menu, open: openMenu } = useContextMenu()
   const primary = actions.filter((x) => !x.danger).slice(0, 3)
   const row = toRow(kindId, obj)
@@ -134,6 +162,7 @@ export function Detail({
         testIdPrefix="k8s-detail-tab"
         tabs={[
           { id: 'overview', label: 'Overview' },
+          ...(hasRelated ? [{ id: 'related' as const, label: 'Related' }] : []),
           ...(hasPods ? [{ id: 'pods' as const, label: 'Pods' }] : []),
           ...(hasData
             ? [
@@ -151,6 +180,15 @@ export function Detail({
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {tab === 'overview' && (
           <Overview kindId={kindId} obj={obj} usage={usage} nodeUsage={nodeUsage} />
+        )}
+        {tab === 'related' && (
+          <RelatedOf
+            kindId={kindId}
+            obj={obj}
+            request={request}
+            {...(onNavigate ? { onNavigate } : {})}
+            {...(onShowPods ? { onShowPods } : {})}
+          />
         )}
         {tab === 'pods' && (
           <PodsOf kindId={kindId} obj={obj} request={request} onOpenPod={onOpenPod} />
@@ -996,4 +1034,180 @@ function YamlOf({
       {text ?? 'Loading…'}
     </pre>
   )
+}
+
+/** Nhóm mặc định luôn hiện (kể cả khi trống) cho workload — thấy ngay "không có service nào". */
+const ALWAYS = new Set(['pods', 'services', 'configmaps', 'secrets'])
+
+/**
+ * Tab Related (kiểu Rancher): pod, service, ingress, ConfigMap / Secret / PVC đang dùng (thiếu →
+ * đỏ), autoscaler, disruption budget, owner; với ConfigMap / Secret / PVC: workload đang dùng.
+ */
+function RelatedOf({
+  kindId,
+  obj,
+  request,
+  onNavigate,
+  onShowPods
+}: {
+  kindId: string
+  obj: K8sObject
+  request: Request
+  onNavigate?: (kind: string, name: string) => void
+  onShowPods?: () => void
+}): React.JSX.Element {
+  const [data, setData] = useState<RelatedResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
+  const ns = obj.metadata.namespace ?? ''
+  const name = obj.metadata.name
+  useEffect(() => {
+    let cancelled = false
+    request<RelatedResult>({ op: 'related', kind: kindId, namespace: ns, name }).then(
+      (r) => {
+        if (cancelled) return
+        setData(r)
+        setError(null)
+      },
+      (e: unknown) => {
+        if (!cancelled) setError(cleanError(e))
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [request, kindId, ns, name, tick])
+  if (error) return <p className="text-xs text-danger">{error}</p>
+  if (!data) return <p className="text-xs text-faint">Finding related resources…</p>
+  const shown = data.groups.filter((g) => g.items.length > 0 || g.error || ALWAYS.has(g.id))
+  const empty = data.groups.filter((g) => !shown.includes(g)).map((g) => g.title.toLowerCase())
+  const missing = data.groups.flatMap((g) => g.items.filter((i) => i.missing))
+  return (
+    <div className="flex flex-col gap-4" data-testid="k8s-related">
+      {missing.length > 0 && (
+        <p className="rounded-md bg-danger-soft px-2 py-1.5 text-xs text-danger">
+          {missing.length} referenced resource{missing.length === 1 ? ' is' : 's are'} missing —
+          pods that need {missing.length === 1 ? 'it' : 'them'} will not start.
+        </p>
+      )}
+      {shown.map((g) => (
+        <RelatedSection
+          key={g.id}
+          group={g}
+          {...(onNavigate ? { onNavigate } : {})}
+          {...(g.id === 'pods' && onShowPods ? { onShowPods } : {})}
+        />
+      ))}
+      <div className="flex items-center gap-2 text-xs text-faint">
+        {empty.length > 0 && <span className="flex-1">No {empty.join(', ')}.</span>}
+        <button
+          type="button"
+          className="ml-auto flex items-center gap-1 hover:text-fg"
+          onClick={() => {
+            setTick((n) => n + 1)
+          }}
+        >
+          <RefreshCw size={11} /> Refresh
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function RelatedSection({
+  group,
+  onNavigate,
+  onShowPods
+}: {
+  group: RelatedGroup
+  onNavigate?: (kind: string, name: string) => void
+  onShowPods?: () => void
+}): React.JSX.Element {
+  return (
+    <section data-testid="k8s-related-group" data-group={group.id}>
+      <div className="mb-1 flex items-center gap-2">
+        <Heading>
+          {group.title}
+          {group.items.length > 0 && (
+            <span className="ml-1.5 font-normal text-faint tabular-nums">{group.items.length}</span>
+          )}
+        </Heading>
+        {onShowPods && group.items.length > 0 && (
+          <button
+            type="button"
+            className="mb-1 ml-auto flex items-center gap-1 text-xs text-accent hover:underline"
+            data-testid="k8s-related-show-pods"
+            onClick={onShowPods}
+          >
+            <Rows3 size={12} /> Show in table
+          </button>
+        )}
+      </div>
+      {group.error && <p className="text-xs text-warning">{group.error}</p>}
+      {group.items.length === 0 && !group.error && <p className="text-xs text-faint">None</p>}
+      <div className="flex flex-col">
+        {group.items.map((item) => (
+          <RelatedRow
+            key={`${item.kind}/${item.name}`}
+            item={item}
+            {...(onNavigate ? { onNavigate } : {})}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function RelatedRow({
+  item,
+  onNavigate
+}: {
+  item: RelatedItem
+  onNavigate?: (kind: string, name: string) => void
+}): React.JSX.Element {
+  const canOpen = Boolean(onNavigate && item.kind && !item.missing)
+  const body = (
+    <>
+      <span className={cx('size-1.5 shrink-0 rounded-full', DOT_BG[item.tone])} />
+      <span
+        className={cx(
+          'min-w-0 shrink truncate font-mono',
+          item.missing ? 'text-danger' : canOpen ? 'text-fg group-hover:text-accent' : 'text-fg'
+        )}
+        title={item.name}
+      >
+        {item.name}
+      </span>
+      {item.missing && <Pill tone="bad">missing</Pill>}
+      <span className="ml-auto min-w-0 truncate text-right text-faint" title={item.summary}>
+        {item.summary}
+      </span>
+    </>
+  )
+  return canOpen ? (
+    <button
+      type="button"
+      className="group flex h-7 w-full items-center gap-2 rounded px-1 text-left text-xs hover:bg-hover"
+      data-testid="k8s-related-item"
+      data-name={item.name}
+      onClick={() => onNavigate?.(item.kind, item.name)}
+    >
+      {body}
+    </button>
+  ) : (
+    <div
+      className="flex h-7 items-center gap-2 px-1 text-xs"
+      data-testid="k8s-related-item"
+      data-name={item.name}
+    >
+      {body}
+    </div>
+  )
+}
+
+const DOT_BG: Record<RelatedItem['tone'], string> = {
+  ok: 'bg-success',
+  warn: 'bg-warning',
+  bad: 'bg-danger-solid',
+  muted: 'bg-line-strong'
 }

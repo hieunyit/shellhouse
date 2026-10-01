@@ -249,7 +249,12 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       ])
     ],
     ['jobs', new Map()],
-    ['configmaps', new Map()]
+    ['configmaps', new Map()],
+    ['persistentvolumeclaims', new Map()],
+    ['serviceaccounts', new Map()],
+    ['ingresses', new Map()],
+    ['horizontalpodautoscalers', new Map()],
+    ['poddisruptionbudgets', new Map()]
   ])
   for (const rs of store.get('replicasets')?.values() ?? []) {
     rs.metadata.labels = { app: 'web' }
@@ -306,6 +311,19 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     cronjobs: { apiVersion: 'batch/v1', kind: 'CronJob', namespaced: true },
     jobs: { apiVersion: 'batch/v1', kind: 'Job', namespaced: true },
     configmaps: { apiVersion: 'v1', kind: 'ConfigMap', namespaced: true },
+    persistentvolumeclaims: { apiVersion: 'v1', kind: 'PersistentVolumeClaim', namespaced: true },
+    serviceaccounts: { apiVersion: 'v1', kind: 'ServiceAccount', namespaced: true },
+    ingresses: { apiVersion: 'networking.k8s.io/v1', kind: 'Ingress', namespaced: true },
+    horizontalpodautoscalers: {
+      apiVersion: 'autoscaling/v2',
+      kind: 'HorizontalPodAutoscaler',
+      namespaced: true
+    },
+    poddisruptionbudgets: {
+      apiVersion: 'policy/v1',
+      kind: 'PodDisruptionBudget',
+      namespaced: true
+    },
     widgets: { apiVersion: 'example.com/v1', kind: 'Widget', namespaced: true }
   }
 
@@ -414,7 +432,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         return json(res, 201, { status: { allowed } })
       }
       const m =
-        /^\/(?:api\/v1|apis\/([^/]+)\/v1)(?:\/namespaces\/([^/]+))?\/([a-z]+)(?:\/([^/]+))?(?:\/([a-z]+))?$/.exec(
+        /^\/(?:api\/v1|apis\/([^/]+)\/v[12])(?:\/namespaces\/([^/]+))?\/([a-z]+)(?:\/([^/]+))?(?:\/([a-z]+))?$/.exec(
           p
         )
       if (!m)

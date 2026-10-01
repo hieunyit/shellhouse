@@ -134,11 +134,27 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await page.getByTestId('k8s-scale-apply').click()
     await expect(view.getByTestId('k8s-replicas')).toHaveText('3')
     await page.keyboard.press('Escape')
+    // Bấm đúp workload → chi tiết ở tab Related (kiểu Rancher): service, pod… liên quan.
     await deploy.dblclick()
+    const related = view.getByTestId('k8s-related')
+    await expect(
+      related.locator('[data-testid="k8s-related-group"][data-group="services"]')
+    ).toContainText('ClusterIP · 10.0.0.10')
+    await expect(
+      related.locator('[data-testid="k8s-related-group"][data-group="pods"]')
+    ).toContainText('web-1')
+    // "Show in table" → pod của deployment trong bảng chính (breadcrumb, Esc để quay lại).
+    await related.getByTestId('k8s-related-show-pods').click()
     await expect(view.getByTestId('k8s-breadcrumb')).toContainText('deployment/web')
     await expect(rows).toHaveCount(2)
     await page.keyboard.press('Escape')
     await expect(view.getByTestId('k8s-breadcrumb')).not.toContainText('deployment/web')
+    // Bấm vào service liên quan → sang Services, mở chi tiết của nó.
+    await deploy.dblclick()
+    await related.locator('[data-testid="k8s-related-item"][data-name="web"]').click()
+    await expect(view.getByTestId('k8s-nav-services')).toHaveAttribute('aria-current', 'true')
+    await expect(view.getByTestId('k8s-describe')).toContainText('web')
+    await page.keyboard.press('Escape')
 
     // Thanh bên: nhóm thu gọn được — chỉ Workloads mở sẵn; lựa chọn được nhớ.
     await expect(view.getByTestId('k8s-nav-secrets')).toHaveCount(0)

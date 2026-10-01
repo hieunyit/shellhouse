@@ -51,7 +51,7 @@ import {
   type ActionHandlers
 } from './actions'
 import { openPodLogs, openPodShell } from './api'
-import { Detail } from './Detail'
+import { Detail, RELATED_KINDS, type DetailTab } from './Detail'
 import {
   DeleteDialog,
   DrainDialog,
@@ -132,6 +132,8 @@ export function ClusterTab({
   const [suggestAt, setSuggestAt] = useState(0)
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [detailKey, setDetailKey] = useState<string | null>(null)
+  /** Tab mở sẵn khi mở chi tiết (bấm đúp workload → Related). */
+  const [detailTab, setDetailTab] = useState<DetailTab>('overview')
   const [sort, setSort] = useState<SortState<'name' | 'age' | 'cpu' | 'mem'>>({
     key: 'name',
     dir: 'asc'
@@ -573,9 +575,65 @@ export function ClusterTab({
   )
   const columns = allColumns.filter((c) => fit.keep.has(c.id))
 
-  const drillable = kindId === 'nodes' || kindId === 'namespaces' || HAS_PODS.includes(kindId)
+  const drillable = kindId === 'nodes' || kindId === 'namespaces'
 
-  /** Enter: đi sâu (workload / service / node / namespace → pod); loại khác → mở chi tiết. */
+  /** Pod của workload / service trong bảng chính, có breadcrumb (kiểu k9s). */
+  const drillPods = (o: K8sObject): void => {
+    const sel = selectorString(o.spec?.['selector'])
+    if (!sel) {
+      notify(`${o.metadata.name} has no pod selector`, 'danger')
+      return
+    }
+    setDrill((d) => [
+      ...d,
+      {
+        label: `${(o.kind ?? kindId).toLowerCase()}/${o.metadata.name}`,
+        kind: 'pods',
+        namespace: o.metadata.namespace,
+        labelSelector: sel
+      }
+    ])
+    setSelected(new Set())
+    setDetailKey(null)
+  }
+
+  /** Mở một tài nguyên liên quan (tab Related): sang loại đó, chọn và mở chi tiết. */
+  const openRelated = (from: K8sObject, kind: string, name: string): void => {
+    const ns = from.metadata.namespace
+    const known =
+      BUILTIN_KINDS.some((k) => k.id === kind) || (kinds ?? []).some((k) => k.id === kind)
+    if (!known) {
+      // Loại không có trong điều hướng (ServiceAccount, HPA…): xem YAML.
+      request<string>({
+        op: 'get',
+        kind,
+        ...(ns ? { namespace: ns } : {}),
+        name,
+        format: 'yaml'
+      }).then(
+        (text) => {
+          setDialog({ kind: 'yaml', mode: 'view', title: name, text })
+        },
+        (e: unknown) => {
+          notify(cleanError(e), 'danger')
+        }
+      )
+      return
+    }
+    if (ns && namespaces && namespaces.length > 0 && !namespaces.includes(ns)) setNamespaces([ns])
+    const key = ns ? `${ns}/${name}` : name
+    setView(kind)
+    setDrill([])
+    setQuery('')
+    setSelected(new Set([key]))
+    setDetailTab('overview')
+    setDetailKey(key)
+  }
+
+  /**
+   * Bấm đúp / Enter: namespace → chuyển namespace; node → pod trên node; workload, service,
+   * ConfigMap… → chi tiết ở tab Related (kiểu Rancher); loại khác → chi tiết.
+   */
   const open = (r: Row): void => {
     const o = r.obj
     const name = o.metadata.name
@@ -593,21 +651,7 @@ export function ClusterTab({
       setDetailKey(null)
       return
     }
-    const sel = HAS_PODS.includes(kindId) ? selectorString(o.spec?.['selector']) : null
-    if (sel) {
-      setDrill((d) => [
-        ...d,
-        {
-          label: `${(o.kind ?? kindId).toLowerCase()}/${name}`,
-          kind: 'pods',
-          namespace: o.metadata.namespace,
-          labelSelector: sel
-        }
-      ])
-      setSelected(new Set())
-      setDetailKey(null)
-      return
-    }
+    setDetailTab(RELATED_KINDS.includes(kindId) && kindId !== 'pods' ? 'related' : 'overview')
     setDetailKey(r.row.key)
   }
 
@@ -1155,8 +1199,20 @@ export function ClusterTab({
               setDrill([])
               setView('pods')
               setSelected(new Set([objectKey(pod)]))
+              setDetailTab('overview')
               setDetailKey(objectKey(pod))
             }}
+            initialTab={detailTab}
+            onNavigate={(kind, name) => {
+              openRelated(detail.obj, kind, name)
+            }}
+            {...(HAS_PODS.includes(kindId)
+              ? {
+                  onShowPods: () => {
+                    drillPods(detail.obj)
+                  }
+                }
+              : {})}
           />
         )}
       </div>

@@ -88,6 +88,8 @@ export const K8sOp = z.discriminatedUnion('op', [
   }),
   /** Số liệu tổng quan cluster (kiểu Lens). */
   z.object({ op: z.literal('overview'), namespaces: z.array(Namespace).max(64) }),
+  /** Tài nguyên liên quan (kiểu Rancher): service, ConfigMap, Secret, PVC, HPA… / "Used by". */
+  z.object({ op: z.literal('related'), kind: Kind, namespace: Namespace, name: Name }),
   z.object({ op: z.literal('rolloutHistory'), namespace: Namespace, name: Name }),
   z.object({
     op: z.literal('rollback'),
@@ -233,6 +235,29 @@ export interface MetricsResult {
   available: boolean
   /** "ns/pod" hoặc tên node → mức dùng. */
   items: Record<string, Usage>
+}
+
+/** Một tài nguyên liên quan; `missing` = được tham chiếu nhưng không tồn tại. */
+export interface RelatedItem {
+  /** Id loại (services, configmaps…) để mở; '' = loại không mở được. */
+  kind: string
+  name: string
+  summary: string
+  tone: 'ok' | 'warn' | 'bad' | 'muted'
+  missing?: boolean
+}
+
+export interface RelatedGroup {
+  id: string
+  title: string
+  kind: string
+  items: RelatedItem[]
+  /** Không liệt kê được (thiếu quyền…). */
+  error?: string
+}
+
+export interface RelatedResult {
+  groups: RelatedGroup[]
 }
 
 export interface OverviewResult {

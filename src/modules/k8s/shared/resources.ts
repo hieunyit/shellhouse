@@ -83,7 +83,7 @@ export interface K8sObject {
     creationTimestamp?: string
     labels?: Record<string, string>
     annotations?: Record<string, string>
-    ownerReferences?: { kind: string; name: string }[]
+    ownerReferences?: { kind: string; name: string; controller?: boolean }[]
     deletionTimestamp?: string
   }
   spec?: Record<string, unknown>

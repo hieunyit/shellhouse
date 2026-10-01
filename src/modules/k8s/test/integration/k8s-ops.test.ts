@@ -7,6 +7,7 @@ import type {
   DrainResult,
   MetricsResult,
   OverviewResult,
+  RelatedResult,
   RolloutRevision
 } from '../../shared/ops'
 import { startApiTestServer, TEST_CA, TOKEN, type ApiTestServer } from '../api-test-server'
@@ -100,6 +101,196 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
       ready: 0
     })
     expect(o.warnings[0]).toMatchObject({ object: 'pod/web-2', reason: 'BackOff' })
+  })
+
+  it('liên quan (kiểu Rancher): workload → pod / service / ingress / ConfigMap / Secret (thiếu → báo) / PVC / HPA / PDB / owner; ConfigMap → used by; Service → workload', async () => {
+    const { server, run } = await setup()
+    const ns = 'shop'
+    const meta = (name: string, labels?: Record<string, string>) => ({
+      name,
+      namespace: ns,
+      ...(labels ? { labels } : {})
+    })
+    server.upsert('configmaps', {
+      apiVersion: 'v1',
+      kind: 'ConfigMap',
+      metadata: meta('api-config'),
+      data: { A: '1', B: '2' }
+    })
+    server.upsert('secrets', {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: meta('api-creds'),
+      type: 'Opaque',
+      data: { pw: 'eA==' }
+    })
+    server.upsert('persistentvolumeclaims', {
+      apiVersion: 'v1',
+      kind: 'PersistentVolumeClaim',
+      metadata: meta('api-data'),
+      spec: { storageClassName: 'fast' },
+      status: { phase: 'Bound', capacity: { storage: '10Gi' } }
+    })
+    server.upsert('deployments', {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: meta('api'),
+      spec: {
+        replicas: 2,
+        selector: { matchLabels: { app: 'api' } },
+        template: {
+          metadata: { labels: { app: 'api', tier: 'backend' } },
+          spec: {
+            serviceAccountName: 'api-sa',
+            imagePullSecrets: [{ name: 'regcred' }],
+            volumes: [
+              { name: 'cfg', configMap: { name: 'api-config' } },
+              { name: 'data', persistentVolumeClaim: { claimName: 'api-data' } }
+            ],
+            containers: [
+              {
+                name: 'app',
+                image: 'api:1',
+                env: [
+                  { name: 'PW', valueFrom: { secretKeyRef: { name: 'api-creds', key: 'pw' } } }
+                ],
+                envFrom: [{ secretRef: { name: 'gone' } }]
+              }
+            ]
+          }
+        }
+      },
+      status: { readyReplicas: 2 }
+    })
+    server.upsert('pods', {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      metadata: {
+        ...meta('api-1', { app: 'api', tier: 'backend' }),
+        ownerReferences: [{ kind: 'ReplicaSet', name: 'api-rs', controller: true }]
+      },
+      spec: { containers: [{ name: 'app' }] },
+      status: {
+        phase: 'Running',
+        containerStatuses: [{ name: 'app', ready: true, restartCount: 0, state: { running: {} } }]
+      }
+    } as never)
+    server.upsert('services', {
+      apiVersion: 'v1',
+      kind: 'Service',
+      metadata: meta('api'),
+      spec: {
+        type: 'ClusterIP',
+        clusterIP: '10.0.0.20',
+        selector: { app: 'api' },
+        ports: [{ port: 80, protocol: 'TCP' }]
+      }
+    })
+    server.upsert('ingresses', {
+      apiVersion: 'networking.k8s.io/v1',
+      kind: 'Ingress',
+      metadata: meta('api'),
+      spec: {
+        rules: [
+          {
+            host: 'api.example.com',
+            http: {
+              paths: [{ path: '/', backend: { service: { name: 'api', port: { number: 80 } } } }]
+            }
+          }
+        ]
+      }
+    })
+    server.upsert('horizontalpodautoscalers', {
+      apiVersion: 'autoscaling/v2',
+      kind: 'HorizontalPodAutoscaler',
+      metadata: meta('api'),
+      spec: { minReplicas: 2, maxReplicas: 6, scaleTargetRef: { kind: 'Deployment', name: 'api' } },
+      status: { currentReplicas: 2 }
+    })
+    server.upsert('poddisruptionbudgets', {
+      apiVersion: 'policy/v1',
+      kind: 'PodDisruptionBudget',
+      metadata: meta('api'),
+      spec: {
+        minAvailable: 1,
+        selector: { matchExpressions: [{ key: 'tier', operator: 'In', values: ['backend'] }] }
+      },
+      status: { disruptionsAllowed: 1 }
+    })
+
+    const r = await run<RelatedResult>({
+      op: 'related',
+      kind: 'deployments.apps',
+      namespace: ns,
+      name: 'api'
+    })
+    const g = (id: string) => r.groups.find((x) => x.id === id)
+    expect(g('pods')?.items.map((i) => i.name)).toEqual(['api-1'])
+    expect(g('services')?.items).toMatchObject([
+      { name: 'api', summary: 'ClusterIP · 10.0.0.20 · 80/TCP' }
+    ])
+    expect(g('ingresses')?.items).toMatchObject([{ name: 'api', summary: 'api.example.com' }])
+    expect(g('configmaps')?.items).toMatchObject([
+      { name: 'api-config', summary: '2 keys', tone: 'ok' }
+    ])
+    expect(g('secrets')?.items).toEqual([
+      { kind: 'secrets', name: 'api-creds', summary: 'Opaque · 1 key', tone: 'ok' },
+      {
+        kind: 'secrets',
+        name: 'gone',
+        summary: 'Not found in this namespace',
+        tone: 'bad',
+        missing: true
+      },
+      {
+        kind: 'secrets',
+        name: 'regcred',
+        summary: 'Not found in this namespace',
+        tone: 'bad',
+        missing: true
+      }
+    ])
+    expect(g('pvcs')?.items).toMatchObject([{ name: 'api-data', summary: 'Bound · 10Gi · fast' }])
+    expect(g('hpas')?.items).toMatchObject([{ name: 'api', summary: '2–6 replicas · now 2' }])
+    expect(g('pdbs')?.items).toMatchObject([
+      { name: 'api', summary: 'min available 1 · 1 disruptions allowed' }
+    ])
+    expect(g('sa')?.items).toMatchObject([{ name: 'api-sa' }])
+    // Không bao giờ có giá trị Secret trong kết quả.
+    expect(JSON.stringify(r)).not.toContain('eA==')
+
+    const pod = await run<RelatedResult>({
+      op: 'related',
+      kind: 'pods',
+      namespace: ns,
+      name: 'api-1'
+    })
+    expect(pod.groups.find((x) => x.id === 'owners')?.items).toMatchObject([
+      { kind: 'replicasets.apps', name: 'api-rs', missing: true }
+    ])
+
+    const cm = await run<RelatedResult>({
+      op: 'related',
+      kind: 'configmaps',
+      namespace: ns,
+      name: 'api-config'
+    })
+    expect(cm.groups[0]?.items).toMatchObject([
+      { kind: 'deployments.apps', name: 'api', summary: 'Deployment · 2/2 ready' }
+    ])
+
+    const svc = await run<RelatedResult>({
+      op: 'related',
+      kind: 'services',
+      namespace: ns,
+      name: 'api'
+    })
+    expect(svc.groups.map((x) => [x.id, x.items.map((i) => i.name)])).toEqual([
+      ['pods', ['api-1']],
+      ['workloads', ['api']],
+      ['ingresses', ['api']]
+    ])
   })
 
   it('lịch sử rollout + rollback về revision cũ (bỏ pod-template-hash)', async () => {

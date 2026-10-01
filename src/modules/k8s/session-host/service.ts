@@ -35,6 +35,7 @@ import {
   rolloutHistory,
   serverApply
 } from './operations'
+import { related } from './related'
 
 /** Kết quả `fromMain('resolve')` (xem main/kubeconfig.ts). */
 export interface ResolvedClusterConfig {
@@ -210,6 +211,13 @@ export class K8sService implements HostModuleSession {
         return metrics(client, op.scope, op.namespace, signal)
       case 'overview':
         return overview(client, op.namespaces)
+      case 'related': {
+        const kind = this.kind(op.kind)
+        const obj = await client.json<K8sObject>('GET', resourcePath(kind, op.namespace, op.name), {
+          signal
+        })
+        return related(client, kind.id, obj, signal)
+      }
       case 'rolloutHistory':
         return rolloutHistory(client, op.namespace, op.name)
       case 'rollback':

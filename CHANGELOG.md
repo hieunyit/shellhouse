@@ -6,6 +6,39 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- **Docker inside WSL** (Windows): every running WSL distribution with Docker shows up in the
+  Docker sidebar as “Ubuntu (WSL)” — containers, logs, stats, shells and Compose work as usual
+  through `wsl.exe`. Stopped distributions can be added from the ＋ menu; any can be hidden. The
+  module is also suggested when Docker is found in WSL.
+- **Kubernetes: Related tab** (like Rancher): double-click a deployment, stateful set, daemon set,
+  job, cron job, service or pod to see its pods, services, ingresses, the ConfigMaps / Secrets /
+  volume claims it uses (missing ones are flagged in red — pods that need them will not start),
+  autoscalers, disruption budgets, service account and owner. ConfigMaps, Secrets and volume
+  claims show which workloads use them. Click any of them to open it; **Show in table** lists the
+  pods in the main table.
+- **Kubernetes: delete contexts** you no longer need (right-click → Delete context…). Imported
+  ones are removed from the vault; contexts in `~/.kube` files are removed from the file like
+  `kubectl config delete-context`, keeping a `.bak` copy. Nothing changes on the cluster.
+- **Kubernetes: Refresh** button, and `~/.kube` is read again whenever you come back to the app —
+  newly downloaded kubeconfigs appear without restarting.
+- **S3 sync**: choose how many objects are copied at once, see the time left, a smoother speed and
+  the objects being copied right now.
+
+### Changed
+
+- S3 bucket list export: a readable **Size** column (KB / MB / GB / TB) next to Size (bytes).
+- Kubernetes: double-click / Enter on a workload opens its details (Related tab) instead of jumping
+  to its pods.
+
+### Fixed
+
+- Kubernetes was not suggested when `~/.kube` only had kubeconfigs not named `config` (common for
+  files downloaded from Rancher or cloud consoles).
+- Docker via the `docker` command (WSL, or when the socket is not reachable): container and image
+  dates were shown as unknown.
+
 ## [1.2.0-beta.3] - 2026-10-01
 
 ### Changed
