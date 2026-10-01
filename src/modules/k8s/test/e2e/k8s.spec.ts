@@ -378,8 +378,8 @@ ${names.map((n) => `- name: ${n}\n  context: { cluster: ${n}-c, user: u }`).join
 `
   const file = join(home, '.kube', 'console-stg-kubeconfig')
   writeFileSync(file, yaml(['stg', 'old']))
-  // Windows lấy thư mục nhà từ USERPROFILE (không phải HOME).
-  const launched = await launchApp({ HOME: home, USERPROFILE: home, KUBECONFIG: '' })
+  // Thư mục nhà giả (SHELLHOUSE_HOME — Windows không đọc HOME, đổi USERPROFILE thì app không chạy).
+  const launched = await launchApp({ SHELLHOUSE_HOME: home, KUBECONFIG: '' })
   const { page } = launched
   try {
     await enableK8s(page)

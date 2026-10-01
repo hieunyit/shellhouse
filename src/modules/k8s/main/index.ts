@@ -1,4 +1,3 @@
-import { homedir } from 'node:os'
 import { delimiter } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { MainModule, MainModuleContext } from '../../registry/main-types'
@@ -50,17 +49,18 @@ export function kubeconfigFiles(env: NodeJS.ProcessEnv = process.env): string[] 
   return list.length ? list : ['~/.kube/config']
 }
 
-function label(path: string): string {
-  const home = homedir()
-  return path.startsWith(home) ? `~${path.slice(home.length)}` : path
-}
-
-function expand(path: string): string {
-  return path.startsWith('~/') ? `${homedir()}${path.slice(1)}` : path
-}
-
 class Kubeconfigs {
   constructor(private readonly ctx: MainModuleContext) {}
+
+  /** "/home/an/.kube/config" → "~/.kube/config" (thư mục nhà do lõi cung cấp — test thay được). */
+  private label(path: string): string {
+    const home = this.ctx.home
+    return path.startsWith(home) ? `~${path.slice(home.length)}` : path
+  }
+
+  private expand(path: string): string {
+    return path.startsWith('~/') ? `${this.ctx.home}${path.slice(1)}` : path
+  }
 
   private async loadFile(path: string): Promise<KubeconfigDoc | null> {
     try {
@@ -76,7 +76,7 @@ class Kubeconfigs {
    * trong ~/.kube (kubeconfig của từng cluster mà nhiều công cụ ghi vào đó).
    */
   async files(): Promise<string[]> {
-    const primary = kubeconfigFiles().map(expand)
+    const primary = kubeconfigFiles().map((p) => this.expand(p))
     const extra = await this.ctx
       .readDir('~/.kube')
       .then((list) =>
@@ -116,19 +116,21 @@ class Kubeconfigs {
     const errors: string[] = []
     const infos: ContextInfo[] = []
     const files: ContextList['files'] = []
-    const explicit = new Set(kubeconfigFiles().map(expand))
+    const explicit = new Set(kubeconfigFiles().map((p) => this.expand(p)))
     for (const file of await this.files()) {
       try {
         const doc = await this.loadFile(file)
         if (!doc) continue
         // File phụ trong ~/.kube không có context → không phải kubeconfig, bỏ qua im lặng.
         if (doc.contexts.length === 0 && !explicit.has(file)) continue
-        const contexts = listContexts(doc, `file:${file}`, label(file))
-        files.push({ path: file, label: label(file), contexts: contexts.length })
+        const contexts = listContexts(doc, `file:${file}`, this.label(file))
+        files.push({ path: file, label: this.label(file), contexts: contexts.length })
         infos.push(...contexts)
       } catch (error) {
         if (explicit.has(file))
-          errors.push(`${label(file)}: ${error instanceof Error ? error.message : String(error)}`)
+          errors.push(
+            `${this.label(file)}: ${error instanceof Error ? error.message : String(error)}`
+          )
       }
     }
     const imported = this.imported()
@@ -239,7 +241,7 @@ class Kubeconfigs {
           .prepare('UPDATE k8s_kubeconfigs SET yaml_enc = ? WHERE id = ?')
           .run(this.ctx.secrets.seal('k8s_kubeconfigs', id, 'yaml_enc', text), id)
     } else if (ref.source.startsWith('file:')) {
-      const path = expand(ref.source.slice('file:'.length))
+      const path = this.expand(ref.source.slice('file:'.length))
       if (!(await this.files()).includes(path))
         throw new Error('This kubeconfig is no longer in KUBECONFIG or ~/.kube')
       const original = await this.ctx.readFile(path)
@@ -258,11 +260,11 @@ class Kubeconfigs {
   /** Phân giải context cho Session Host (đọc file tham chiếu, giải mã bản import). */
   async resolve(ref: ContextRef): Promise<unknown> {
     if (ref.source.startsWith('file:')) {
-      const path = expand(ref.source.slice('file:'.length))
+      const path = this.expand(ref.source.slice('file:'.length))
       if (!(await this.files()).includes(path))
         throw new Error('This kubeconfig is no longer in KUBECONFIG or ~/.kube')
       const doc = await this.loadFile(path)
-      if (!doc) throw new Error(`${label(path)} was not found`)
+      if (!doc) throw new Error(`${this.label(path)} was not found`)
       return resolveContext(doc, ref, path, (p) => this.ctx.readFile(p))
     }
     if (ref.source.startsWith('imported:')) {

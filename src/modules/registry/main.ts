@@ -314,6 +314,7 @@ export class MainModuleRegistry {
           if (this.active.has(id)) this.deps.emit(id, name, data)
         }
       },
+      home: this.deps.home ?? homedir(),
       readFile: async (path) => {
         const ctx = {
           home: this.deps.home ?? homedir(),

@@ -68,6 +68,8 @@ export interface MainModuleContext {
   ipc: ModuleIpc
   /** → renderer, tên sự kiện tự có tiền tố module. */
   events: { emit(name: string, data: unknown): void }
+  /** Thư mục nhà của người dùng (`~` trong quyền read-file / write-file). */
+  readonly home: string
   /** Đọc file trên máy — chỉ đường dẫn khai báo trong quyền `read-file` (kubeconfig…). */
   readFile(path: string): Promise<string>
   /**

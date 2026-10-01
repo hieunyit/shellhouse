@@ -689,6 +689,8 @@ if (!app.requestSingleInstanceLock()) {
         log[level](`[modules] ${message}`)
       },
       listWslDistros: wslDistros,
+      // Cùng thư mục nhà với phần còn lại của app (E2E đổi bằng SHELLHOUSE_HOME).
+      home: app.getPath('home'),
       showOpenDialog: async (options) => {
         const properties: ('openFile' | 'multiSelections' | 'showHiddenFiles')[] = options.multiple
           ? ['openFile', 'multiSelections', 'showHiddenFiles']
