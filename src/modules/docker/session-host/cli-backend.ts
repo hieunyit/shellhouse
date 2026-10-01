@@ -1,4 +1,8 @@
 import type {
+  DiskUsage,
+  ImageLayer,
+  ProcessList,
+  RunSpec,
   ContainerRow,
   EngineInfo,
   ImageRow,
@@ -13,6 +17,7 @@ import {
   BUILTIN_NETWORKS,
   cliErrorText,
   parseSize,
+  runArgs,
   type DockerBackend,
   type DockerCli
 } from './backend'
@@ -82,7 +87,7 @@ export class CliBackend implements DockerBackend {
 
   constructor(private readonly cli: DockerCli) {}
 
-  private async run(args: readonly string[], signal?: AbortSignal): Promise<string> {
+  private async sh(args: readonly string[], signal?: AbortSignal): Promise<string> {
     const r = await this.cli.exec(args, { ...(signal ? { signal } : {}), timeoutMs: 120_000 })
     if (r.code !== 0) throw new Error(cliErrorText(r.stderr, r.code))
     return r.stdout
@@ -90,8 +95,8 @@ export class CliBackend implements DockerBackend {
 
   async info(signal: AbortSignal): Promise<EngineInfo> {
     const [version, info] = await Promise.all([
-      this.run(['version', '--format', '{{json .}}'], signal),
-      this.run(['info', '--format', '{{json .}}'], signal)
+      this.sh(['version', '--format', '{{json .}}'], signal),
+      this.sh(['info', '--format', '{{json .}}'], signal)
     ])
     const v =
       (
@@ -125,7 +130,7 @@ export class CliBackend implements DockerBackend {
   }
 
   async containers(all: boolean, signal: AbortSignal): Promise<ContainerRow[]> {
-    const out = await this.run(
+    const out = await this.sh(
       ['ps', ...(all ? ['-a'] : []), '--no-trunc', '--format', '{{json .}}'],
       signal
     )
@@ -157,17 +162,17 @@ export class CliBackend implements DockerBackend {
   }
 
   async inspect(kind: 'container' | 'image' | 'volume' | 'network', id: string): Promise<unknown> {
-    const out = await this.run(['inspect', '--type', kind, id])
+    const out = await this.sh(['inspect', '--type', kind, id])
     const parsed = JSON.parse(out) as unknown[]
     return parsed[0] ?? null
   }
 
   async action(id: string, action: string, force: boolean): Promise<void> {
-    await this.run(action === 'remove' ? ['rm', ...(force ? ['-f'] : []), id] : [action, id])
+    await this.sh(action === 'remove' ? ['rm', ...(force ? ['-f'] : []), id] : [action, id])
   }
 
   async rename(id: string, name: string): Promise<void> {
-    await this.run(['rename', id, name])
+    await this.sh(['rename', id, name])
   }
 
   /** Chạy một lệnh dài, chuyển output theo luồng tới khi thoát / bị huỷ. */
@@ -213,7 +218,7 @@ export class CliBackend implements DockerBackend {
   async stats(id: string, onSample: (s: StatsSample) => void, signal: AbortSignal): Promise<void> {
     // `docker stats` dạng luồng vẽ lại màn hình bằng mã điều khiển → hỏi từng mẫu mỗi 2 giây.
     while (!signal.aborted) {
-      const out = await this.run(['stats', '--no-stream', '--format', '{{json .}}', id], signal)
+      const out = await this.sh(['stats', '--no-stream', '--format', '{{json .}}', id], signal)
       const s = jsonLines<{ CPUPerc?: string; MemUsage?: string; NetIO?: string }>(out)[0]
       if (s) {
         const [used, limit] = (s.MemUsage ?? '').split('/')
@@ -254,8 +259,8 @@ export class CliBackend implements DockerBackend {
 
   async images(signal: AbortSignal): Promise<ImageRow[]> {
     const [out, containers] = await Promise.all([
-      this.run(['images', '--no-trunc', '--format', '{{json .}}'], signal),
-      this.run(['ps', '-a', '--no-trunc', '--format', '{{.Image}}'], signal)
+      this.sh(['images', '--no-trunc', '--format', '{{json .}}'], signal),
+      this.sh(['ps', '-a', '--no-trunc', '--format', '{{.Image}}'], signal)
     ])
     const used = containers.split('\n').filter(Boolean)
     const byId = new Map<string, ImageRow>()
@@ -287,7 +292,7 @@ export class CliBackend implements DockerBackend {
   }
 
   async imageRemove(id: string, force: boolean): Promise<void> {
-    await this.run(['rmi', ...(force ? ['-f'] : []), id])
+    await this.sh(['rmi', ...(force ? ['-f'] : []), id])
   }
 
   async imagePull(
@@ -309,7 +314,7 @@ export class CliBackend implements DockerBackend {
   }
 
   async volumes(signal: AbortSignal): Promise<VolumeRow[]> {
-    const out = await this.run(['volume', 'ls', '--format', '{{json .}}'], signal)
+    const out = await this.sh(['volume', 'ls', '--format', '{{json .}}'], signal)
     return jsonLines<{ Name: string; Driver: string; Mountpoint: string; Labels: string }>(out).map(
       (v) => ({
         name: v.Name,
@@ -322,11 +327,11 @@ export class CliBackend implements DockerBackend {
   }
 
   async volumeRemove(name: string): Promise<void> {
-    await this.run(['volume', 'rm', name])
+    await this.sh(['volume', 'rm', name])
   }
 
   async networks(signal: AbortSignal): Promise<NetworkRow[]> {
-    const out = await this.run(['network', 'ls', '--no-trunc', '--format', '{{json .}}'], signal)
+    const out = await this.sh(['network', 'ls', '--no-trunc', '--format', '{{json .}}'], signal)
     return jsonLines<{ ID: string; Name: string; Driver: string; Scope: string }>(out).map((n) => ({
       id: n.ID,
       name: n.Name,
@@ -337,7 +342,7 @@ export class CliBackend implements DockerBackend {
   }
 
   async networkRemove(id: string): Promise<void> {
-    await this.run(['network', 'rm', id])
+    await this.sh(['network', 'rm', id])
   }
 
   async prune(what: PruneTarget, dryRun: boolean): Promise<PruneResult> {
@@ -351,7 +356,7 @@ export class CliBackend implements DockerBackend {
         case 'containers':
           return {
             items: lines(
-              await this.run([
+              await this.sh([
                 'ps',
                 '-a',
                 '--filter',
@@ -369,28 +374,21 @@ export class CliBackend implements DockerBackend {
         case 'images':
           return {
             items: lines(
-              await this.run(['images', '--filter', 'dangling=true', '--format', '{{.ID}}'])
+              await this.sh(['images', '--filter', 'dangling=true', '--format', '{{.ID}}'])
             ),
             reclaimed: 0
           }
         case 'volumes':
           return {
             items: lines(
-              await this.run(['volume', 'ls', '--filter', 'dangling=true', '--format', '{{.Name}}'])
+              await this.sh(['volume', 'ls', '--filter', 'dangling=true', '--format', '{{.Name}}'])
             ),
             reclaimed: 0
           }
         case 'networks':
           return {
             items: lines(
-              await this.run([
-                'network',
-                'ls',
-                '--filter',
-                'dangling=true',
-                '--format',
-                '{{.Name}}'
-              ])
+              await this.sh(['network', 'ls', '--filter', 'dangling=true', '--format', '{{.Name}}'])
             ).filter((n) => !BUILTIN_NETWORKS.has(n)),
             reclaimed: 0
           }
@@ -402,7 +400,7 @@ export class CliBackend implements DockerBackend {
       volumes: 'volume',
       networks: 'network'
     }[what]
-    const out = await this.run([kind, 'prune', '-f'])
+    const out = await this.sh([kind, 'prune', '-f'])
     const items = out
       .split('\n')
       .map((l) => l.trim())
@@ -413,4 +411,86 @@ export class CliBackend implements DockerBackend {
     const reclaimed = /Total reclaimed space:\s*(\S+)/i.exec(out)?.[1]
     return { items, reclaimed: reclaimed ? parseSize(reclaimed) : 0 }
   }
+
+  async df(signal: AbortSignal): Promise<DiskUsage> {
+    const out = await this.sh(['system', 'df', '--format', '{{json .}}'], signal)
+    const rows = jsonLines<{ Type: string; TotalCount: string; Size: string; Reclaimable: string }>(
+      out
+    )
+    const pick = (type: RegExp): DiskUsage['images'] => {
+      const r = rows.find((x) => type.test(x.Type))
+      return {
+        count: Number(r?.TotalCount ?? 0) || 0,
+        size: parseSize(r?.Size ?? ''),
+        reclaimable: parseSize((r?.Reclaimable ?? '').split(' ')[0] ?? '')
+      }
+    }
+    return {
+      images: pick(/^images/i),
+      containers: pick(/^containers/i),
+      volumes: pick(/volumes/i),
+      buildCache: pick(/build cache/i)
+    }
+  }
+
+  async statsOnce(signal: AbortSignal): Promise<Record<string, StatsSample>> {
+    const out = await this.sh(
+      ['stats', '--no-stream', '--no-trunc', '--format', '{{json .}}'],
+      signal
+    )
+    const result: Record<string, StatsSample> = {}
+    for (const s of jsonLines<{ ID: string; CPUPerc?: string; MemUsage?: string; NetIO?: string }>(
+      out
+    )) {
+      const [used, limit] = (s.MemUsage ?? '').split('/')
+      const [rx, tx] = (s.NetIO ?? '').split('/')
+      result[s.ID] = {
+        at: Date.now(),
+        cpuPercent: Number.parseFloat(s.CPUPerc ?? '0') || 0,
+        memUsage: parseSize(used ?? ''),
+        memLimit: parseSize(limit ?? ''),
+        netRx: parseSize(rx ?? ''),
+        netTx: parseSize(tx ?? '')
+      }
+    }
+    return result
+  }
+
+  async top(id: string): Promise<ProcessList> {
+    return parseTop(await this.sh(['top', id]))
+  }
+
+  async imageHistory(id: string): Promise<ImageLayer[]> {
+    const out = await this.sh(['history', '--no-trunc', '--format', '{{json .}}', id])
+    return jsonLines<{
+      ID: string
+      CreatedAt: string
+      CreatedBy: string
+      Size: string
+      Comment: string
+    }>(out).map((l) => ({
+      id: l.ID,
+      created: parseCliDate(l.CreatedAt),
+      createdBy: l.CreatedBy,
+      size: parseSize(l.Size),
+      comment: l.Comment
+    }))
+  }
+
+  async run(spec: RunSpec, signal: AbortSignal): Promise<string> {
+    const r = await this.cli.exec(runArgs(spec), { signal, timeoutMs: 15 * 60_000 })
+    if (r.code !== 0) throw new Error(cliErrorText(r.stderr, r.code))
+    return r.stdout.trim().split('\n').pop() ?? ''
+  }
+}
+
+/** Bảng của `docker top` (cột cuối — lệnh — có thể chứa khoảng trắng). */
+export function parseTop(text: string): ProcessList {
+  const lines = text.split('\n').filter((l) => l.trim())
+  const titles = (lines[0] ?? '').trim().split(/\s+/)
+  const processes = lines.slice(1).map((l) => {
+    const parts = l.trim().split(/\s+/)
+    return [...parts.slice(0, titles.length - 1), parts.slice(titles.length - 1).join(' ')]
+  })
+  return { titles, processes }
 }

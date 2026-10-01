@@ -266,6 +266,107 @@ describe('Docker qua Engine API (Engine giả trên unix socket)', () => {
   })
 })
 
+describe('Docker — Overview, stats cả bảng, top, history, run, log Compose', () => {
+  it('dung lượng đĩa, CPU/RAM mọi container đang chạy, tiến trình, lớp image', async () => {
+    const server = await engine()
+    const { run, events, until } = service(server)
+    const df = await run<{
+      images: { count: number; reclaimable: number }
+      volumes: { reclaimable: number }
+      buildCache: { size: number }
+    }>({ op: 'df' })
+    expect(df.images.count).toBe(3)
+    expect(df.images.reclaimable).toBe(5_000_000)
+    expect(df.volumes.reclaimable).toBe(2000)
+    expect(df.buildCache.size).toBe(3000)
+    await run({ op: 'statsAll.subscribe' })
+    await until(() => events.some((e) => e.event === 'statsAll'))
+    const samples = (
+      events.find((e) => e.event === 'statsAll')?.data as {
+        samples: Record<string, { memUsage: number }>
+      }
+    ).samples
+    expect(Object.keys(samples).length).toBe(2)
+    expect(Object.values(samples)[0]?.memUsage).toBe(50_000_000)
+    const top = await run<{ titles: string[]; processes: string[][] }>({
+      op: 'top',
+      id: server.containers[0]?.Id
+    })
+    expect(top.processes[0]?.[2]).toContain('nginx: master')
+    const layers = await run<{ createdBy: string; size: number }[]>({
+      op: 'image.history',
+      id: 'sha256:img1'
+    })
+    expect(layers.map((l) => l.size)).toEqual([0, 50_000_000])
+  })
+
+  it('run: tạo + chạy; image chưa có → kéo về rồi tạo; tham số cổng / env', async () => {
+    const server = await engine()
+    const { run } = service(server)
+    const spec = {
+      image: 'redis:7',
+      name: 'cache',
+      ports: [{ host: 6380, container: 6379, protocol: 'tcp' }],
+      env: ['MODE=test'],
+      volumes: [{ source: 'cache-data', target: '/data', readOnly: false }],
+      restart: 'unless-stopped',
+      autoRemove: false,
+      pull: false
+    }
+    await expect(run({ op: 'run', spec })).rejects.toThrow(/No such image/)
+    const r = await run<{ id: string }>({ op: 'run', spec: { ...spec, pull: true } })
+    const c = server.containers.find((x) => x.Id === r.id)
+    expect(c?.Names).toEqual(['/cache'])
+    expect(c?.State).toBe('running')
+    expect(server.created.at(-1)).toMatchObject({
+      Image: 'redis:7',
+      Env: ['MODE=test'],
+      HostConfig: {
+        PortBindings: { '6379/tcp': [{ HostPort: '6380' }] },
+        Binds: ['cache-data:/data'],
+        RestartPolicy: { Name: 'unless-stopped' }
+      }
+    })
+    await run({ op: 'configure', readOnly: true })
+    await expect(run({ op: 'run', spec })).rejects.toThrow(/Read-only/)
+  })
+
+  it('inspect: che env mặc định, reveal = giá trị thật', async () => {
+    const server = await engine()
+    const { run } = service(server)
+    const id = server.containers[0]?.Id ?? ''
+    const shown = await run<{ Config: { Env: string[] } }>({
+      op: 'inspect',
+      kind: 'container',
+      id,
+      reveal: true
+    })
+    expect(shown.Config.Env).toContain('DB_PASSWORD=hunter2')
+  })
+
+  it('log nhiều container (Compose): tiền tố tên mỗi dòng', async () => {
+    const server = await engine()
+    const { run, events, until } = service(server)
+    const [web, db] = server.containers
+    await run({
+      op: 'logs.subscribeMany',
+      containers: [
+        { id: web?.Id, name: 'web' },
+        { id: db?.Id, name: 'db' }
+      ],
+      tail: 10,
+      timestamps: false
+    })
+    await until(() => {
+      const text = events
+        .filter((e) => e.event === 'logs')
+        .map((e) => (e.data as { text: string }).text)
+        .join('')
+      return text.includes('[web] hello from stdout') && text.includes('[db] warning on stderr')
+    })
+  })
+})
+
 describe('Docker CLI dự phòng', () => {
   it('đọc `--format {{json .}}`, lỗi quyền socket → câu dễ hiểu', async () => {
     const outputs: Record<string, { code: number; stdout: string; stderr: string }> = {

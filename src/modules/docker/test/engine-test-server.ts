@@ -29,6 +29,7 @@ export interface EngineTestServer {
   path: string
   containers: FakeContainer[]
   requests: string[]
+  created: unknown[]
   /** Thêm một dòng log cho container (gửi ngay tới các luồng đang follow). */
   log(id: string, stream: 1 | 2, text: string): void
   close(): Promise<void>
@@ -107,6 +108,13 @@ export async function startEngineTestServer(): Promise<EngineTestServer> {
     { Id: 'n-unused', Name: 'unused', Driver: 'bridge', Scope: 'local' }
   ]
   const requests: string[] = []
+  /** Thân request tạo container (kiểm tham số `docker run`). */
+  const created: unknown[] = []
+  const readBody = async (req: IncomingMessage): Promise<unknown> => {
+    const chunks: Buffer[] = []
+    for await (const c of req as AsyncIterable<Buffer>) chunks.push(c)
+    return JSON.parse(Buffer.concat(chunks).toString('utf8') || 'null') as unknown
+  }
   const followers = new Map<string, Set<{ res: ServerResponse; tty: boolean }>>()
   const eventStreams = new Set<ServerResponse>()
   const timers = new Set<NodeJS.Timeout>()
@@ -130,7 +138,7 @@ export async function startEngineTestServer(): Promise<EngineTestServer> {
       )
   }
 
-  const handle = (req: IncomingMessage, res: ServerResponse): unknown => {
+  const handleAsync = async (req: IncomingMessage, res: ServerResponse): Promise<unknown> => {
     const url = new URL(req.url ?? '/', 'http://docker')
     const method = req.method ?? 'GET'
     requests.push(`${method} ${url.pathname}${url.search}`)
@@ -141,6 +149,68 @@ export async function startEngineTestServer(): Promise<EngineTestServer> {
     }
     const p = url.pathname.replace(/^\/v1\.41/, '')
     let m: RegExpExecArray | null
+    if (method === 'GET' && p === '/system/df')
+      return json(res, 200, {
+        Images: images.map((i) => ({
+          Size: i.Size,
+          SharedSize: 0,
+          Containers: containers.filter((c) => c.ImageID === i.Id).length
+        })),
+        Containers: containers.map((c) => ({ SizeRw: 1000, State: c.State })),
+        Volumes: volumes.map((v) => ({
+          UsageData: { Size: 2000, RefCount: v.Name === 'orphan' ? 0 : 1 }
+        })),
+        BuildCache: [{ Size: 3000, InUse: false }]
+      })
+    if (method === 'GET' && (m = /^\/containers\/([^/]+)\/top$/.exec(p)))
+      return json(res, 200, {
+        Titles: ['UID', 'PID', 'CMD'],
+        Processes: [['root', '1', 'nginx: master process nginx -g daemon off;']]
+      })
+    if (method === 'GET' && (m = /^\/images\/(.+)\/history$/.exec(p)))
+      return json(res, 200, [
+        {
+          Id: 'sha256:l2',
+          Created: 1_700_000_100,
+          CreatedBy: '/bin/sh -c #(nop)  CMD ["nginx"]',
+          Size: 0,
+          Comment: ''
+        },
+        {
+          Id: 'sha256:l1',
+          Created: 1_700_000_000,
+          CreatedBy: '/bin/sh -c apt-get install nginx',
+          Size: 50_000_000,
+          Comment: ''
+        }
+      ])
+    if (method === 'POST' && p === '/containers/create') {
+      const body = (await readBody(req)) as {
+        Image: string
+        Env?: string[]
+        HostConfig?: { PortBindings?: Record<string, { HostPort: string }[]> }
+      }
+      if (
+        !images.some(
+          (i) => i.RepoTags.includes(body.Image) || i.RepoTags.includes(`${body.Image}:latest`)
+        )
+      )
+        return json(res, 404, { message: `No such image: ${body.Image}` })
+      const name = url.searchParams.get('name') || `created-${containers.length}`
+      const c = container(name, {
+        Image: body.Image,
+        State: 'created',
+        Env: body.Env ?? [],
+        Ports: Object.entries(body.HostConfig?.PortBindings ?? {}).map(([k, v]) => ({
+          PrivatePort: Number(k.split('/')[0]),
+          PublicPort: Number(v[0]?.HostPort) || undefined,
+          Type: k.split('/')[1] ?? 'tcp'
+        }))
+      })
+      containers.push(c)
+      created.push(body)
+      return json(res, 201, { Id: c.Id, Warnings: [] })
+    }
     if (method === 'GET' && p === '/version')
       return json(res, 200, {
         Version: '27.1.1',
@@ -260,6 +330,10 @@ export async function startEngineTestServer(): Promise<EngineTestServer> {
         )
       }
       tick()
+      if (url.searchParams.get('stream') === 'false') {
+        res.end()
+        return true
+      }
       const timer = setInterval(tick, 100)
       timers.add(timer)
       res.on('close', () => {
@@ -356,12 +430,16 @@ export async function startEngineTestServer(): Promise<EngineTestServer> {
     return json(res, 404, { message: `page not found: ${method} ${p}` })
   }
 
+  const handle = (req: IncomingMessage, res: ServerResponse): void => {
+    void handleAsync(req, res)
+  }
   const server = createServer(handle)
   await new Promise<void>((resolve) => server.listen(path, resolve))
   return {
     path,
     containers,
     requests,
+    created,
     log: (id, stream, text) => {
       const c = find(id)
       c?.logs.push({ stream, text })

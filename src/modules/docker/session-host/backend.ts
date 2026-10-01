@@ -1,4 +1,8 @@
 import type {
+  DiskUsage,
+  ImageLayer,
+  ProcessList,
+  RunSpec,
   ComposeAction,
   ContainerAction,
   ContainerRow,
@@ -45,6 +49,13 @@ export interface DockerBackend {
   networks(signal: AbortSignal): Promise<NetworkRow[]>
   networkRemove(id: string): Promise<void>
   prune(what: PruneTarget, dryRun: boolean): Promise<PruneResult>
+  df(signal: AbortSignal): Promise<DiskUsage>
+  /** Một mẫu CPU / RAM cho mọi container đang chạy (khoá = id container). */
+  statsOnce(signal: AbortSignal): Promise<Record<string, StatsSample>>
+  top(id: string): Promise<ProcessList>
+  imageHistory(id: string): Promise<ImageLayer[]>
+  /** Tạo + chạy container; trả id. */
+  run(spec: RunSpec, signal: AbortSignal): Promise<string>
 }
 
 /** Lệnh `docker …` (máy này hoặc qua SSH) — cho compose up/down/pull và CLI dự phòng. */
@@ -109,4 +120,44 @@ export function parseSize(text: string): number {
   const base = unit.includes('i') ? 1024 : 1000
   const power = { '': 0, k: 1, K: 1, M: 2, G: 3, T: 4, P: 5 }[unit.replace('i', '')] ?? 0
   return Math.round(n * base ** power)
+}
+
+/** Chạy hàm cho từng phần tử, tối đa `limit` cùng lúc. */
+export async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const out: R[] = new Array<R>(items.length)
+  let next = 0
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++
+        out[i] = await fn(items[i] as T)
+      }
+    })
+  )
+  return out
+}
+
+/** Tham số `docker run -d` cho CLI. */
+export function runArgs(spec: RunSpec): string[] {
+  return [
+    'run',
+    '-d',
+    ...(spec.name ? ['--name', spec.name] : []),
+    ...spec.ports.flatMap((p) => [
+      '-p',
+      `${p.host ? `${p.host}:` : ''}${p.container}/${p.protocol}`
+    ]),
+    ...spec.env.flatMap((e) => ['-e', e]),
+    ...spec.volumes.flatMap((v) => ['-v', `${v.source}:${v.target}${v.readOnly ? ':ro' : ''}`]),
+    ...(spec.restart !== 'no' ? ['--restart', spec.restart] : []),
+    ...(spec.autoRemove ? ['--rm'] : []),
+    '--pull',
+    spec.pull ? 'missing' : 'never',
+    spec.image,
+    ...(spec.command ?? [])
+  ]
 }

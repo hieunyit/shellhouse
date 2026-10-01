@@ -1,4 +1,8 @@
 import type {
+  DiskUsage,
+  ImageLayer,
+  ProcessList,
+  RunSpec,
   ContainerRow,
   EngineInfo,
   ImageRow,
@@ -8,7 +12,7 @@ import type {
   StatsSample,
   VolumeRow
 } from '../shared/ops'
-import { BUILTIN_NETWORKS, type DockerBackend } from './backend'
+import { BUILTIN_NETWORKS, mapLimit, type DockerBackend } from './backend'
 import { EngineClient, JsonLines, LogDemuxer } from './engine'
 
 /** Docker qua Engine API (socket local hoặc streamlocal qua SSH). */
@@ -434,5 +438,135 @@ export class ApiBackend implements DockerBackend {
         return { items: r.NetworksDeleted ?? [], reclaimed: 0 }
       }
     }
+  }
+
+  async df(signal: AbortSignal): Promise<DiskUsage> {
+    const r = await this.engine.json<{
+      Images?: { Size: number; SharedSize?: number; Containers: number }[] | null
+      Containers?: { SizeRw?: number; State: string }[] | null
+      Volumes?: { UsageData?: { Size: number; RefCount: number } }[] | null
+      BuildCache?: { Size: number; InUse: boolean }[] | null
+    }>('GET', '/system/df', { signal })
+    const images = r.Images ?? []
+    const containers = r.Containers ?? []
+    const volumes = r.Volumes ?? []
+    const cache = r.BuildCache ?? []
+    const sum = <T>(list: T[], f: (x: T) => number): number =>
+      list.reduce((n, x) => n + Math.max(0, f(x)), 0)
+    return {
+      images: {
+        count: images.length,
+        size: sum(images, (i) => i.Size),
+        reclaimable: sum(
+          images.filter((i) => i.Containers === 0),
+          (i) => i.Size - (i.SharedSize ?? 0)
+        )
+      },
+      containers: {
+        count: containers.length,
+        size: sum(containers, (c) => c.SizeRw ?? 0),
+        reclaimable: sum(
+          containers.filter((c) => c.State !== 'running'),
+          (c) => c.SizeRw ?? 0
+        )
+      },
+      volumes: {
+        count: volumes.length,
+        size: sum(volumes, (v) => v.UsageData?.Size ?? 0),
+        reclaimable: sum(
+          volumes.filter((v) => v.UsageData?.RefCount === 0),
+          (v) => v.UsageData?.Size ?? 0
+        )
+      },
+      buildCache: {
+        count: cache.length,
+        size: sum(cache, (c) => c.Size),
+        reclaimable: sum(
+          cache.filter((c) => !c.InUse),
+          (c) => c.Size
+        )
+      }
+    }
+  }
+
+  async statsOnce(signal: AbortSignal): Promise<Record<string, StatsSample>> {
+    const running = await this.engine.json<ApiContainer[]>('GET', '/containers/json', { signal })
+    const samples = await mapLimit(running, 8, (c) =>
+      this.engine
+        .json<ApiStats>('GET', `/containers/${encodeURIComponent(c.Id)}/stats`, {
+          query: { stream: false },
+          signal
+        })
+        .then(toStatsSample)
+        .catch(() => null)
+    )
+    const out: Record<string, StatsSample> = {}
+    running.forEach((c, i) => {
+      const s = samples[i]
+      if (s) out[c.Id] = s
+    })
+    return out
+  }
+
+  async top(id: string): Promise<ProcessList> {
+    const r = await this.engine.json<{ Titles?: string[]; Processes?: string[][] }>(
+      'GET',
+      `/containers/${encodeURIComponent(id)}/top`
+    )
+    return { titles: r.Titles ?? [], processes: r.Processes ?? [] }
+  }
+
+  async imageHistory(id: string): Promise<ImageLayer[]> {
+    const list = await this.engine.json<
+      { Id: string; Created: number; CreatedBy: string; Size: number; Comment: string }[]
+    >('GET', `/images/${encodeURIComponent(id)}/history`)
+    return list.map((l) => ({
+      id: l.Id,
+      created: l.Created * 1000,
+      createdBy: l.CreatedBy,
+      size: l.Size,
+      comment: l.Comment
+    }))
+  }
+
+  async run(spec: RunSpec, signal: AbortSignal): Promise<string> {
+    const exposed: Record<string, object> = {}
+    const bindings: Record<string, { HostPort: string }[]> = {}
+    for (const p of spec.ports) {
+      const key = `${p.container}/${p.protocol}`
+      exposed[key] = {}
+      bindings[key] = [{ HostPort: p.host ? String(p.host) : '' }]
+    }
+    const body = {
+      Image: spec.image,
+      ...(spec.command?.length ? { Cmd: spec.command } : {}),
+      Env: spec.env,
+      ExposedPorts: exposed,
+      HostConfig: {
+        PortBindings: bindings,
+        Binds: spec.volumes.map((v) => `${v.source}:${v.target}${v.readOnly ? ':ro' : ''}`),
+        RestartPolicy: { Name: spec.restart },
+        AutoRemove: spec.autoRemove
+      }
+    }
+    const create = (): Promise<{ Id: string }> =>
+      this.engine.json<{ Id: string }>('POST', '/containers/create', {
+        query: { name: spec.name || undefined },
+        body,
+        signal
+      })
+    let created: { Id: string }
+    try {
+      created = await create()
+    } catch (error) {
+      if (!(spec.pull && error instanceof Error && /no such image/i.test(error.message)))
+        throw error
+      await this.imagePull(spec.image, () => undefined, signal)
+      created = await create()
+    }
+    await this.engine.json('POST', `/containers/${encodeURIComponent(created.Id)}/start`, {
+      signal
+    })
+    return created.Id
   }
 }

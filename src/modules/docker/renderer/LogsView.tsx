@@ -7,7 +7,7 @@ import { LogViewer } from '../../../renderer/src/components/LogViewer'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { ConnectionPrompt } from '../../registry/renderer-kit'
 import type { ModuleTabProps } from '../../registry/renderer-types'
-import type { DockerLogsParams, LogsEvent } from '../shared/ops'
+import type { DockerLogsParams, DockerOp, LogsEvent } from '../shared/ops'
 import { useDockerSession } from './useDockerSession'
 
 /** Tab log của một container. */
@@ -37,12 +37,11 @@ export function LogsTab({ tabId, params }: ModuleTabProps<DockerLogsParams>): Re
     if (!ready) return
     let sub: string | null = null
     let cancelled = false
-    request<{ subscription: string }>({
-      op: 'logs.subscribe',
-      id: params.container,
-      tail,
-      timestamps
-    }).then(
+    // Nhiều container (Compose project) → một luồng gộp, mỗi dòng có tiền tố tên service.
+    const op: DockerOp = params.containers?.length
+      ? { op: 'logs.subscribeMany', containers: params.containers, tail, timestamps }
+      : { op: 'logs.subscribe', id: params.container ?? '', tail, timestamps }
+    request<{ subscription: string }>(op).then(
       (r) => {
         if (cancelled) {
           void request({ op: 'unsubscribe', subscription: r.subscription })
@@ -63,7 +62,7 @@ export function LogsTab({ tabId, params }: ModuleTabProps<DockerLogsParams>): Re
       subscription.current = null
       if (sub) void request({ op: 'unsubscribe', subscription: sub }).catch(() => undefined)
     }
-  }, [ready, request, feed, params.container, tail, timestamps, restart])
+  }, [ready, request, feed, params.container, params.containers, tail, timestamps, restart])
 
   return (
     <div className="relative flex h-full flex-col bg-surface" data-testid="docker-logs-view">

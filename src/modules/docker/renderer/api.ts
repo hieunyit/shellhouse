@@ -50,15 +50,41 @@ export function openLogs(
   return openModuleTab('docker', 'logs', params)
 }
 
+/** Log cả Compose project (mọi container, tiền tố tên). */
+export function openProjectLogs(
+  hostId: string | undefined,
+  project: string,
+  containers: { id: string; name: string }[]
+): string | null {
+  const params: DockerLogsParams = {
+    ...(hostId ? { hostId } : {}),
+    label: sourceLabel(hostId),
+    name: project,
+    containers: containers.slice(0, 50).map((c) => ({ id: c.id, name: c.name }))
+  }
+  return openModuleTab('docker', 'logs', params)
+}
+
 /** Shell vào container → tab terminal (trên máy này hoặc qua SSH tới host). */
 export function openShell(
   hostId: string | undefined,
-  container: { id: string; name: string }
+  container: { id: string; name: string },
+  options: { command?: string[] | undefined; user?: string | undefined } = {}
 ): string {
   return openModuleTerminal(
     'docker',
-    `${container.name} (shell)`,
-    { container: container.id },
+    `${container.name} (${options.command?.join(' ') ?? 'shell'})`,
+    {
+      container: container.id,
+      ...(options.command ? { command: options.command } : {}),
+      ...(options.user ? { user: options.user } : {})
+    },
     hostId
   )
+}
+
+/** Địa chỉ để mở cổng đã publish: localhost hoặc tên server của host SSH. */
+export function publishHost(hostId: string | undefined): string {
+  if (!hostId) return 'localhost'
+  return savedHost(hostId)?.address.split('@').pop() ?? 'localhost'
 }

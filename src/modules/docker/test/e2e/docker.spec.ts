@@ -93,6 +93,68 @@ test('Docker trên máy này (Engine giả qua DOCKER_HOST): danh sách, stats, 
   }
 })
 
+test('Docker: tổng quan, lọc trạng thái, chạy container mới, log cả Compose project, phím tắt', async () => {
+  test.skip(isWindows, 'Engine giả dùng unix socket')
+  const engine = await startEngineTestServer()
+  const launched = await launchApp({ DOCKER_HOST: `unix://${engine.path}` })
+  const { page } = launched
+  try {
+    await enableDocker(page)
+    await page.locator('[data-testid="docker-endpoint"][data-name="This computer"]').dblclick()
+    const view = page.getByTestId('docker-view')
+    const rows = view.getByTestId('docker-container')
+    await expect(rows).toHaveCount(3)
+
+    // Tổng quan: số container đang chạy + dung lượng đĩa; bấm thẻ → danh sách đã lọc.
+    await view.getByTestId('docker-nav-overview').click()
+    await expect(view.getByTestId('docker-ov-disk')).toContainText('reclaimable')
+    const runningCount = engine.containers.filter((c) => c.State === 'running').length
+    await expect(view.getByTestId('docker-ov-running')).toContainText(String(runningCount))
+    await view.getByTestId('docker-ov-running').click()
+    await expect(view.getByTestId('docker-status-running')).toHaveAttribute('aria-checked', 'true')
+    await expect(rows).toHaveCount(runningCount)
+    await view.getByTestId('docker-status-all').click()
+    await expect(rows).toHaveCount(3)
+
+    // Run: image có sẵn, cổng, biến môi trường → Engine nhận đúng cấu hình.
+    await view.getByTestId('docker-run').click()
+    await page.getByTestId('docker-run-image').fill('nginx:1.27')
+    await page.getByTestId('docker-run-name').fill('edge')
+    await page.getByTestId('docker-run-add-port').click()
+    await page.getByTestId('docker-run-port-host').fill('8088')
+    await page.getByTestId('docker-run-port-container').fill('80')
+    await page.getByTestId('docker-run-env').fill('MODE=prod')
+    await page.getByTestId('docker-run-submit').click()
+    await expect(page.getByTestId('docker-run-dialog')).toHaveCount(0)
+    await expect(view.locator('[data-testid="docker-container"][data-name="edge"]')).toBeVisible()
+    expect(engine.created[0]).toMatchObject({
+      Image: 'nginx:1.27',
+      Env: ['MODE=prod'],
+      HostConfig: { PortBindings: { '80/tcp': [{ HostPort: '8088' }] } }
+    })
+
+    // Phím tắt trên dòng đang chọn: r = restart.
+    await view.locator('[data-testid="docker-container"][data-name="web"]').click()
+    await expect(view.getByTestId('docker-detail')).toBeVisible()
+    await page.keyboard.press('r')
+    await expect
+      .poll(() => engine.requests.some((r) => /\/containers\/web-[^/]+\/restart/.test(r)))
+      .toBe(true)
+
+    // Log của cả Compose project: một tab, dòng có tiền tố service.
+    await view.getByTestId('docker-nav-compose').click()
+    await view
+      .locator('[data-testid="docker-project"][data-name="shop"]')
+      .getByTestId('docker-compose-logs')
+      .click()
+    await expect(page.getByTestId('tab').last()).toContainText('shop (logs)')
+    await expect(page.getByTestId('docker-logs')).toContainText('hello from stdout')
+  } finally {
+    await launched.close()
+    await engine.close()
+  }
+})
+
 test('Docker qua SSH: menu host "Docker…", socket qua streamlocal, shell vào container thành tab terminal', async () => {
   test.skip(isWindows, 'Engine giả dùng unix socket; exec của server test dùng /bin/sh')
   const engine = await startEngineTestServer()

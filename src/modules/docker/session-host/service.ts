@@ -27,8 +27,11 @@ export interface DockerServiceDeps {
 }
 
 const LOG_FLUSH_MS = 50
+const STATS_ALL_MS = 3000
 /** Log dồn quá mức này thì gửi ngay (container in liên tục). */
 const LOG_FLUSH_BYTES = 64 * 1024
+/** Đọc lại cờ sau await (TS tưởng giá trị không đổi kể từ lần kiểm tra trước). */
+const isAborted = (s: AbortSignal): boolean => s.aborted
 
 /** Shell mặc định khi vào container: bash nếu có, không thì sh. */
 export const DEFAULT_SHELL = ['sh', '-c', 'command -v bash >/dev/null 2>&1 && exec bash || exec sh']
@@ -87,8 +90,54 @@ export class DockerService implements HostModuleSession {
         return backend.containers(op.all, signal)
       case 'inspect': {
         const data = await backend.inspect(op.kind, op.id)
-        return op.kind === 'container' ? maskInspect(data) : data
+        return op.kind === 'container' && !op.reveal ? maskInspect(data) : data
       }
+      case 'df':
+        return backend.df(signal)
+      case 'top':
+        return backend.top(op.id)
+      case 'image.history':
+        return backend.imageHistory(op.id)
+      case 'run':
+        return { id: await backend.run(op.spec, signal) }
+      case 'statsAll.subscribe':
+        // Một mẫu cho mọi container đang chạy mỗi STATS_ALL_MS (như cột của `docker stats`).
+        return this.subscribe('statsAll', async (id, s) => {
+          while (!s.aborted) {
+            const samples = await backend.statsOnce(s).catch(() => null)
+            if (isAborted(s)) return
+            if (samples) this.deps.emit('statsAll', { subscription: id, samples })
+            await new Promise((r) => setTimeout(r, STATS_ALL_MS))
+          }
+        })
+      case 'logs.subscribeMany':
+        return this.subscribe('logs', async (id, s) => {
+          const batch = new Batcher((stream, text) => {
+            this.deps.emit('logs', { subscription: id, stream, text })
+          })
+          try {
+            await Promise.all(
+              op.containers.map((c) => {
+                let partial = { stdout: '', stderr: '' }
+                const prefix = `[${c.name}] `
+                return backend.logs(
+                  c.id,
+                  op.tail,
+                  op.timestamps,
+                  (stream, text) => {
+                    const lines = (partial[stream] + text).split('\n')
+                    partial = { ...partial, [stream]: lines.pop() ?? '' }
+                    if (lines.length)
+                      batch.push(stream, lines.map((l) => `${prefix}${l}\n`).join(''))
+                  },
+                  s
+                )
+              })
+            )
+          } finally {
+            batch.flush()
+          }
+        })
       case 'action':
         await backend.action(op.id, op.action, op.force === true)
         return null

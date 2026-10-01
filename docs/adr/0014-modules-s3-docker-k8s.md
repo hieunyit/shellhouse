@@ -723,12 +723,29 @@ TLS thật, SSH test server hỗ trợ streamlocal / direct-tcpip), E2E trang Mo
     suggest again" lưu trong `settings.modules.<id>`. E2E tắt gợi ý mặc định (không phụ thuộc máy
     chạy có Docker hay không); `SHELLHOUSE_TEST_DETECT` (chỉ khi bật test hooks) giả danh sách file.
 
+13. **Hoàn thiện theo k9s / Lens (2026-10-01).**
+    - K8s: trang Overview, cột CPU / MEM (metrics-server, 15 giây), thanh lệnh `:` (alias +
+      gợi ý), drill-down có breadcrumb, phím tắt một phím (nghe ở window khi tab đang hiện và
+      focus nằm trong tab), Create bằng server-side apply (`fieldManager=shellhouse`), lịch sử
+      rollout / rollback, cordon / drain (Eviction API, bỏ DaemonSet và mirror pod), trigger /
+      suspend CronJob, log nhiều container / theo selector trong một luồng có tiền tố.
+    - **Import file kubeconfig**: quyền mới `pick-file` (`ctx.pickFiles` — hộp chọn file của hệ
+      điều hành; module chỉ đọc được file người dùng chọn, tối đa 4 MB; file tham chiếu cạnh nó
+      tối đa 1 MB) → chứng chỉ / tokenFile được nhúng thành `…-data` rồi lưu vault. Quét thêm mọi
+      kubeconfig trong `~/.kube` (`ctx.readDir`).
+    - Docker: Overview (`/system/df`), Run (create + start, pull khi thiếu image), CPU / RAM mọi
+      container (`statsAll.subscribe` — một mẫu `stream=false` mỗi 3 giây, tối đa 8 request song
+      song; CLI: `docker stats --no-stream`), processes (`top`), image layers (`history`), log cả
+      Compose project (`logs.subscribeMany`).
+    - Thành phần UI dùng chung mới `components/panels.tsx` (Pill, TabStrip, KeyHints, Sparkline,
+      Meter, StatCard, DefList…) — module được phép import.
+
 ### 11.2. Chưa làm
 
 - Nút **Enable** ngay trong thông báo có bản cập nhật (3.12.5) — chờ thông báo cập nhật mang danh
   sách module mới. Nhãn NEW trên trang Modules vẫn có.
 - Docker: copy file vào / ra container (giai đoạn 2 theo 6.3); exec trên máy qua Engine API
   hijack (hiện dùng `docker` CLI trong PTY).
-- Kubernetes: lịch sử rollout (danh sách ReplicaSet theo revision), Helm (câu hỏi mở 2), test với
-  kind trên CI (hiện dùng API server giả trên mọi nền tảng).
+- Kubernetes: Helm (câu hỏi mở 2), test với kind trên CI (hiện dùng API server giả trên mọi nền
+  tảng).
 - Đồng bộ (mục 4): manifest đã khai báo `syncRecordTypes`; `ctx.sync` làm cùng ADR-013.

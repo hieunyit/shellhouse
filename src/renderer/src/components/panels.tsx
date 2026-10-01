@@ -172,16 +172,20 @@ export function Meter({
   max,
   label,
   detail,
+  neutral,
   testId
 }: {
   value: number
   max: number
   label: string
   detail?: string
+  /** Không tô vàng / đỏ khi gần đầy (vd. phần "có thể dọn" — đầy là tốt, không phải báo động). */
+  neutral?: boolean
   testId?: string
 }): React.JSX.Element {
   const ratio = max > 0 ? Math.min(1, value / max) : 0
-  const tone = ratio > 0.9 ? 'bg-danger-solid' : ratio > 0.75 ? 'bg-warning' : 'bg-accent-solid'
+  const tone =
+    neutral || ratio <= 0.75 ? 'bg-accent-solid' : ratio > 0.9 ? 'bg-danger-solid' : 'bg-warning'
   return (
     <div className="flex flex-col gap-1" data-testid={testId}>
       <div className="flex justify-between text-xs">

@@ -29,6 +29,51 @@ export type PruneTarget = z.infer<typeof PruneTarget>
 export const ComposeAction = z.enum(['start', 'stop', 'restart', 'up', 'down', 'pull'])
 export type ComposeAction = z.infer<typeof ComposeAction>
 
+/** Container mới (hộp thoại Run). */
+export const RunSpec = z.object({
+  image: z
+    .string()
+    .min(1)
+    .max(512)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9_.:/@-]*$/, 'Looks like nginx:1.27'),
+  name: z
+    .string()
+    .regex(/^([A-Za-z0-9][A-Za-z0-9_.-]{0,127})?$/, 'Letters, digits, "_", "." and "-" only')
+    .optional(),
+  ports: z
+    .array(
+      z.object({
+        host: z.number().int().min(0).max(65535),
+        container: z.number().int().min(1).max(65535),
+        protocol: z.enum(['tcp', 'udp'])
+      })
+    )
+    .max(32),
+  env: z
+    .array(
+      z
+        .string()
+        .max(4096)
+        .regex(/^[^=\s]+=/, 'Use NAME=value')
+    )
+    .max(100),
+  volumes: z
+    .array(
+      z.object({
+        source: z.string().min(1).max(1024),
+        target: z.string().min(1).max(1024).regex(/^\//, 'Must be an absolute path'),
+        readOnly: z.boolean()
+      })
+    )
+    .max(32),
+  restart: z.enum(['no', 'always', 'unless-stopped', 'on-failure']),
+  command: z.array(z.string().max(4096)).max(64).optional(),
+  autoRemove: z.boolean(),
+  /** Image chưa có trên máy → kéo về trước. */
+  pull: z.boolean()
+})
+export type RunSpec = z.infer<typeof RunSpec>
+
 export const DockerOp = z.discriminatedUnion('op', [
   /** Chế độ chỉ đọc cho phiên này: thao tác thay đổi bị từ chối ở Session Host. */
   z.object({ op: z.literal('configure'), readOnly: z.boolean() }),
@@ -37,7 +82,29 @@ export const DockerOp = z.discriminatedUnion('op', [
   z.object({
     op: z.literal('inspect'),
     kind: z.enum(['container', 'image', 'volume', 'network']),
-    id: Id
+    id: Id,
+    /** true = không che biến môi trường (người dùng bấm "Show values"). */
+    reveal: z.boolean().optional()
+  }),
+  /** Dung lượng đĩa theo loại (`docker system df`). */
+  z.object({ op: z.literal('df') }),
+  /** CPU / RAM của mọi container đang chạy, lặp lại → sự kiện 'statsAll'. */
+  z.object({ op: z.literal('statsAll.subscribe') }),
+  /** Tiến trình trong container (`docker top`). */
+  z.object({ op: z.literal('top'), id: Id }),
+  /** Các lớp của image (`docker history`). */
+  z.object({ op: z.literal('image.history'), id: Id }),
+  /** Tạo + chạy container (như `docker run -d`). */
+  z.object({ op: z.literal('run'), spec: RunSpec }),
+  /** Log nhiều container (Compose project) — mỗi dòng có tiền tố tên. */
+  z.object({
+    op: z.literal('logs.subscribeMany'),
+    containers: z
+      .array(z.object({ id: Id, name: z.string().max(200) }))
+      .min(1)
+      .max(50),
+    tail: z.number().int().min(0).max(100_000),
+    timestamps: z.boolean()
   }),
   z.object({
     op: z.literal('action'),
@@ -90,6 +157,7 @@ export function isMutating(op: DockerOp): boolean {
   switch (op.op) {
     case 'action':
     case 'rename':
+    case 'run':
     case 'image.remove':
     case 'image.pull':
     case 'volume.remove':
@@ -170,6 +238,26 @@ export interface NetworkRow {
   builtin: boolean
 }
 
+export interface DiskUsage {
+  images: { count: number; size: number; reclaimable: number }
+  containers: { count: number; size: number; reclaimable: number }
+  volumes: { count: number; size: number; reclaimable: number }
+  buildCache: { count: number; size: number; reclaimable: number }
+}
+
+export interface ProcessList {
+  titles: string[]
+  processes: string[][]
+}
+
+export interface ImageLayer {
+  id: string
+  created: number
+  createdBy: string
+  size: number
+  comment: string
+}
+
 export interface PruneResult {
   /** Tên / id những gì bị xoá (hoặc sẽ bị xoá khi dryRun). */
   items: string[]
@@ -215,8 +303,14 @@ export type DockerEngineParams = z.infer<typeof DockerEngineParams>
 export const DockerLogsParams = z.object({
   hostId: z.string().min(1).max(64).optional(),
   label: z.string().max(200),
-  container: Id,
-  name: z.string().max(200)
+  /** Một container… */
+  container: Id.optional(),
+  name: z.string().max(200),
+  /** …hoặc nhiều (log cả Compose project). */
+  containers: z
+    .array(z.object({ id: Id, name: z.string().max(200) }))
+    .max(50)
+    .optional()
 })
 export type DockerLogsParams = z.infer<typeof DockerLogsParams>
 
