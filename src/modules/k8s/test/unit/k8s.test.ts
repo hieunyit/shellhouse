@@ -419,10 +419,17 @@ describe('bố cục cột bảng (bỏ bớt cột khi hẹp)', () => {
     expect([...fitColumns(pods, 2000).keep]).toEqual(pods)
     expect([...fitColumns(pods, 0).keep]).toEqual(pods)
   })
-  it('hẹp → bỏ Node trước, rồi CPU / Memory; Status và Age luôn còn', () => {
-    const mid = fitColumns(pods, 640).keep
-    expect(mid.has('node')).toBe(false)
-    expect(mid.has('status')).toBe(true)
+  it('hẹp → bỏ Node trước, rồi Restarts; CPU / Memory giữ lâu nhất; Status và Age luôn còn', () => {
+    // Bảng ~816 px (cửa sổ 1280 px trừ thanh bên): chỉ bỏ Node.
+    expect([...fitColumns(pods, 816).keep]).toEqual([
+      'ready',
+      'status',
+      'restarts',
+      'cpu',
+      'mem',
+      'age'
+    ])
+    expect([...fitColumns(pods, 680).keep]).toEqual(['ready', 'status', 'cpu', 'mem', 'age'])
     const narrow = fitColumns(pods, 300).keep
     expect([...narrow]).toEqual(['status', 'age'])
   })

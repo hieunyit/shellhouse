@@ -1,6 +1,6 @@
 /**
  * Bố cục cột bảng tài nguyên: mỗi cột có độ rộng tối thiểu (rem), có giãn hay không, và thứ tự
- * bỏ bớt khi khung hẹp (mở bảng chi tiết, cửa sổ nhỏ) — như k9s bỏ cột ở màn hẹp. Cột Status và
+ * bỏ bớt khi khung hẹp — cột chi tiết (Node, Owner…) đi trước, CPU / Memory giữ lâu nhất (mở bảng chi tiết, cửa sổ nhỏ) — như k9s bỏ cột ở màn hẹp. Cột Status và
  * Age không bao giờ bị bỏ; Status đủ rộng cho "CrashLoopBackOff".
  */
 interface Spec {
@@ -16,9 +16,9 @@ const SPECS: Record<string, Spec> = {
   age: { min: 3.5, grow: 0, drop: 0 },
   ready: { min: 4, grow: 0, drop: 1 },
   ns: { min: 6, grow: 1, drop: 2 },
-  restarts: { min: 4.5, grow: 0, drop: 3 },
-  cpu: { min: 4.5, grow: 0, drop: 4 },
-  mem: { min: 5, grow: 0, drop: 4 },
+  restarts: { min: 4.5, grow: 0, drop: 4 },
+  cpu: { min: 4.5, grow: 0, drop: 3 },
+  mem: { min: 5, grow: 0, drop: 3 },
   type: { min: 5, grow: 1, drop: 1 },
   keys: { min: 3.5, grow: 0, drop: 2 },
   ports: { min: 6, grow: 1.5, drop: 2 },
@@ -28,19 +28,19 @@ const SPECS: Record<string, Spec> = {
   message: { min: 10, grow: 3, drop: 1 },
   object: { min: 8, grow: 1.5, drop: 2 },
   desired: { min: 4.5, grow: 0, drop: 3 },
-  upToDate: { min: 5, grow: 0, drop: 5 },
-  available: { min: 5, grow: 0, drop: 4 },
+  upToDate: { min: 5, grow: 0, drop: 4 },
+  available: { min: 5, grow: 0, drop: 3 },
   completions: { min: 5.5, grow: 0, drop: 2 },
   suspend: { min: 4.5, grow: 0, drop: 3 },
   capacity: { min: 4.5, grow: 0, drop: 2 },
   last: { min: 5, grow: 0, drop: 4 },
   version: { min: 5.5, grow: 1, drop: 4 },
-  roles: { min: 6, grow: 1, drop: 3 },
-  address: { min: 6, grow: 1, drop: 4 },
-  clusterIP: { min: 6.5, grow: 1, drop: 4 },
-  storageClass: { min: 6, grow: 1, drop: 5 },
-  owner: { min: 6, grow: 1, drop: 5 },
-  node: { min: 6, grow: 1, drop: 5 }
+  roles: { min: 6, grow: 1, drop: 4 },
+  address: { min: 6, grow: 1, drop: 5 },
+  clusterIP: { min: 6.5, grow: 1, drop: 5 },
+  storageClass: { min: 6, grow: 1, drop: 6 },
+  owner: { min: 6, grow: 1, drop: 6 },
+  node: { min: 6, grow: 1, drop: 6 }
 }
 const DEFAULT: Spec = { min: 6, grow: 1, drop: 3 }
 const NAME = 'minmax(10rem,2fr)'

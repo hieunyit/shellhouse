@@ -27,6 +27,8 @@ async function enableDocker(page: Page): Promise<void> {
 }
 
 test('Docker trên máy này (Engine giả qua DOCKER_HOST): danh sách, stats, restart, log, chỉ đọc, dọn image', async () => {
+  // Nhiều bước + khởi động Electron (runner macOS lần đầu ~25 giây).
+  test.setTimeout(60_000)
   test.skip(isWindows, 'Engine giả dùng unix socket')
   const engine = await startEngineTestServer()
   const launched = await launchApp({ DOCKER_HOST: `unix://${engine.path}` })
@@ -94,6 +96,8 @@ test('Docker trên máy này (Engine giả qua DOCKER_HOST): danh sách, stats, 
 })
 
 test('Docker: tổng quan, lọc trạng thái, chạy container mới, log cả Compose project, phím tắt', async () => {
+  // Nhiều bước + khởi động Electron (runner macOS lần đầu ~25 giây).
+  test.setTimeout(60_000)
   test.skip(isWindows, 'Engine giả dùng unix socket')
   const engine = await startEngineTestServer()
   const launched = await launchApp({ DOCKER_HOST: `unix://${engine.path}` })
@@ -156,6 +160,8 @@ test('Docker: tổng quan, lọc trạng thái, chạy container mới, log cả
 })
 
 test('Docker qua SSH: menu host "Docker…", socket qua streamlocal, shell vào container thành tab terminal', async () => {
+  // Nhiều bước + khởi động Electron (runner macOS lần đầu ~25 giây).
+  test.setTimeout(60_000)
   test.skip(isWindows, 'Engine giả dùng unix socket; exec của server test dùng /bin/sh')
   const engine = await startEngineTestServer()
   // `docker` giả trên "server": in tên container rồi chạy sh.

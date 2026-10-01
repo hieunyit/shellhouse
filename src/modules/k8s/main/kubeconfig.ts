@@ -1,3 +1,4 @@
+import { dirname, isAbsolute, join } from 'node:path'
 import { parse, parseDocument } from 'yaml'
 import type { ContextInfo, ContextRef } from '../shared/ops'
 
@@ -110,13 +111,13 @@ const decode = (b64: string): string => Buffer.from(b64, 'base64').toString('utf
 
 /** Thư mục chứa file (đường dẫn tương đối trong kubeconfig tính từ đây). */
 function dirOf(path: string): string {
-  const i = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-  return i >= 0 ? path.slice(0, i) : '.'
+  return dirname(path)
 }
 
+/** Đường dẫn tuyệt đối theo quy ước của hệ điều hành (Windows: dấu "\\"). */
 function absolute(path: string, base: string): string {
-  if (/^([a-zA-Z]:)?[\\/]/.test(path) || path.startsWith('~')) return path
-  return `${base}/${path}`
+  if (isAbsolute(path) || /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith('~')) return path
+  return join(base, path)
 }
 
 /**

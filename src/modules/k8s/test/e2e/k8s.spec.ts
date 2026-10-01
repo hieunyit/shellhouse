@@ -52,6 +52,8 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     const context = page.locator('[data-testid="k8s-context"][data-name="test"]')
     await context.dblclick()
     const view = page.getByTestId('k8s-view')
+    // Cửa sổ cố định: số cột hiện được tuỳ độ rộng (cửa sổ mặc định của CI macOS hẹp hơn).
+    await page.setViewportSize({ width: 1366, height: 820 })
     const rows = view.getByTestId('k8s-row')
     await expect(rows).toHaveCount(2)
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-2"]')).toContainText(

@@ -237,6 +237,8 @@ test('S3: export danh sách bucket (CSV) và đồng bộ sang tài khoản khá
   app,
   page
 }) => {
+  // Nhiều bước + khởi động Electron (runner macOS lần đầu ~25 giây).
+  test.setTimeout(60_000)
   const { GetObjectCommand, PutObjectCommand, S3Client } = await import('@aws-sdk/client-s3')
   server = await startS3TestServer(['photos', 'logs'])
   const other = await startS3TestServer(['existing'])
