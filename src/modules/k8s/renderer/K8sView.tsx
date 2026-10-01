@@ -212,7 +212,7 @@ export function ClusterTab({
           labelSelector: top?.labelSelector,
           fieldSelector: top?.fieldSelector
         }
-  const list = useResourceList(ready, request, bus, listQuery, reloadKey)
+  const list = useResourceList(ready, request, bus, listQuery, reloadKey, active)
 
   // CPU / RAM (metrics-server) cho pod và node, 15 giây một lần khi tab đang hiện.
   const metricScope = kindId === 'pods' ? 'pods' : kindId === 'nodes' ? 'nodes' : null
@@ -1024,7 +1024,12 @@ export function ClusterTab({
             </div>
           ) : onOverview ? (
             namespaces === null ? null : (
-              <ClusterOverview request={request} namespaces={namespaces} onNavigate={go} />
+              <ClusterOverview
+                request={request}
+                namespaces={namespaces}
+                active={active}
+                onNavigate={go}
+              />
             )
           ) : !loaded ? (
             <div

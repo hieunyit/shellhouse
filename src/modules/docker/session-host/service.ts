@@ -32,6 +32,21 @@ const STATS_ALL_MS = 3000
 const LOG_FLUSH_BYTES = 64 * 1024
 /** Đọc lại cờ sau await (TS tưởng giá trị không đổi kể từ lần kiểm tra trước). */
 const isAborted = (s: AbortSignal): boolean => s.aborted
+/** Chờ trước khi theo dõi lại sự kiện Engine sau khi luồng đứt: base × 2^lần (test rút ngắn được). */
+export const eventsRetry = { baseMs: 500, maxMs: 30_000 }
+
+/** Ngủ `ms`, dậy sớm nếu bị huỷ. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(done, ms)
+    function done(): void {
+      clearTimeout(t)
+      signal.removeEventListener('abort', done)
+      resolve()
+    }
+    signal.addEventListener('abort', done)
+  })
+}
 
 /** Shell mặc định khi vào container: bash nếu có, không thì sh. */
 export const DEFAULT_SHELL = ['sh', '-c', 'command -v bash >/dev/null 2>&1 && exec bash || exec sh']
@@ -174,11 +189,32 @@ export class DockerService implements HostModuleSession {
           )
         )
       case 'events.subscribe':
-        return this.subscribe('engine', (id, s) =>
-          backend.events((e) => {
-            this.deps.emit('engine', { subscription: id, ...e })
-          }, s)
-        )
+        // Luồng sự kiện đứt (daemon khởi động lại, socket / SSH chập chờn) → theo dõi lại, chờ tăng
+        // dần; mỗi lần nối lại báo renderer tải lại (có thể đã lỡ sự kiện trong lúc đứt).
+        return this.subscribe('engine', async (id, s) => {
+          let failures = 0
+          while (!isAborted(s)) {
+            const started = Date.now()
+            await backend
+              .events((e) => {
+                this.deps.emit('engine', { subscription: id, ...e })
+              }, s)
+              .catch((error: unknown) => {
+                this.deps.log(
+                  'warn',
+                  `docker events: ${error instanceof Error ? error.message : String(error)}`
+                )
+              })
+            if (isAborted(s)) return
+            failures = Date.now() - started > 60_000 ? 1 : failures + 1
+            await sleep(
+              Math.min(eventsRetry.maxMs, eventsRetry.baseMs * 2 ** Math.min(failures, 16)),
+              s
+            )
+            if (isAborted(s)) return
+            this.deps.emit('engine', { subscription: id, action: 'reconnect', id: '' })
+          }
+        })
       case 'images':
         return backend.images(signal)
       case 'image.remove':

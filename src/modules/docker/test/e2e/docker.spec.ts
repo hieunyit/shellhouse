@@ -244,7 +244,7 @@ test('gợi ý đúng lúc: có socket Docker trên máy → một dòng gợi �
     await page.evaluate(() =>
       window.shellhouse.updateSettings({ moduleOptions: { suggest: true } })
     )
-    await page.reload()
+    // Bật gợi ý → hiện ngay (không cần mở lại app), kể cả khi dấu hiệu tới trước cài đặt.
     const suggestion = page.getByTestId('module-suggestion')
     await expect(suggestion).toContainText('Docker detected on this computer')
     await page.getByTestId('module-suggestion-enable').click()

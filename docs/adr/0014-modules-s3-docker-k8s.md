@@ -740,6 +740,20 @@ TLS thật, SSH test server hỗ trợ streamlocal / direct-tcpip), E2E trang Mo
     - Thành phần UI dùng chung mới `components/panels.tsx` (Pill, TabStrip, KeyHints, Sparkline,
       Meter, StatCard, DefList…) — module được phép import.
 
+14. **S3: export + đồng bộ (2026-10-01).**
+    - Export danh sách bucket tạo nội dung ở renderer (`shared/sync.ts` — CSV có BOM, chặn công
+      thức), ghi bằng op `writeFile` tới đường dẫn người dùng vừa chọn trong hộp Save.
+    - Đồng bộ chạy trong Session Host (`session-host/sync.ts`): quét song song hai bên, lập kế
+      hoạch (`planSync` — so dung lượng, và ETag khi không phải upload nhiều phần), copy trên
+      server nếu cùng tài khoản, khác tài khoản thì GetObject → Upload theo luồng (≤ 2 × 8 MiB
+      bộ nhớ mỗi object), Mirror xoá lô 1000. Tối đa 1 triệu object mỗi bên.
+    - Kết nối tài khoản đích: Session Host hỏi main (`onHostRequest('account')`) — secret không
+      qua renderer, như kubeconfig của K8s.
+15. **Ổn định / nhẹ (2026-10-01).** Watch K8s không bỏ cuộc sau 5 lần lỗi (thử lại tới 30 giây
+    một lần, nối lại được → list lại); luồng sự kiện Docker tự theo dõi lại; tab ẩn không poll
+    metrics / overview và gom sự kiện watch (quá 5000 → list lại khi hiện tab); đăng ký luồng
+    huỷ trước khi xong vẫn được bỏ đăng ký.
+
 ### 11.2. Chưa làm
 
 - Nút **Enable** ngay trong thông báo có bản cập nhật (3.12.5) — chờ thông báo cập nhật mang danh

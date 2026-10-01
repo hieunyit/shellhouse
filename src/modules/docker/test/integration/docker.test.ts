@@ -8,7 +8,7 @@ import { startTestSshServer } from '../../../../../test/integration/ssh-test-ser
 import { ApiBackend } from '../../session-host/api-backend'
 import { CliBackend } from '../../session-host/cli-backend'
 import { EngineClient } from '../../session-host/engine'
-import { DockerService } from '../../session-host/service'
+import { DockerService, eventsRetry } from '../../session-host/service'
 import { dockerHost } from '../../session-host'
 import type { DockerCli } from '../../session-host/backend'
 import type { ContainerRow, ImageRow, PruneResult } from '../../shared/ops'
@@ -174,6 +174,30 @@ describe('Docker qua Engine API (Engine giả trên unix socket)', () => {
     await run({ op: 'action', id, action: 'restart' })
     await until(() => events.some((e) => e.event === 'engine'))
     expect(events.find((e) => e.event === 'engine')?.data).toMatchObject({ action: 'restart', id })
+
+    // Luồng sự kiện đứt (daemon khởi động lại) → tự theo dõi lại + báo renderer tải lại.
+    const saved = { ...eventsRetry }
+    eventsRetry.baseMs = 5
+    try {
+      events.length = 0
+      server.dropEvents()
+      await until(() =>
+        events.some(
+          (e) => e.event === 'engine' && (e.data as { action: string }).action === 'reconnect'
+        )
+      )
+      expect(events.some((e) => e.event === 'engine-end')).toBe(false)
+      await new Promise((r) => setTimeout(r, 100))
+      events.length = 0
+      await run({ op: 'action', id, action: 'restart' })
+      await until(() =>
+        events.some(
+          (e) => e.event === 'engine' && (e.data as { action: string }).action === 'restart'
+        )
+      )
+    } finally {
+      Object.assign(eventsRetry, saved)
+    }
   })
 
   it('image: danh sách (dangling, số container dùng), pull có tiến độ, pull lỗi báo rõ, prune xem trước rồi xoá', async () => {

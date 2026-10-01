@@ -3,7 +3,14 @@ import { X } from 'lucide-react'
 import { manifestOf } from '../../../modules/registry/manifests'
 import { ModuleIcon } from '../../../modules/registry/renderer-kit'
 import { markSuggested, neverSuggest, requestEnableModule, suggestable } from '../stores/module-ui'
+import { useSettings } from '../stores/settings'
 import { cx } from './ui'
+
+/**
+ * Gợi ý đang hiện theo chỗ (`where`) — sống theo phiên app, không theo component: component mount
+ * lại (thanh bên vẽ lại…) vẫn thấy gợi ý đã chọn, vì nó đã bị đánh dấu "đã gợi ý" rồi.
+ */
+const visible = new Map<string, string>()
 
 /**
  * Một dòng gợi ý bật module (ADR-014 mục 3.12.4) — không popup: "Docker detected on web-01 —
@@ -23,22 +30,30 @@ export function ModuleSuggestion({
   // Chốt danh sách lúc có dấu hiệu mới (không đổi khi cài đặt đổi vì chính dòng này ghi suggestedAt).
   const [shown, setShown] = useState<string | null>(null)
   const key = candidates.join(',')
+  // Dấu hiệu có thể tới trước khi cài đặt tải xong (bật gợi ý hay không) — chờ, rồi mới quyết.
+  const loaded = useSettings((st) => st.loaded)
+  const enabled = useSettings((st) => st.settings.moduleOptions.suggest)
   useEffect(() => {
-    const first = suggestable(candidates)[0] ?? null
+    if (!loaded || !enabled) return
+    const first = visible.get(where) ?? suggestable(candidates)[0] ?? null
     if (!first) return
-    markSuggested(first)
-    // Hiện sau khi ghi lại — tránh hiện đi hiện lại khi render lại.
+    // Đánh dấu "đã gợi ý" cùng lúc hiện (không trước): bị huỷ giữa chừng thì lần sau vẫn gợi ý.
     const t = setTimeout(() => {
+      if (!visible.has(where)) {
+        visible.set(where, first)
+        markSuggested(first)
+      }
       setShown(first)
     }, 0)
     return () => {
       clearTimeout(t)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ khi tập dấu hiệu đổi
-  }, [key])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ khi tập dấu hiệu / cài đặt gợi ý đổi
+  }, [key, loaded, enabled, where])
   const manifest = shown ? manifestOf(shown) : undefined
   if (!shown || !manifest) return null
   const close = (): void => {
+    visible.delete(where)
     setShown(null)
   }
   return (

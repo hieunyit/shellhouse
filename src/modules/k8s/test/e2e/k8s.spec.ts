@@ -66,6 +66,19 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     })
     await expect(rows).toHaveCount(3)
 
+    // Tab ẩn: sự kiện được giữ lại, hiện tab thì bảng cập nhật đúng.
+    await page.getByTestId('tab').first().click()
+    server.upsert('pods', {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      metadata: { name: 'web-4', namespace: 'shop' }
+    })
+    await page.waitForTimeout(300)
+    await page.getByTestId('tab').filter({ hasText: 'test' }).first().click()
+    await expect(rows).toHaveCount(4)
+    server.remove('pods', 'shop', 'web-4')
+    await expect(rows).toHaveCount(3)
+
     // Mô tả (phím d): tab Overview có container; tab Events có sự kiện liên quan.
     await view.locator('[data-testid="k8s-row"][data-name="shop/web-2"]').click()
     await page.keyboard.press('d')

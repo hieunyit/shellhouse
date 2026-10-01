@@ -241,27 +241,50 @@ export function DockerTab({
     }
   }, [load, section])
 
-  // Kết nối xong: thông tin engine + theo dõi sự kiện (không cần poll) + CPU/RAM mọi container.
-  useEffect(() => {
-    if (!ready) return
-    const subs: string[] = []
-    void request<EngineInfo>({ op: 'info' }).then(setInfo, (e: unknown) => {
-      setLoadError(cleanError(e))
-    })
-    for (const op of ['events.subscribe', 'statsAll.subscribe'] as const)
+  /**
+   * Đăng ký một luồng của phiên; trả hàm huỷ. Huỷ trước khi đăng ký xong vẫn bỏ đăng ký đúng (không
+   * để lại luồng chạy mãi trong Session Host).
+   */
+  const subscribeOnce = useCallback(
+    (op: 'events.subscribe' | 'statsAll.subscribe', onId?: (id: string | null) => void) => {
+      let cancelled = false
+      let sub: string | null = null
       void request<{ subscription: string }>({ op }).then(
         (r) => {
-          subs.push(r.subscription)
-          if (op === 'statsAll.subscribe') statsAllSub.current = r.subscription
+          if (cancelled) {
+            void request({ op: 'unsubscribe', subscription: r.subscription }).catch(() => undefined)
+            return
+          }
+          sub = r.subscription
+          onId?.(sub)
         },
         () => undefined
       )
-    return () => {
-      statsAllSub.current = null
-      for (const sub of subs)
-        void request({ op: 'unsubscribe', subscription: sub }).catch(() => undefined)
-    }
-  }, [ready, request])
+      return () => {
+        cancelled = true
+        onId?.(null)
+        if (sub) void request({ op: 'unsubscribe', subscription: sub }).catch(() => undefined)
+      }
+    },
+    [request]
+  )
+
+  // Kết nối xong: thông tin engine + theo dõi sự kiện (không cần poll).
+  useEffect(() => {
+    if (!ready) return
+    void request<EngineInfo>({ op: 'info' }).then(setInfo, (e: unknown) => {
+      setLoadError(cleanError(e))
+    })
+    return subscribeOnce('events.subscribe')
+  }, [ready, request, subscribeOnce])
+
+  // CPU / RAM mọi container — chỉ khi tab đang hiện (tab ẩn không tốn request).
+  useEffect(() => {
+    if (!ready || !active) return
+    return subscribeOnce('statsAll.subscribe', (id) => {
+      statsAllSub.current = id
+    })
+  }, [ready, active, subscribeOnce])
 
   useEffect(() => {
     if (!ready) return

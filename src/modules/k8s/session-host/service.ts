@@ -65,6 +65,8 @@ function isBuiltinGroup(group: string): boolean {
 }
 
 const WATCH_FLUSH_MS = 100
+/** Chờ trước khi nối lại watch sau lỗi: base × 2^lần, tối đa max (test rút ngắn được). */
+export const watchRetry = { baseMs: 1000, maxMs: 30_000 }
 
 export const DEFAULT_POD_SHELL = [
   'sh',
@@ -544,6 +546,8 @@ export class K8sService implements HostModuleSession {
   ): Promise<void> {
     let rv = startVersion
     let failures = 0
+    /** Đã báo lỗi cho renderer — khi nối lại thì list lại. */
+    let lostEvents = false
     const client = this.require()
     const signal = w.controller.signal
     // Đọc qua hàm để TS không thu hẹp kiểu qua `await`.
@@ -567,6 +571,13 @@ export class K8sService implements HostModuleSession {
             signal
           },
           (chunk) => {
+            if (lostEvents) {
+              // Nối lại được sau khi đã báo lỗi: renderer list lại (dữ liệu mới + xoá thông báo lỗi)
+              // rồi đăng ký watch mới — luồng này sẽ bị huỷ khi nó bỏ đăng ký.
+              lostEvents = false
+              failures = 0
+              this.flushWatch(w, { relist: true })
+            }
             pending += chunk.toString('utf8')
             let nl = pending.indexOf('\n')
             while (nl >= 0) {
@@ -605,12 +616,12 @@ export class K8sService implements HostModuleSession {
             'warn',
             `watch ${kind.id}: ${error instanceof Error ? error.message : String(error)}`
           )
-          if (failures >= 5) {
+          // Báo lỗi một lần (bảng giữ dữ liệu cũ), vẫn thử lại chậm dần tới khi nối được.
+          if (failures === 5)
             this.flushWatch(w, { error: error instanceof Error ? error.message : String(error) })
-            return
-          }
         }
       }
+      if (failures >= 5) lostEvents = true
       if (gone) {
         // Phiên bản quá cũ — renderer list lại rồi đăng ký watch mới.
         this.flushWatch(w, { relist: true })
@@ -619,7 +630,9 @@ export class K8sService implements HostModuleSession {
       this.flushWatch(w)
       // Server đóng luồng (timeoutSeconds) → nối lại ngay; lỗi mạng → chờ tăng dần.
       if (failures > 0)
-        await new Promise((r) => setTimeout(r, Math.min(30_000, 1000 * 2 ** failures)))
+        await new Promise((r) =>
+          setTimeout(r, Math.min(watchRetry.maxMs, watchRetry.baseMs * 2 ** Math.min(failures, 16)))
+        )
     }
   }
 

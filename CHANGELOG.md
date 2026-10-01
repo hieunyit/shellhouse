@@ -59,12 +59,35 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   keyboard shortcuts (press **?** for the list).
 - Success messages in the Docker and Kubernetes tabs now disappear on their own after a few
   seconds; errors stay until dismissed.
+- **S3: export the bucket list** of an account to CSV (opens in Excel) or JSON — name, region,
+  created date, and optionally object count and total size (counts reused when already
+  calculated) and versioning / encryption.
+- **S3: sync** a bucket or folder to another place — the same account or another S3 account, even
+  at a different provider (AWS → R2, MinIO → Wasabi…). Always previewable (new / changed /
+  unchanged / to delete), **Copy new & changed** or **Mirror** (also deletes extra objects at the
+  destination, only after a preview), creates the destination bucket if needed, compares by size
+  and checksum, can be stopped at any time and resumes by simply running it again. Within one
+  account objects are copied on the server; between accounts they are streamed through this
+  computer without touching the disk.
 - **Suggestions**: when Docker is found on a server you connect to, or a kubeconfig on this
   computer, a one-line hint offers the matching module (at most once a month; can be turned off).
 - **Welcome screen** when no tab is open: add a host, import hosts, quick connect or open a local
   terminal. The sidebar shows a compact **Add your servers** card instead of a large empty box.
 - **Settings → About**: version, components, release notes, report a problem, copy details.
 - Command palette: **New host**, **Import hosts** and **Quick connect**.
+
+### Fixed
+
+- Kubernetes: live tables no longer freeze after the API server or network was unreachable for a
+  while — the watch keeps retrying and reloads the list once it is back.
+- Docker: the container list keeps updating after the Docker daemon restarts or the connection
+  drops; live CPU / memory no longer keeps polling after quickly switching tabs.
+- Kubernetes and Docker tabs in the background no longer poll metrics, refresh the cluster
+  overview or redraw tables; changes are applied when you come back to the tab.
+- The whole tab area could shift up by a few pixels after resizing the window.
+- A setting changed right while the app was starting could be shown with its old value.
+- A module suggestion ("Docker detected…") could be marked as shown without ever appearing, which
+  hid it for 30 days.
 
 ## [1.2.0-beta.2] - 2026-09-30
 

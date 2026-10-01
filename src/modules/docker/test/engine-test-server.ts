@@ -32,6 +32,8 @@ export interface EngineTestServer {
   created: unknown[]
   /** Thêm một dòng log cho container (gửi ngay tới các luồng đang follow). */
   log(id: string, stream: 1 | 2, text: string): void
+  /** Ngắt mọi luồng /events đang mở (daemon khởi động lại). */
+  dropEvents(): void
   close(): Promise<void>
 }
 
@@ -445,6 +447,9 @@ export async function startEngineTestServer(): Promise<EngineTestServer> {
       c?.logs.push({ stream, text })
       for (const f of followers.get(c?.Id ?? '') ?? [])
         f.res.write(f.tty ? text : frame(stream, text))
+    },
+    dropEvents: () => {
+      for (const r of eventStreams) r.destroy()
     },
     close: async () => {
       for (const t of timers) clearInterval(t)

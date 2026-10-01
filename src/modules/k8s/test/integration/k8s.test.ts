@@ -9,7 +9,7 @@ import { FakePort } from '../../../../../test/integration/fake-port'
 import { startTestSshServer } from '../../../../../test/integration/ssh-test-server'
 import { tempDir } from '../../../../../test/unit/helpers'
 import type { LimitedSpawn } from '../../../registry/host-types'
-import { K8sService, type ResolvedClusterConfig } from '../../session-host/service'
+import { K8sService, watchRetry, type ResolvedClusterConfig } from '../../session-host/service'
 import { k8sHost } from '../../session-host'
 import type { DiscoveredKind, PortForwardInfo } from '../../shared/ops'
 import type { K8sObject } from '../../shared/resources'
@@ -209,6 +209,48 @@ describe('Kubernetes qua API server giả (HTTPS, chứng chỉ test)', () => {
     await until(() =>
       events.some((e) => e.event === 'watch' && (e.data as { relist?: boolean }).relist === true)
     )
+  })
+
+  it('watch mất kết nối lâu: báo lỗi một lần, vẫn thử lại; nối lại được → báo list lại', async () => {
+    const saved = { ...watchRetry }
+    watchRetry.baseMs = 5
+    watchRetry.maxMs = 20
+    try {
+      const server = await api()
+      const { run, events, until } = service(cluster(server))
+      await run({ op: 'connect', ref, readOnly: false })
+      const list = await run<{ resourceVersion: string }>({
+        op: 'list',
+        kind: 'pods',
+        namespace: 'shop',
+        limit: 100
+      })
+      await run({
+        op: 'watch',
+        kind: 'pods',
+        namespace: 'shop',
+        resourceVersion: list.resourceVersion
+      })
+      await new Promise((r) => setTimeout(r, 100))
+      server.failWatches(7)
+      const watchData = () =>
+        events
+          .filter((e) => e.event === 'watch')
+          .map((e) => e.data as { error?: string; relist?: boolean })
+      await until(() => watchData().some((d) => d.error))
+      expect(watchData().filter((d) => d.error)).toHaveLength(1)
+      // Server ổn lại: sự kiện đầu tiên tới → renderer được báo list lại (không treo bảng).
+      await until(() => server.requests.filter((r) => r.includes('watch=true')).length >= 9)
+      await new Promise((r) => setTimeout(r, 50))
+      server.upsert('pods', {
+        apiVersion: 'v1',
+        kind: 'Pod',
+        metadata: { name: 'back', namespace: 'shop' }
+      })
+      await until(() => watchData().some((d) => d.relist))
+    } finally {
+      Object.assign(watchRetry, saved)
+    }
   })
 
   it('replace có kiểm resourceVersion (xung đột → báo), scale, restart; chỉ đọc chặn thay đổi', async () => {

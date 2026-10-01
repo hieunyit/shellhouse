@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { cleanError } from '../../../renderer/src/lib/format'
 import type { K8sOp, WatchEvent } from '../shared/ops'
 import type { K8sObject } from '../shared/resources'
 
 const PAGE = 500
 const MAX_PAGES = 20
+/** Tab ẩn lâu, cluster thay đổi nhiều: giữ quá chừng này sự kiện thì bỏ, list lại khi hiện tab. */
+const MAX_HELD = 5000
 
 /** Nhận sự kiện của phiên (watch, forwards…) — ClusterTab phát cho các hook đăng ký. */
 export type EventBus = Set<(event: string, data: unknown) => void>
@@ -30,16 +32,49 @@ export function useResourceList(
   request: <T>(op: K8sOp) => Promise<T>,
   bus: EventBus,
   query: ListQuery | null,
-  reloadKey: number
+  reloadKey: number,
+  /** Tab đang hiện. Tab ẩn: gom sự kiện watch, áp dụng một lần khi hiện lại (không vẽ lại vô ích). */
+  active = true
 ): { objects: Map<string, K8sObject> | null; error: string | null; reload: () => void } {
   // Dữ liệu gắn với truy vấn đã tạo ra nó: đổi truy vấn → hiện "đang tải" ngay, không lẫn dữ liệu cũ.
   const [data, setData] = useState<{ key: string; map: Map<string, K8sObject> } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [relist, setRelist] = useState(0)
   const subs = useRef(new Set<string>())
+  const activeRef = useRef(active)
+  const held = useRef<WatchEvent['events']>([])
+  const overflow = useRef(false)
   const queryKey = query
     ? `${query.kind}|${query.namespaces.join(',')}|${query.labelSelector ?? ''}|${query.fieldSelector ?? ''}|${query.namespaced}`
     : ''
+
+  const applyEvents = useCallback((events: WatchEvent['events']) => {
+    setData((prev) => {
+      if (!prev) return prev
+      const next = new Map(prev.map)
+      for (const e of events) {
+        const obj = e.object as K8sObject
+        if (e.type === 'DELETED') next.delete(objectKey(obj))
+        else next.set(objectKey(obj), obj)
+      }
+      return { key: prev.key, map: next }
+    })
+  }, [])
+
+  useEffect(() => {
+    activeRef.current = active
+    if (!active) return
+    if (overflow.current) {
+      overflow.current = false
+      held.current = []
+      setRelist((n) => n + 1)
+      return
+    }
+    if (held.current.length === 0) return
+    const events = held.current
+    held.current = []
+    applyEvents(events)
+  }, [active, applyEvents])
 
   useEffect(() => {
     const active = subs.current
@@ -53,22 +88,20 @@ export function useResourceList(
       }
       if (w.error) setError(w.error)
       if (w.events.length === 0) return
-      setData((prev) => {
-        if (!prev) return prev
-        const next = new Map(prev.map)
-        for (const e of w.events) {
-          const obj = e.object as K8sObject
-          if (e.type === 'DELETED') next.delete(objectKey(obj))
-          else next.set(objectKey(obj), obj)
+      if (activeRef.current) applyEvents(w.events)
+      else if (!overflow.current) {
+        held.current.push(...w.events)
+        if (held.current.length > MAX_HELD) {
+          overflow.current = true
+          held.current = []
         }
-        return { key: prev.key, map: next }
-      })
+      }
     }
     bus.add(listener)
     return () => {
       bus.delete(listener)
     }
-  }, [bus])
+  }, [bus, applyEvents])
 
   useEffect(() => {
     if (!ready || !query) return
@@ -106,6 +139,8 @@ export function useResourceList(
         versions.push({ ns, rv })
       }
       if (isCancelled()) return
+      // Danh sách mới thay hết — sự kiện đang giữ đã cũ.
+      held.current = []
       setData({ key: queryKey, map: all })
       setError(null)
       for (const v of versions) {

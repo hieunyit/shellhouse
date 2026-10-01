@@ -10,10 +10,13 @@ import { age, formatCpu, formatMemory } from '../shared/resources'
 export function ClusterOverview({
   request,
   namespaces,
+  active,
   onNavigate
 }: {
   request: <T>(op: K8sOp) => Promise<T>
   namespaces: readonly string[]
+  /** Tab đang hiện — tab ẩn không tự làm mới (op overview liệt kê cả cluster). */
+  active: boolean
   onNavigate: (view: string, filter?: string) => void
 }): React.JSX.Element {
   const [data, setData] = useState<OverviewResult | null>(null)
@@ -21,6 +24,7 @@ export function ClusterOverview({
   const [tick, setTick] = useState(0)
   const key = namespaces.join(',')
   useEffect(() => {
+    if (!active) return
     let cancelled = false
     request<OverviewResult>({ op: 'overview', namespaces: key ? key.split(',') : [] }).then(
       (r) => {
@@ -33,7 +37,7 @@ export function ClusterOverview({
         if (!cancelled) setError(cleanError(e))
       }
     )
-    // Tự làm mới mỗi 30 giây.
+    // Tự làm mới mỗi 30 giây khi tab đang hiện; quay lại tab → làm mới ngay.
     const t = setTimeout(() => {
       setTick((n) => n + 1)
     }, 30_000)
@@ -41,9 +45,9 @@ export function ClusterOverview({
       cancelled = true
       clearTimeout(t)
     }
-  }, [request, key, tick])
+  }, [request, key, tick, active])
 
-  if (error)
+  if (error && !data)
     return (
       <div className="p-4">
         <Notice tone="danger">{error}</Notice>
@@ -58,6 +62,11 @@ export function ClusterOverview({
   const p = data.pods
   return (
     <div className="min-h-0 flex-1 overflow-auto p-4" data-testid="k8s-overview">
+      {error && (
+        <div className="mb-3">
+          <Notice tone="danger">Could not refresh — showing the last data. {error}</Notice>
+        </div>
+      )}
       <div className="mb-3 flex items-center gap-2">
         <h3 className="text-sm font-semibold text-fg">Cluster overview</h3>
         <span className="text-xs text-faint">

@@ -52,6 +52,8 @@ export interface ApiTestServer {
   list(plural: string): Obj[]
   /** Làm các watch sau nhận 410 Gone. */
   expireWatches(): void
+  /** Ngắt các watch đang mở; `n` lần watch tiếp theo trả 503 (mạng / API server chập chờn). */
+  failWatches(n: number): void
   close(): Promise<void>
 }
 
@@ -287,6 +289,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
   for (const p of store.get('pods')?.values() ?? [])
     p.metadata.labels = { app: p.metadata.name.startsWith('web') ? 'web' : 'tool' }
   const requests: string[] = []
+  let failingWatches = 0
   const watchers = new Set<{ plural: string; namespace: string | undefined; res: ServerResponse }>()
   let expired = false
   let metricsDisabled = false
@@ -457,6 +460,10 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       }
       if (!name) {
         if (url.searchParams.get('watch') === 'true') {
+          if (failingWatches > 0) {
+            failingWatches--
+            return json(res, 503, statusBody(503, 'ServiceUnavailable', 'try again'))
+          }
           if (expired) {
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(
@@ -702,6 +709,10 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     list: (plural) => [...(store.get(plural)?.values() ?? [])],
     expireWatches: () => {
       expired = true
+      for (const w of watchers) w.res.end()
+    },
+    failWatches: (n) => {
+      failingWatches = n
       for (const w of watchers) w.res.end()
     },
     close: async () => {
