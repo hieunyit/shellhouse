@@ -21,6 +21,8 @@ export interface SessionClientHandlers {
   transfers(list: TransferStatus[]): void
   /** Thanh theo dõi server: số liệu mới, hoặc server không hỗ trợ (null). */
   stats(stats: ServerStats | null): void
+  /** Độ trễ khứ hồi tới server (ms), null = không đo được. */
+  latency?(ms: number | null): void
   /** Sự kiện của module (log stream, watch…). */
   moduleEvent?(module: string, event: string, data: unknown): void
   /** Module đang tắt có dấu hiệu trên server (gợi ý bật). */
@@ -79,6 +81,9 @@ export class SessionClient {
           break
         case 'stats':
           handlers.stats(message.stats)
+          break
+        case 'latency':
+          handlers.latency?.(message.ms)
           break
         case 'stats-unsupported':
           handlers.stats(null)

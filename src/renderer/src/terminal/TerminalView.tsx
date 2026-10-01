@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { LookMenu } from './LookMenu'
 import { useTerminalFind } from '../stores/terminal-find'
 import { FindBar } from './FindBar'
 import '@xterm/xterm/css/xterm.css'
@@ -45,6 +46,7 @@ export function TerminalView({
   const [detected, setDetected] = useState<string[]>([])
   /** undefined = chưa có số liệu / tắt; null = server không hỗ trợ. */
   const [stats, setStats] = useState<ServerStats | null | undefined>(undefined)
+  const [latency, setLatency] = useState<number | null | undefined>(undefined)
   /** 'files' = trình quản lý file hai cột (Local | Remote); terminal vẫn chạy phía sau. */
   const [view, setViewState] = useState<'terminal' | 'files'>(
     () => useTabs.getState().tabs.find((t) => t.id === tabId)?.view ?? 'terminal'
@@ -75,6 +77,9 @@ export function TerminalView({
     return groupId ? s.groupTree.path(groupId).join(' / ') : ''
   })
   const env = hostId ? { color: envColor, path: envPath } : null
+  const encoding = useHosts((s) =>
+    hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.encoding ?? null) : null
+  )
   const legacy = useHosts((s) =>
     hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.legacyAlgorithms ?? false) : false
   )
@@ -123,6 +128,7 @@ export function TerminalView({
       onForwards: setForwards,
       onTransfers: setTransfers,
       onStats: setStats,
+      onLatency: setLatency,
       onConnectedChange: setConnected,
       onModuleSuggest: setDetected,
       onContextMenu: (x, y) => {
@@ -174,6 +180,22 @@ export function TerminalView({
             <span className="hidden text-muted @xs:inline">{connectionLabel[state]}</span>
             {/* Đồng hồ phiên: gắn lại mỗi lần kết nối (key) — đếm từ lúc vào được server. */}
             {state === 'connected' && <SessionClock key={`clock-${String(connectedSeq)}`} />}
+            {state === 'connected' && typeof latency === 'number' && (
+              <span
+                className={cx(
+                  'hidden rounded px-1 font-mono text-[10.5px] tabular-nums @sm:inline',
+                  latency < 100
+                    ? 'bg-success-soft text-success'
+                    : latency < 300
+                      ? 'bg-warning-soft text-warning'
+                      : 'bg-danger-soft text-danger'
+                )}
+                data-testid="session-latency"
+                title="Round-trip time to the server (SSH keepalive)"
+              >
+                {latency} ms
+              </span>
+            )}
           </span>
           {address && (
             <span
@@ -222,7 +244,17 @@ export function TerminalView({
               {env.path}
             </span>
           )}
+          {encoding && encoding !== 'utf-8' && (
+            <span
+              className="ml-2 hidden shrink-0 rounded bg-subtle px-1.5 py-px font-mono text-[10.5px] text-muted uppercase @sm:inline"
+              data-testid="session-encoding"
+              title="Character encoding of this host (Edit host → Advanced)"
+            >
+              {encoding}
+            </span>
+          )}
           <div className="flex-1" />
+          <LookMenu />
           <ToolbarButton
             testId="open-find"
             icon={<Search size={13} />}

@@ -18,6 +18,7 @@ import { useAppearance } from '../stores/appearance'
 import { isMac, matchCommand } from '../lib/keybindings'
 import type { ITerminalOptions } from '@xterm/xterm'
 import { useHostStatus } from '../stores/host-status'
+import { useHosts } from '../stores/hosts'
 import { useVault } from '../stores/vault'
 import { SessionClient } from './session-client'
 import { broadcastInput } from './broadcast'
@@ -41,6 +42,7 @@ export interface ControllerEvents {
   onTransfers(list: TransferStatus[]): void
   /** Thanh theo dõi server: số liệu mới; null = server không hỗ trợ; undefined = chưa có / tắt. */
   onStats?(stats: ServerStats | null | undefined): void
+  onLatency?(ms: number | null | undefined): void
   /** Đã/không còn kết nối SSH tích hợp (bật/tắt các tính năng cần SSH). */
   onConnectedChange(connected: boolean): void
   /** Trạng thái kết nối đổi (hiện chấm trạng thái trên tab / sidebar). */
@@ -91,6 +93,8 @@ export class TerminalController {
   readonly term: Terminal
   private readonly fit = new FitAddon()
   readonly search = new SearchAddon()
+  /** Giải mã output khi host dùng bảng mã khác UTF-8 (stream: ký tự nhiều byte bị cắt vẫn ghép đúng). */
+  private decoder: TextDecoder | null = null
   private client: SessionClient | null = null
   /** Phím gõ khi phiên đang mở (tab vừa tạo) — gửi ngay khi có phiên, không để mất. */
   private pendingInput = ''
@@ -758,7 +762,10 @@ export class TerminalController {
     if (on === this.statsOn || !this.client) return
     this.statsOn = on
     this.client.setStats(on)
-    if (!on) this.events.onStats?.(undefined)
+    if (!on) {
+      this.events.onStats?.(undefined)
+      this.events.onLatency?.(undefined)
+    }
   }
 
   private updateRenderer(): void {
@@ -829,7 +836,8 @@ export class TerminalController {
       this.client = new SessionClient(sessionId, port, {
         write: (data, done) => {
           this.lastOutputAt = performance.now()
-          this.term.write(data, () => {
+          const decoder = this.outputDecoder()
+          this.term.write(decoder ? decoder.decode(data, { stream: true }) : data, () => {
             done()
             this.resolveEcho(data)
             this.scheduleGhost()
@@ -875,6 +883,9 @@ export class TerminalController {
         },
         stats: (stats) => {
           this.events.onStats?.(stats)
+        },
+        latency: (ms) => {
+          this.events.onLatency?.(ms)
         }
       })
       // Local: có shell ngay. SSH: chờ status 'connected' (đã xác thực) mới coi là kết nối.
@@ -1113,6 +1124,27 @@ export class TerminalController {
       return handled()
     }
     return true
+  }
+
+  /** Bảng mã của host (đọc mỗi lần — sửa host thì áp dụng ngay cho output tiếp theo). */
+  private outputDecoder(): TextDecoder | null {
+    const target = this.target
+    const encoding =
+      target.kind === 'host'
+        ? useHosts.getState().tree.hosts.find((h) => h.id === target.hostId)?.encoding
+        : null
+    if (!encoding || encoding === 'utf-8') {
+      this.decoder = null
+      return null
+    }
+    if (this.decoder?.encoding !== encoding) {
+      try {
+        this.decoder = new TextDecoder(encoding)
+      } catch {
+        this.decoder = null
+      }
+    }
+    return this.decoder
   }
 
   private resolveEcho(data: Uint8Array): void {

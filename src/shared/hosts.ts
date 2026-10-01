@@ -92,6 +92,8 @@ export const HostSummary = z.object({
   direct: z.boolean(),
   /** Cho phép thuật toán cũ (thiết bị đời cũ). */
   legacyAlgorithms: z.boolean(),
+  /** Bảng mã output của server (thiết bị cũ: Windows-1252, GBK…); không có = UTF-8. */
+  encoding: z.string().max(32).nullable().optional(),
   protocol: HostProtocol,
   /** Chỉ có khi protocol = 'serial'. */
   serial: SerialSettings.nullable(),
@@ -103,6 +105,34 @@ export const HostSummary = z.object({
   sort: z.number().int()
 })
 export type HostSummary = z.infer<typeof HostSummary>
+
+/** Bảng mã terminal hỗ trợ (tên theo WHATWG Encoding — TextDecoder giải mã được). */
+export const ENCODINGS = [
+  { id: 'utf-8', label: 'UTF-8 (default)' },
+  { id: 'windows-1252', label: 'Western — Windows-1252 / ISO-8859-1' },
+  { id: 'iso-8859-15', label: 'Western — ISO-8859-15' },
+  { id: 'windows-1250', label: 'Central European — Windows-1250' },
+  { id: 'iso-8859-2', label: 'Central European — ISO-8859-2' },
+  { id: 'windows-1251', label: 'Cyrillic — Windows-1251' },
+  { id: 'koi8-r', label: 'Cyrillic — KOI8-R' },
+  { id: 'ibm866', label: 'Cyrillic — CP866 (DOS)' },
+  { id: 'windows-1253', label: 'Greek — Windows-1253' },
+  { id: 'windows-1254', label: 'Turkish — Windows-1254' },
+  { id: 'windows-1255', label: 'Hebrew — Windows-1255' },
+  { id: 'windows-1256', label: 'Arabic — Windows-1256' },
+  { id: 'windows-1258', label: 'Vietnamese — Windows-1258' },
+  { id: 'windows-874', label: 'Thai — Windows-874' },
+  { id: 'gbk', label: 'Chinese Simplified — GBK' },
+  { id: 'gb18030', label: 'Chinese Simplified — GB18030' },
+  { id: 'big5', label: 'Chinese Traditional — Big5' },
+  { id: 'shift_jis', label: 'Japanese — Shift_JIS' },
+  { id: 'euc-jp', label: 'Japanese — EUC-JP' },
+  { id: 'euc-kr', label: 'Korean — EUC-KR' }
+] as const
+export const ENCODING_IDS = ENCODINGS.map((e) => e.id) as unknown as readonly [
+  (typeof ENCODINGS)[number]['id'],
+  ...(typeof ENCODINGS)[number]['id'][]
+]
 
 export const HostInput = z.object({
   /** Không có = tạo mới. */
@@ -137,6 +167,8 @@ export const HostInput = z.object({
   direct: z.boolean().optional(),
   /** Cho phép thuật toán cũ (ssh-rsa/SHA-1, DH-SHA1, CBC) — chỉ cho thiết bị đời cũ. */
   legacyAlgorithms: z.boolean().optional(),
+  /** Bảng mã output của server; null / không có = UTF-8. */
+  encoding: z.enum(ENCODING_IDS).nullable().optional(),
   tags: z
     .array(z.string().trim().min(1).max(40, 'Each tag can be at most 40 characters'))
     .max(20, 'At most 20 tags'),

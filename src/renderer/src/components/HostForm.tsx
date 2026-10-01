@@ -3,6 +3,7 @@ import { useMemo, useState, type SyntheticEvent } from 'react'
 import { inheritedDefaults } from '@shared/inherit'
 import { KeyRound, X, ChevronRight } from 'lucide-react'
 import {
+  ENCODINGS,
   HostInput,
   MAX_JUMPS,
   type AuthKind,
@@ -10,6 +11,8 @@ import {
   type HostProtocol,
   type HostSummary
 } from '@shared/hosts'
+
+type EncodingId = (typeof ENCODINGS)[number]['id']
 import { DEFAULT_SERIAL, type SerialSettings } from '@shared/serial'
 import { SerialFields } from './SerialFields'
 import { useHosts } from '../stores/hosts'
@@ -60,9 +63,14 @@ export function HostForm({
   const [mode, setMode] = useState<HostMode>(host?.mode ?? 'builtin')
   const [direct, setDirect] = useState(host?.direct ?? false)
   const [legacy, setLegacy] = useState(host?.legacyAlgorithms ?? false)
+  const [encoding, setEncoding] = useState<EncodingId>(
+    ENCODINGS.find((e) => e.id === host?.encoding)?.id ?? 'utf-8'
+  )
   // Mục Advanced mở sẵn khi host đang dùng một tuỳ chọn trong đó (không giấu cấu hình đang bật).
   const [advancedOpen, setAdvancedOpen] = useState(
-    Boolean(host?.legacyAlgorithms) || host?.mode === 'system'
+    Boolean(host?.legacyAlgorithms) ||
+      host?.mode === 'system' ||
+      Boolean(host?.encoding && host.encoding !== 'utf-8')
   )
   const groupTree = useHosts((s) => s.groupTree)
   const inherited = useMemo(() => inheritedDefaults(groupTree, groupId), [groupTree, groupId])
@@ -105,6 +113,7 @@ export function HostForm({
         jumpHostIds: [],
         mode: 'builtin' as const,
         ...(protocol === 'serial' ? { serial } : {}),
+        encoding: encoding === 'utf-8' ? null : encoding,
         tags: tags
           .split(',')
           .map((t) => t.trim())
@@ -144,6 +153,7 @@ export function HostForm({
       mode,
       ...(direct ? { direct: true } : {}),
       ...(legacy ? { legacyAlgorithms: true } : {}),
+      encoding: encoding === 'utf-8' ? null : encoding,
       tags: tags
         .split(',')
         .map((t) => t.trim())
@@ -492,7 +502,7 @@ export function HostForm({
           )}
         </div>
 
-        {isSsh && (
+        {
           <details
             className="group rounded-lg border border-line"
             open={advancedOpen}
@@ -510,35 +520,63 @@ export function HostForm({
               />
               Advanced
               <span className="text-xs font-normal text-faint">
-                {legacy || mode === 'system'
-                  ? [legacy && 'legacy algorithms', mode === 'system' && 'system ssh']
+                {legacy || mode === 'system' || encoding !== 'utf-8'
+                  ? [
+                      encoding !== 'utf-8' && encoding,
+                      isSsh && legacy && 'legacy algorithms',
+                      isSsh && mode === 'system' && 'system ssh'
+                    ]
                       .filter(Boolean)
                       .join(' · ')
-                  : 'Legacy algorithms, system ssh'}
+                  : isSsh
+                    ? 'Character encoding, legacy algorithms, system ssh'
+                    : 'Character encoding'}
               </span>
             </summary>
             <div className="flex flex-col gap-3 border-t border-line px-3 py-3">
-              <Checkbox
-                data-testid="host-legacy"
-                checked={legacy}
-                onChange={(e) => {
-                  setLegacy(e.target.checked)
-                }}
-                label="Allow legacy algorithms"
-                description="For old switches, routers and servers that only offer ssh-rsa (SHA-1), SHA-1 key exchange or CBC ciphers. Weaker security — enable only for devices that need it."
-              />
-              <Checkbox
-                data-testid="host-mode-system"
-                checked={mode === 'system'}
-                onChange={(e) => {
-                  setMode(e.target.checked ? 'system' : 'builtin')
-                }}
-                label="Compatibility mode: use the system ssh command"
-                description="For GSSAPI/Kerberos, FIDO hardware keys or complex ssh_config setups. OpenSSH asks for passwords and host keys in the terminal. SFTP, port forwarding and passwords/keys stored in the vault are not available."
-              />
+              <Field
+                label="Character encoding"
+                hint="For old devices whose output looks garbled. Applies to what the server prints; text you type is sent as UTF-8."
+              >
+                <Select
+                  value={encoding}
+                  data-testid="host-encoding"
+                  onChange={(e) => {
+                    setEncoding(e.target.value as EncodingId)
+                  }}
+                >
+                  {ENCODINGS.map((enc) => (
+                    <option key={enc.id} value={enc.id}>
+                      {enc.label}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {isSsh && (
+                <>
+                  <Checkbox
+                    data-testid="host-legacy"
+                    checked={legacy}
+                    onChange={(e) => {
+                      setLegacy(e.target.checked)
+                    }}
+                    label="Allow legacy algorithms"
+                    description="For old switches, routers and servers that only offer ssh-rsa (SHA-1), SHA-1 key exchange or CBC ciphers. Weaker security — enable only for devices that need it."
+                  />
+                  <Checkbox
+                    data-testid="host-mode-system"
+                    checked={mode === 'system'}
+                    onChange={(e) => {
+                      setMode(e.target.checked ? 'system' : 'builtin')
+                    }}
+                    label="Compatibility mode: use the system ssh command"
+                    description="For GSSAPI/Kerberos, FIDO hardware keys or complex ssh_config setups. OpenSSH asks for passwords and host keys in the terminal. SFTP, port forwarding and passwords/keys stored in the vault are not available."
+                  />
+                </>
+              )}
             </div>
           </details>
-        )}
+        }
 
         {host?.keyFile && (
           <p className="text-xs text-faint">IdentityFile from ~/.ssh/config: {host.keyFile}</p>

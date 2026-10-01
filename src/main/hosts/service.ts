@@ -74,6 +74,8 @@ interface HostOptions {
   direct?: boolean
   /** Cho phép thuật toán cũ (ssh-rsa/SHA-1, DH-SHA1, CBC) — thiết bị đời cũ. */
   legacy?: boolean
+  /** Bảng mã output của server (không có = UTF-8). */
+  encoding?: string
   /** Không có = SSH. */
   protocol?: 'telnet' | 'serial'
   serial?: SerialSettings
@@ -160,6 +162,7 @@ export class HostService {
           mode: r.mode === 'system' ? 'system' : 'builtin',
           direct: options.direct === true,
           legacyAlgorithms: options.legacy === true,
+          encoding: options.encoding ?? null,
           protocol: options.protocol ?? 'ssh',
           serial: options.protocol === 'serial' ? (options.serial ?? null) : null,
           tags: parseJson<string[]>(r.tags, []),
@@ -244,6 +247,7 @@ export class HostService {
       if (input.port === null) options.inheritPort = true
       if (input.direct) options.direct = true
       if (input.legacyAlgorithms) options.legacy = true
+      if (input.encoding && input.encoding !== 'utf-8') options.encoding = input.encoding
       if (input.protocol === 'telnet') options.protocol = 'telnet'
       if (input.protocol === 'serial') {
         if (!input.serial) throw new Error('Choose a serial port')

@@ -25,6 +25,15 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - **Find in terminal** (Ctrl+Shift+F / ⌘F, or the Find button on the session bar) — searches the
   whole scrollback, highlights every match, shows "3 of 12", with match case, whole word and
   regex; Enter / Shift+Enter move between matches, Esc closes.
+- **Terminal look menu** (Aa on the session bar) — change the colour theme, font and text size
+  without leaving the terminal; only fonts installed on this computer are offered. 12 more
+  built-in themes: One Dark, Monokai, Gruvbox (dark / light), Tokyo Night, Catppuccin (Mocha /
+  Latte), GitHub (dark / light), Ayu Dark, Night Owl and Material.
+- **Latency** — the session bar shows the round-trip time to the server (measured with an SSH
+  keepalive, nothing runs on the server), green / amber / red.
+- **Character encoding per host** (Edit host → Advanced) — for old devices whose output looks
+  garbled: Windows-1252, ISO-8859-x, Cyrillic, Greek, Turkish, Vietnamese, Thai, GBK / GB18030,
+  Big5, Shift_JIS, EUC-JP, EUC-KR. The session bar shows the encoding in use.
 - **Terminal text size** — Ctrl+= / Ctrl+- / Ctrl+0 (⌘ on macOS) make the text bigger, smaller
   or back to the default.
 - **Session bar** — shows where you are connected (user@host:port) and for how long.

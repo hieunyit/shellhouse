@@ -129,6 +129,8 @@ export type ServerMessage =
   | { t: 'module-suggest'; modules: string[] }
   | { t: 'stats'; stats: ServerStats }
   | { t: 'stats-unsupported'; reason: string }
+  /** Độ trễ khứ hồi tới server (ms); null = không đo được. */
+  | { t: 'latency'; ms: number | null }
   | {
       t: 'deploy-key-result'
       id: number
@@ -162,6 +164,8 @@ export function isServerMessage(value: unknown): value is ServerMessage {
       return Array.isArray(m['list'])
     case 'deploy-key-result':
       return typeof m['id'] === 'number' && typeof m['status'] === 'string'
+    case 'latency':
+      return m['ms'] === null || typeof m['ms'] === 'number'
     case 'stats':
       return typeof m['stats'] === 'object' && m['stats'] !== null
     case 'stats-unsupported':

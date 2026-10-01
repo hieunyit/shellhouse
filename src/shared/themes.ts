@@ -232,6 +232,354 @@ export const BUILTIN_THEMES: readonly TerminalTheme[] = [
         '#eceff4'
       ])
     }
+  },
+  {
+    id: 'one-dark',
+    name: 'One Dark',
+    dark: true,
+    colors: {
+      background: '#282c34',
+      foreground: '#abb2bf',
+      cursor: '#528bff',
+      selectionBackground: '#3e4451',
+      ...ansi([
+        '#282c34',
+        '#e06c75',
+        '#98c379',
+        '#e5c07b',
+        '#61afef',
+        '#c678dd',
+        '#56b6c2',
+        '#abb2bf',
+        '#5c6370',
+        '#e06c75',
+        '#98c379',
+        '#e5c07b',
+        '#61afef',
+        '#c678dd',
+        '#56b6c2',
+        '#ffffff'
+      ])
+    }
+  },
+  {
+    id: 'monokai',
+    name: 'Monokai',
+    dark: true,
+    colors: {
+      background: '#272822',
+      foreground: '#f8f8f2',
+      cursor: '#f8f8f0',
+      selectionBackground: '#49483e',
+      ...ansi([
+        '#272822',
+        '#f92672',
+        '#a6e22e',
+        '#f4bf75',
+        '#66d9ef',
+        '#ae81ff',
+        '#a1efe4',
+        '#f8f8f2',
+        '#75715e',
+        '#f92672',
+        '#a6e22e',
+        '#f4bf75',
+        '#66d9ef',
+        '#ae81ff',
+        '#a1efe4',
+        '#f9f8f5'
+      ])
+    }
+  },
+  {
+    id: 'gruvbox-dark',
+    name: 'Gruvbox Dark',
+    dark: true,
+    colors: {
+      background: '#282828',
+      foreground: '#ebdbb2',
+      cursor: '#ebdbb2',
+      selectionBackground: '#504945',
+      ...ansi([
+        '#282828',
+        '#cc241d',
+        '#98971a',
+        '#d79921',
+        '#458588',
+        '#b16286',
+        '#689d6a',
+        '#a89984',
+        '#928374',
+        '#fb4934',
+        '#b8bb26',
+        '#fabd2f',
+        '#83a598',
+        '#d3869b',
+        '#8ec07c',
+        '#ebdbb2'
+      ])
+    }
+  },
+  {
+    id: 'gruvbox-light',
+    name: 'Gruvbox Light',
+    dark: false,
+    colors: {
+      background: '#fbf1c7',
+      foreground: '#3c3836',
+      cursor: '#3c3836',
+      selectionBackground: '#d5c4a1',
+      ...ansi([
+        '#fbf1c7',
+        '#cc241d',
+        '#98971a',
+        '#d79921',
+        '#458588',
+        '#b16286',
+        '#689d6a',
+        '#7c6f64',
+        '#928374',
+        '#9d0006',
+        '#79740e',
+        '#b57614',
+        '#076678',
+        '#8f3f71',
+        '#427b58',
+        '#3c3836'
+      ])
+    }
+  },
+  {
+    id: 'tokyo-night',
+    name: 'Tokyo Night',
+    dark: true,
+    colors: {
+      background: '#1a1b26',
+      foreground: '#c0caf5',
+      cursor: '#c0caf5',
+      selectionBackground: '#33467c',
+      ...ansi([
+        '#15161e',
+        '#f7768e',
+        '#9ece6a',
+        '#e0af68',
+        '#7aa2f7',
+        '#bb9af7',
+        '#7dcfff',
+        '#a9b1d6',
+        '#414868',
+        '#f7768e',
+        '#9ece6a',
+        '#e0af68',
+        '#7aa2f7',
+        '#bb9af7',
+        '#7dcfff',
+        '#c0caf5'
+      ])
+    }
+  },
+  {
+    id: 'catppuccin-mocha',
+    name: 'Catppuccin Mocha',
+    dark: true,
+    colors: {
+      background: '#1e1e2e',
+      foreground: '#cdd6f4',
+      cursor: '#f5e0dc',
+      selectionBackground: '#45475a',
+      ...ansi([
+        '#45475a',
+        '#f38ba8',
+        '#a6e3a1',
+        '#f9e2af',
+        '#89b4fa',
+        '#f5c2e7',
+        '#94e2d5',
+        '#bac2de',
+        '#585b70',
+        '#f38ba8',
+        '#a6e3a1',
+        '#f9e2af',
+        '#89b4fa',
+        '#f5c2e7',
+        '#94e2d5',
+        '#a6adc8'
+      ])
+    }
+  },
+  {
+    id: 'catppuccin-latte',
+    name: 'Catppuccin Latte',
+    dark: false,
+    colors: {
+      background: '#eff1f5',
+      foreground: '#4c4f69',
+      cursor: '#dc8a78',
+      selectionBackground: '#ccd0da',
+      ...ansi([
+        '#5c5f77',
+        '#d20f39',
+        '#40a02b',
+        '#df8e1d',
+        '#1e66f5',
+        '#ea76cb',
+        '#179299',
+        '#acb0be',
+        '#6c6f85',
+        '#d20f39',
+        '#40a02b',
+        '#df8e1d',
+        '#1e66f5',
+        '#ea76cb',
+        '#179299',
+        '#bcc0cc'
+      ])
+    }
+  },
+  {
+    id: 'github-dark',
+    name: 'GitHub Dark',
+    dark: true,
+    colors: {
+      background: '#0d1117',
+      foreground: '#e6edf3',
+      cursor: '#e6edf3',
+      selectionBackground: '#264f78',
+      ...ansi([
+        '#484f58',
+        '#ff7b72',
+        '#3fb950',
+        '#d29922',
+        '#58a6ff',
+        '#bc8cff',
+        '#39c5cf',
+        '#b1bac4',
+        '#6e7681',
+        '#ffa198',
+        '#56d364',
+        '#e3b341',
+        '#79c0ff',
+        '#d2a8ff',
+        '#56d4dd',
+        '#ffffff'
+      ])
+    }
+  },
+  {
+    id: 'github-light',
+    name: 'GitHub Light',
+    dark: false,
+    colors: {
+      background: '#ffffff',
+      foreground: '#1f2328',
+      cursor: '#1f2328',
+      selectionBackground: '#add6ff',
+      ...ansi([
+        '#24292f',
+        '#cf222e',
+        '#116329',
+        '#4d2d00',
+        '#0969da',
+        '#8250df',
+        '#1b7c83',
+        '#6e7781',
+        '#57606a',
+        '#a40e26',
+        '#1a7f37',
+        '#633c01',
+        '#218bff',
+        '#a475f9',
+        '#3192aa',
+        '#8c959f'
+      ])
+    }
+  },
+  {
+    id: 'ayu-dark',
+    name: 'Ayu Dark',
+    dark: true,
+    colors: {
+      background: '#0b0e14',
+      foreground: '#bfbdb6',
+      cursor: '#e6b450',
+      selectionBackground: '#273747',
+      ...ansi([
+        '#1e232b',
+        '#ea6c73',
+        '#7fd962',
+        '#f9af4f',
+        '#53bdfa',
+        '#cda1fa',
+        '#90e1c6',
+        '#c7c7c7',
+        '#686868',
+        '#f07178',
+        '#aad94c',
+        '#ffb454',
+        '#59c2ff',
+        '#d2a6ff',
+        '#95e6cb',
+        '#ffffff'
+      ])
+    }
+  },
+  {
+    id: 'night-owl',
+    name: 'Night Owl',
+    dark: true,
+    colors: {
+      background: '#011627',
+      foreground: '#d6deeb',
+      cursor: '#80a4c2',
+      selectionBackground: '#1d3b53',
+      ...ansi([
+        '#011627',
+        '#ef5350',
+        '#22da6e',
+        '#c5e478',
+        '#82aaff',
+        '#c792ea',
+        '#21c7a8',
+        '#ffffff',
+        '#575656',
+        '#ef5350',
+        '#22da6e',
+        '#ffeb95',
+        '#82aaff',
+        '#c792ea',
+        '#7fdbca',
+        '#ffffff'
+      ])
+    }
+  },
+  {
+    id: 'material',
+    name: 'Material',
+    dark: true,
+    colors: {
+      background: '#263238',
+      foreground: '#eeffff',
+      cursor: '#ffcc00',
+      selectionBackground: '#546e7a',
+      ...ansi([
+        '#000000',
+        '#e53935',
+        '#91b859',
+        '#ffb62c',
+        '#6182b8',
+        '#7c4dff',
+        '#39adb5',
+        '#ffffff',
+        '#546e7a',
+        '#ff5370',
+        '#c3e88d',
+        '#ffcb6b',
+        '#82aaff',
+        '#c792ea',
+        '#89ddff',
+        '#ffffff'
+      ])
+    }
   }
 ]
 

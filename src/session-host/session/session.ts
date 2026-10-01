@@ -14,6 +14,7 @@ import { ForwardManager } from '../forward/manager'
 import { SftpService } from '../sftp/service'
 import { deployPublicKey } from '../ssh/deploy-key'
 import { StatsMonitor } from '../ssh/stats-monitor'
+import { LatencyMonitor } from '../ssh/latency'
 import { RemoteEdits } from '../sftp/edit'
 import { downloadFolder, uploadFolder } from '../sftp/folders'
 import { TransferQueue } from '../sftp/transfers'
@@ -101,6 +102,7 @@ export class Session {
   private edits: RemoteEdits | null = null
   private log: SessionLog | null = null
   private stats: StatsMonitor | null = null
+  private latency: LatencyMonitor | null = null
   /** Phiên riêng của module (spec `module`). */
   private moduleSession: { id: string; session: HostModuleSession } | null = null
   /** Module gắn vào kết nối SSH của tab (đang gắn = promise chưa xong). */
@@ -351,6 +353,8 @@ export class Session {
     this.log = null
     this.stats?.stop()
     this.stats = null
+    this.latency?.stop()
+    this.latency = null
     for (const controller of this.moduleOps.values()) controller.abort()
     this.moduleOps.clear()
     this.moduleSession?.session.dispose()
@@ -627,8 +631,16 @@ export class Session {
       if ('stats' in update) this.post({ t: 'stats', stats: update.stats })
       else this.post({ t: 'stats-unsupported', reason: update.unsupported })
     })
-    if (this.wantStats) this.stats.start()
-    else this.stats.stop()
+    this.latency ??= new LatencyMonitor(ssh.client, (ms) => {
+      this.post({ t: 'latency', ms })
+    })
+    if (this.wantStats) {
+      this.stats.start()
+      this.latency.start()
+    } else {
+      this.stats.stop()
+      this.latency.stop()
+    }
   }
 
   private handleClientMessage(raw: unknown): void {
