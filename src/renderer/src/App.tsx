@@ -3,6 +3,7 @@ import { CommandPalette } from './components/CommandPalette'
 import type { SettingsSectionId } from './components/settings/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { TabBar } from './components/TabBar'
+import { Toaster } from './components/Toaster'
 import { Workspace } from './components/Workspace'
 import { WorkspacesDialog } from './components/WorkspacesDialog'
 import { preloadLazyParts, SettingsDialog, SnippetsDialog } from './lazy'
@@ -183,6 +184,7 @@ export function App(): React.JSX.Element {
 
   return (
     <div className="flex h-full">
+      <Toaster />
       {!sidebarHidden && <Sidebar ref={searchRef} />}
       <div className="flex min-w-0 flex-1 flex-col">
         <TabBar

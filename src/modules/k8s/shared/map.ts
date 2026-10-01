@@ -381,6 +381,10 @@ export interface MapNode {
   /** Workload: công nghệ (TECH); namespace: vài công nghệ chính bên trong. */
   tech?: string
   techs?: string[]
+  /** Workload: số pod sẵn sàng / mong muốn (nhãn trên thẻ). */
+  replicas?: { ready: number; desired: number }
+  /** Workload: tên loại ngắn (Deployment…), trạng thái (CronJob: lịch chạy). */
+  status?: string
 }
 
 /**
@@ -525,23 +529,47 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
   }
   const islands: Island[] = []
 
+  const nsWorkloadsOf = new Map<string, MapWorkload[]>()
+  for (const w of data.workloads) {
+    const list = nsWorkloadsOf.get(w.ns)
+    if (list) list.push(w)
+    else nsWorkloadsOf.set(w.ns, [w])
+  }
+  const nsServicesOf = new Map<string, MapService[]>()
+  for (const s of data.services) {
+    const list = nsServicesOf.get(s.ns)
+    if (list) list.push(s)
+    else nsServicesOf.set(s.ns, [s])
+  }
+
   for (const ns of nsNames) {
     const nsId = `n:${ns}`
     const children: MapNode[] = []
     // Hàng 1: route (Ingress / HTTPRoute…); hàng 2: service; hàng 3: workload; hàng 4: PVC.
-    const workloads = data.workloads
-      .filter((w) => w.ns === ns)
-      .sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name))
+    // Workload có service trỏ tới đứng đầu (ngay dưới service của nó — đường nối ngắn, không
+    // chạy ngầm dưới thẻ khác); còn lại theo loại rồi tên.
+    const nsServices = [...(nsServicesOf.get(ns) ?? [])].sort(byName)
+    // Service → workload nó chọn: so selector một lần, dùng cho sắp xếp và cạnh.
+    const targets = new Map<MapService, MapWorkload[]>()
+    const rank = new Map<MapWorkload, number>()
+    nsServices.forEach((s, i) => {
+      const hit = (nsWorkloadsOf.get(ns) ?? []).filter((w) => selectorMatches(s.selector, w.labels))
+      targets.set(s, hit)
+      for (const w of hit) if (!rank.has(w)) rank.set(w, i)
+    })
+    const workloads = [...(nsWorkloadsOf.get(ns) ?? [])].sort(
+      (a, b) =>
+        (rank.get(a) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b) ?? Number.MAX_SAFE_INTEGER) ||
+        a.kind.localeCompare(b.kind) ||
+        a.name.localeCompare(b.name)
+    )
     // Service theo vị trí workload đích, route theo service đích, PVC theo workload dùng nó —
     // cạnh ngắn, ít cắt nhau (không có đích → cuối hàng, theo tên).
     const firstIndex = (indices: number[]): number =>
       indices.length ? Math.min(...indices) : Number.MAX_SAFE_INTEGER
-    const services = orderBy(
-      data.services.filter((x) => x.ns === ns),
-      (svc) =>
-        firstIndex(
-          workloads.flatMap((w, i) => (selectorMatches(svc.selector, w.labels) ? [i] : []))
-        )
+    const position = new Map(workloads.map((w, i) => [w, i]))
+    const services = orderBy(nsServices, (svc) =>
+      firstIndex((targets.get(svc) ?? []).map((w) => position.get(w) ?? 0))
     )
     const routes = orderBy(
       data.routes.filter((r) => r.ns === ns),
@@ -590,6 +618,8 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
         parent: nsId,
         ...(badges.length ? { badges } : {}),
         ...(w.tech ? { tech: w.tech } : {}),
+        replicas: { ready: w.ready, desired: w.desired },
+        status: w.status,
         pods
       })
     }
@@ -770,13 +800,12 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
         if (services.some((s) => s.name === b))
           edges.push({ from: `r:${r.kind}:${ns}/${r.name}`, to: `s:${ns}/${b}`, kind: 'route' })
     for (const s of services)
-      for (const w of workloads)
-        if (selectorMatches(s.selector, w.labels))
-          edges.push({
-            from: `s:${ns}/${s.name}`,
-            to: `w:${w.kind}:${ns}/${w.name}`,
-            kind: 'select'
-          })
+      for (const w of targets.get(s) ?? [])
+        edges.push({
+          from: `s:${ns}/${s.name}`,
+          to: `w:${w.kind}:${ns}/${w.name}`,
+          kind: 'select'
+        })
     for (const w of workloads)
       for (const v of w.pvcs)
         if (pvcs.some((p) => p.name === v))

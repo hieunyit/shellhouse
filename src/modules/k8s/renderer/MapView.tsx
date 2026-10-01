@@ -408,14 +408,15 @@ function MapInner({
     const arrow = (color: string): MapFlowEdge['markerEnd'] => ({
       type: MarkerType.ArrowClosed,
       color,
-      width: 14,
-      height: 14
+      width: 12,
+      height: 12
     })
     if (band === 'near' && options.edges && layout)
       for (const e of layout.edges) {
         const hot = related.has(e.from) && related.has(e.to)
-        // Policy áp lên cả namespace → rất nhiều cạnh; chỉ vẽ khi đang xem quan hệ.
-        if (e.kind === 'policy' && !hot) continue
+        // Policy áp lên cả namespace → rất nhiều cạnh; chỉ vẽ đường của chính mục đang chọn.
+        if (e.kind === 'policy' && !(hot && focusId && (e.from === focusId || e.to === focusId)))
+          continue
         const color =
           e.kind === 'storage' ? palette.muted : e.kind === 'policy' ? palette.warn : palette.accent
         out.push({
@@ -431,23 +432,26 @@ function MapInner({
         })
       }
     if (options.traffic && trafficEdges.length) {
-      const list =
-        band === 'near'
-          ? trafficEdges
-          : // Nhìn xa: gộp theo cặp namespace.
-            [
-              ...trafficEdges
-                .reduce((m, t) => {
-                  const a = index.byId.get(t.from)?.ns
-                  const b = index.byId.get(t.to)?.ns
-                  if (!a || !b || a === b) return m
-                  const key = `n:${a}>n:${b}`
-                  const prev = m.get(key)
-                  m.set(key, { from: `n:${a}`, to: `n:${b}`, rate: (prev?.rate ?? 0) + t.rate })
-                  return m
-                }, new Map<string, { from: string; to: string; rate: number }>())
-                .values()
-            ]
+      // Khác namespace: luôn gộp thành đường giữa hai đảo (không xuyên qua thẻ trong đảo);
+      // cùng namespace (nhìn gần): đường giữa hai thẻ workload.
+      const cross = new Map<string, { from: string; to: string; rate: number }>()
+      const local: { from: string; to: string; rate: number }[] = []
+      for (const tr of trafficEdges) {
+        const a = index.byId.get(tr.from)?.ns
+        const b = index.byId.get(tr.to)?.ns
+        if (!a || !b) continue
+        if (a === b) {
+          if (band === 'near') local.push(tr)
+          continue
+        }
+        const key = `n:${a}>n:${b}`
+        cross.set(key, {
+          from: `n:${a}`,
+          to: `n:${b}`,
+          rate: (cross.get(key)?.rate ?? 0) + tr.rate
+        })
+      }
+      const list = [...local, ...cross.values()]
       for (const t of list) {
         const color = t.rate >= BANDS[3].max ? palette.trafficHot : palette.traffic
         out.push({
@@ -468,7 +472,7 @@ function MapInner({
       }
     }
     return out
-  }, [band, options.edges, options.traffic, layout, related, palette, trafficEdges, index])
+  }, [band, options.edges, options.traffic, layout, related, palette, trafficEdges, index, focusId])
 
   // ——— Điều khiển khung nhìn ———
   const flyTo = useCallback(

@@ -602,7 +602,7 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await page.keyboard.press('Escape')
     await view.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
-    // Lấy hai mẫu (5 s) → live; đường traffic web → standalone pods (tool).
+    // Lấy hai mẫu (5 s) → live; traffic shop → default (web → pod tool) nối giữa hai đảo.
     await expect(map.getByTestId('k8s-map-traffic-status')).toHaveAttribute('data-status', 'live', {
       timeout: 15_000
     })
@@ -610,7 +610,7 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await map.getByTestId('k8s-map-result').filter({ hasText: 'Workload' }).first().click()
     await expect(
       map.locator(
-        '[data-testid="k8s-map-traffic-edge"][data-source="w:deployments.apps:shop/web"][data-target="w:pods:default/standalone"]'
+        '[data-testid="k8s-map-traffic-edge"][data-source="n:shop"][data-target="n:default"]'
       )
     ).toHaveCount(1)
     const panel = view.getByTestId('k8s-map-panel')
@@ -660,6 +660,76 @@ test('Kubernetes: Session Host chết giữa chừng → tab tự kết nối l�
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web"]')).toBeVisible({
       timeout: 20_000
     })
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})
+
+test('Kubernetes: tạo Deployment + Service bằng form (kiểu Rancher / Lens), kiểm tra lỗi, toast', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await page.setViewportSize({ width: 1366, height: 820 })
+    await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toBeVisible()
+    await view.getByTestId('k8s-nav-deployments.apps').click()
+    await view.getByTestId('k8s-create').click()
+    const dialog = page.getByTestId('k8s-create-dialog')
+    // Đang xem Deployments → form Deployment; namespace mặc định = namespace đang xem.
+    await expect(dialog.getByTestId('k8s-create-kind-Deployment')).toHaveAttribute(
+      'aria-current',
+      'true'
+    )
+    await expect(dialog.getByTestId('k8s-form-namespace')).toHaveValue('shop')
+
+    // Để trống → báo lỗi tại chỗ, không gửi gì.
+    await dialog.getByTestId('k8s-create-submit').click()
+    await expect(dialog.getByTestId('k8s-create-invalid')).toContainText('Fix 2 fields')
+    await expect(dialog.getByTestId('k8s-form-error').first()).toBeVisible()
+
+    await dialog.getByTestId('k8s-form-name').fill('api')
+    await dialog.getByTestId('k8s-form-image').fill('ghcr.io/acme/api:1.2')
+    await dialog.getByTestId('k8s-form-replicas').fill('2')
+    await dialog.getByTestId('k8s-form-add-port').click()
+    await dialog.getByTestId('k8s-form-port').fill('8080')
+    await dialog.getByTestId('k8s-form-expose').check()
+    // Port của Service lấy sẵn từ port container.
+    await expect(dialog.getByTestId('k8s-form-service-port')).toHaveValue('8080')
+    await dialog.getByTestId('k8s-form-service-port').fill('80')
+    await expect(dialog.getByTestId('k8s-create-yaml')).toContainText('kind: Service')
+    await expect(dialog.getByTestId('k8s-create-yaml')).not.toContainText('&a1')
+    await dialog.getByTestId('k8s-create-submit').click()
+
+    await expect(dialog).toHaveCount(0)
+    const t = page.getByTestId('toast').filter({ hasText: 'Created api' })
+    await expect(t).toHaveAttribute('data-tone', 'success')
+    await expect(t).toContainText('shop/service/api')
+    const deploy = server.get('deployments', 'shop', 'api')
+    expect(deploy?.spec).toMatchObject({
+      replicas: 2,
+      selector: { matchLabels: { app: 'api' } },
+      template: {
+        spec: {
+          containers: [
+            { name: 'app', image: 'ghcr.io/acme/api:1.2', ports: [{ containerPort: 8080 }] }
+          ]
+        }
+      }
+    })
+    expect(server.get('services', 'shop', 'api')?.spec).toMatchObject({
+      selector: { app: 'api' },
+      ports: [{ port: 80, targetPort: 'http' }]
+    })
+    // Mở luôn đối tượng vừa tạo.
+    await expect(view.getByTestId('k8s-describe')).toContainText('api')
   } finally {
     await launched.close()
     await server.close()

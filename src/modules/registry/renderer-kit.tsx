@@ -37,6 +37,8 @@ import type { ModuleState } from './types'
 
 let registered: readonly RendererModule[] = []
 
+/** Thông báo nổi (toast) của app — module dùng để báo kết quả thao tác. */
+export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
 export function registerRendererModules(modules: readonly RendererModule[]): void {
   registered = modules
 }

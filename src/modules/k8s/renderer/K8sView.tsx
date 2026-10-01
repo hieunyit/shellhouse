@@ -20,6 +20,9 @@ import { Empty } from '../../../renderer/src/components/files/parts'
 import { KeyHints, Pill, TONE_TEXT, type Tone } from '../../../renderer/src/components/panels'
 import type { SortState } from '../../../renderer/src/components/SortMenu'
 import { cleanError } from '../../../renderer/src/lib/format'
+import { toast } from '../../registry/renderer-kit'
+import { CreateResourceDialog } from './CreateResource'
+import type { FormKind } from '../shared/forms'
 import { ConnectionPrompt, setModuleTabParams } from '../../registry/renderer-kit'
 import type { ModuleTabProps } from '../../registry/renderer-types'
 import {
@@ -72,6 +75,22 @@ import { ResourceNav } from './ResourceNav'
 import { useK8sSession } from './useK8sSession'
 import { objectKey, useResourceList, type EventBus } from './useResourceList'
 
+/** Đang xem loại nào → mở form của loại đó khi bấm Create. */
+const FORM_FOR_KIND: Record<string, FormKind> = {
+  'deployments.apps': 'Deployment',
+  'statefulsets.apps': 'StatefulSet',
+  'daemonsets.apps': 'DaemonSet',
+  'jobs.batch': 'Job',
+  'cronjobs.batch': 'CronJob',
+  services: 'Service',
+  'ingresses.networking.k8s.io': 'Ingress',
+  configmaps: 'ConfigMap',
+  secrets: 'Secret',
+  persistentvolumeclaims: 'PersistentVolumeClaim',
+  'horizontalpodautoscalers.autoscaling': 'HorizontalPodAutoscaler',
+  namespaces: 'Namespace'
+}
+
 const TONE: Record<ResourceRow['tone'], Tone> = {
   ok: 'ok',
   warn: 'warn',
@@ -104,7 +123,6 @@ function cachedRow(kindId: string, obj: K8sObject): ResourceRow {
 const METRIC_EVERY_MS = 15_000
 const NAV_HIDDEN_KEY = 'shellhouse.k8s.navHidden'
 /** Thông báo thành công tự tắt sau chừng này (lỗi thì giữ tới khi người dùng đóng). */
-const NOTICE_MS = 4000
 
 interface Drill {
   /** Breadcrumb: "deployment/web". */
@@ -117,6 +135,7 @@ interface Drill {
 
 type Dialog =
   | { kind: 'yaml'; mode: 'view' | 'edit' | 'create'; title: string; text: string }
+  | { kind: 'create'; initial: FormKind }
   | { kind: 'delete'; obj: K8sObject; force: boolean }
   | { kind: 'forward'; obj: K8sObject; ports: number[] }
   | { kind: 'scale'; obj: K8sObject }
@@ -154,7 +173,6 @@ export function ClusterTab({
   const [namespaces, setNamespaces] = useState<string[] | null>(
     params.namespace ? [params.namespace] : null
   )
-  const [notice, setNotice] = useState<{ tone: 'danger' | 'success'; text: string } | null>(null)
   const [query, setQuery] = useState('')
   const [suggestAt, setSuggestAt] = useState(0)
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
@@ -196,11 +214,12 @@ export function ClusterTab({
       if (event === 'forwards') setForwards(data as PortForwardInfo[])
       else if (event === 'edit') {
         const d = data as { name: string; ok: boolean; error?: string }
-        setNotice(
-          d.ok
-            ? { tone: 'success', text: `Saved ${d.name} to the cluster` }
-            : { tone: 'danger', text: `Could not save ${d.name}: ${d.error ?? 'unknown error'}` }
-        )
+        if (d.ok) toast.success(`Saved ${d.name} to the cluster`, { group: `edit:${d.name}` })
+        else
+          toast.error(`Could not save ${d.name}`, {
+            description: d.error ?? 'Unknown error',
+            group: `edit:${d.name}`
+          })
       }
     },
     [bus]
@@ -225,7 +244,10 @@ export function ClusterTab({
         if (!cancelled) setKinds(k)
       },
       (e: unknown) => {
-        if (!cancelled) setNotice({ tone: 'danger', text: cleanError(e) })
+        if (!cancelled)
+          toast.error('Could not read the resource types of this cluster', {
+            description: cleanError(e)
+          })
       }
     )
     request<{ names: string[]; canList: boolean }>({ op: 'namespaces' }).then(
@@ -325,17 +347,6 @@ export function ClusterTab({
     }
   }, [ready, request, metricScope, metricNs, active])
 
-  // Thông báo thành công tự tắt; lỗi giữ lại.
-  useEffect(() => {
-    if (notice?.tone !== 'success') return
-    const t = setTimeout(() => {
-      setNotice((n) => (n === notice ? null : n))
-    }, NOTICE_MS)
-    return () => {
-      clearTimeout(t)
-    }
-  }, [notice])
-
   // Độ rộng vùng bảng → số cột vừa (mở chi tiết / thu nhỏ cửa sổ thì bỏ bớt cột phụ).
   useEffect(() => {
     const el = tableRef.current
@@ -358,19 +369,28 @@ export function ClusterTab({
     setQuery(filter)
   }, [])
 
+  /** Thông báo nổi (toast); lỗi "Tiêu đề: chi tiết" tách thành tiêu đề + mô tả. */
   const notify = (text: string, tone: 'success' | 'danger' = 'success'): void => {
-    setNotice({ tone, text })
+    if (tone === 'success') {
+      toast.success(text)
+      return
+    }
+    const at = text.indexOf(': ')
+    if (at > 0 && at < 60) toast.error(text.slice(0, at), { description: text.slice(at + 2) })
+    else toast.error(text)
   }
-  const run = (label: string, fn: () => Promise<unknown>, done?: string): void => {
-    setNotice(null)
-    fn().then(
-      () => {
-        if (done) notify(done)
-      },
-      (e: unknown) => {
-        notify(`${label}: ${cleanError(e)}`, 'danger')
-      }
-    )
+  /** Thao tác có toast "đang chạy" → xong / lỗi (kèm lý do từ API server). */
+  const run = (
+    messages: { loading: string; success: string; error: string },
+    fn: () => Promise<unknown>
+  ): void => {
+    void toast
+      .promise(fn(), {
+        ...messages,
+        error: messages.error,
+        group: messages.loading
+      })
+      .catch(() => undefined)
   }
   const nsOf = (obj: K8sObject): { namespace?: string } =>
     obj.metadata.namespace ? { namespace: obj.metadata.namespace } : {}
@@ -458,7 +478,11 @@ export function ClusterTab({
     },
     editExternal: (obj) => {
       run(
-        'Edit failed',
+        {
+          loading: `Opening ${obj.metadata.name} in your editor…`,
+          success: `Editing ${obj.metadata.name} — every save is applied to the cluster`,
+          error: `Could not edit ${obj.metadata.name}`
+        },
         async () => {
           const localPath = await window.shellhouse.prepareRemoteEdit(
             `${obj.metadata.name}.${kindId}.yaml`
@@ -471,8 +495,7 @@ export function ClusterTab({
             localPath
           })
           await window.shellhouse.openInEditor(localPath)
-        },
-        `Editing ${obj.metadata.name} — every save is applied to the cluster`
+        }
       )
     },
     forward: (obj) => {
@@ -497,28 +520,34 @@ export function ClusterTab({
       )
         return
       run(
-        'Restart failed',
+        {
+          loading: `Restarting ${obj.metadata.name}…`,
+          success: `Rolling restart started for ${obj.metadata.name}`,
+          error: `Could not restart ${obj.metadata.name}`
+        },
         () =>
           request({
             op: 'rolloutRestart',
             kind: kindId as 'deployments.apps',
             namespace: obj.metadata.namespace ?? '',
             name: obj.metadata.name
-          }),
-        `Restarting ${obj.metadata.name}`
+          })
       )
     },
     pause: (obj, paused) => {
       run(
-        'Failed',
+        {
+          loading: `${paused ? 'Pausing' : 'Resuming'} the rollout of ${obj.metadata.name}…`,
+          success: `Rollout of ${obj.metadata.name} ${paused ? 'paused' : 'resumed'}`,
+          error: `Could not ${paused ? 'pause' : 'resume'} the rollout of ${obj.metadata.name}`
+        },
         () =>
           request({
             op: 'rolloutPause',
             namespace: obj.metadata.namespace ?? '',
             name: obj.metadata.name,
             paused
-          }),
-        paused ? 'Rollout paused' : 'Rollout resumed'
+          })
       )
     },
     history: (obj) => {
@@ -529,23 +558,38 @@ export function ClusterTab({
     },
     cordon: (obj, unschedulable) => {
       run(
-        'Failed',
-        () => request({ op: 'cordon', node: obj.metadata.name, unschedulable }),
-        `${unschedulable ? 'Cordoned' : 'Uncordoned'} ${obj.metadata.name}`
+        {
+          loading: `${unschedulable ? 'Cordoning' : 'Uncordoning'} ${obj.metadata.name}…`,
+          success: `${unschedulable ? 'Cordoned' : 'Uncordoned'} ${obj.metadata.name}`,
+          error: `Could not ${unschedulable ? 'cordon' : 'uncordon'} ${obj.metadata.name}`
+        },
+        () => request({ op: 'cordon', node: obj.metadata.name, unschedulable })
       )
     },
     drain: (obj) => {
       setDialog({ kind: 'drain', obj })
     },
     trigger: (obj) => {
-      run('Could not start the job', async () => {
-        const job = await request<string>({
-          op: 'cronTrigger',
-          namespace: obj.metadata.namespace ?? '',
-          name: obj.metadata.name
-        })
-        notify(`Started job ${job}`)
-      })
+      void toast
+        .promise(
+          request<string>({
+            op: 'cronTrigger',
+            namespace: obj.metadata.namespace ?? '',
+            name: obj.metadata.name
+          }),
+          {
+            loading: `Starting a job from ${obj.metadata.name}…`,
+            success: (job) => `Started job ${job}`,
+            error: `Could not start a job from ${obj.metadata.name}`,
+            action: (job) => ({
+              label: 'Show job',
+              run: () => {
+                openRef('jobs.batch', obj.metadata.namespace, job)
+              }
+            })
+          }
+        )
+        .catch(() => undefined)
     },
     argoSync: (obj, prune) => {
       if (
@@ -563,41 +607,50 @@ export function ClusterTab({
       )
         return
       run(
-        'Sync failed',
+        {
+          loading: `Syncing ${obj.metadata.name}…`,
+          success: `Sync started for ${obj.metadata.name}${prune ? ' (with prune)' : ''}`,
+          error: `Could not sync ${obj.metadata.name}`
+        },
         () =>
           request({
             op: 'argoSync',
             namespace: obj.metadata.namespace ?? '',
             name: obj.metadata.name,
             prune
-          }),
-        `Syncing ${obj.metadata.name}`
+          })
       )
     },
     argoRefresh: (obj, hard) => {
       run(
-        'Refresh failed',
+        {
+          loading: `Refreshing ${obj.metadata.name}…`,
+          success: `${hard ? 'Hard refresh' : 'Refresh'} requested for ${obj.metadata.name}`,
+          error: `Could not refresh ${obj.metadata.name}`
+        },
         () =>
           request({
             op: 'argoRefresh',
             namespace: obj.metadata.namespace ?? '',
             name: obj.metadata.name,
             hard
-          }),
-        `${hard ? 'Hard refresh' : 'Refresh'} requested for ${obj.metadata.name}`
+          })
       )
     },
     suspend: (obj, suspend) => {
       run(
-        'Failed',
+        {
+          loading: `${suspend ? 'Suspending' : 'Resuming'} ${obj.metadata.name}…`,
+          success: `Schedule of ${obj.metadata.name} ${suspend ? 'suspended' : 'resumed'}`,
+          error: `Could not ${suspend ? 'suspend' : 'resume'} ${obj.metadata.name}`
+        },
         () =>
           request({
             op: 'cronSuspend',
             namespace: obj.metadata.namespace ?? '',
             name: obj.metadata.name,
             suspend
-          }),
-        suspend ? 'Schedule suspended' : 'Schedule resumed'
+          })
       )
     }
   }
@@ -1128,18 +1181,31 @@ export function ClusterTab({
           </span>
         )}
         {!readOnly && (
-          <Button
-            size="sm"
-            variant="ghost"
-            icon={<Plus size={13} />}
-            data-testid="k8s-create"
-            title="Create or update objects from YAML"
-            onClick={() => {
-              setDialog({ kind: 'yaml', mode: 'create', title: 'Create from YAML', text: '' })
-            }}
-          >
-            Create
-          </Button>
+          <span className="flex items-center">
+            <Button
+              size="sm"
+              variant="ghost"
+              icon={<Plus size={13} />}
+              data-testid="k8s-create"
+              title="Create a resource with a form"
+              onClick={() => {
+                setDialog({ kind: 'create', initial: FORM_FOR_KIND[kindId] ?? 'Deployment' })
+              }}
+            >
+              Create
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              data-testid="k8s-create-yaml"
+              title="Create or update objects from YAML"
+              onClick={() => {
+                setDialog({ kind: 'yaml', mode: 'create', title: 'Create from YAML', text: '' })
+              }}
+            >
+              YAML
+            </Button>
+          </span>
         )}
         <Button
           size="sm"
@@ -1214,23 +1280,10 @@ export function ClusterTab({
               </span>
             </div>
           )}
-          {(list.error ?? notice) && (
+          {list.error && (
             <div className="border-b border-line p-2">
-              <Notice tone={list.error ? 'danger' : (notice?.tone ?? 'danger')} testId="k8s-notice">
-                <span className="flex items-center gap-2">
-                  <span className="flex-1">{list.error ?? notice?.text}</span>
-                  {notice && !list.error && (
-                    <button
-                      type="button"
-                      aria-label="Dismiss"
-                      onClick={() => {
-                        setNotice(null)
-                      }}
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </span>
+              <Notice tone="danger" testId="k8s-notice">
+                {list.error}
               </Notice>
             </div>
           )}
@@ -1470,6 +1523,32 @@ export function ClusterTab({
           }}
         />
       )}
+      {dialog?.kind === 'create' && (
+        <CreateResourceDialog
+          request={request}
+          namespaces={allNamespaces}
+          defaultNamespace={scopeNs[0] ?? cluster?.namespace ?? 'default'}
+          initialKind={dialog.initial}
+          onClose={() => {
+            setDialog(null)
+          }}
+          onEditYaml={(text) => {
+            setDialog({ kind: 'yaml', mode: 'create', title: 'Create from YAML', text })
+          }}
+          onCreated={(createdKind, ns, name, summary) => {
+            toast.success(`Created ${name}`, {
+              description: summary,
+              action: {
+                label: 'Open',
+                run: () => {
+                  openRef(createdKind, ns, name)
+                }
+              }
+            })
+            if (createdKind !== 'namespaces') openRef(createdKind, ns, name)
+          }}
+        />
+      )}
       {dialog?.kind === 'delete' && (
         <DeleteDialog
           obj={dialog.obj}
@@ -1482,14 +1561,22 @@ export function ClusterTab({
             const { obj, force } = dialog
             setDialog(null)
             if (detailKey === objectKey(obj)) setDetailKey(null)
-            run('Delete failed', () =>
-              request({
-                op: 'delete',
-                kind: kindId,
-                ...nsOf(obj),
-                name: obj.metadata.name,
-                ...(force ? { force: true } : {})
-              })
+            const what =
+              `${(obj.kind ?? kind?.kind ?? '').toLowerCase()} ${obj.metadata.name}`.trim()
+            run(
+              {
+                loading: `Deleting ${what}…`,
+                success: `Deleted ${what}`,
+                error: `Could not delete ${what}`
+              },
+              () =>
+                request({
+                  op: 'delete',
+                  kind: kindId,
+                  ...nsOf(obj),
+                  name: obj.metadata.name,
+                  ...(force ? { force: true } : {})
+                })
             )
           }}
         />
@@ -1505,13 +1592,19 @@ export function ClusterTab({
             const t = dialog.obj
             setDialog(null)
             setShowForwards(true)
-            run('Port forward failed', () =>
-              request({
-                op: 'portForward',
-                namespace: t.metadata.namespace ?? '',
-                target: `${kindId === 'pods' ? 'pod' : 'service'}/${t.metadata.name}`,
-                ports: [[local, remote]]
-              })
+            run(
+              {
+                loading: `Forwarding localhost:${String(local)} → ${t.metadata.name}:${String(remote)}…`,
+                success: `Forwarding localhost:${String(local)} → ${t.metadata.name}:${String(remote)}`,
+                error: `Could not forward to ${t.metadata.name}`
+              },
+              () =>
+                request({
+                  op: 'portForward',
+                  namespace: t.metadata.namespace ?? '',
+                  target: `${kindId === 'pods' ? 'pod' : 'service'}/${t.metadata.name}`,
+                  ports: [[local, remote]]
+                })
             )
           }}
         />
@@ -1527,7 +1620,11 @@ export function ClusterTab({
             const t = dialog.obj
             setDialog(null)
             run(
-              'Scale failed',
+              {
+                loading: `Scaling ${t.metadata.name} to ${String(replicas)}…`,
+                success: `Scaled ${t.metadata.name} to ${String(replicas)} replica${replicas === 1 ? '' : 's'}`,
+                error: `Could not scale ${t.metadata.name}`
+              },
               () =>
                 request({
                   op: 'scale',
@@ -1535,8 +1632,7 @@ export function ClusterTab({
                   namespace: t.metadata.namespace ?? '',
                   name: t.metadata.name,
                   replicas
-                }),
-              `Scaling ${t.metadata.name} to ${replicas}`
+                })
             )
           }}
         />

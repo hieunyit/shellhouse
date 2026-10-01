@@ -3,6 +3,7 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   getBezierPath,
+  getSmoothStepPath,
   Handle,
   Position,
   useStore,
@@ -119,27 +120,44 @@ export const RegionNode = memo(function RegionNode({
 }: NodeProps<MapFlowNode>): React.JSX.Element {
   const n = data.node
   const { band } = useMap()
-  // Chữ theo đơn vị thế giới (tỉ lệ với vùng) — nhìn xa vẫn đọc được tên vùng.
-  const size = band === 'far' ? Math.min(220, Math.max(28, n.w * 0.03)) : 18
+  // Nhìn xa: chữ theo đơn vị thế giới (tỉ lệ với vùng) — vẫn đọc được tên vùng.
+  const far = band === 'far'
+  const size = far ? Math.min(200, Math.max(26, n.w * 0.028)) : 13
   return (
     <div
-      className="size-full rounded-[28px] border border-dashed border-line-strong bg-subtle/70"
+      className="size-full rounded-[32px] border border-line bg-subtle/60"
       data-testid="k8s-map-region"
     >
       <div
-        className="truncate px-6 pt-3 font-semibold tracking-widest text-muted uppercase"
+        className="flex items-baseline gap-3 truncate px-7 pt-3.5"
         style={{ fontSize: size, lineHeight: 1.2 }}
       >
-        {n.label}
-        {band !== 'far' && (
-          <span className="ml-3 text-[13px] font-normal tracking-normal text-faint normal-case">
-            {n.sub}
-          </span>
-        )}
+        <span className="font-semibold tracking-[0.14em] text-muted uppercase">{n.label}</span>
+        {!far && <span className="text-[12px] font-normal text-faint">{n.sub}</span>}
       </div>
     </div>
   )
 })
+
+/** Nhãn trạng thái gọn ("2 failing", "1 degraded") cho namespace / vùng. */
+function HealthPills({ n, size = 11 }: { n: MapNode; size?: number }): React.JSX.Element | null {
+  const st = n.stats
+  if (!st || (!st.bad && !st.warn)) return null
+  return (
+    <span className="flex shrink-0 items-center gap-1" style={{ fontSize: size }}>
+      {st.bad > 0 && (
+        <span className="rounded-full bg-danger-soft px-1.5 py-px font-medium text-danger">
+          {st.bad} failing
+        </span>
+      )}
+      {st.warn > 0 && (
+        <span className="rounded-full bg-warning-soft px-1.5 py-px font-medium text-warning">
+          {st.warn} degraded
+        </span>
+      )}
+    </span>
+  )
+}
 
 export const NamespaceNode = memo(function NamespaceNode({
   data
@@ -150,7 +168,7 @@ export const NamespaceNode = memo(function NamespaceNode({
   const st = n.stats
   const okN = st ? Math.max(0, st.workloads - st.warn - st.bad) : 0
   const health = st && st.workloads > 0 && (
-    <div className="flex h-full w-full overflow-hidden rounded-full bg-subtle">
+    <div className="flex size-full overflow-hidden rounded-full bg-line">
       <div className="bg-success" style={{ flex: okN }} />
       <div className="bg-warning" style={{ flex: st.warn }} />
       <div className="bg-danger-solid" style={{ flex: st.bad }} />
@@ -158,34 +176,33 @@ export const NamespaceNode = memo(function NamespaceNode({
   )
   if (ctx.band === 'far') {
     // Nhìn xa: tên to giữa đảo, số liệu, logo công nghệ, thanh tình trạng — cỡ theo đảo.
-    const fs = Math.max(14, Math.min(n.w * 0.085, n.h * 0.2, 90))
+    const fs = Math.max(14, Math.min(n.w * 0.08, n.h * 0.18, 84))
     return (
       <div
         className={cx(
-          'flex size-full flex-col items-center justify-center rounded-2xl border-2 bg-surface shadow-sm',
-          sel ? 'border-accent' : TONE_BORDER[n.tone]
+          'flex size-full flex-col items-center justify-center rounded-3xl border bg-surface shadow-sm',
+          sel ? 'border-accent ring-4 ring-accent/30' : 'border-line-strong'
         )}
-        style={{ padding: fs * 0.4, gap: fs * 0.25 }}
+        style={{ padding: fs * 0.4, gap: fs * 0.22 }}
       >
-        <KindIcon kind="namespaces" size={fs * 1.1} />
         <div
           className="max-w-full truncate font-semibold text-fg"
           style={{ fontSize: fs, lineHeight: 1.1 }}
         >
           {n.label}
         </div>
-        <div className="max-w-full truncate text-faint" style={{ fontSize: fs * 0.55 }}>
+        <div className="max-w-full truncate text-faint" style={{ fontSize: fs * 0.5 }}>
           {n.sub}
         </div>
         {n.techs && n.techs.length > 0 && (
           <div className="flex" style={{ gap: fs * 0.2 }}>
             {n.techs.map((t) => (
-              <TechIcon key={t} tech={t} size={fs * 1.05} />
+              <TechIcon key={t} tech={t} size={fs * 0.95} />
             ))}
           </div>
         )}
         {health && (
-          <div style={{ width: '80%', height: Math.max(4, fs * 0.22) }} className="mt-auto">
+          <div style={{ width: '70%', height: Math.max(4, fs * 0.18) }} className="mt-auto">
             {health}
           </div>
         )}
@@ -196,30 +213,34 @@ export const NamespaceNode = memo(function NamespaceNode({
   return (
     <div
       className={cx(
-        'size-full rounded-2xl border bg-surface/95 shadow-sm',
-        sel
-          ? 'border-2 border-accent'
-          : n.tone === 'ok'
-            ? 'border-line-strong'
-            : TONE_BORDER[n.tone]
+        'size-full overflow-hidden rounded-2xl border bg-surface shadow-sm',
+        sel ? 'border-accent ring-4 ring-accent/25' : 'border-line-strong'
       )}
     >
-      <div className="flex h-[34px] items-center gap-2 px-4">
-        <KindIcon kind="namespaces" size={18} />
-        <span className="max-w-[60%] shrink-0 truncate text-[15px] font-semibold text-fg">
+      <div className="flex h-[34px] items-center gap-2 border-b border-line bg-subtle px-3.5">
+        <KindIcon kind="namespaces" size={17} />
+        <span className="max-w-[45%] shrink-0 truncate text-[14px] font-semibold text-fg">
           {n.label}
         </span>
-        <span className="min-w-0 truncate text-xs text-faint">{n.sub}</span>
+        <span className="min-w-0 truncate text-[11.5px] text-faint">{n.sub}</span>
         <span className="flex-1" />
+        <HealthPills n={n} />
         {n.techs?.map((t) => (
-          <TechIcon key={t} tech={t} size={18} />
+          <TechIcon key={t} tech={t} size={17} />
         ))}
-        {health && <div className="h-1.5 w-20 shrink-0">{health}</div>}
+        {health && <div className="h-1.5 w-16 shrink-0">{health}</div>}
       </div>
       <Handles />
     </div>
   )
 })
+
+const REPLICA_TONE: Record<MapTone, string> = {
+  ok: 'bg-success-soft text-success',
+  warn: 'bg-warning-soft text-warning',
+  bad: 'bg-danger-soft text-danger',
+  muted: 'bg-subtle text-faint'
+}
 
 export const WorkloadNode = memo(function WorkloadNode({
   data
@@ -232,35 +253,55 @@ export const WorkloadNode = memo(function WorkloadNode({
   const g = podGrid(pods.length)
   const helm = n.badges?.includes('Helm')
   const badges = n.badges?.filter((b) => b !== 'Helm') ?? []
+  const kindLabel = n.ref ? workloadKindLabel(n.ref.kind) : 'Pods'
+  const cron = n.ref?.kind === 'cronjobs.batch'
+  const job = n.ref?.kind === 'jobs.batch'
   return (
     <div
       className={cx(
-        'relative flex size-full flex-col overflow-hidden rounded-lg border bg-surface shadow-sm transition-opacity',
-        sel ? 'border-2 border-accent shadow-md' : TONE_BORDER[n.tone],
-        n.tone === 'bad' && 'bg-danger-soft',
-        n.tone === 'warn' && 'bg-warning-soft',
+        'relative flex size-full flex-col overflow-hidden rounded-lg border bg-surface shadow-[0_1px_2px_rgb(16_24_40/0.06)] transition-[opacity,box-shadow]',
+        sel
+          ? 'border-accent ring-2 ring-accent/30'
+          : n.tone === 'bad'
+            ? 'border-danger/50'
+            : n.tone === 'warn'
+              ? 'border-warning/50'
+              : 'border-line-strong',
         dimmed(ctx, n) && 'opacity-25'
       )}
       data-testid="k8s-map-workload"
       data-name={n.label}
     >
-      <div
-        className={cx('absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-r', TONE_BG[n.tone])}
-      />
-      <div className="flex h-[24px] items-center gap-1.5 pt-1 pr-1.5 pl-2.5">
+      <div className={cx('absolute inset-y-0 left-0 w-[3px]', TONE_BG[n.tone])} />
+      <div className="flex h-[25px] items-center gap-1.5 pt-1 pr-1.5 pl-2.5">
         <KindIcon kind={n.ref?.kind ?? 'pods'} size={16} />
         <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-fg">
           {n.label}
         </span>
-        {helm && <HelmBadge size={13} />}
-        {n.tech && <TechIcon tech={n.tech} size={18} />}
+        {n.tech && <TechIcon tech={n.tech} size={17} />}
+        {n.replicas && !cron && !job && (
+          <span
+            className={cx(
+              'shrink-0 rounded px-1 font-mono text-[10.5px] font-semibold tabular-nums',
+              REPLICA_TONE[n.tone]
+            )}
+            title="Ready / desired pods"
+          >
+            {n.replicas.ready}/{n.replicas.desired}
+          </span>
+        )}
       </div>
-      <div className="flex h-[18px] items-center gap-1 pr-2 pl-2.5 text-[10.5px] text-faint">
-        <span className="truncate">{n.sub}</span>
+      <div className="flex h-[17px] items-center gap-1 pr-2 pl-2.5 text-[10.5px] text-faint">
+        <span className="shrink-0">{kindLabel}</span>
+        {(cron || job || !n.replicas) && n.status && (
+          <span className="min-w-0 truncate font-mono">· {n.status}</span>
+        )}
+        <span className="flex-1" />
+        {helm && <HelmBadge size={12} />}
         {badges.map((b) => (
           <span
             key={b}
-            className="shrink-0 rounded bg-accent-soft px-1 text-[9.5px] font-medium text-accent"
+            className="shrink-0 rounded border border-line px-1 text-[9.5px] font-medium text-muted"
           >
             {b}
           </span>
@@ -278,7 +319,7 @@ export const WorkloadNode = memo(function WorkloadNode({
               aria-label={p.label}
               data-testid="k8s-map-pod"
               className={cx(
-                'nodrag size-[10px] rounded-full hover:ring-2 hover:ring-accent',
+                'nodrag size-[10px] rounded-[3px] hover:ring-2 hover:ring-accent',
                 TONE_BG[p.tone],
                 ctx.selected === p.id && 'ring-2 ring-fg',
                 dimmed(ctx, p) && !ctx.related.has(n.id) && 'opacity-30'
@@ -315,22 +356,20 @@ export const PillNode = memo(function PillNode({
   const n = data.node
   const ctx = useMap()
   const sel = ctx.selected === n.id
-  const square = n.kind === 'pvc' || n.kind === 'policy'
+  const route = n.kind === 'route' || n.kind === 'gateway'
   return (
     <div
       className={cx(
-        'flex size-full items-center gap-1.5 border px-2 shadow-xs transition-opacity',
-        square ? 'rounded-md bg-subtle' : 'rounded-full bg-surface',
+        'flex size-full items-center gap-1.5 rounded-md border bg-surface px-2 shadow-[0_1px_2px_rgb(16_24_40/0.05)] transition-opacity',
         sel
-          ? 'border-2 border-accent'
-          : n.kind === 'route' || n.kind === 'gateway'
-            ? 'border-accent/60'
+          ? 'border-accent ring-2 ring-accent/30'
+          : route
+            ? 'border-accent/40'
             : n.kind === 'policy'
-              ? 'border-dashed border-warning/70'
-              : n.kind === 'pvc'
+              ? 'border-dashed border-line-strong'
+              : n.kind === 'pvc' && n.tone !== 'ok'
                 ? TONE_BORDER[n.tone]
-                : 'border-line-strong',
-        n.kind === 'route' && !sel && 'border-dashed',
+                : 'border-line',
         dimmed(ctx, n) && 'opacity-25'
       )}
       data-testid="k8s-map-pill"
@@ -340,7 +379,9 @@ export const PillNode = memo(function PillNode({
     >
       <KindIcon kind={n.ref?.kind ?? PILL_KIND[n.kind] ?? 'services'} size={16} />
       <span className="min-w-0 truncate text-[11.5px] font-medium text-fg">{n.label}</span>
-      <span className="min-w-0 flex-1 truncate text-right text-[10px] text-faint">{n.sub}</span>
+      <span className="min-w-0 flex-1 truncate text-right font-mono text-[9.5px] text-faint">
+        {n.sub}
+      </span>
       <Handles />
     </div>
   )
@@ -363,7 +404,11 @@ export const MapEdgeComp = memo(function MapEdgeComp(
 ): React.JSX.Element {
   const ctx = useMap()
   const d = props.data
-  const [path, lx, ly] = getBezierPath(props)
+  const traffic = d?.kind === 'traffic'
+  // Quan hệ: đường gấp khúc bo góc (gọn, không chéo lung tung); traffic: đường cong.
+  const [path, lx, ly] = traffic
+    ? getBezierPath(props)
+    : getSmoothStepPath({ ...props, borderRadius: 10, offset: 14 })
   const hot = ctx.related.size > 0 && ctx.related.has(props.source) && ctx.related.has(props.target)
   const faded = ctx.related.size > 0 && !hot
   if (d?.kind === 'traffic') {
@@ -413,8 +458,8 @@ export const MapEdgeComp = memo(function MapEdgeComp(
       {...(props.markerEnd ? { markerEnd: props.markerEnd } : {})}
       style={{
         stroke: d?.color,
-        strokeWidth: hot ? 2.2 : 1.4,
-        strokeOpacity: faded ? 0.12 : hot ? 1 : 0.55,
+        strokeWidth: hot ? 2 : 1.25,
+        strokeOpacity: faded ? 0.1 : hot ? 1 : 0.5,
         ...(dash ? { strokeDasharray: dash } : {})
       }}
     />

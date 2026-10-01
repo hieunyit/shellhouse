@@ -31,7 +31,7 @@ import { Empty } from '../../../renderer/src/components/files/parts'
 import { KeyHints, Pill, TONE_TEXT } from '../../../renderer/src/components/panels'
 import type { SortState } from '../../../renderer/src/components/SortMenu'
 import { cleanError, formatSize, nameOrder } from '../../../renderer/src/lib/format'
-import { ConnectionPrompt } from '../../registry/renderer-kit'
+import { toast, ConnectionPrompt } from '../../registry/renderer-kit'
 import type { ModuleTabProps } from '../../registry/renderer-types'
 import type {
   ComposeAction,
@@ -159,7 +159,6 @@ export function DockerTab({
   const [volumes, setVolumes] = useState<VolumeRow[] | null>(null)
   const [networks, setNetworks] = useState<NetworkRow[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<{ tone: 'danger' | 'success'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [filter, setFilter] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
@@ -185,17 +184,6 @@ export function DockerTab({
   const filterRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const { menu, open: openMenu } = useContextMenu()
-
-  // Thông báo thành công tự tắt sau 4 giây; lỗi giữ tới khi đóng.
-  useEffect(() => {
-    if (notice?.tone !== 'success') return
-    const t = setTimeout(() => {
-      setNotice((n) => (n === notice ? null : n))
-    }, 4000)
-    return () => {
-      clearTimeout(t)
-    }
-  }, [notice])
 
   const reload = useRef<() => void>(() => undefined)
   const onEvent = useCallback((event: string, data: unknown) => {
@@ -309,13 +297,12 @@ export function DockerTab({
   }, [ready, section, request, apply, reloadKey])
 
   const run = async (label: string, fn: () => Promise<unknown>, done?: string): Promise<void> => {
-    setNotice(null)
     setBusy(true)
     try {
       await fn()
-      if (done) setNotice({ tone: 'success', text: done })
+      if (done) toast.success(done)
     } catch (e) {
-      setNotice({ tone: 'danger', text: `${label}: ${cleanError(e)}` })
+      toast.error(label, { description: cleanError(e) })
     } finally {
       setBusy(false)
       void load(section)
@@ -376,7 +363,7 @@ export function DockerTab({
         setDialog({ kind: 'inspect', title, data })
       },
       (e: unknown) => {
-        setNotice({ tone: 'danger', text: cleanError(e) })
+        toast.error(`Could not inspect ${title}`, { description: cleanError(e) })
       }
     )
   }
@@ -1085,26 +1072,10 @@ export function DockerTab({
               </button>
             </div>
           )}
-          {(loadError ?? notice) && (
+          {loadError && (
             <div className="border-b border-line p-2">
-              <Notice
-                tone={loadError ? 'danger' : (notice?.tone ?? 'danger')}
-                testId="docker-action-error"
-              >
-                <span className="flex items-center gap-2">
-                  <span className="flex-1">{loadError ?? notice?.text}</span>
-                  {!loadError && (
-                    <button
-                      type="button"
-                      aria-label="Dismiss"
-                      onClick={() => {
-                        setNotice(null)
-                      }}
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </span>
+              <Notice tone="danger" testId="docker-action-error">
+                {loadError}
               </Notice>
             </div>
           )}
@@ -1690,7 +1661,7 @@ export function DockerTab({
             await request({ op: 'run', spec })
             setDialog(null)
             setSection('containers')
-            setNotice({ tone: 'success', text: `Started ${spec.name || spec.image}` })
+            toast.success(`Started ${spec.name || spec.image}`)
             void load('containers')
           }}
         />

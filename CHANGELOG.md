@@ -22,6 +22,18 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   to, technology badges (Prometheus, Grafana, Argo CD, CoreDNS, NGINX, PostgreSQL, Redis… from
   the image), a Helm badge, and a **Blast radius** for any object: what is affected if it
   changes or fails.
+- **Kubernetes: create resources with forms** (like Rancher / Lens) — Deployment,
+  StatefulSet, DaemonSet, Job, CronJob, Service, Ingress, ConfigMap, Secret (key / value,
+  registry login, TLS, username / password), volume claim, autoscaler and namespace. Pick
+  ConfigMaps, Secrets, volume claims, services and storage classes from the cluster; set image,
+  ports, environment (values or keys of a ConfigMap / Secret), resources, health checks, volumes
+  and schedules; tick **Also create a Service** to expose a workload. Fields are checked as you
+  go, the YAML preview updates live, and **Edit as YAML** opens the generated manifest for hand
+  edits. **Create** opens the form for the kind you are looking at; **YAML** still opens the
+  editor directly.
+- **Notifications** — actions in the Kubernetes and Docker modules report through toasts: a
+  progress toast that turns into success or a clear error (with the reason from the cluster and
+  a Copy button), plus an **Open** action after creating something.
 - **Kubernetes: Map and Topology redrawn** with React Flow — cards, icons and edges are proper
   UI components that follow the light / dark theme. Every resource uses the official Kubernetes
   icon set, and recognised applications show their logo (Prometheus, Grafana, Argo CD, NGINX,
