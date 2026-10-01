@@ -43,7 +43,7 @@ function envTargets(pattern: string, ctx: PathContext): string[] | null {
 
 export function localPathAllowed(
   manifest: ModuleManifest,
-  kind: 'read-file' | 'local-socket',
+  kind: 'read-file' | 'write-file' | 'local-socket',
   path: string,
   ctx: PathContext
 ): boolean {

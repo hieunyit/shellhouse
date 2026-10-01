@@ -1,5 +1,5 @@
 import { connect } from 'node:net'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -279,5 +279,50 @@ test('Kubernetes: import kubeconfig từ file (chứng chỉ tham chiếu đư�
     await launched.close()
     await server.close()
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('Kubernetes: ~/.kube có file tên tuỳ ý, Refresh đọc file mới, xoá context (sửa file + .bak)', async () => {
+  test.setTimeout(60_000)
+  const home = mkdtempSync(join(tmpdir(), 'sh-home-'))
+  mkdirSync(join(home, '.kube'))
+  const yaml = (names: string[]): string => `apiVersion: v1
+kind: Config
+current-context: ${names[0] ?? ''}
+clusters:
+${names.map((n) => `- name: ${n}-c\n  cluster: { server: 'https://127.0.0.1:6443' }`).join('\n')}
+users:
+- name: u
+  user: { token: x }
+contexts:
+${names.map((n) => `- name: ${n}\n  context: { cluster: ${n}-c, user: u }`).join('\n')}
+`
+  const file = join(home, '.kube', 'console-stg-kubeconfig')
+  writeFileSync(file, yaml(['stg', 'old']))
+  const launched = await launchApp({ HOME: home, KUBECONFIG: '' })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    const ctx = (name: string) => page.locator(`[data-testid="k8s-context"][data-name="${name}"]`)
+    await expect(ctx('stg')).toBeVisible()
+    await expect(ctx('old')).toBeVisible()
+
+    // File mới tải về khi app đang mở → Refresh là thấy.
+    writeFileSync(join(home, '.kube', 'prod.yaml'), yaml(['prod']))
+    await page.getByTestId('k8s-refresh').click()
+    await expect(ctx('prod')).toBeVisible()
+
+    // Xoá context không dùng: file được sửa, bản cũ giữ ở .bak.
+    await ctx('old').click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Delete context…' }).click()
+    await expect(page.getByTestId('k8s-delete-context')).toContainText('console-stg-kubeconfig')
+    await page.getByTestId('k8s-delete-context-confirm').click()
+    await expect(ctx('old')).toHaveCount(0)
+    await expect(ctx('stg')).toBeVisible()
+    expect(readFileSync(file, 'utf8')).not.toContain('old-c')
+    expect(readFileSync(`${file}.bak`, 'utf8')).toContain('name: old')
+  } finally {
+    await launched.close()
+    rmSync(home, { recursive: true, force: true })
   }
 })

@@ -315,6 +315,9 @@ export const DockerLogsParams = z.object({
 export type DockerLogsParams = z.infer<typeof DockerLogsParams>
 
 /** Shell vào container (tab terminal của module). */
+/** Tên distro WSL (Ubuntu, Ubuntu-22.04…). */
+export const WSL_DISTRO = /^[\w.-]{1,64}$/
+
 export const DockerTerminalParams = z.object({
   container: Id,
   /** Lệnh thay cho shell mặc định (bash nếu có, không thì sh). */
@@ -323,9 +326,15 @@ export const DockerTerminalParams = z.object({
     .string()
     .max(64)
     .regex(/^[A-Za-z0-9_.:-]*$/)
-    .optional()
+    .optional(),
+  /** Windows: container trong Docker của distro WSL này. */
+  wsl: z.string().regex(WSL_DISTRO).optional()
 })
 export type DockerTerminalParams = z.infer<typeof DockerTerminalParams>
+
+/** Config phiên trên máy này (main phân giải): `wsl` = Docker trong distro WSL đó. */
+export const DockerSessionConfig = z.object({ wsl: z.string().regex(WSL_DISTRO).optional() })
+export type DockerSessionConfig = z.infer<typeof DockerSessionConfig>
 
 /** Config phiên trên máy này (main phân giải). */
 export const DockerLocalConfig = z.object({

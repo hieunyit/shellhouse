@@ -6,6 +6,7 @@ import type { DockerBackend, DockerCli } from './backend'
 import { CliBackend } from './cli-backend'
 import { EngineClient, type Connect } from './engine'
 import { DockerService } from './service'
+import { DockerSessionConfig } from '../shared/ops'
 
 /**
  * Phần Session Host của Docker (ADR-014 mục 6.2): nói chuyện với Engine API qua socket (máy này)
@@ -101,6 +102,51 @@ function localService(ctx: HostModuleContext): DockerService {
   })
 }
 
+/** `wsl.exe -d <distro> -e docker …` — Docker trong một bản phân phối WSL (Windows). */
+function wslCli(ctx: HostModuleContext, distro: string): DockerCli {
+  const wrap = (args: readonly string[]): string[] => ['-d', distro, '-e', 'docker', ...args]
+  return {
+    exec: (args, options) => ctx.spawn.exec('wsl', wrap(args), options),
+    spawn: (args, signal) => ctx.spawn.spawn('wsl', wrap(args), signal)
+  }
+}
+
+/**
+ * Docker trong WSL: socket của Engine nằm trong máy ảo WSL, Windows không mở được — dùng `docker`
+ * CLI trong distro (mỗi lệnh ~0,25 giây; CPU / RAM của mọi container là một lệnh `docker stats`).
+ */
+function wslService(ctx: HostModuleContext, distro: string): DockerService {
+  const cli = wslCli(ctx, distro)
+  return new DockerService({
+    cli,
+    connect: async (signal): Promise<DockerBackend> => {
+      if (!ctx.spawn.available('wsl')) throw new Error('WSL is not installed on this computer.')
+      const backend = new CliBackend(cli)
+      await backend.info(signal).catch((error: unknown) => {
+        const text = error instanceof Error ? error.message : String(error)
+        throw new Error(
+          /not installed|not found/i.test(text)
+            ? `Docker is not installed in ${distro} (WSL).`
+            : /not running|cannot connect/i.test(text)
+              ? `Docker is installed in ${distro} (WSL) but not running — start it with \`sudo service docker start\`.`
+              : text,
+          { cause: error }
+        )
+      })
+      ctx.log('info', `docker in WSL distro ${distro}`)
+      return backend
+    },
+    openPty: (args, size, cb) =>
+      ctx.spawn.openPty('wsl', ['-d', distro, '-e', 'docker', ...args], size, cb),
+    emit: (event, data) => {
+      ctx.emit(event, data)
+    },
+    log: (level, message) => {
+      ctx.log(level, message)
+    }
+  })
+}
+
 function remoteService(ctx: HostModuleContext, ssh: SshCapability): DockerService {
   const cli = sshCli(ssh)
   return new DockerService({
@@ -146,6 +192,9 @@ function remoteService(ctx: HostModuleContext, ssh: SshCapability): DockerServic
 
 export const dockerHost: HostModule = {
   manifest: dockerManifest,
-  createSession: (_kind, _config, ctx) => localService(ctx),
+  createSession: (_kind, raw, ctx) => {
+    const config = DockerSessionConfig.parse(raw ?? {})
+    return config.wsl ? wslService(ctx, config.wsl) : localService(ctx)
+  },
   attachToSsh: (ctx) => remoteService(ctx, ctx.ssh)
 }

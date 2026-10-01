@@ -5,7 +5,7 @@ import {
   openModuleTerminal,
   savedHost
 } from '../../registry/renderer-kit'
-import type { DockerEndpoint } from '../shared/ipc'
+import { wslDistroOf, type DockerEndpoint, type WslDistroInfo } from '../shared/ipc'
 import type { DockerEngineParams, DockerLogsParams } from '../shared/ops'
 
 /** IPC `module:docker:*`. */
@@ -13,17 +13,21 @@ export const dockerApi = {
   endpoints: () => invokeModule<DockerEndpoint[]>('docker', 'endpoints'),
   add: (hostId: string | null) => invokeModule<undefined>('docker', 'add', hostId),
   remove: (hostId: string | null) => invokeModule<undefined>('docker', 'remove', hostId),
+  hide: (hostId: string) => invokeModule<undefined>('docker', 'hide', hostId),
   setReadOnly: (hostId: string | null, readOnly: boolean) =>
     invokeModule<undefined>('docker', 'setReadOnly', hostId, readOnly),
+  wslDistros: () => invokeModule<WslDistroInfo[]>('docker', 'wslDistros'),
   onChanged: (listener: () => void) =>
     onModuleEvent('docker', 'changed', () => {
       listener()
     })
 }
 
-/** Tên nguồn: "This computer" hoặc nhãn host. */
+/** Tên nguồn: "This computer", "Ubuntu (WSL)" hoặc nhãn host. */
 export function sourceLabel(hostId: string | null | undefined): string {
   if (!hostId) return 'This computer'
+  const wsl = wslDistroOf(hostId)
+  if (wsl) return `${wsl} (WSL)`
   return savedHost(hostId)?.label ?? 'Server'
 }
 
@@ -71,20 +75,24 @@ export function openShell(
   container: { id: string; name: string },
   options: { command?: string[] | undefined; user?: string | undefined } = {}
 ): string {
+  const wsl = wslDistroOf(hostId)
   return openModuleTerminal(
     'docker',
     `${container.name} (${options.command?.join(' ') ?? 'shell'})`,
     {
       container: container.id,
       ...(options.command ? { command: options.command } : {}),
-      ...(options.user ? { user: options.user } : {})
+      ...(options.user ? { user: options.user } : {}),
+      ...(wsl ? { wsl } : {})
     },
-    hostId
+    // WSL: phiên module trên máy này (không phải host SSH).
+    wsl ? undefined : hostId
   )
 }
 
 /** Địa chỉ để mở cổng đã publish: localhost hoặc tên server của host SSH. */
 export function publishHost(hostId: string | undefined): string {
-  if (!hostId) return 'localhost'
+  // Máy này / WSL 2 (cổng mở trong distro dùng được qua localhost).
+  if (!hostId || wslDistroOf(hostId)) return 'localhost'
   return savedHost(hostId)?.address.split('@').pop() ?? 'localhost'
 }

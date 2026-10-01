@@ -152,8 +152,10 @@ describe('S3: đồng bộ', () => {
       expect(missing.phase).toBe('error')
       expect(missing.error).toContain('does not exist')
 
-      const done = await sync(s, { ...base, createBucket: true })
+      const done = await sync(s, { ...base, createBucket: true, concurrency: 2 })
       expect(done.phase).toBe('done')
+      expect(done.concurrency).toBe(2)
+      expect(done.active).toEqual([])
       expect(done.serverSide).toBe(false)
       expect(done.done).toMatchObject({ copied: 2, failed: 0, bytes: 20_007 })
       expect(await get(cb, 'photos-copy', '2024/a.json')).toEqual({

@@ -235,10 +235,21 @@ function startingProgress(dryRun: boolean, serverSide: boolean): S3SyncProgress 
     plan: { new: 0, update: 0, delete: 0, same: 0, bytes: 0 },
     done: { copied: 0, deleted: 0, bytes: 0, failed: 0 },
     bytesPerSecond: 0,
+    concurrency: 0,
+    active: [],
     sample: [],
     errors: [],
     error: null
   }
+}
+
+/** Thời gian còn lại theo tốc độ đã làm mượt: "3 min", "1 h 20 min"; chưa đủ dữ liệu → null. */
+function eta(p: S3SyncProgress): string | null {
+  if (p.bytesPerSecond <= 0 || p.plan.bytes <= p.done.bytes) return null
+  const s = Math.round((p.plan.bytes - p.done.bytes) / p.bytesPerSecond)
+  if (s < 60) return `${Math.max(1, s)} s`
+  if (s < 3600) return `${Math.round(s / 60)} min`
+  return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`
 }
 
 export interface SyncSource {
@@ -275,6 +286,8 @@ export function SyncDialog({
   const [destPrefix, setDestPrefix] = useState(source.prefix)
   const [mode, setMode] = useState<'copy' | 'mirror'>('copy')
   const [compare, setCompare] = useState<'etag' | 'size'>('etag')
+  /** 0 = theo cài đặt (Settings → Modules → S3 storage). */
+  const [threads, setThreads] = useState(0)
   const [progress, setProgress] = useState<S3SyncProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const jobId = useRef<string | null>(null)
@@ -340,12 +353,14 @@ export function SyncDialog({
         },
         mirror: mode === 'mirror',
         compare,
+        ...(threads ? { concurrency: threads } : {}),
         createBucket: willCreate,
         dryRun
       })) as string
       jobId.current = id
       setProgress(startingProgress(dryRun, sameAccount))
-      for (let wait = 100; alive.current && jobId.current === id; wait = Math.min(500, wait * 2)) {
+      // Hỏi sớm (bucket nhỏ xong ngay), rồi đều đặn ~3 lần / giây cho thanh tiến độ mượt.
+      for (let wait = 100; alive.current && jobId.current === id; wait = Math.min(300, wait * 2)) {
         await sleep(wait)
         const p = (await run({ op: 'syncPoll', id })) as S3SyncProgress
         if (!isAlive()) return
@@ -544,17 +559,38 @@ export function SyncDialog({
               />
             </div>
           </Field>
-          <Field label="Changed means">
-            <Select
-              value={compare}
-              onChange={(e) => {
-                setCompare(e.target.value as 'etag' | 'size')
-              }}
+          <div className="grid grid-cols-[2fr_1fr] gap-3">
+            <Field label="Changed means">
+              <Select
+                value={compare}
+                onChange={(e) => {
+                  setCompare(e.target.value as 'etag' | 'size')
+                }}
+              >
+                <option value="etag">Different size or checksum (ETag)</option>
+                <option value="size">Different size only (faster for very large uploads)</option>
+              </Select>
+            </Field>
+            <Field
+              label="Parallel transfers"
+              hint={threads ? undefined : 'From Settings → Modules → S3 storage'}
             >
-              <option value="etag">Different size or checksum (ETag)</option>
-              <option value="size">Different size only (faster for very large uploads)</option>
-            </Select>
-          </Field>
+              <Select
+                data-testid="s3-sync-threads"
+                value={String(threads)}
+                onChange={(e) => {
+                  setThreads(Number(e.target.value))
+                }}
+              >
+                <option value="0">Auto</option>
+                {[1, 2, 4, 8, 16, 32, 64].map((n) => (
+                  <option key={n} value={n}>
+                    {n} at a time
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
           <p className="text-xs text-faint">
             {sameAccount
               ? 'Same account: objects are copied on the server — nothing goes through this computer.'
@@ -611,10 +647,38 @@ export function SyncDialog({
                   {p.done.failed ? ` · ${p.done.failed.toLocaleString('en')} failed` : ''}
                 </span>
                 <span>
-                  {formatSize(p.done.bytes)}
+                  {formatSize(p.done.bytes)} / {formatSize(p.plan.bytes)}
                   {p.bytesPerSecond ? ` · ${formatSize(p.bytesPerSecond)}/s` : ''}
+                  {p.phase === 'copying' && eta(p) ? ` · ${eta(p)} left` : ''}
                 </span>
               </div>
+              {p.phase === 'copying' && p.active.length > 0 && (
+                <div className="mt-1 flex flex-col gap-1" data-testid="s3-sync-active">
+                  <span className="text-[11px] text-faint">
+                    {p.concurrency} at a time{p.serverSide ? ' · copied on the server' : ''}
+                  </span>
+                  {p.active.map((a) => (
+                    <div key={a.key} className="flex items-center gap-2 text-xs">
+                      <span className="min-w-0 flex-1 truncate font-mono text-muted" title={a.key}>
+                        {a.key}
+                      </span>
+                      {!p.serverSide && a.size > 0 && (
+                        <span className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-subtle">
+                          <span
+                            className="block h-full bg-accent-solid"
+                            style={{
+                              width: `${Math.min(100, Math.round((a.done / a.size) * 100))}%`
+                            }}
+                          />
+                        </span>
+                      )}
+                      <span className="w-16 shrink-0 text-right text-faint tabular-nums">
+                        {formatSize(a.size)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {p?.error && <Notice tone="danger">{p.error}</Notice>}
@@ -629,7 +693,7 @@ export function SyncDialog({
               ))}
             </div>
           )}
-          {p && p.sample.length > 0 && (planned || p.phase === 'copying') && (
+          {p && p.sample.length > 0 && planned && (
             <div className="max-h-64 overflow-auto rounded-md border border-line">
               {p.sample.map((it) => (
                 <div

@@ -2,7 +2,7 @@ import type { ZodType } from 'zod'
 import type { AppSettings, ModuleEntry, SettingsPatch } from '@shared/settings'
 import type { Db } from '../../main/store/db'
 import type { Vault } from '../../main/vault/vault'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { homedir } from 'node:os'
 import { createModuleDb, migrateModule, removeModuleData } from './main-db'
@@ -35,6 +35,8 @@ export interface MainRegistryDeps {
     filters?: { name: string; extensions: string[] }[]
     multiple?: boolean
   }): Promise<string[]>
+  /** Windows: bản phân phối WSL (không khởi động distro nào). */
+  listWslDistros?(): Promise<{ name: string; running: boolean; version: number }[]>
   /** Cho test: home / biến môi trường khi kiểm quyền đọc file. */
   home?: string
   env?: NodeJS.ProcessEnv
@@ -151,17 +153,37 @@ export class MainModuleRegistry {
   }
 
   /**
-   * Module đang TẮT có dấu hiệu trên máy này (kubeconfig, socket Docker…) — để gợi ý bật (3.12.4).
-   * Chỉ kiểm file có tồn tại, không đọc nội dung.
+   * Module đang TẮT có dấu hiệu trên máy này (kubeconfig, socket Docker, Docker trong WSL…) — để
+   * gợi ý bật (3.12.4). Chỉ kiểm file có tồn tại, không đọc nội dung; WSL chỉ hỏi distro đang chạy
+   * (không khởi động distro nào).
    */
-  detectLocal(exists: (path: string) => boolean, home: string): string[] {
+  async detectLocal(
+    exists: (path: string) => boolean,
+    home: string,
+    wsl: { running: () => Promise<string[]>; exists: (distro: string, path: string) => boolean } = {
+      running: () => Promise.resolve([]),
+      exists: () => false
+    }
+  ): Promise<string[]> {
     const expand = (p: string): string => (p.startsWith('~/') ? `${home}${p.slice(1)}` : p)
-    return [...this.modules.values()]
-      .filter((m) => !this.active.has(m.manifest.id))
-      .filter((m) =>
-        (m.manifest.detect ?? []).some((d) => d.on === 'startup' && exists(expand(d.path)))
-      )
-      .map((m) => m.manifest.id)
+    let distros: Promise<string[]> | null = null
+    const out: string[] = []
+    for (const m of this.modules.values()) {
+      if (this.active.has(m.manifest.id)) continue
+      for (const d of m.manifest.detect ?? []) {
+        if (d.on !== 'startup') continue
+        if (d.probe === 'wsl-file') distros ??= wsl.running().catch(() => [])
+        const hit =
+          d.probe === 'wsl-file'
+            ? (await (distros ?? Promise.resolve([]))).some((name) => wsl.exists(name, d.path))
+            : exists(expand(d.path))
+        if (hit) {
+          out.push(m.manifest.id)
+          break
+        }
+      }
+    }
+    return out
   }
 
   resolveSession(id: string, sessionKind: string, params: unknown): unknown {
@@ -304,6 +326,30 @@ export class MainModuleRegistry {
           )
         return readFile(expandHome(path, ctx.home), 'utf8')
       },
+      writeFile: async (path, content) => {
+        const ctx = {
+          home: this.deps.home ?? homedir(),
+          env: this.deps.env ?? process.env,
+          platform: process.platform
+        }
+        if (!localPathAllowed(module.manifest, 'write-file', path, ctx))
+          throw new Error(
+            `Module ${id} is not allowed to change ${path} (not declared in its manifest)`
+          )
+        const target = expandHome(path, ctx.home)
+        const mode = await stat(target).then(
+          (s) => s.mode & 0o777,
+          () => 0o600
+        )
+        const temp = join(dirname(target), `.${basename(target)}.${process.pid}.tmp`)
+        await writeFile(temp, content, { mode })
+        try {
+          await rename(temp, target)
+        } catch (error) {
+          await rm(temp, { force: true })
+          throw error
+        }
+      },
       readDir: async (path) => {
         const ctx = {
           home: this.deps.home ?? homedir(),
@@ -321,6 +367,13 @@ export class MainModuleRegistry {
           if (info) out.push({ name: e.name, path: full, size: info.size })
         }
         return out
+      },
+      wslDistros: async () => {
+        if (
+          !module.manifest.permissions.some((p) => p.kind === 'run-program' && p.binary === 'wsl')
+        )
+          throw new Error(`Module ${id} did not declare running "wsl"`)
+        return this.deps.listWslDistros ? this.deps.listWslDistros() : []
       },
       pickFiles: async (options) => {
         if (!module.manifest.permissions.some((p) => p.kind === 'pick-file'))

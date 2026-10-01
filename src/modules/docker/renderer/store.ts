@@ -1,18 +1,25 @@
 import { create } from 'zustand'
-import type { DockerEndpoint } from '../shared/ipc'
+import type { DockerEndpoint, WslDistroInfo } from '../shared/ipc'
 import { dockerApi } from './api'
 
 interface DockerStore {
   endpoints: DockerEndpoint[]
+  /** Windows: bản phân phối WSL (Docker có thể chạy trong đó); máy khác: []. */
+  wsl: WslDistroInfo[]
   loaded: boolean
   reload: () => Promise<void>
 }
 
 export const useDocker = create<DockerStore>((set) => ({
   endpoints: [],
+  wsl: [],
   loaded: false,
   reload: async () => {
-    set({ endpoints: await dockerApi.endpoints(), loaded: true })
+    const [endpoints, wsl] = await Promise.all([
+      dockerApi.endpoints(),
+      dockerApi.wslDistros().catch(() => [])
+    ])
+    set({ endpoints, wsl, loaded: true })
   }
 }))
 

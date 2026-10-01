@@ -49,6 +49,7 @@ import { DeviceKeyStore } from './vault/device-key'
 import { electronProtector } from './vault/electron-protector'
 import { registerSecurityIpc } from './vault/security-ipc'
 import { Updater } from './updater'
+import { listWslDistros, wslFileExists, type WslDistro } from './wsl'
 
 log.initialize()
 log.transports.file.level = 'info'
@@ -95,6 +96,13 @@ const testDetect: string[] | null = (() => {
   const parsed: unknown = JSON.parse(process.env['SHELLHOUSE_TEST_DETECT'] ?? '[]')
   return Array.isArray(parsed) ? parsed.filter((p): p is string => typeof p === 'string') : []
 })()
+/** Chỉ cho E2E: danh sách distro WSL giả (máy test không phải Windows). */
+const testWsl: WslDistro[] | null = (() => {
+  const raw = testHooks ? process.env['SHELLHOUSE_TEST_WSL'] : undefined
+  return raw ? (JSON.parse(raw) as WslDistro[]) : null
+})()
+const wslDistros = (): Promise<WslDistro[]> =>
+  testWsl ? Promise.resolve(testWsl) : listWslDistros()
 let db: Db | null = null
 let vault: Vault | null = null
 let knownHosts: KnownHosts | null = null
@@ -507,7 +515,12 @@ function registerIpc(): void {
   handle('modules:detectLocal', isTrustedSender, () =>
     requireModules().detectLocal(
       testDetect ? (p) => testDetect.includes(p) : existsSync,
-      app.getPath('home')
+      app.getPath('home'),
+      {
+        running: async () => (await wslDistros()).filter((d) => d.running).map((d) => d.name),
+        // E2E: "wsl:<distro>:<đường dẫn>" trong SHELLHOUSE_TEST_DETECT = file có trong distro.
+        exists: testDetect ? (d, p) => testDetect.includes(`wsl:${d}:${p}`) : wslFileExists
+      }
     )
   )
   handle('history:list', isTrustedSender, (target) => requireHistory().list(target))
@@ -671,6 +684,7 @@ if (!app.requestSingleInstanceLock()) {
       log: (level, message) => {
         log[level](`[modules] ${message}`)
       },
+      listWslDistros: wslDistros,
       showOpenDialog: async (options) => {
         const properties: ('openFile' | 'multiSelections' | 'showHiddenFiles')[] = options.multiple
           ? ['openFile', 'multiSelections', 'showHiddenFiles']

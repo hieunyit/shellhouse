@@ -9,11 +9,22 @@ export const dockerManifest: ModuleManifest = {
     'any server you reach with SSH. Shellhouse talks to the Docker socket through the SSH ' +
     'connection, so nothing has to be exposed on the network and nothing is installed on the ' +
     'server.\n\n' +
+    'On Windows, Docker running inside WSL (Ubuntu, Debian…) is listed too.\n\n' +
     'Follow logs, watch CPU and memory, open a shell inside a container as a terminal tab, ' +
     'restart or remove containers, pull and prune images. Turn on read-only mode for production ' +
     'servers to hide every action that changes something.',
   category: 'containers',
-  keywords: ['docker', 'container', 'compose', 'podman', 'image', 'colima', 'orbstack', 'moby'],
+  keywords: [
+    'docker',
+    'container',
+    'compose',
+    'podman',
+    'image',
+    'colima',
+    'orbstack',
+    'moby',
+    'wsl'
+  ],
   source: 'builtin',
   since: '1.2.0',
   permissions: [
@@ -36,18 +47,21 @@ export const dockerManifest: ModuleManifest = {
     { kind: 'local-socket', path: '/run/user/*/docker.sock' },
     { kind: 'local-socket', path: '/run/user/*/podman/podman.sock' },
     { kind: 'local-socket', path: '\\\\.\\pipe\\docker_engine' },
-    { kind: 'run-program', binary: 'docker' }
+    { kind: 'run-program', binary: 'docker' },
+    { kind: 'run-program', binary: 'wsl' }
   ],
   detect: [
     { on: 'ssh-connected', probe: 'unix-socket', path: '/var/run/docker.sock' },
     { on: 'startup', probe: 'local-socket', path: '/var/run/docker.sock' },
     { on: 'startup', probe: 'local-socket', path: '~/.docker/run/docker.sock' },
-    { on: 'startup', probe: 'local-socket', path: '~/.orbstack/run/docker.sock' }
+    { on: 'startup', probe: 'local-socket', path: '~/.orbstack/run/docker.sock' },
+    { on: 'startup', probe: 'local-socket', path: '\\\\.\\pipe\\docker_engine' },
+    { on: 'startup', probe: 'wsl-file', path: '/usr/bin/docker' }
   ],
   version: 1,
   icon: 'container',
   enabledByDefault: false,
-  binaries: ['docker'],
+  binaries: ['docker', 'wsl'],
   contributes: {
     sidebarSection: true,
     tabKinds: ['engine', 'logs'],

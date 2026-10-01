@@ -286,8 +286,10 @@ test('S3: export danh sách bucket (CSV) và đồng bộ sang tài khoản khá
     await page.getByTestId('s3-export-submit').click()
     await expect(page.getByTestId('s3-export-done')).toContainText('buckets.csv')
     const csv = readFileSync(csvPath, 'utf8')
-    expect(csv.split('\r\n')[0]).toBe('﻿Account,Bucket,Region,Created,Objects,Size (bytes)')
-    expect(csv).toMatch(/\r\nSource,photos,[^,]*,[^,]+,2,7\r\n/)
+    expect(csv.split('\r\n')[0]).toBe(
+      '\uFEFFAccount,Bucket,Region,Created,Objects,Size,Size (bytes)'
+    )
+    expect(csv).toMatch(/\r\nSource,photos,[^,]*,[^,]+,2,7 B,7\r\n/)
     await page.getByRole('button', { name: 'Done' }).click()
 
     // Đồng bộ photos → tài khoản Backup, bucket mới (tự tạo), xem trước trước khi chạy.

@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, Container, Eye, Laptop, Plus, Server, Trash2 } from 'lucide-react'
+import {
+  ChevronRight,
+  Container,
+  Eye,
+  Laptop,
+  Plus,
+  RefreshCw,
+  Server,
+  SquareTerminal,
+  Trash2
+} from 'lucide-react'
 import { cx, IconButton } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
 import { useSavedHosts } from '../../registry/renderer-kit'
+import { wslDistroOf, wslSource } from '../shared/ipc'
 import { dockerApi, openDocker, sourceLabel } from './api'
 import { useDocker } from './store'
 
@@ -12,6 +23,7 @@ import { useDocker } from './store'
  */
 export function DockerSection(): React.JSX.Element {
   const endpoints = useDocker((s) => s.endpoints)
+  const wsl = useDocker((s) => s.wsl)
   const hosts = useSavedHosts()
   const [open, setOpen] = useState(true)
   const { menu, open: openMenu } = useContextMenu()
@@ -20,13 +32,27 @@ export function DockerSection(): React.JSX.Element {
     void useDocker.getState().reload()
   }, [])
 
-  // "This computer" luôn có; host SSH theo danh sách đã thêm (bỏ host đã xoá).
+  // "This computer" luôn có; WSL: distro đang chạy + distro đã thêm; host SSH theo danh sách đã
+  // thêm (bỏ host đã xoá).
   const remote = endpoints.filter((e) => e.hostId && hosts.some((h) => h.id === e.hostId))
   const local = endpoints.find((e) => e.hostId === null)
+  const hidden = new Set(endpoints.filter((e) => e.hidden).map((e) => e.hostId))
+  const wslRows = wsl
+    .filter((d) => {
+      const key = wslSource(d.name)
+      if (hidden.has(key)) return false
+      return d.running || endpoints.some((e) => e.hostId === key)
+    })
+    .map((d) => {
+      const key = wslSource(d.name)
+      return { hostId: key, readOnly: endpoints.find((e) => e.hostId === key)?.readOnly ?? false }
+    })
   const rows = [
     { hostId: null, readOnly: local?.readOnly ?? false },
+    ...wslRows,
     ...remote.map((e) => ({ hostId: e.hostId, readOnly: e.readOnly }))
   ]
+  const addableWsl = wsl.filter((d) => !wslRows.some((r) => r.hostId === wslSource(d.name)))
   const addable = hosts.filter(
     (h) => h.protocol === 'ssh' && !remote.some((e) => e.hostId === h.id)
   )
@@ -49,10 +75,11 @@ export function DockerSection(): React.JSX.Element {
           'separator' as const,
           {
             id: 'docker-remove',
-            label: 'Remove from Docker',
+            label: wslDistroOf(hostId) ? 'Hide from Docker' : 'Remove from Docker',
             icon: <Trash2 size={14} />,
             danger: true,
-            onSelect: () => void dockerApi.remove(hostId)
+            onSelect: () =>
+              void (wslDistroOf(hostId) ? dockerApi.hide(hostId) : dockerApi.remove(hostId))
           }
         ]
       : [])
@@ -77,13 +104,30 @@ export function DockerSection(): React.JSX.Element {
           <span className="flex-1 text-left">Docker</span>
         </button>
         <IconButton
+          label="Refresh (find WSL distributions again)"
+          size="sm"
+          data-testid="docker-refresh-sources"
+          onClick={() => void useDocker.getState().reload()}
+        >
+          <RefreshCw size={12} />
+        </IconButton>
+        <IconButton
           label="Add a server"
           size="sm"
           data-testid="docker-add-server"
           onClick={(e) => {
-            openMenu(
-              e,
-              addable.length === 0
+            const entries: MenuEntry[] = [
+              ...addableWsl.map((d) => ({
+                id: `docker-add-wsl-${d.name}`,
+                label: `${d.name} (WSL)`,
+                hint: d.running ? 'running' : 'stopped',
+                icon: <SquareTerminal size={14} />,
+                onSelect: () => {
+                  void dockerApi.add(wslSource(d.name))
+                }
+              })),
+              ...(addableWsl.length ? ['separator' as const] : []),
+              ...(addable.length === 0
                 ? [
                     {
                       id: 'none',
@@ -100,8 +144,9 @@ export function DockerSection(): React.JSX.Element {
                     onSelect: () => {
                       void dockerApi.add(h.id)
                     }
-                  }))
-            )
+                  })))
+            ]
+            openMenu(e, entries)
           }}
         >
           <Plus size={13} />
@@ -125,7 +170,9 @@ export function DockerSection(): React.JSX.Element {
               openMenu(e, rowMenu(r.hostId, r.readOnly))
             }}
           >
-            {r.hostId ? (
+            {wslDistroOf(r.hostId) ? (
+              <SquareTerminal size={14} className="shrink-0 text-muted" />
+            ) : r.hostId ? (
               <Server size={14} className="shrink-0 text-muted" />
             ) : (
               <Laptop size={14} className="shrink-0 text-muted" />

@@ -34,8 +34,11 @@ export class SyncJob {
   private readonly progress: S3SyncProgress
   private readonly sourcePrefix: string
   private readonly destPrefix: string
-  private windowStart = Date.now()
-  private windowBytes = 0
+  /** Đo tốc độ: mẫu mỗi ≥ 500 ms, làm mượt bằng trung bình trượt (không nhảy giật). */
+  private sampleAt = Date.now()
+  private sampleBytes = 0
+  private lastByteAt = 0
+  private readonly active = new Map<string, { size: number; done: number }>()
   finished = false
 
   constructor(
@@ -59,6 +62,8 @@ export class SyncJob {
       plan: { new: 0, update: 0, delete: 0, same: 0, bytes: 0 },
       done: { copied: 0, deleted: 0, bytes: 0, failed: 0 },
       bytesPerSecond: 0,
+      concurrency: op.concurrency ?? env.concurrency,
+      active: [],
       sample: [],
       errors: [],
       error: null
@@ -68,10 +73,11 @@ export class SyncJob {
   snapshot(): S3SyncProgress {
     const p = this.progress
     // Tốc độ về 0 nếu vài giây không có byte nào (đang copy object lớn trên server…).
-    const idle = Date.now() - this.windowStart > 3000
+    const idle = Date.now() - this.lastByteAt > 3000
     return {
       ...p,
       bytesPerSecond: idle ? 0 : p.bytesPerSecond,
+      active: [...this.active].slice(0, 8).map(([key, a]) => ({ key, size: a.size, done: a.done })),
       scanned: { ...p.scanned },
       plan: { ...p.plan },
       done: { ...p.done },
@@ -127,16 +133,20 @@ export class SyncJob {
         return
       }
       p.phase = 'copying'
-      this.windowStart = Date.now()
+      this.sampleAt = Date.now()
       const copies = items.filter((it) => it.action !== 'delete')
-      await mapLimit(copies, this.env.concurrency, async (it) => {
+      await mapLimit(copies, p.concurrency, async (it) => {
         if (signal.aborted) return
+        const entry = { size: it.size, done: 0 }
+        this.active.set(it.rel, entry)
         try {
-          await this.copyOne(it.rel, it.size)
+          await this.copyOne(it.rel, it.size, entry)
           p.done.copied++
           if (this.env.serverSide) this.count(it.size)
         } catch (error) {
           if (!this.stopped()) this.fail(it.rel, error)
+        } finally {
+          this.active.delete(it.rel)
         }
       })
       const deletes = items.filter((it) => it.action === 'delete').map((it) => it.rel)
@@ -212,7 +222,7 @@ export class SyncJob {
     return out
   }
 
-  private async copyOne(rel: string, size: number): Promise<void> {
+  private async copyOne(rel: string, size: number, entry: { done: number }): Promise<void> {
     const signal = this.abort.signal
     const from = { bucket: this.op.bucket, key: this.sourcePrefix + rel }
     const to = { bucket: this.op.dest.bucket, key: this.destPrefix + rel }
@@ -228,6 +238,7 @@ export class SyncJob {
     )
     const body = got.Body as Readable
     body.on('data', (chunk: Buffer) => {
+      entry.done += chunk.length
       this.count(chunk.length)
     })
     const upload = new Upload({
@@ -280,12 +291,16 @@ export class SyncJob {
     const p = this.progress
     p.done.bytes += bytes
     const now = Date.now()
-    if (now - this.windowStart >= 1000) {
+    this.lastByteAt = now
+    const elapsed = now - this.sampleAt
+    if (elapsed >= 500) {
+      const instant = ((p.done.bytes - this.sampleBytes) * 1000) / elapsed
+      // Mẫu đầu lấy luôn; sau đó 30% mẫu mới + 70% giá trị cũ.
       p.bytesPerSecond = Math.round(
-        ((p.done.bytes - this.windowBytes) * 1000) / (now - this.windowStart)
+        p.bytesPerSecond === 0 ? instant : p.bytesPerSecond * 0.7 + instant * 0.3
       )
-      this.windowStart = now
-      this.windowBytes = p.done.bytes
+      this.sampleAt = now
+      this.sampleBytes = p.done.bytes
     }
   }
 

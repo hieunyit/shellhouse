@@ -21,7 +21,7 @@ const EXTRA_DIRS: Partial<Record<NodeJS.Platform, readonly string[]>> = {
     '/Applications/Docker.app/Contents/Resources/bin'
   ],
   linux: ['/usr/local/bin', '/usr/bin', '/snap/bin'],
-  win32: ['C:\\Program Files\\Docker\\Docker\\resources\\bin']
+  win32: ['C:\\Program Files\\Docker\\Docker\\resources\\bin', 'C:\\Windows\\System32']
 }
 
 export function findProgram(name: string, env: NodeJS.ProcessEnv = process.env): string | null {

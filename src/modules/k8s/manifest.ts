@@ -31,6 +31,8 @@ export const k8sManifest: ModuleManifest = {
   permissions: [
     { kind: 'read-file', path: '~/.kube/**' },
     { kind: 'read-file', path: '$KUBECONFIG' },
+    { kind: 'write-file', path: '~/.kube/**' },
+    { kind: 'write-file', path: '$KUBECONFIG' },
     { kind: 'read-file', path: '~/.minikube/**' },
     {
       kind: 'pick-file',
@@ -44,7 +46,8 @@ export const k8sManifest: ModuleManifest = {
     { kind: 'ssh-tunnel' },
     { kind: 'secrets', detail: 'Stores kubeconfigs you import encrypted in the vault' }
   ],
-  detect: [{ on: 'startup', probe: 'local-file', path: '~/.kube/config' }],
+  // Thư mục ~/.kube (file có thể không tên "config" — vd. kubeconfig tải từ Rancher / cloud).
+  detect: [{ on: 'startup', probe: 'local-file', path: '~/.kube' }],
   version: 1,
   icon: 'ship',
   enabledByDefault: false,

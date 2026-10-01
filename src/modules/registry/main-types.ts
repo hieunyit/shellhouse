@@ -70,8 +70,15 @@ export interface MainModuleContext {
   events: { emit(name: string, data: unknown): void }
   /** Đọc file trên máy — chỉ đường dẫn khai báo trong quyền `read-file` (kubeconfig…). */
   readFile(path: string): Promise<string>
+  /**
+   * Ghi đè file trên máy — chỉ đường dẫn khai báo trong quyền `write-file`. Ghi an toàn: file tạm
+   * cùng thư mục rồi đổi tên (không bao giờ để lại file ghi dở); giữ quyền truy cập của file cũ.
+   */
+  writeFile(path: string, content: string): Promise<void>
   /** Liệt kê file (không đệ quy) trong thư mục khai báo trong quyền `read-file`. */
   readDir(path: string): Promise<{ name: string; path: string; size: number }[]>
+  /** Windows: bản phân phối WSL (cần quyền chạy `wsl`); máy khác → []. */
+  wslDistros(): Promise<{ name: string; running: boolean; version: number }[]>
   /** Hộp thoại chọn file (cần quyền `pick-file`); huỷ → []. */
   pickFiles(options: {
     title: string

@@ -14,6 +14,7 @@ import { ContextRef, contextKey, type ContextInfo } from '../shared/ops'
 import m0001 from '../migrations/0001_contexts.sql?raw'
 import m0002 from '../migrations/0002_hidden.sql?raw'
 import {
+  deleteContextFromYaml,
   embedReferences,
   listContexts,
   parseKubeconfig,
@@ -220,6 +221,40 @@ class Kubeconfigs {
     this.ctx.db.prepare('DELETE FROM k8s_kubeconfigs WHERE id = ?').run(id)
   }
 
+  /**
+   * Xoá một context: bản import → sửa bản trong vault (hết context thì xoá cả bản import); file
+   * trong ~/.kube / KUBECONFIG → sửa file như `kubectl config delete-context`, giữ bản sao
+   * `<file>.bak` (nội dung trước khi xoá). Cài đặt riêng của context cũng bị xoá.
+   */
+  async deleteContext(ref: ContextRef): Promise<{ backup: string | null }> {
+    let backup: string | null = null
+    if (ref.source.startsWith('imported:')) {
+      const id = ref.source.slice('imported:'.length)
+      const row = this.imported().find((r) => r.id === id)
+      if (!row) throw new Error('This imported kubeconfig was removed')
+      const { text, left } = deleteContextFromYaml(this.open(row), ref.context)
+      if (left === 0) this.removeImported(id)
+      else
+        this.ctx.db
+          .prepare('UPDATE k8s_kubeconfigs SET yaml_enc = ? WHERE id = ?')
+          .run(this.ctx.secrets.seal('k8s_kubeconfigs', id, 'yaml_enc', text), id)
+    } else if (ref.source.startsWith('file:')) {
+      const path = expand(ref.source.slice('file:'.length))
+      if (!(await this.files()).includes(path))
+        throw new Error('This kubeconfig is no longer in KUBECONFIG or ~/.kube')
+      const original = await this.ctx.readFile(path)
+      const { text } = deleteContextFromYaml(original, ref.context)
+      // Bản sao cạnh file (trong ~/.kube); file ở chỗ khác (KUBECONFIG) chỉ được ghi chính nó.
+      backup = await this.ctx.writeFile(`${path}.bak`, original).then(
+        () => `${path}.bak`,
+        () => null
+      )
+      await this.ctx.writeFile(path, text)
+    } else throw new Error('Unknown kubeconfig source')
+    this.ctx.db.prepare('DELETE FROM k8s_contexts WHERE key = ?').run(contextKey(ref))
+    return { backup }
+  }
+
   /** Phân giải context cho Session Host (đọc file tham chiếu, giải mã bản import). */
   async resolve(ref: ContextRef): Promise<unknown> {
     if (ref.source.startsWith('file:')) {
@@ -276,6 +311,16 @@ export const k8sMain: MainModule = {
     ctx.ipc.handle('renameImported', K8sIpc.renameImported, (id, name) => {
       configs.renameImported(id, name)
       changed()
+    })
+    ctx.ipc.handle('deleteContext', K8sIpc.deleteContext, async (ref) => {
+      try {
+        const r = await configs.deleteContext(ref)
+        return { ok: true, backup: r.backup }
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : String(error) }
+      } finally {
+        changed()
+      }
     })
     ctx.ipc.handle('removeImported', K8sIpc.removeImported, (id) => {
       configs.removeImported(id)

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tempDir } from './helpers'
 import { describe, expect, it } from 'vitest'
@@ -230,9 +230,30 @@ describe('MainModuleRegistry', () => {
     }
     const { registry } = await setup([detecting])
     const exists = (p: string): boolean => p === '/home/u/.kube/config'
-    expect(registry.detectLocal(exists, '/home/u')).toEqual(['kube'])
+    expect(await registry.detectLocal(exists, '/home/u')).toEqual(['kube'])
     registry.setEnabled('kube', true)
-    expect(registry.detectLocal(exists, '/home/u')).toEqual([])
+    expect(await registry.detectLocal(exists, '/home/u')).toEqual([])
+  })
+
+  it('dò dấu hiệu trong WSL: chỉ distro đang chạy, file theo đường dẫn Linux', async () => {
+    const detecting: MainModule = {
+      ...fakeModule('dock'),
+      manifest: manifest('dock', {
+        detect: [{ on: 'startup', probe: 'wsl-file', path: '/usr/bin/docker' }]
+      })
+    }
+    const { registry } = await setup([detecting])
+    const asked: string[] = []
+    const wsl = (running: string[]) => ({
+      running: () => Promise.resolve(running),
+      exists: (d: string, p: string) => {
+        asked.push(`${d}:${p}`)
+        return d === 'Ubuntu' && p === '/usr/bin/docker'
+      }
+    })
+    expect(await registry.detectLocal(() => false, '/home/u', wsl(['Ubuntu']))).toEqual(['dock'])
+    expect(await registry.detectLocal(() => false, '/home/u', wsl(['Debian']))).toEqual([])
+    expect(asked).toEqual(['Ubuntu:/usr/bin/docker', 'Debian:/usr/bin/docker'])
   })
 })
 
@@ -281,7 +302,8 @@ describe('ctx.pickFiles / readDir', () => {
       manifest: manifest('pick', {
         permissions: [
           { kind: 'pick-file', detail: 'x' },
-          { kind: 'read-file', path: '~/.kube/**' }
+          { kind: 'read-file', path: '~/.kube/**' },
+          { kind: 'write-file', path: '~/.kube/**' }
         ]
       })
     }
@@ -318,5 +340,15 @@ describe('ctx.pickFiles / readDir', () => {
       'dev.yaml'
     ])
     await expect(ctx?.readFile(join(elsewhere, 'picked.yaml'))).rejects.toThrow(/not allowed/)
+
+    // writeFile: chỉ theo quyền write-file; ghi qua file tạm (không còn file .tmp nào).
+    await ctx?.writeFile('~/.kube/config', 'changed')
+    expect(readFileSync(join(home, '.kube', 'config'), 'utf8')).toBe('changed')
+    expect(readdirSync(join(home, '.kube')).filter((n) => n.endsWith('.tmp'))).toEqual([])
+    await expect(ctx?.writeFile(join(elsewhere, 'picked.yaml'), 'x')).rejects.toThrow(
+      /not allowed to change/
+    )
+    await expect(ctx?.writeFile('~/.kube/../.bashrc', 'x')).rejects.toThrow(/not allowed/)
+    await expect(plain.ctx?.writeFile('~/.kube/config', 'x')).rejects.toThrow(/not allowed/)
   })
 })

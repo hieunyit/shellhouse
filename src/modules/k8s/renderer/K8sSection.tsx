@@ -5,6 +5,8 @@ import {
   Eye,
   EyeOff,
   FileInput,
+  FileX,
+  RefreshCw,
   Settings2,
   Ship,
   Trash2
@@ -53,11 +55,30 @@ export function K8sSection(): React.JSX.Element {
   const [open, setOpen] = useState(true)
   const [importing, setImporting] = useState(false)
   const [editing, setEditing] = useState<ContextEntry | null>(null)
+  const [deleting, setDeleting] = useState<ContextEntry | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const { menu, open: openMenu } = useContextMenu()
 
+  // Đọc lại ~/.kube khi mở và mỗi lần quay lại cửa sổ (kubeconfig mới tải về / kubectl vừa sửa).
   useEffect(() => {
-    void useK8s.getState().reload()
+    const reload = (): void => {
+      void useK8s.getState().reload()
+    }
+    reload()
+    window.addEventListener('focus', reload)
+    return () => {
+      window.removeEventListener('focus', reload)
+    }
   }, [])
+  const refresh = (): void => {
+    setRefreshing(true)
+    void useK8s
+      .getState()
+      .reload()
+      .finally(() => {
+        setRefreshing(false)
+      })
+  }
 
   return (
     <div className="mt-2 border-t border-line pt-2" data-testid="k8s-section">
@@ -77,6 +98,14 @@ export function K8sSection(): React.JSX.Element {
           <Ship size={12} />
           <span className="flex-1 text-left">Kubernetes</span>
         </button>
+        <IconButton
+          label="Refresh (read ~/.kube again)"
+          size="sm"
+          data-testid="k8s-refresh"
+          onClick={refresh}
+        >
+          <RefreshCw size={12} className={cx(refreshing && 'animate-spin')} />
+        </IconButton>
         <IconButton
           label="Add clusters"
           size="sm"
@@ -185,9 +214,18 @@ export function K8sSection(): React.JSX.Element {
                     setEditing(c)
                   }
                 },
+                'separator',
+                {
+                  id: 'delete',
+                  label: 'Delete context…',
+                  icon: <FileX size={14} />,
+                  danger: true,
+                  onSelect: () => {
+                    setDeleting(c)
+                  }
+                },
                 ...(c.ref.source.startsWith('imported:')
                   ? [
-                      'separator' as const,
                       {
                         id: 'remove',
                         label: 'Remove imported kubeconfig',
@@ -230,6 +268,14 @@ export function K8sSection(): React.JSX.Element {
         <ImportDialog
           onClose={() => {
             setImporting(false)
+          }}
+        />
+      )}
+      {deleting && (
+        <DeleteContextDialog
+          context={deleting}
+          onClose={() => {
+            setDeleting(null)
           }}
         />
       )}
@@ -416,6 +462,84 @@ function ContextDialog({
             setReadOnly(e.target.checked)
           }}
         />
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * Xoá một context không dùng nữa: bản import → khỏi vault; file kubeconfig → sửa file như
+ * `kubectl config delete-context` (giữ bản .bak). Cluster thật không bị đụng tới.
+ */
+function DeleteContextDialog({
+  context,
+  onClose
+}: {
+  context: ContextEntry
+  onClose: () => void
+}): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const imported = context.ref.source.startsWith('imported:')
+  const file = imported ? null : context.ref.source.slice('file:'.length)
+  const submit = (): void => {
+    setBusy(true)
+    setError(null)
+    k8sApi.deleteContext(context.ref).then(
+      (r) => {
+        setBusy(false)
+        if (r.ok) onClose()
+        else setError(r.message)
+      },
+      (e: unknown) => {
+        setBusy(false)
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    )
+  }
+  return (
+    <Modal
+      title={`Delete context “${context.name}”?`}
+      onClose={onClose}
+      width="max-w-md"
+      testId="k8s-delete-context"
+      footer={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="danger"
+            disabled={busy}
+            data-testid="k8s-delete-context-confirm"
+            onClick={submit}
+          >
+            {busy ? 'Deleting…' : 'Delete'}
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-2 text-[13px]">
+        {imported ? (
+          <p>
+            Removes it from <strong>{context.sourceLabel}</strong> (stored in your vault). Its
+            cluster and user entries go too if nothing else uses them.
+          </p>
+        ) : (
+          <>
+            <p>
+              Removes it from <span className="font-mono text-xs break-all">{file}</span>, like{' '}
+              <code className="text-xs">kubectl config delete-context</code>. Its cluster and user
+              entries go too if no other context uses them.
+            </p>
+            <p className="text-xs text-muted">
+              The file before the change is saved next to it as{' '}
+              <span className="font-mono">.bak</span> (when it lives in ~/.kube).
+            </p>
+          </>
+        )}
+        <p className="text-xs text-muted">
+          Nothing changes on the cluster itself — only this computer forgets how to reach it.
+        </p>
+        {error && <Notice tone="danger">{error}</Notice>}
       </div>
     </Modal>
   )

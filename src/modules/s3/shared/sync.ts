@@ -86,6 +86,15 @@ const BOM = '\uFEFF'
 
 const iso = (ms: number | null): string => (ms === null ? '' : new Date(ms).toISOString())
 
+/** "1.23 TB", "512.0 MB"… (đơn vị 1024, như trong app). */
+export function humanSize(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`
+  if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`
+  if (n < 1000 * 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`
+  return `${(n / 1024 ** 4).toFixed(2)} TB`
+}
+
 /** Ô CSV: bọc ngoặc khi cần; chặn công thức Excel (=, +, -, @ ở đầu). */
 export function csvCell(value: string | number | null): string {
   if (value === null) return ''
@@ -105,7 +114,7 @@ export function bucketsToCsv(
     'Bucket',
     'Region',
     'Created',
-    ...(options.sizes ? ['Objects', 'Size (bytes)'] : []),
+    ...(options.sizes ? ['Objects', 'Size', 'Size (bytes)'] : []),
     ...(options.details ? ['Versioning', 'Encryption'] : [])
   ]
   const lines = rows.map((r) =>
@@ -114,7 +123,7 @@ export function bucketsToCsv(
       r.bucket.name,
       r.info?.region ?? r.bucket.region,
       iso(r.bucket.createdAt),
-      ...(options.sizes ? [r.objects, r.bytes] : []),
+      ...(options.sizes ? [r.objects, r.bytes === null ? null : humanSize(r.bytes), r.bytes] : []),
       ...(options.details ? [r.info?.versioning ?? null, r.info?.encryption ?? null] : [])
     ]
       .map(csvCell)
@@ -136,7 +145,13 @@ export function bucketsToJson(
         name: r.bucket.name,
         region: r.info?.region ?? r.bucket.region,
         created: r.bucket.createdAt === null ? null : iso(r.bucket.createdAt),
-        ...(options.sizes ? { objects: r.objects, bytes: r.bytes } : {}),
+        ...(options.sizes
+          ? {
+              objects: r.objects,
+              size: r.bytes === null ? null : humanSize(r.bytes),
+              bytes: r.bytes
+            }
+          : {}),
         ...(options.details
           ? { versioning: r.info?.versioning ?? null, encryption: r.info?.encryption ?? null }
           : {})

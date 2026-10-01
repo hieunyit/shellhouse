@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { JsonLines, LogDemuxer } from '../../session-host/engine'
 import { splitImageRef, toStatsSample } from '../../session-host/api-backend'
 import { cliErrorText, composeArgs, parseSize } from '../../session-host/backend'
-import { parseLabels, parsePorts } from '../../session-host/cli-backend'
+import { parseCliDate, parseLabels, parsePorts } from '../../session-host/cli-backend'
 import { execArgs, maskInspect } from '../../session-host/service'
 import { localSocketCandidates, WINDOWS_PIPE } from '../../session-host'
 import { DockerOp, isMutating, maskEnv } from '../../shared/ops'
@@ -157,5 +157,18 @@ describe('bộ đệm log của tab', () => {
     const big = new LineBuffer()
     big.push('x\n'.repeat(MAX_LINES + 10), false)
     expect(big.all()).toHaveLength(MAX_LINES)
+  })
+})
+
+describe('ngày của docker CLI', () => {
+  it('múi giờ dạng số (+07), chữ (UTC), không có, sai', () => {
+    expect(parseCliDate('2026-09-30 07:48:41 +0700 +07')).toBe(Date.UTC(2026, 8, 30, 0, 48, 41))
+    expect(parseCliDate('2026-09-30 00:48:41 +0000 UTC')).toBe(Date.UTC(2026, 8, 30, 0, 48, 41))
+    expect(parseCliDate('2026-09-30T00:48:41.123456789Z')).toBe(
+      Date.UTC(2026, 8, 30, 0, 48, 41, 123)
+    )
+    expect(parseCliDate('2026-09-29 20:48:41 -0400 EDT')).toBe(Date.UTC(2026, 8, 30, 0, 48, 41))
+    expect(parseCliDate('3 days ago')).toBe(0)
+    expect(parseCliDate(undefined)).toBe(0)
   })
 })

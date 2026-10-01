@@ -256,3 +256,37 @@ export async function embedReferences(
   }
   return doc.toString()
 }
+
+/**
+ * Xoá một context khỏi kubeconfig (như `kubectl config delete-context`), giữ nguyên chú thích /
+ * thứ tự phần còn lại. Cluster / user chỉ context này dùng cũng được xoá; current-context trỏ vào
+ * nó thì chuyển sang context còn lại đầu tiên (hoặc bỏ). Trả về số context còn lại.
+ */
+export function deleteContextFromYaml(text: string, name: string): { text: string; left: number } {
+  const doc = parseDocument(text)
+  const root = doc.toJS() as Obj | null
+  if (!root || typeof root !== 'object') throw new Error('This file is not a kubeconfig')
+  const contexts = arr(root['contexts'])
+  const index = contexts.findIndex((c) => str(c['name']) === name)
+  if (index < 0) throw new Error(`The context “${name}” is not in this kubeconfig anymore`)
+  const target = obj(contexts[index]?.['context'])
+  doc.deleteIn(['contexts', index])
+  const rest = contexts.filter((_, i) => i !== index)
+  const stillUsed = (field: 'cluster' | 'user', value: string): boolean =>
+    rest.some((c) => str(obj(c['context'])[field]) === value)
+  for (const [section, field] of [
+    ['clusters', 'cluster'],
+    ['users', 'user']
+  ] as const) {
+    const value = str(target[field])
+    if (!value || stillUsed(field, value)) continue
+    const i = arr(root[section]).findIndex((x) => str(x['name']) === value)
+    if (i >= 0) doc.deleteIn([section, i])
+  }
+  if (str(root['current-context']) === name) {
+    const next = str(rest[0]?.['name'])
+    if (next) doc.set('current-context', next)
+    else doc.delete('current-context')
+  }
+  return { text: doc.toString(), left: rest.length }
+}

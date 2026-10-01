@@ -18,7 +18,14 @@ export const MODULE_CATEGORIES: readonly { id: ModuleCategory; title: string }[]
 
 /** Chương trình bên ngoài module được phép gọi (3.6). */
 export type ModuleBinary =
-  'docker' | 'kubectl' | 'aws' | 'gcloud' | 'kubelogin' | 'gke-gcloud-auth-plugin'
+  | 'docker'
+  | 'kubectl'
+  | 'aws'
+  | 'gcloud'
+  | 'kubelogin'
+  | 'gke-gcloud-auth-plugin'
+  /** Windows: chạy lệnh trong một bản phân phối WSL (`wsl.exe -d <distro> -e …`). */
+  | 'wsl'
 
 /**
  * Quyền hiển thị cho người dùng (3.12.3). Phải khớp năng lực module thật sự dùng — registry kiểm
@@ -32,6 +39,8 @@ export type ModulePermission =
   | { kind: 'local-socket'; path: string }
   | { kind: 'run-program'; binary: ModuleBinary }
   | { kind: 'read-file'; path: string }
+  /** Sửa file trên máy (xoá context khỏi kubeconfig…) — luôn ghi an toàn (file tạm → đổi tên). */
+  | { kind: 'write-file'; path: string }
   | { kind: 'network'; hosts: string }
   | { kind: 'secrets'; detail: string }
   /** Đọc file người dùng tự chọn trong hộp thoại của hệ điều hành (và file chúng trỏ tới). */
@@ -42,6 +51,8 @@ export type ModuleDetector =
   | { on: 'ssh-connected'; probe: 'command'; command: 'systemctl' | 'kubectl' | 'docker' }
   | { on: 'startup'; probe: 'local-file'; path: string }
   | { on: 'startup'; probe: 'local-socket'; path: string }
+  /** Windows: file (đường dẫn Linux) có trong một distro WSL đang chạy. */
+  | { on: 'startup'; probe: 'wsl-file'; path: string }
 
 export interface ModuleManifest {
   /** Chữ thường, [a-z0-9-]; cũng là tiền tố bảng DB (`<id>_`, '-' đổi thành '_'). */
@@ -96,11 +107,17 @@ export function describePermission(p: ModulePermission): string {
         ? 'Connects to the Docker socket set in DOCKER_HOST'
         : `Connects to ${p.path} on this computer`
     case 'run-program':
-      return `May run \`${p.binary}\` on this computer — asks first`
+      return p.binary === 'wsl'
+        ? 'May run commands inside your WSL distributions (Windows) — asks first'
+        : `May run \`${p.binary}\` on this computer — asks first`
     case 'read-file':
       return p.path === '$KUBECONFIG'
         ? 'Reads the files listed in KUBECONFIG'
         : `Reads ${p.path.replace(/\/\*\*$/, '/')}`
+    case 'write-file':
+      return p.path === '$KUBECONFIG'
+        ? 'Changes the files listed in KUBECONFIG when you ask it to (a backup is kept)'
+        : `Changes files in ${p.path.replace(/\/\*\*$/, '/')} when you ask it to (a backup is kept)`
     case 'network':
       return `Connects to ${p.hosts}`
     case 'secrets':

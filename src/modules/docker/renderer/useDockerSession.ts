@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PromptRequest } from '@shared/stream-protocol'
 import { ModuleSessionClient, setTabState } from '../../registry/renderer-kit'
 import type { DockerOp } from '../shared/ops'
+import { wslDistroOf } from '../shared/ipc'
 import { useDocker } from './store'
 
 export interface DockerSession {
@@ -32,7 +33,11 @@ export function useDockerSession(
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState(
-    hostId ? 'Connecting…' : 'Looking for Docker on this computer…'
+    wslDistroOf(hostId)
+      ? `Connecting to Docker in ${wslDistroOf(hostId) ?? ''} (WSL)…`
+      : hostId
+        ? 'Connecting…'
+        : 'Looking for Docker on this computer…'
   )
   const [prompt, setPrompt] = useState<DockerSession['prompt']>(null)
   const [attempt, setAttempt] = useState(0)
@@ -55,7 +60,11 @@ export function useDockerSession(
     }
     void ModuleSessionClient.open(
       'docker',
-      hostId ? { kind: 'ssh', hostId } : { kind: 'module', sessionKind: 'engine', params: {} },
+      wslDistroOf(hostId)
+        ? { kind: 'module', sessionKind: 'engine', params: { wsl: wslDistroOf(hostId) } }
+        : hostId
+          ? { kind: 'ssh', hostId }
+          : { kind: 'module', sessionKind: 'engine', params: {} },
       {
         onStatus: (phase, detail) => {
           if (cancelled) return

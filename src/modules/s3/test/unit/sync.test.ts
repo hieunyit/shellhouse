@@ -78,15 +78,15 @@ describe('export danh sách bucket', () => {
     const csv = bucketsToCsv('Prod, EU', rows, { sizes: true, details: true })
     expect(
       csv.startsWith(
-        '﻿Account,Bucket,Region,Created,Objects,Size (bytes),Versioning,Encryption\r\n'
+        '\uFEFFAccount,Bucket,Region,Created,Objects,Size,Size (bytes),Versioning,Encryption\r\n'
       )
     ).toBe(true)
     expect(csv).toContain(
-      '"Prod, EU",logs,eu-west-1,2024-01-02T00:00:00.000Z,12,3456,Enabled,AES256\r\n'
+      '"Prod, EU",logs,eu-west-1,2024-01-02T00:00:00.000Z,12,3.4 KB,3456,Enabled,AES256\r\n'
     )
-    expect(csv).toContain('"Prod, EU",tmp,us-east-1,,,,,\r\n')
+    expect(csv).toContain('"Prod, EU",tmp,us-east-1,,,,,,\r\n')
     expect(bucketsToCsv('a', rows, { sizes: false, details: false }).split('\r\n')[0]).toBe(
-      '﻿Account,Bucket,Region,Created'
+      '\uFEFFAccount,Bucket,Region,Created'
     )
   })
   it('ô CSV chặn công thức và thoát dấu ngoặc', () => {
@@ -103,6 +103,7 @@ describe('export danh sách bucket', () => {
       region: 'eu-west-1',
       created: '2024-01-02T00:00:00.000Z',
       objects: 12,
+      size: '3.4 KB',
       bytes: 3456
     })
   })

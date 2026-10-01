@@ -265,3 +265,43 @@ test('gợi ý đúng lúc: có socket Docker trên máy → một dòng gợi �
     await launched.close()
   }
 })
+
+test('Docker trong WSL (Windows): gợi ý, distro đang chạy hiện ở thanh bên, ẩn / thêm lại, báo lỗi rõ khi không có WSL', async () => {
+  test.setTimeout(60_000)
+  const launched = await launchApp({
+    SHELLHOUSE_TEST_WSL: JSON.stringify([
+      { name: 'Ubuntu', running: true, version: 2 },
+      { name: 'Debian', running: false, version: 2 }
+    ]),
+    SHELLHOUSE_TEST_DETECT: JSON.stringify(['wsl:Ubuntu:/usr/bin/docker'])
+  })
+  const { page } = launched
+  try {
+    await page.evaluate(() =>
+      window.shellhouse.updateSettings({ moduleOptions: { suggest: true } })
+    )
+    await expect(page.getByTestId('module-suggestion')).toContainText('Docker detected')
+    await page.getByTestId('module-suggestion-enable').click()
+    await page.getByTestId('module-enable-confirm').click()
+
+    // Distro đang chạy tự hiện; distro đang dừng nằm trong menu ＋.
+    const ubuntu = page.locator('[data-testid="docker-endpoint"][data-name="Ubuntu (WSL)"]')
+    await expect(ubuntu).toBeVisible()
+    await expect(
+      page.locator('[data-testid="docker-endpoint"][data-name="Debian (WSL)"]')
+    ).toHaveCount(0)
+    await ubuntu.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Hide from Docker' }).click()
+    await expect(ubuntu).toHaveCount(0)
+    await page.getByTestId('docker-add-server').click()
+    await page.getByRole('menuitem', { name: /Ubuntu \(WSL\)/ }).click()
+    await expect(ubuntu).toBeVisible()
+
+    // Máy test không có wsl.exe: tab báo lỗi dễ hiểu (không treo).
+    await ubuntu.dblclick()
+    await expect(page.getByTestId('tab').last()).toContainText('Docker · Ubuntu (WSL)')
+    await expect(page.getByRole('alert').filter({ hasText: 'WSL is not installed' })).toBeVisible()
+  } finally {
+    await launched.close()
+  }
+})

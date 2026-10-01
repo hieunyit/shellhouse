@@ -46,6 +46,8 @@ export const K8sIpc = {
       .max(1024 * 1024)
   ]),
   removeImported: z.tuple([z.string().max(64)]),
+  /** Xoá một context (khỏi bản import trong vault, hoặc khỏi file kubeconfig — có bản .bak). */
+  deleteContext: z.tuple([ContextRef]),
   renameImported: z.tuple([z.string().max(64), z.string().trim().min(1).max(100)]),
   /** Hộp thoại chọn file kubeconfig (một hay nhiều) → nhúng chứng chỉ → lưu vào vault. */
   importFiles: z.tuple([])

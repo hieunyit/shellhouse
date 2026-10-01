@@ -12,7 +12,12 @@ import {
   type K8sObject
 } from '../../shared/resources'
 import { K8sOp, isMutating } from '../../shared/ops'
-import { listContexts, parseKubeconfig, resolveContext } from '../../main/kubeconfig'
+import {
+  deleteContextFromYaml,
+  listContexts,
+  parseKubeconfig,
+  resolveContext
+} from '../../main/kubeconfig'
 import { credentialProvider, jwtExpiry, pluginBinary } from '../../session-host/auth'
 import { statusMessage } from '../../session-host/client'
 import type { LimitedSpawn } from '../../../registry/host-types'
@@ -436,5 +441,43 @@ describe('bố cục cột bảng (bỏ bớt cột khi hẹp)', () => {
   it('mẫu grid: cột tên + cột giữ lại, Status đủ rộng', () => {
     const { template } = fitColumns(['status', 'age'], 2000)
     expect(template).toBe('minmax(10rem,2fr) minmax(8.5rem,1fr) 3.5rem')
+  })
+})
+
+describe('xoá context khỏi kubeconfig (như kubectl config delete-context)', () => {
+  const yaml = `# kubeconfig của tôi
+apiVersion: v1
+kind: Config
+current-context: stg
+clusters:
+- name: shared
+  cluster: { server: 'https://a' }
+- name: stg-cluster # chỉ stg dùng
+  cluster: { server: 'https://b' }
+users:
+- name: me
+  user: { token: t }
+contexts:
+- name: prod
+  context: { cluster: shared, user: me }
+- name: stg
+  context: { cluster: stg-cluster, user: me }
+`
+  it('bỏ context + cluster chỉ nó dùng; user dùng chung giữ lại; current-context chuyển; giữ chú thích', () => {
+    const { text, left } = deleteContextFromYaml(yaml, 'stg')
+    expect(left).toBe(1)
+    const doc = parseKubeconfig(text)
+    expect(doc.contexts.map((c) => c.name)).toEqual(['prod'])
+    expect([...doc.clusters.keys()]).toEqual(['shared'])
+    expect([...doc.users.keys()]).toEqual(['me'])
+    expect(text).toContain('current-context: prod')
+    expect(text).toContain('# kubeconfig của tôi')
+  })
+  it('context cuối cùng → không còn current-context; tên không có → lỗi rõ', () => {
+    const once = deleteContextFromYaml(yaml, 'prod').text
+    const { text, left } = deleteContextFromYaml(once, 'stg')
+    expect(left).toBe(0)
+    expect(text).not.toContain('current-context')
+    expect(() => deleteContextFromYaml(yaml, 'nope')).toThrow(/not in this kubeconfig/)
   })
 })

@@ -71,14 +71,19 @@ export function parsePorts(text: string | undefined): PortMapping[] {
 }
 
 /** "2024-05-01 10:00:00 +0000 UTC" → ms. */
-function parseCliDate(text: string | undefined): number {
+/**
+ * Ngày của `docker … --format json`: "2026-09-30 07:48:41 +0700 +07" / "… +0000 UTC" (tên múi giờ
+ * cuối có thể là chữ hoặc số — bỏ qua, dùng độ lệch +0700).
+ */
+export function parseCliDate(text: string | undefined): number {
   if (!text) return 0
-  const t = Date.parse(
-    text
-      .replace(/ [A-Z]{2,5}$/, '')
-      .replace(' ', 'T')
-      .replace(' ', '')
-  )
+  const m =
+    /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(\.\d+)?\s*(?:([+-])(\d{2}):?(\d{2})|Z)?/.exec(
+      text.trim()
+    )
+  if (!m) return 0
+  const zone = m[4] ? `${m[4]}${m[5] ?? '00'}:${m[6] ?? '00'}` : 'Z'
+  const t = Date.parse(`${m[1] ?? ''}T${m[2] ?? ''}${(m[3] ?? '').slice(0, 4)}${zone}`)
   return Number.isFinite(t) ? t : 0
 }
 

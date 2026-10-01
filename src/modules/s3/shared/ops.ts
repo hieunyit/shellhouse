@@ -153,7 +153,9 @@ export const S3Op = z.discriminatedUnion('op', [
     mirror: z.boolean(),
     compare: z.enum(['size', 'etag']),
     createBucket: z.boolean(),
-    dryRun: z.boolean()
+    dryRun: z.boolean(),
+    /** Số object chép cùng lúc; không có = theo cài đặt (Settings → Modules → S3). */
+    concurrency: z.number().int().min(1).max(64).optional()
   }),
   z.object({ op: z.literal('syncPoll'), id: z.string().max(64) }),
   z.object({ op: z.literal('syncStop'), id: z.string().max(64) }),
@@ -179,7 +181,12 @@ export interface S3SyncProgress {
   scanned: { source: number; dest: number }
   plan: { new: number; update: number; delete: number; same: number; bytes: number }
   done: { copied: number; deleted: number; bytes: number; failed: number }
+  /** Tốc độ đã làm mượt (trung bình trượt), 0 khi không có byte nào vài giây. */
   bytesPerSecond: number
+  /** Số object chép cùng lúc của lượt này. */
+  concurrency: number
+  /** Object đang chép (tối đa 8) — key, dung lượng, đã chép bao nhiêu byte. */
+  active: { key: string; size: number; done: number }[]
   /** Vài trăm mục đầu của kế hoạch (để xem trước). */
   sample: { key: string; action: SyncAction; size: number }[]
   /** Lỗi của từng object (tối đa 50) — lượt đồng bộ vẫn chạy tiếp. */

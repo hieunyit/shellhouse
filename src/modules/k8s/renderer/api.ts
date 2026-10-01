@@ -16,6 +16,12 @@ export const k8sApi = {
   importKubeconfig: (name: string, yaml: string) =>
     invokeModule<MutationResult>('k8s', 'importKubeconfig', name, yaml),
   removeImported: (id: string) => invokeModule<undefined>('k8s', 'removeImported', id),
+  deleteContext: (ref: ContextRef) =>
+    invokeModule<{ ok: true; backup: string | null } | { ok: false; message: string }>(
+      'k8s',
+      'deleteContext',
+      ref
+    ),
   renameImported: (id: string, name: string) =>
     invokeModule<undefined>('k8s', 'renameImported', id, name),
   /** Hộp thoại chọn file kubeconfig → nhúng chứng chỉ → lưu vào vault. */
