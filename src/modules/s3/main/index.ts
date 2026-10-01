@@ -42,21 +42,29 @@ export const s3Main: MainModule = {
       accounts.setPin(id, pin, pinned)
       changed()
     })
+    const connection = (accountId: string): S3SessionConfig['connection'] => {
+      const account = accounts.resolve(accountId)
+      return {
+        endpoint: account.endpoint,
+        region: account.region,
+        accessKeyId: account.accessKeyId,
+        secretAccessKey: account.secretAccessKey,
+        forcePathStyle: account.forcePathStyle
+      }
+    }
     return {
       resolveSession: (_kind, raw): S3SessionConfig => {
         const params = S3BrowserParams.parse(raw)
-        const account = accounts.resolve(params.accountId)
         const settings = S3Settings.parse(ctx.settings.get())
         return {
-          connection: {
-            endpoint: account.endpoint,
-            region: account.region,
-            accessKeyId: account.accessKeyId,
-            secretAccessKey: account.secretAccessKey,
-            forcePathStyle: account.forcePathStyle
-          },
+          connection: connection(params.accountId),
           limits: { requests: settings.requests, transfers: settings.transfers }
         }
+      },
+      // Session Host xin kết nối của tài khoản khác (đích đồng bộ) — secret đi thẳng sang đó.
+      onHostRequest: (name, params) => {
+        if (name !== 'account') throw new Error(`Unknown request ${name}`)
+        return connection(S3BrowserParams.shape.accountId.parse(params))
       }
     }
   }

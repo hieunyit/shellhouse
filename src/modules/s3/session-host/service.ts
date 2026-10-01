@@ -1,25 +1,21 @@
 import { randomUUID } from 'node:crypto'
-import { Agent as HttpAgent } from 'node:http'
-import { Agent as HttpsAgent } from 'node:https'
 import { createReadStream, createWriteStream, existsSync } from 'node:fs'
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Readable } from 'node:stream'
 import {
-  AbortMultipartUploadCommand,
-  CompleteMultipartUploadCommand,
-  CopyObjectCommand,
   CreateBucketCommand,
-  CreateMultipartUploadCommand,
   DeleteObjectsCommand,
+  GetBucketEncryptionCommand,
+  GetBucketLocationCommand,
+  GetBucketVersioningCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListBucketsCommand,
   ListObjectsV2Command,
   PutObjectCommand,
-  S3Client,
-  UploadPartCopyCommand
+  type S3Client
 } from '@aws-sdk/client-s3'
 import type { _Object } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
@@ -29,22 +25,26 @@ import {
   objectNameProblem,
   parentPrefix,
   type S3Bucket,
+  type S3BucketInfo,
   type S3Entry,
   type S3Listing,
   type S3Op,
   type S3StatsProgress
 } from '../shared/ops'
 import type { TransferStatus } from '@shared/sftp'
-import { mapLimit, runQueue } from '../../../node-shared/pool'
+import { mapLimit } from '../../../node-shared/pool'
+import {
+  createS3Client,
+  errorText,
+  isNotFound,
+  scanObjects,
+  serverCopy,
+  type S3Connection
+} from './client'
 import { S3Edits } from './edit'
+import { SyncJob } from './sync'
 
-export interface S3Connection {
-  endpoint: string
-  region: string
-  accessKeyId: string
-  secretAccessKey: string
-  forcePathStyle: boolean
-}
+export type { S3Connection } from './client'
 
 /** Mỗi lần liệt kê hiện tối đa chừng này mục (thư mục khổng lồ: báo truncated). */
 const MAX_LIST = 5000
@@ -56,11 +56,6 @@ const PROGRESS_MS = 250
 export const DEFAULT_S3_LIMITS = { requests: 16, transfers: 6 } as const
 /** Mỗi file lớn tự chia phần gửi song song (lib-storage). */
 const UPLOAD_QUEUE = 4
-/** Hai cấp đầu liệt kê theo "thư mục" để chia việc; sâu hơn liệt kê phẳng (ít request nhất). */
-const SPLIT_DEPTH = 2
-/** CopyObject một phát chỉ tới 5 GiB; lớn hơn phải copy từng phần (UploadPartCopy). */
-const MAX_SINGLE_COPY = 5 * 1024 ** 3
-const COPY_PART = 512 * 1024 ** 2
 
 interface Job {
   status: TransferStatus
@@ -82,32 +77,6 @@ function lastName(key: string): string {
   return key.replace(/\/$/, '').split('/').at(-1) ?? key
 }
 
-/** CopySource phải URL-encode (giữ "/"). */
-function copySource(bucket: string, key: string): string {
-  return `${bucket}/${encodeURIComponent(key).replace(/%2F/g, '/')}`
-}
-
-function isNotFound(error: unknown): boolean {
-  const e = error as { name?: string; $metadata?: { httpStatusCode?: number } } | null
-  return e?.name === 'NotFound' || e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404
-}
-
-function errorText(error: unknown): string {
-  const e = error as { name?: string; message?: string; Code?: string } | null
-  const code = e?.Code ?? e?.name
-  if (code === 'NoSuchBucket') return 'The bucket does not exist'
-  if (code === 'NoSuchKey') return 'The object does not exist'
-  if (code === 'AccessDenied') return 'Access denied (check the key permissions)'
-  if (code === 'InvalidAccessKeyId') return 'The access key ID is not valid'
-  if (code === 'SignatureDoesNotMatch') return 'The secret key is wrong'
-  if (code === 'BucketAlreadyExists' || code === 'BucketAlreadyOwnedByYou')
-    return 'A bucket with this name already exists'
-  if (code === 'AbortError') return 'Cancelled'
-  if (code === 'InvalidObjectState')
-    return 'The object is archived (Glacier) — restore it before reading or copying it'
-  return e?.message ?? String(error)
-}
-
 /** Thao tác S3 của một tab + hàng đợi truyền file (chạy trong Session Host). */
 export class S3Service {
   private readonly client: S3Client
@@ -120,6 +89,7 @@ export class S3Service {
     string,
     { progress: S3StatsProgress; abort: AbortController }
   >()
+  private readonly syncJobs = new Map<string, SyncJob>()
 
   private readonly requests: number
   private readonly maxTransfers: number
@@ -127,28 +97,15 @@ export class S3Service {
   constructor(
     connection: S3Connection,
     private readonly onTransfers: (list: TransferStatus[]) => void,
-    limits: { requests: number; transfers: number } = DEFAULT_S3_LIMITS
+    limits: { requests: number; transfers: number } = DEFAULT_S3_LIMITS,
+    /** Kết nối của tài khoản khác (đích đồng bộ) — main giải mã secret. */
+    private readonly resolveAccount: (accountId: string) => Promise<S3Connection> = () =>
+      Promise.reject(new Error('Other accounts are not available here'))
   ) {
     this.requests = limits.requests
     this.maxTransfers = limits.transfers
-    // Đủ socket cho mọi request song song (quét + các phần của file đang truyền); giữ kết nối để
-    // không bắt tay TLS lại mỗi request. retryMode adaptive: gặp SlowDown / 503 thì tự giảm tốc.
-    const agent = {
-      keepAlive: true,
-      maxSockets: this.requests + this.maxTransfers * UPLOAD_QUEUE + 4
-    }
-    this.client = new S3Client({
-      maxAttempts: 5,
-      retryMode: 'adaptive',
-      requestHandler: { httpAgent: new HttpAgent(agent), httpsAgent: new HttpsAgent(agent) },
-      region: connection.region || 'us-east-1',
-      ...(connection.endpoint ? { endpoint: connection.endpoint } : {}),
-      forcePathStyle: connection.forcePathStyle,
-      credentials: {
-        accessKeyId: connection.accessKeyId,
-        secretAccessKey: connection.secretAccessKey
-      }
-    })
+    // Đủ socket cho mọi request song song (quét + các phần của file đang truyền).
+    this.client = createS3Client(connection, this.requests + this.maxTransfers * UPLOAD_QUEUE + 4)
   }
 
   async run(op: S3Op): Promise<unknown> {
@@ -215,6 +172,33 @@ export class S3Service {
         }
         return null
       }
+      case 'listBucketsOf': {
+        const client = createS3Client(await this.resolveAccount(op.accountId), 4)
+        try {
+          return await this.listBuckets(client)
+        } finally {
+          client.destroy()
+        }
+      }
+      case 'bucketInfo':
+        return this.bucketInfo(op.bucket)
+      case 'writeFile':
+        await writeFile(op.localPath, op.content, 'utf8')
+        return null
+      case 'syncStart':
+        return this.startSync(op)
+      case 'syncPoll': {
+        const job = this.syncJobs.get(op.id)
+        if (!job) throw new Error('The sync was stopped')
+        const snapshot = job.snapshot()
+        if (job.finished) this.syncJobs.delete(op.id)
+        return snapshot
+      }
+      case 'syncStop': {
+        const job = this.syncJobs.get(op.id)
+        job?.stop()
+        return job?.snapshot() ?? null
+      }
       case 'clearDone':
         for (const [id, job] of this.jobs) if (job.status.state === 'done') this.jobs.delete(id)
         this.notify(true)
@@ -222,8 +206,8 @@ export class S3Service {
     }
   }
 
-  private async listBuckets(): Promise<S3Bucket[]> {
-    const out = await this.client.send(new ListBucketsCommand({}))
+  private async listBuckets(client: S3Client = this.client): Promise<S3Bucket[]> {
+    const out = await client.send(new ListBucketsCommand({}))
     return (out.Buckets ?? [])
       .map((b) => ({
         name: b.Name ?? '',
@@ -232,6 +216,64 @@ export class S3Service {
       }))
       .filter((b) => b.name)
       .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  /** Region / versioning / mã hoá — mỗi mục một request; dịch vụ không hỗ trợ thì null. */
+  private async bucketInfo(bucket: string): Promise<S3BucketInfo> {
+    const [location, versioning, encryption] = await Promise.allSettled([
+      this.client.send(new GetBucketLocationCommand({ Bucket: bucket })),
+      this.client.send(new GetBucketVersioningCommand({ Bucket: bucket })),
+      this.client.send(new GetBucketEncryptionCommand({ Bucket: bucket }))
+    ])
+    const rule =
+      encryption.status === 'fulfilled'
+        ? encryption.value.ServerSideEncryptionConfiguration?.Rules?.[0]
+            ?.ApplyServerSideEncryptionByDefault
+        : undefined
+    const encryptionCode =
+      encryption.status === 'rejected'
+        ? (encryption.reason as { name?: string } | null)?.name
+        : undefined
+    return {
+      // ListBuckets cũ / dịch vụ khác: LocationConstraint rỗng = us-east-1.
+      region:
+        location.status === 'fulfilled' ? location.value.LocationConstraint || 'us-east-1' : null,
+      versioning:
+        versioning.status === 'fulfilled'
+          ? versioning.value.Status === 'Enabled' || versioning.value.Status === 'Suspended'
+            ? versioning.value.Status
+            : 'Off'
+          : null,
+      encryption: rule?.SSEAlgorithm
+        ? `${rule.SSEAlgorithm}${rule.KMSMasterKeyID ? ` (${rule.KMSMasterKeyID})` : ''}`
+        : encryptionCode === 'ServerSideEncryptionConfigurationNotFoundError'
+          ? 'None'
+          : null
+    }
+  }
+
+  // ---------- Đồng bộ ----------
+
+  private async startSync(op: Extract<S3Op, { op: 'syncStart' }>): Promise<string> {
+    const destClient = op.dest.accountId
+      ? createS3Client(await this.resolveAccount(op.dest.accountId), this.requests + 8)
+      : null
+    const id = randomUUID()
+    const job = new SyncJob(
+      {
+        source: this.client,
+        dest: destClient ?? this.client,
+        serverSide: destClient === null,
+        concurrency: destClient ? Math.max(4, this.maxTransfers) : this.requests,
+        scanConcurrency: this.requests
+      },
+      op
+    )
+    this.syncJobs.set(id, job)
+    void job.run().finally(() => {
+      destClient?.destroy()
+    })
+    return id
   }
 
   async list(bucket: string, prefix: string): Promise<S3Listing> {
@@ -282,43 +324,13 @@ export class S3Service {
     return { bucket, prefix, entries, truncated }
   }
 
-  /**
-   * Duyệt mọi object dưới `prefix`, nhiều request song song. S3 chỉ phân trang tuần tự trong một
-   * prefix (token trang sau nằm trong trang trước), nên chia việc theo "thư mục": 2 cấp đầu liệt kê
-   * có Delimiter để lấy các thư mục con rồi quét chúng song song; sâu hơn thì liệt kê phẳng. Mỗi
-   * object được báo đúng một lần.
-   */
   private scanTree(
     bucket: string,
     prefix: string,
     onObjects: (objects: readonly _Object[]) => void,
     signal?: AbortSignal
   ): Promise<void> {
-    return runQueue(
-      [{ prefix, depth: 0 }],
-      this.requests,
-      async (task, push) => {
-        const split = task.depth < SPLIT_DEPTH
-        let token: string | undefined
-        do {
-          const out = await this.client.send(
-            new ListObjectsV2Command({
-              Bucket: bucket,
-              Prefix: task.prefix,
-              ...(split ? { Delimiter: '/' } : {}),
-              ContinuationToken: token
-            }),
-            { abortSignal: signal }
-          )
-          if (out.Contents?.length) onObjects(out.Contents)
-          if (split)
-            for (const p of out.CommonPrefixes ?? [])
-              if (p.Prefix) push({ prefix: p.Prefix, depth: task.depth + 1 })
-          token = out.IsTruncated ? out.NextContinuationToken : undefined
-        } while (token && !signal?.aborted)
-      },
-      signal
-    )
+    return scanObjects(this.client, bucket, prefix, this.requests, onObjects, signal)
   }
 
   /** Mọi key dưới prefix (đệ quy, song song), tối đa MAX_TREE; sắp theo key. */
@@ -467,55 +479,13 @@ export class S3Service {
     }))
   }
 
-  private async copyObject(bucket: string, destBucket: string, pair: CopyPair): Promise<void> {
-    const source = copySource(bucket, pair.from)
-    if (pair.size <= MAX_SINGLE_COPY) {
-      await this.client.send(
-        new CopyObjectCommand({ Bucket: destBucket, Key: pair.to, CopySource: source })
-      )
-      return
-    }
-    // Object > 5 GiB: copy từng phần trên server (không tải về máy).
-    const head = await this.client.send(new HeadObjectCommand({ Bucket: bucket, Key: pair.from }))
-    const { UploadId } = await this.client.send(
-      new CreateMultipartUploadCommand({
-        Bucket: destBucket,
-        Key: pair.to,
-        ContentType: head.ContentType,
-        Metadata: head.Metadata
-      })
+  private copyObject(bucket: string, destBucket: string, pair: CopyPair): Promise<void> {
+    return serverCopy(
+      this.client,
+      { bucket, key: pair.from },
+      { bucket: destBucket, key: pair.to },
+      pair.size
     )
-    const partSize = Math.max(COPY_PART, Math.ceil(pair.size / 9000))
-    try {
-      const parts: { ETag: string | undefined; PartNumber: number }[] = []
-      for (let start = 0, n = 1; start < pair.size; start += partSize, n++) {
-        const end = Math.min(start + partSize, pair.size) - 1
-        const out = await this.client.send(
-          new UploadPartCopyCommand({
-            Bucket: destBucket,
-            Key: pair.to,
-            UploadId,
-            PartNumber: n,
-            CopySource: source,
-            CopySourceRange: `bytes=${start}-${end}`
-          })
-        )
-        parts.push({ ETag: out.CopyPartResult?.ETag, PartNumber: n })
-      }
-      await this.client.send(
-        new CompleteMultipartUploadCommand({
-          Bucket: destBucket,
-          Key: pair.to,
-          UploadId,
-          MultipartUpload: { Parts: parts }
-        })
-      )
-    } catch (error) {
-      await this.client
-        .send(new AbortMultipartUploadCommand({ Bucket: destBucket, Key: pair.to, UploadId }))
-        .catch(() => undefined)
-      throw error
-    }
   }
 
   /** Copy các cặp (song song), move thì xoá nguồn sau khi copy xong hết. Trả về số object. */
@@ -868,6 +838,8 @@ export class S3Service {
     this.edits?.dispose()
     for (const job of this.statsJobs.values()) job.abort.abort()
     this.statsJobs.clear()
+    for (const job of this.syncJobs.values()) job.stop()
+    this.syncJobs.clear()
     for (const job of this.jobs.values()) job.abort.abort()
     if (this.notifyTimer) clearTimeout(this.notifyTimer)
     this.client.destroy()

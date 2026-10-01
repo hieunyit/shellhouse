@@ -232,3 +232,92 @@ test('sắp xếp: menu Sort (dung lượng, thời gian, đảo chiều), nhớ
     rmSync(local, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   }
 })
+
+test('S3: export danh sách bucket (CSV) và đồng bộ sang tài khoản khác (xem trước → chạy)', async ({
+  app,
+  page
+}) => {
+  const { GetObjectCommand, PutObjectCommand, S3Client } = await import('@aws-sdk/client-s3')
+  server = await startS3TestServer(['photos', 'logs'])
+  const other = await startS3TestServer(['existing'])
+  const out = mkdtempSync(join(tmpdir(), 'sh-s3-export-'))
+  const conn = (s: S3TestServer) => ({
+    endpoint: s.endpoint,
+    region: 'us-east-1',
+    accessKeyId: s.accessKeyId,
+    secretAccessKey: s.secretAccessKey,
+    forcePathStyle: true
+  })
+  const client = (s: S3TestServer) =>
+    new S3Client({
+      endpoint: s.endpoint,
+      region: 'us-east-1',
+      forcePathStyle: true,
+      credentials: { accessKeyId: s.accessKeyId, secretAccessKey: s.secretAccessKey }
+    })
+  const ca = client(server)
+  const cb = client(other)
+  try {
+    await ca.send(new PutObjectCommand({ Bucket: 'photos', Key: 'a.txt', Body: 'aaa' }))
+    await ca.send(new PutObjectCommand({ Bucket: 'photos', Key: 'dir/b.txt', Body: 'bbbb' }))
+    for (const [name, s] of [
+      ['Source', server],
+      ['Backup', other]
+    ] as const) {
+      const r = (await page.evaluate(
+        (input) => window.shellhouse.invokeModule('s3', 'save', [input]),
+        { name, ...conn(s), secretAccessKey: s.secretAccessKey }
+      )) as { ok: boolean }
+      expect(r.ok).toBe(true)
+    }
+    const account = page.locator('[data-testid="s3-account"][data-name="Source"]')
+    await account.dblclick()
+    const view = page.getByTestId('s3-view')
+    await expect(view.locator('[data-testid="s3-bucket"]')).toHaveCount(2)
+
+    // Export: đếm object còn thiếu rồi ghi CSV vào file người dùng chọn.
+    const csvPath = join(out, 'buckets.csv')
+    await app.evaluate(({ dialog }, f) => {
+      dialog.showSaveDialog = () => Promise.resolve({ canceled: false, filePath: f })
+    }, csvPath)
+    await view.getByTestId('s3-export').click()
+    await page.getByTestId('s3-export-submit').click()
+    await expect(page.getByTestId('s3-export-done')).toContainText('buckets.csv')
+    const csv = readFileSync(csvPath, 'utf8')
+    expect(csv.split('\r\n')[0]).toBe('﻿Account,Bucket,Region,Created,Objects,Size (bytes)')
+    expect(csv).toMatch(/\r\nSource,photos,[^,]*,[^,]+,2,7\r\n/)
+    await page.getByRole('button', { name: 'Done' }).click()
+
+    // Đồng bộ photos → tài khoản Backup, bucket mới (tự tạo), xem trước trước khi chạy.
+    await view.locator('[data-testid="s3-bucket"][data-name="photos"]').click()
+    await view.getByTestId('s3-sync-bucket').click()
+    const dialog = page.getByTestId('s3-sync-dialog')
+    const backupId = await page.evaluate(async () => {
+      const list = (await window.shellhouse.invokeModule('s3', 'accounts', [])) as {
+        id: string
+        name: string
+      }[]
+      return list.find((a) => a.name === 'Backup')?.id ?? ''
+    })
+    await dialog.getByTestId('s3-sync-account').selectOption(backupId)
+    await dialog.getByTestId('s3-sync-bucket').fill('photos-backup')
+    await expect(dialog).toContainText('This bucket will be created')
+    await dialog.getByTestId('s3-sync-preview').click()
+    await expect(dialog.getByTestId('s3-sync-plan')).toContainText('2 new')
+    await expect(dialog.getByTestId('s3-sync-item')).toHaveCount(2)
+    await dialog.getByTestId('s3-sync-run').click()
+    await expect(dialog.getByTestId('s3-sync-result')).toContainText('In sync: 2 copied')
+    const got = await cb.send(new GetObjectCommand({ Bucket: 'photos-backup', Key: 'dir/b.txt' }))
+    expect(await got.Body?.transformToString()).toBe('bbbb')
+
+    // Chạy lại: không còn gì để copy.
+    await dialog.getByRole('button', { name: 'Back', exact: true }).click()
+    await dialog.getByTestId('s3-sync-preview').click()
+    await expect(dialog.getByTestId('s3-sync-run')).toHaveText('Already in sync')
+  } finally {
+    ca.destroy()
+    cb.destroy()
+    await other.close()
+    rmSync(out, { recursive: true, force: true })
+  }
+})

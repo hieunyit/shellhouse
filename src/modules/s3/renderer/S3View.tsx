@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
+  ArrowLeftRight,
   ArrowUp,
   BarChart3,
   ChevronDown,
@@ -9,6 +10,7 @@ import {
   CloudUpload,
   Copy,
   Download,
+  FileDown,
   File,
   FilePen,
   Folder,
@@ -64,6 +66,7 @@ import type { ModuleTabProps } from '../../registry/renderer-types'
 import type { S3BrowserParams } from '../shared/ipc'
 import { S3SessionClient } from './s3-client'
 import { eachLimit, runStatsJob } from './stats-job'
+import { ExportBucketsDialog, SyncDialog, type SyncSource } from './S3Sync'
 
 /** Số bucket đếm cùng lúc khi "Calculate all sizes". */
 const PARALLEL_BUCKETS = 3
@@ -115,6 +118,11 @@ export function S3View({
   const [calculating, setCalculating] = useState(false)
   const stopCalc = useRef(false)
   const [opening, setOpening] = useState<string | null>(null)
+  /** Hộp thoại export / đồng bộ (ngoài S3Dialog). */
+  const [tool, setTool] = useState<
+    { kind: 'export' } | { kind: 'sync'; source: SyncSource } | null
+  >(null)
+  const accounts = useS3((s) => s.accounts)
   const [sort, setSort] = usePersistentSort<SortKey>('s3-objects', OBJECT_SORT_KEYS, {
     key: 'name',
     dir: 'asc'
@@ -252,12 +260,14 @@ export function S3View({
   // ---------- Thống kê bucket (tính khi cần, cập nhật dần trong bảng) ----------
 
   /** Tính dung lượng các bucket: vài bucket cùng lúc, mỗi bucket Session Host quét song song. */
-  const calculate = async (names: readonly string[]): Promise<void> => {
+  const calculate = async (names: readonly string[]): Promise<Record<string, BucketStats>> => {
+    const results: Record<string, BucketStats> = {}
     stopCalc.current = false
     // Hàm (không phải đọc thẳng): TS không thu hẹp kiểu ref qua các lần await.
     const stopped = (): boolean => stopCalc.current
     setCalculating(true)
     const patch = (name: string, value: BucketStats): void => {
+      results[name] = value
       setBucketStats((all) => ({ ...all, [name]: value }))
     }
     await eachLimit(names, PARALLEL_BUCKETS, async (name) => {
@@ -288,6 +298,7 @@ export function S3View({
       }
     })
     setCalculating(false)
+    return results
   }
 
   // ---------- Ghim lên thanh bên ----------
@@ -437,6 +448,16 @@ export function S3View({
         }
       }
     )
+    const onlyFolder = list.length === 1 && list[0]?.isFolder ? list[0] : undefined
+    if (onlyFolder)
+      items.push({
+        id: 's3-sync',
+        label: 'Sync to…',
+        icon: <ArrowLeftRight size={14} />,
+        onSelect: () => {
+          setTool({ kind: 'sync', source: { bucket, prefix: onlyFolder.key } })
+        }
+      })
     if (list.some((e) => e.isFolder))
       items.push({
         id: 's3-stats',
@@ -472,6 +493,14 @@ export function S3View({
       icon: <BarChart3 size={14} />,
       disabled: calculating,
       onSelect: () => void calculate([name])
+    },
+    {
+      id: 's3-bucket-sync',
+      label: 'Sync to…',
+      icon: <ArrowLeftRight size={14} />,
+      onSelect: () => {
+        setTool({ kind: 'sync', source: { bucket: name, prefix: '' } })
+      }
     },
     'separator',
     pinItem(name, ''),
@@ -800,9 +829,28 @@ export function S3View({
                 onClick={() => void calculate(unknownSizes.map((b) => b.name))}
               />
             )}
+            <ToolButton
+              icon={<FileDown size={14} />}
+              label="Export list"
+              labelAt="xl"
+              testId="s3-export"
+              disabled={!buckets?.length}
+              onClick={() => {
+                setTool({ kind: 'export' })
+              }}
+            />
             <span className="flex-1" />
             {selectedBucket && (
               <>
+                <ToolButton
+                  icon={<ArrowLeftRight size={14} />}
+                  label="Sync to…"
+                  labelAt="xl"
+                  testId="s3-sync-bucket"
+                  onClick={() => {
+                    setTool({ kind: 'sync', source: { bucket: selectedBucket, prefix: '' } })
+                  }}
+                />
                 <ToolButton
                   icon={<FolderOpen size={14} />}
                   label="Open"
@@ -847,6 +895,17 @@ export function S3View({
               testId="s3-mkdir"
               onClick={() => {
                 setDialog({ kind: 'mkdir' })
+              }}
+            />
+            <ToolButton
+              icon={<ArrowLeftRight size={14} />}
+              label="Sync…"
+              labelAt="5xl"
+              testId="s3-sync-here"
+              onClick={() => {
+                // Một thư mục đang chọn → đồng bộ thư mục đó; không thì cả chỗ đang xem.
+                const folder = one?.isFolder ? one.key : prefix
+                setTool({ kind: 'sync', source: { bucket, prefix: folder } })
               }}
             />
             <span className="flex-1" />
@@ -1172,6 +1231,38 @@ export function S3View({
           run={run}
           onClose={() => {
             setStats(null)
+          }}
+        />
+      )}
+      {tool?.kind === 'export' && buckets && (
+        <ExportBucketsDialog
+          account={accountName}
+          buckets={buckets}
+          stats={bucketStats}
+          run={run}
+          calculate={calculate}
+          stop={() => {
+            stopCalc.current = true
+          }}
+          onClose={() => {
+            setTool(null)
+          }}
+        />
+      )}
+      {tool?.kind === 'sync' && (
+        <SyncDialog
+          accountId={accountId}
+          accounts={accounts}
+          buckets={buckets ?? []}
+          source={tool.source}
+          run={run}
+          onClose={() => {
+            setTool(null)
+          }}
+          onFinished={(dest) => {
+            if (dest !== accountId) return
+            void loadBuckets()
+            if (bucket !== null) void load(bucket, prefix)
           }}
         />
       )}

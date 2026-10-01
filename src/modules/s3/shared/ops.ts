@@ -125,9 +125,68 @@ export const S3Op = z.discriminatedUnion('op', [
   /** Tải object về `localPath` rồi theo dõi: lưu trong editor → tải lên đè (nếu server chưa đổi). */
   z.object({ op: z.literal('edit'), bucket: Bucket, key: Key, localPath: LocalPath }),
   z.object({ op: z.literal('cancel'), transferId: z.string().max(64) }),
+  /** Bucket của một tài khoản khác (đích đồng bộ). */
+  z.object({ op: z.literal('listBucketsOf'), accountId: z.string().min(1).max(64) }),
+  /** Region, versioning, mã hoá của một bucket (lỗi / không hỗ trợ → null). */
+  z.object({ op: z.literal('bucketInfo'), bucket: Bucket }),
+  /** Ghi file người dùng vừa chọn trong hộp Save (export danh sách bucket). */
+  z.object({
+    op: z.literal('writeFile'),
+    localPath: LocalPath,
+    content: z.string().max(50 * 1024 * 1024)
+  }),
+  /**
+   * Đồng bộ `bucket/prefix` → `dest` (cùng hoặc khác tài khoản). Chạy nền; `dryRun` chỉ quét và
+   * lập kế hoạch. Hỏi tiến độ bằng `syncPoll`, dừng bằng `syncStop`.
+   */
+  z.object({
+    op: z.literal('syncStart'),
+    bucket: Bucket,
+    prefix: Key,
+    dest: z.object({
+      /** Không có = cùng tài khoản. */
+      accountId: z.string().min(1).max(64).optional(),
+      bucket: Bucket,
+      prefix: Key
+    }),
+    /** Xoá ở đích những object không còn ở nguồn. */
+    mirror: z.boolean(),
+    compare: z.enum(['size', 'etag']),
+    createBucket: z.boolean(),
+    dryRun: z.boolean()
+  }),
+  z.object({ op: z.literal('syncPoll'), id: z.string().max(64) }),
+  z.object({ op: z.literal('syncStop'), id: z.string().max(64) }),
   z.object({ op: z.literal('clearDone') })
 ])
 export type S3Op = z.infer<typeof S3Op>
+
+/** Thông tin thêm của bucket (cho export). null = không lấy được / dịch vụ không hỗ trợ. */
+export interface S3BucketInfo {
+  region: string | null
+  versioning: 'Enabled' | 'Suspended' | 'Off' | null
+  encryption: string | null
+}
+
+export type SyncAction = 'new' | 'update' | 'delete'
+
+/** Tiến độ một lượt đồng bộ (op `syncPoll`). */
+export interface S3SyncProgress {
+  phase: 'scanning' | 'planned' | 'copying' | 'deleting' | 'done' | 'stopped' | 'error'
+  dryRun: boolean
+  /** Copy phía server (cùng tài khoản) hay truyền qua máy này. */
+  serverSide: boolean
+  scanned: { source: number; dest: number }
+  plan: { new: number; update: number; delete: number; same: number; bytes: number }
+  done: { copied: number; deleted: number; bytes: number; failed: number }
+  bytesPerSecond: number
+  /** Vài trăm mục đầu của kế hoạch (để xem trước). */
+  sample: { key: string; action: SyncAction; size: number }[]
+  /** Lỗi của từng object (tối đa 50) — lượt đồng bộ vẫn chạy tiếp. */
+  errors: { key: string; message: string }[]
+  /** Lỗi làm dừng cả lượt. */
+  error: string | null
+}
 
 export interface S3Bucket {
   name: string
