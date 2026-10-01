@@ -65,7 +65,7 @@ import { OVERVIEW, parseCommand, suggest } from './nav'
 import { ClusterOverview } from './Overview'
 import { useK8s } from './store'
 import { fitColumns } from '../shared/columns'
-import { ResourceNav } from './Nav'
+import { ResourceNav } from './ResourceNav'
 import { useK8sSession } from './useK8sSession'
 import { objectKey, useResourceList, type EventBus } from './useResourceList'
 
