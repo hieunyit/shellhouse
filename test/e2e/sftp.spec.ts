@@ -7,7 +7,7 @@ import {
   utimesSync,
   writeFileSync
 } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import {
@@ -202,7 +202,10 @@ test('editor trong app: bấm đúp file cấu hình, tô màu, Ctrl+S lưu th�
 
   await panel.locator('[data-testid="sftp-entry"][data-name="nginx.conf"]').dblclick()
   const editor = page.getByTestId('editor')
-  await expect(editor.getByTestId('editor-path')).toHaveText(join(remote, 'nginx.conf'))
+  // Đường dẫn trên server (macOS: /private/var/…, Windows: /C:/…) — chỉ cần đúng thư mục + tên.
+  await expect(editor.getByTestId('editor-path')).toHaveText(
+    new RegExp(`${basename(remote)}/nginx\\.conf$`)
+  )
   await expect(editor.getByTestId('editor-language')).toHaveValue('nginx')
   await expect(editor.locator('.cm-content')).toContainText('listen 80;')
   await expect(editor.getByTestId('editor-state')).toHaveText('Saved')
@@ -218,7 +221,7 @@ test('editor trong app: bấm đúp file cấu hình, tô màu, Ctrl+S lưu th�
   await expect(
     page.locator(`[data-testid="tab"][data-tab-id]`).filter({ hasText: '● nginx.conf' })
   ).toBeVisible()
-  await page.keyboard.press('Control+s')
+  await page.keyboard.press('ControlOrMeta+s')
   await expect(editor.getByTestId('editor-state')).toHaveText('Saved')
   await expect
     .poll(() => readFileSync(join(remote, 'nginx.conf'), 'utf8'))
@@ -230,7 +233,7 @@ test('editor trong app: bấm đúp file cấu hình, tô màu, Ctrl+S lưu th�
   await editor.locator('.cm-line').nth(0).click()
   await page.keyboard.press('End')
   await page.keyboard.type(' # mine')
-  await page.keyboard.press('Control+s')
+  await page.keyboard.press('ControlOrMeta+s')
   await expect(editor.getByTestId('editor-conflict')).toBeVisible()
   expect(readFileSync(join(remote, 'nginx.conf'), 'utf8')).toContain('9090')
   await editor.getByTestId('editor-overwrite').click()

@@ -146,14 +146,19 @@ test('tab: kéo thả đổi thứ tự; "Recently closed" mở lại đúng tab
   await expect.poll(ids).not.toEqual(before)
   expect((await ids()).sort()).toEqual([...before].sort())
 
-  // Đóng hai tab, mở lại tab đóng TRƯỚC (không phải tab gần nhất) từ menu.
-  const titles = await tabs.allTextContents()
+  // Đóng hai tab, mở lại tab đóng TRƯỚC (không phải tab gần nhất) từ menu. (Không so tiêu đề:
+  // shell trên máy CI tự đổi tiêu đề tab thành "user@host: ~".)
   await tabs.nth(1).getByTestId('tab-close').click()
+  await expect(tabs).toHaveCount(2)
   await tabs.nth(1).getByTestId('tab-close').click()
   await expect(tabs).toHaveCount(1)
   await page.getByTestId('new-tab-menu').click()
   await expect(page.getByText('Recently closed')).toBeVisible()
+  await expect(page.locator('[data-testid^="menu-reopen-"]')).toHaveCount(2)
   await page.getByTestId('menu-reopen-0').click()
   await expect(tabs).toHaveCount(2)
-  expect(titles).toContain((await tabs.last().textContent()) ?? '')
+  // Còn đúng tab đóng sau cùng trong danh sách (mục 0 đã mở lại).
+  await page.getByTestId('new-tab-menu').click()
+  await expect(page.locator('[data-testid^="menu-reopen-"]')).toHaveCount(1)
+  await page.keyboard.press('Escape')
 })

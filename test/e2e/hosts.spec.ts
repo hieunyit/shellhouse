@@ -453,8 +453,13 @@ test('trình quản lý file hai cột: F5 copy, F6 move (chỉ xoá bản gốc
       remotePane.locator('[data-testid="sftp-entry"][data-name="log-a.txt"]')
     ).toHaveCount(0)
   } finally {
-    rmSync(remote, { recursive: true, force: true })
-    rmSync(local, { recursive: true, force: true })
+    // Windows: sftp-server / app có thể còn giữ file thêm chút — thử lại, không làm hỏng test.
+    for (const d of [remote, local])
+      try {
+        rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+      } catch {
+        // Bỏ qua: thư mục tạm.
+      }
   }
 })
 

@@ -100,7 +100,7 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
     await editor.locator('.cm-line').first().click()
     await page.keyboard.press('End')
     await page.keyboard.type(' (đã sửa)')
-    await page.keyboard.press('Control+s')
+    await page.keyboard.press('ControlOrMeta+s')
     await expect(editor.getByTestId('editor-state')).toHaveText('Saved')
     expect(await (await fetch(url)).text()).toBe('nội dung báo cáo (đã sửa)')
     await page

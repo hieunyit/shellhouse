@@ -277,6 +277,11 @@ function MapInner({
   )
   /** Khung bản đồ (callback ref) — đọc token màu sau khi gắn vào DOM. */
   const [mapEl, setMapEl] = useState<HTMLDivElement | null>(null)
+  // Callback ref ổn định (ref viết inline đổi mỗi lần render → React gọi lại null/el → render lặp).
+  const attachMap = useCallback((el: HTMLDivElement | null) => {
+    wrapRef.current = el
+    setMapEl(el)
+  }, [])
   const [themeTick, setThemeTick] = useState(0)
   const palette = useMemo(
     () => readPalette(mapEl),
@@ -1187,10 +1192,7 @@ function MapInner({
           </p>
         )}
         <div
-          ref={(el) => {
-            wrapRef.current = el
-            setMapEl(el)
-          }}
+          ref={attachMap}
           tabIndex={0}
           role="application"
           aria-label="Cluster map — drag to move, scroll to zoom, click to select"
