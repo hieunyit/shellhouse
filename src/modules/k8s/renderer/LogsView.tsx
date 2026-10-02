@@ -124,6 +124,7 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
           (container && container !== '*' ? `-${container}` : '')
         }
         testIdPrefix="k8s"
+        sources={Boolean(params.selector) || container === '*'}
         controls={
           <>
             {containers.length > 1 && (

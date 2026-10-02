@@ -70,6 +70,7 @@ export function LogsTab({ tabId, params }: ModuleTabProps<DockerLogsParams>): Re
         feed={feed}
         fileName={params.name}
         testIdPrefix="docker"
+        sources={Boolean(params.containers?.length)}
         controls={
           <>
             <Select

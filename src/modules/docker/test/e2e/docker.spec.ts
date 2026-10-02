@@ -153,6 +153,18 @@ test('Docker: tổng quan, lọc trạng thái, chạy container mới, log cả
       .click()
     await expect(page.getByTestId('tab').last()).toContainText('shop (logs)')
     await expect(page.getByTestId('docker-logs')).toContainText('hello from stdout')
+    // Mỗi service một màu + chip lọc (như stern): ẩn db → chỉ còn dòng của web.
+    const sources = page.getByTestId('docker-log-sources')
+    await expect(sources.getByTestId('docker-log-source')).toHaveCount(2)
+    const lines = page.getByTestId('docker-log-line')
+    await expect(lines.filter({ hasText: '[db]' }).first()).toBeVisible()
+    await sources.locator('[data-testid="docker-log-source"][data-name="db"]').click()
+    await expect(lines.filter({ hasText: '[db]' })).toHaveCount(0)
+    await expect(lines.filter({ hasText: '[web]' }).first()).toBeVisible()
+    const colors = await lines.evaluateAll((els) =>
+      [...new Set(els.map((el) => el.querySelector('span')?.style.color ?? ''))].filter(Boolean)
+    )
+    expect(colors).toHaveLength(1)
   } finally {
     await launched.close()
     await engine.close()
