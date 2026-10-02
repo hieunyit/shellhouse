@@ -14,6 +14,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   Cards are wider (names are no longer cut off) with more space between rows and namespaces;
   zoom in and out freely. Hovering a namespace no longer covers its cards with a tooltip.
 - **Topology: drag objects** to rearrange the graph; **Reset layout** puts them back.
+- **Kubernetes Map: clearer connections between apps** — an Ingress that sends some paths to
+  another app's Service (e.g. the frontend's `/api` going to the backend) now shows that link as a
+  curved line between the two columns instead of a short stub hidden under the cards, and the
+  line is labelled with the host / path when highlighted. Selecting something lights up what it
+  depends on and what depends on it — following the direction of the arrows — so selecting one
+  Ingress no longer lights up an unrelated Ingress that happens to share a Service.
 
 ### Fixed
 

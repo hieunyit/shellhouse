@@ -322,12 +322,18 @@ export async function mapData(
     ...ingresses.items.map((i) => {
       const spec = o(i.spec)
       const backends = new Set<string>()
-      const add = (b: unknown): void => {
+      // Service → các path dẫn tới nó ("host/path") — nhãn trên đường nối của bản đồ.
+      const paths: Record<string, string[]> = {}
+      const add = (b: unknown, where: string): void => {
         const n = s(o(o(b)['service'])['name'])
-        if (n) backends.add(n)
+        if (!n) return
+        backends.add(n)
+        ;(paths[n] ??= []).push(where)
       }
-      add(spec['defaultBackend'])
-      for (const r of a(spec['rules'])) for (const p of a(o(r['http'])['paths'])) add(p['backend'])
+      add(spec['defaultBackend'], '(default)')
+      for (const r of a(spec['rules']))
+        for (const p of a(o(r['http'])['paths']))
+          add(p['backend'], `${s(r['host'])}${s(p['path']) || '/'}`)
       return {
         kind: 'ingresses.networking.k8s.io',
         ns: i.metadata.namespace ?? '',
@@ -335,7 +341,8 @@ export async function mapData(
         hosts: a(spec['rules'])
           .map((r) => s(r['host']))
           .filter(Boolean),
-        backends: [...backends]
+        backends: [...backends],
+        paths
       }
     }),
     ...[

@@ -480,14 +480,25 @@ function MapInner({
       set.add(selected)
       return set
     }
+    // Lan theo đúng hướng phụ thuộc: xuôi (thứ nó gọi tới: route → service → workload → PVC) và
+    // ngược (thứ gọi tới nó), không quay đầu giữa chừng — chọn Ingress A không làm sáng Ingress B
+    // chỉ vì cùng trỏ tới một Service.
+    const walk = (from: string, dir: 'down' | 'up', depth: number): void => {
+      if (depth === 0) return
+      // NetworkPolicy áp lên cả nhóm workload — không lan tiếp qua nó.
+      if (from !== focusId && index.byId.get(from)?.kind === 'policy') return
+      for (const e of index.edgesOf.get(from) ?? []) {
+        const next =
+          dir === 'down' ? (e.from === from ? e.to : null) : e.to === from ? e.from : null
+        if (next === null || set.has(next)) continue
+        set.add(next)
+        walk(next, dir, depth - 1)
+      }
+    }
     const visit = (id: string, depth: number): void => {
       set.add(id)
-      // NetworkPolicy áp lên cả nhóm workload — không lan tiếp qua nó (kẻo cả namespace "liên quan").
-      if (depth === 0 || (id !== focusId && index.byId.get(id)?.kind === 'policy')) return
-      for (const e of index.edgesOf.get(id) ?? []) {
-        const other = e.from === id ? e.to : e.from
-        if (!set.has(other)) visit(other, depth - 1)
-      }
+      walk(id, 'down', depth)
+      walk(id, 'up', depth)
     }
     const start = node.kind === 'pod' && node.parent ? node.parent : focusId
     visit(start, 3)
@@ -580,15 +591,25 @@ function MapInner({
             : e.kind === 'policy'
               ? palette.warn
               : palette.edge
+        // Khác cột (vd. Ingress frontend → Service backend): nối cạnh bên → cạnh bên bằng đường
+        // cong — thấy trọn đường đi, không chạy ngầm dưới thẻ.
+        const sa = index.byId.get(e.from)
+        const sb = index.byId.get(e.to)
+        const cross =
+          sa !== undefined && sb !== undefined && Math.abs(sa.x + sa.w / 2 - (sb.x + sb.w / 2)) > 24
         out.push({
           id: `${e.kind}:${e.from}>${e.to}`,
           source: e.from,
           target: e.to,
-          sourceHandle: 'sb',
-          targetHandle: 'tt',
+          ...(cross ? sides(sa, sb) : { sourceHandle: 'sb', targetHandle: 'tt' }),
           type: 'map',
           zIndex: 2,
-          data: { kind: e.kind, color },
+          data: {
+            kind: e.kind,
+            color,
+            ...(cross ? { cross: true } : {}),
+            ...(e.label ? { label: e.label } : {})
+          },
           ...(e.kind === 'storage' || e.kind === 'policy' ? {} : { markerEnd: arrow(color) })
         })
       }

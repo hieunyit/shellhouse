@@ -59,6 +59,10 @@ export type MapFlowEdge = Edge<{
   kind: 'route' | 'select' | 'storage' | 'attach' | 'policy' | 'traffic'
   rate?: number
   color: string
+  /** Nối hai cột khác nhau (cạnh bên → cạnh bên, đường cong). */
+  cross?: boolean
+  /** Nhãn khi được làm nổi (Ingress → Service: path). */
+  label?: string
 }>
 
 function dimmed(ctx: MapCtx, n: MapNode): boolean {
@@ -546,9 +550,10 @@ export const MapEdgeComp = memo(function MapEdgeComp(
   const ctx = useMap()
   const d = props.data
   const traffic = d?.kind === 'traffic'
-  const [path, lx, ly] = traffic
-    ? getBezierPath(props)
-    : getSmoothStepPath({ ...props, borderRadius: 12, offset: 16 })
+  const [path, lx, ly] =
+    traffic || d?.cross
+      ? getBezierPath(props)
+      : getSmoothStepPath({ ...props, borderRadius: 12, offset: 16 })
   const focusing = ctx.related.size > 0
   const hot = focusing && ctx.related.has(props.source) && ctx.related.has(props.target)
   const faded = focusing && !hot
@@ -626,19 +631,36 @@ export const MapEdgeComp = memo(function MapEdgeComp(
   }
   const dash = d?.kind === 'storage' ? '4 4' : d?.kind === 'policy' ? '6 4' : undefined
   return (
-    <BaseEdge
-      id={props.id}
-      path={path}
-      {...(props.markerEnd ? { markerEnd: props.markerEnd } : {})}
-      style={{
-        stroke: color,
-        strokeWidth: hot ? 2.2 : 1.3,
-        strokeOpacity: faded ? (ctx.strong ? 0.07 : 0.2) : hot ? 1 : 0.45,
-        ...(hot ? { filter: `drop-shadow(0 0 3px ${color})` } : {}),
-        ...(dash ? { strokeDasharray: dash } : {}),
-        transition: 'stroke-opacity 160ms ease'
-      }}
-    />
+    <>
+      <BaseEdge
+        id={props.id}
+        path={path}
+        {...(props.markerEnd ? { markerEnd: props.markerEnd } : {})}
+        style={{
+          stroke: color,
+          strokeWidth: hot ? 2.2 : 1.3,
+          strokeOpacity: faded ? (ctx.strong ? 0.07 : 0.2) : hot ? 1 : 0.45,
+          ...(hot ? { filter: `drop-shadow(0 0 3px ${color})` } : {}),
+          ...(dash ? { strokeDasharray: dash } : {}),
+          transition: 'stroke-opacity 160ms ease'
+        }}
+      />
+      {hot && d?.label && (
+        <EdgeLabelRenderer>
+          <div
+            className="pointer-events-none absolute max-w-56 truncate rounded-md border px-1.5 py-0.5 font-mono text-[10px] text-fg shadow"
+            style={{
+              transform: `translate(-50%, -50%) translate(${String(lx)}px, ${String(ly)}px)`,
+              background: 'var(--map-card)',
+              borderColor: color
+            }}
+            data-testid="k8s-map-edge-label"
+          >
+            {d.label}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
   )
 })
 

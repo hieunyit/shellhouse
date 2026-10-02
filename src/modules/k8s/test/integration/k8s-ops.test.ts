@@ -534,7 +534,8 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
         ns: 'shop',
         name: 'api',
         hosts: ['api.example.com'],
-        backends: ['api']
+        backends: ['api'],
+        paths: { api: ['api.example.com/'] }
       },
       {
         kind: 'httproutes.gateway.networking.k8s.io',

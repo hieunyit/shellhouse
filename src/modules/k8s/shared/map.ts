@@ -83,6 +83,8 @@ export interface MapRoute {
   hosts: string[]
   /** Tên service phía sau (cùng namespace). */
   backends: string[]
+  /** Ingress: service → các "host/path" dẫn tới nó (nhãn trên đường nối). */
+  paths?: Record<string, string[]>
   /** Gateway API: Gateway cha (parentRefs). */
   parents?: { ns: string; name: string }[]
 }
@@ -634,6 +636,8 @@ export interface MapEdge {
   from: string
   to: string
   kind: MapEdgeKind
+  /** Nhãn hiện khi đường nối được làm nổi (Ingress: path dẫn tới service). */
+  label?: string
 }
 
 export interface MapLayout {
@@ -992,13 +996,21 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
         (r.parents ?? []).filter((pr) => pr.ns === ns).map((pr) => `gw:${ns}/${pr.name}`)
       ])
     )
+    // Mỗi route thuộc làn của service "chính" (nhận path "/" hoặc mặc định; không có thì
+    // backend đầu) — backend phụ (/api → service khác) nối sang bằng đường cong.
+    const homeOf = (r: MapRoute): string | undefined => {
+      const main = Object.entries(r.paths ?? {}).find(([, ps]) =>
+        ps.some((p) => p === '(default)' || p.endsWith('/') || !p.includes('/'))
+      )?.[0]
+      return main && r.backends.includes(main) ? main : r.backends[0]
+    }
     const routesOf = new Map<string, number[]>()
     routes.forEach((r, i) => {
-      for (const b of r.backends) {
-        const list = routesOf.get(b)
-        if (list) list.push(i)
-        else routesOf.set(b, [i])
-      }
+      const home = homeOf(r)
+      if (!home) return
+      const list = routesOf.get(home)
+      if (list) list.push(i)
+      else routesOf.set(home, [i])
     })
     const pvcNodeOf = new Map(pvcs.map((v, i) => [v.name, pvcNodes[i]]))
     interface Lane extends Box {
@@ -1137,7 +1149,12 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
     for (const r of routes)
       for (const b of r.backends)
         if (services.some((s) => s.name === b))
-          edges.push({ from: `r:${r.kind}:${ns}/${r.name}`, to: `s:${ns}/${b}`, kind: 'route' })
+          edges.push({
+            from: `r:${r.kind}:${ns}/${r.name}`,
+            to: `s:${ns}/${b}`,
+            kind: 'route',
+            ...(r.paths?.[b]?.length ? { label: r.paths[b].join(', ') } : {})
+          })
     for (const s of services)
       for (const w of targets.get(s) ?? [])
         edges.push({
