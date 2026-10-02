@@ -1250,7 +1250,8 @@ function MapInner({
                 wrapRef.current?.focus()
               }}
               onNodeMouseEnter={(e, n) => {
-                if (n.type === 'region') return
+                // Namespace / vùng đã có tên + số liệu ngay trên khung — bảng nổi chỉ che thẻ bên trong.
+                if (n.type === 'region' || n.type === 'namespace') return
                 const at = local(e)
                 // Đang trỏ một pod trong thẻ này → giữ bảng của pod.
                 setHover((h) =>

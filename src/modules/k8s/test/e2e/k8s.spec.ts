@@ -631,6 +631,23 @@ test('Kubernetes: trang Deployment (Status / Strategy / Resources / Pods / Repli
     // Tắt nhóm Access (RBAC) → bỏ nhánh role.
     await topo.locator('[data-testid="k8s-topology-filter"][data-category="rbac"]').click()
     await expect(node('roles.rbac.authorization.k8s.io', 'secret-reader')).toHaveCount(0)
+    // Kéo một mục sang chỗ khác → giữ vị trí mới; Reset layout → về chỗ tự xếp.
+    const pod = node('pods', 'web-2')
+    const before = await pod.boundingBox()
+    if (!before) throw new Error('pod node')
+    await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(before.x + before.width / 2 + 140, before.y + before.height / 2 + 60, {
+      steps: 8
+    })
+    await page.mouse.up()
+    await expect
+      .poll(async () => Math.round((await pod.boundingBox())?.x ?? 0))
+      .toBeGreaterThan(Math.round(before.x) + 60)
+    await topo.getByTestId('k8s-topology-reset').click()
+    await expect
+      .poll(async () => Math.round((await pod.boundingBox())?.x ?? 0))
+      .toBe(Math.round(before.x))
 
     // Security: cấu hình pod + ServiceAccount đọc được Secret.
     await detail.getByTestId('k8s-detail-tab-security').click()

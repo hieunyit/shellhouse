@@ -363,4 +363,26 @@ describe('bản đồ cluster (Map)', () => {
     // Namespace khác vẫn đầy đủ.
     expect(folded.nodes.some((n) => n.ns === 'monitoring' && n.kind === 'workload')).toBe(true)
   })
+
+  it('làn dọc: route → service → workload → PVC thẳng một cột, không đè lên làn khác', () => {
+    const layout = layoutMap(data(), { hideSystem: false })
+    const at = (id: string): MapNode => {
+      const n = layout.nodes.find((x) => x.id === id)
+      if (!n) throw new Error(id)
+      return n
+    }
+    const mid = (n: MapNode): number => n.x + n.w / 2
+    const route = at('r:ingresses.networking.k8s.io:shop/web')
+    const svc = at('s:shop/api')
+    const api = at('w:deployments.apps:shop/api')
+    expect(mid(route)).toBe(mid(api))
+    expect(mid(svc)).toBe(mid(api))
+    expect(route.y < svc.y && svc.y < api.y).toBe(true)
+    const db = at('w:statefulsets.apps:shop/db')
+    const pvc = at('v:shop/data-db-0')
+    expect(mid(pvc)).toBe(mid(db))
+    expect(pvc.y > db.y).toBe(true)
+    // Làn khác cột với nhau.
+    expect(mid(db)).not.toBe(mid(api))
+  })
 })

@@ -196,7 +196,8 @@ select.sh-select {
   background-position: right 9px center;
   background-size: 12px;
 }
-select.sh-select option {
+select.sh-select option,
+select option {
   background: var(--sh-elevated);
   color: var(--sh-fg);
 }

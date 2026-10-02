@@ -6,6 +6,20 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- **Kubernetes Map is roomier and easier to follow** — each workload gets its own column with its
+  Ingress / route, Service and volumes straight above and below it (a Gateway sits on top of the
+  routes it serves), so connections are short vertical lines that never run across another app.
+  Cards are wider (names are no longer cut off) with more space between rows and namespaces;
+  zoom in and out freely. Hovering a namespace no longer covers its cards with a tooltip.
+- **Topology: drag objects** to rearrange the graph; **Reset layout** puts them back.
+
+### Fixed
+
+- Dropdown lists (Map grouping and others) were unreadable in the dark theme — white text on a
+  white list.
+
 ## [1.2.0-beta.5] - 2026-10-02
 
 ### Added

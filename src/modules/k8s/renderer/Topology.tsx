@@ -19,6 +19,7 @@ import {
   type Edge,
   type EdgeProps,
   type Node,
+  type NodeChange,
   type NodeProps
 } from '@xyflow/react'
 import '@xyflow/react/dist/base.css'
@@ -293,24 +294,39 @@ export function TopologyOf({
   }
 
   // ——— React Flow ———
+  // Vị trí người dùng kéo (theo từng bố cục — bố cục mới thì về vị trí tự xếp).
+  const [movedRaw, setMoved] = useState<{
+    layout: unknown
+    pos: Readonly<Record<string, { x: number; y: number }>>
+  }>({ layout: null, pos: {} })
+  const moved = useMemo(() => (movedRaw.layout === layout ? movedRaw.pos : {}), [movedRaw, layout])
+  const onNodesChange = useCallback(
+    (changes: NodeChange<TopoFlowNode>[]) => {
+      const next: Record<string, { x: number; y: number }> = {}
+      for (const c of changes) if (c.type === 'position' && c.position) next[c.id] = c.position
+      if (Object.keys(next).length)
+        setMoved((m) => ({ layout, pos: { ...(m.layout === layout ? m.pos : {}), ...next } }))
+    },
+    [layout]
+  )
   const flowNodes = useMemo<TopoFlowNode[]>(
     () =>
       (layout?.nodes ?? []).map((n) => ({
         id: n.id,
         type: 'topo',
-        position: { x: n.x, y: n.y },
+        position: moved[n.id] ?? { x: n.x, y: n.y },
         width: TOPO_NODE_W,
         height: TOPO_NODE_H,
         data: { node: n },
-        draggable: false,
+        draggable: true,
         selectable: false,
         connectable: false
       })),
-    [layout]
+    [layout, moved]
   )
   const flowEdges = useMemo<TopoFlowEdge[]>(() => {
     if (!layout) return []
-    const pos = new Map(layout.nodes.map((n) => [n.id, n]))
+    const pos = new Map(layout.nodes.map((n) => [n.id, { ...n, ...(moved[n.id] ?? {}) }]))
     return layout.edges.map((e) => {
       const a = pos.get(e.from)
       const b = pos.get(e.to)
@@ -328,7 +344,7 @@ export function TopologyOf({
         data: { edge: e }
       }
     })
-  }, [layout])
+  }, [layout, moved])
   const ctx = useMemo<TopoCtx>(
     () => ({
       root: graph?.root ?? '',
@@ -422,6 +438,18 @@ export function TopologyOf({
           >
             <Maximize size={13} />
           </IconButton>
+          {Object.keys(moved).length > 0 && (
+            <button
+              type="button"
+              className="mr-1 rounded px-1.5 text-[11px] text-accent hover:bg-hover"
+              data-testid="k8s-topology-reset"
+              onClick={() => {
+                setMoved({ layout: null, pos: {} })
+              }}
+            >
+              Reset layout
+            </button>
+          )}
           <IconButton
             label="Reload"
             onClick={() => {
@@ -456,7 +484,8 @@ export function TopologyOf({
               }}
               minZoom={0.15}
               maxZoom={2.5}
-              nodesDraggable={false}
+              nodesDraggable
+              onNodesChange={onNodesChange}
               nodesConnectable={false}
               elementsSelectable={false}
               nodesFocusable={false}

@@ -660,15 +660,22 @@ const COLLAPSED_H = 96
 
 const POD = 10
 const POD_GAP = 4
-const CARD_MIN_W = 176
+// Khoảng cách rộng rãi: tên ít bị cắt, đường nối giữa các hàng đủ chỗ để đọc (zoom để xem gần).
+const CARD_MIN_W = 236
 const CARD_HEADER = 46
-const PILL_W = 176
-const PILL_H = 28
-const GAP = 12
-const PAD = 16
-const NS_HEADER = 34
-const REGION_HEADER = 44
-const REGION_PAD = 24
+const PILL_W = 236
+const PILL_H = 32
+/** Khoảng cách ngang giữa các thẻ trong một hàng. */
+const GAP = 22
+/** Khoảng cách dọc giữa các hàng (route → service → workload → PVC) — chỗ cho đường nối. */
+const ROW_GAP = 42
+const PAD = 26
+/** Khoảng cách giữa các làn (cột workload) và giữa các mục trong một làn. */
+const LANE_GAP = 30
+const LANE_ITEM_GAP = 30
+const NS_HEADER = 48
+const REGION_HEADER = 60
+const REGION_PAD = 36
 
 const SEVERITY: Record<MapTone, number> = { bad: 3, warn: 2, muted: 1, ok: 0 }
 const worst = (tones: readonly MapTone[]): MapTone =>
@@ -683,7 +690,8 @@ interface Box {
 function shelf(
   items: readonly Box[],
   maxWidth: number,
-  gap: number
+  gap: number,
+  rowGap = gap
 ): { pos: { x: number; y: number }[]; w: number; h: number } {
   const pos: { x: number; y: number }[] = []
   let x = 0
@@ -693,7 +701,7 @@ function shelf(
   for (const it of items) {
     if (x > 0 && x + it.w > maxWidth) {
       x = 0
-      y += rowH + gap
+      y += rowH + rowGap
       rowH = 0
     }
     pos.push({ x, y })
@@ -959,27 +967,102 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       )
     )
 
-    // Chiều rộng hàng: theo diện tích thẻ (đảo vuông vừa phải), trong [380, 1600].
-    const width = clamp(Math.sqrt(area(cards)) * 1.6, 380, 1600)
-    const rows = [
-      [...gatewayNodes, ...routeNodes],
-      serviceNodes,
-      cards,
-      [...pvcNodes, ...policyNodes]
-    ].filter((r) => r.length > 0)
+    // Làn dọc theo workload: route → service → workload → PVC thẳng một cột — đường nối là đoạn
+    // thẳng ngắn, không đè lên nhau (xếp theo hàng ngang thì hàng route gãy dòng, đường của mục này
+    // chạy trùng đường của mục khác — nhìn như nối nhầm). Mục không gắn workload nào: hàng cuối.
+    const used = new Set<MapNode>()
+    const take = (n: MapNode | undefined): MapNode[] => {
+      if (!n || used.has(n)) return []
+      used.add(n)
+      return [n]
+    }
+    const serviceNodeOf = new Map(services.map((sv, i) => [sv, serviceNodes[i]]))
+    // Tra ngược một lần (cluster lớn: tránh quét mọi service / route cho từng workload).
+    const servicesOf = new Map<MapWorkload, MapService[]>()
+    for (const sv of services)
+      for (const wl of targets.get(sv) ?? []) {
+        const list = servicesOf.get(wl)
+        if (list) list.push(sv)
+        else servicesOf.set(wl, [sv])
+      }
+    const gatewayById = new Map(gatewayNodes.map((g) => [g.id, g]))
+    const routeParents = new Map(
+      routes.map((r, i) => [
+        routeNodes[i],
+        (r.parents ?? []).filter((pr) => pr.ns === ns).map((pr) => `gw:${ns}/${pr.name}`)
+      ])
+    )
+    const routesOf = new Map<string, number[]>()
+    routes.forEach((r, i) => {
+      for (const b of r.backends) {
+        const list = routesOf.get(b)
+        if (list) list.push(i)
+        else routesOf.set(b, [i])
+      }
+    })
+    const pvcNodeOf = new Map(pvcs.map((v, i) => [v.name, pvcNodes[i]]))
+    interface Lane extends Box {
+      items: MapNode[]
+    }
+    const lanes: Lane[] = cards.map((card, ci) => {
+      const wl = ci < workloads.length ? workloads[ci] : undefined
+      const svcs = wl ? (servicesOf.get(wl) ?? []) : []
+      const svcItems = svcs.flatMap((sv) => take(serviceNodeOf.get(sv)))
+      const routeItems = [...new Set(svcs.flatMap((sv) => routesOf.get(sv.name) ?? []))]
+        .sort((a, b) => a - b)
+        .flatMap((i) => take(routeNodes[i]))
+      const pvcItems = (wl?.pvcs ?? []).flatMap((v) => take(pvcNodeOf.get(v)))
+      // Gateway đứng đầu làn của route đầu tiên gắn vào nó (đường gateway → route không chạy
+      // xuyên qua làn khác).
+      const gwItems = routeItems.flatMap((rn) =>
+        (routeParents.get(rn) ?? []).flatMap((gid) => take(gatewayById.get(gid)))
+      )
+      const items = [...gwItems, ...routeItems, ...svcItems, card, ...pvcItems]
+      const laneW = Math.max(...items.map((it) => it.w))
+      let ly = 0
+      for (const it of items) {
+        it.x = (laneW - it.w) / 2
+        it.y = ly
+        ly += it.h + LANE_ITEM_GAP
+      }
+      return { items, w: laneW, h: ly - LANE_ITEM_GAP }
+    })
+    const loose = [
+      ...routeNodes.filter((n) => !used.has(n)),
+      ...serviceNodes.filter((n) => !used.has(n)),
+      ...pvcNodes.filter((n) => !used.has(n)),
+      ...policyNodes
+    ]
+    // Chiều rộng đảo: theo diện tích các làn (đảo vuông vừa phải).
+    const width = clamp(Math.sqrt(area(lanes)) * 1.7, 540, 1900)
     let y = NS_HEADER
     let w = 260
-    for (const row of rows) {
-      const s = shelf(row, width, GAP)
+    const placeRow = (row: MapNode[]): void => {
+      if (!row.length) return
+      const s = shelf(row, width, GAP, ROW_GAP)
       row.forEach((n, i) => {
         const p = s.pos[i] ?? { x: 0, y: 0 }
         n.x = PAD + p.x
         n.y = y + p.y
       })
-      y += s.h + GAP
+      y += s.h + ROW_GAP
       w = Math.max(w, s.w + 2 * PAD)
     }
-    const h = Math.max(y - GAP + PAD, NS_HEADER + 40)
+    placeRow(gatewayNodes.filter((g) => !used.has(g)))
+    if (lanes.length) {
+      const s = shelf(lanes, width, LANE_GAP, ROW_GAP + 8)
+      lanes.forEach((lane, i) => {
+        const p = s.pos[i] ?? { x: 0, y: 0 }
+        for (const it of lane.items) {
+          it.x += PAD + p.x
+          it.y += y + p.y
+        }
+      })
+      y += s.h + ROW_GAP
+      w = Math.max(w, s.w + 2 * PAD)
+    }
+    placeRow(loose)
+    const h = Math.max(y - ROW_GAP + PAD, NS_HEADER + 40)
     const podCount = cards.reduce((n, c) => n + c.pods.length, 0)
     // Công nghệ chính (nhiều workload nhất) cho nhìn xa.
     const techCount = new Map<string, number>()
@@ -1117,7 +1200,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
     const members = islands.filter((i) => groupOf(i.ns) === region)
     if (!members.length) continue
     const width = clamp(Math.sqrt(area(members)) * 1.5, 700, 4200)
-    const s = shelf(members, width, 32)
+    const s = shelf(members, width, 64)
     const stats = members.reduce(
       (acc, m) => ({
         workloads: acc.workloads + (m.node.stats?.workloads ?? 0),
@@ -1147,7 +1230,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
     })
   }
   const total = clamp(Math.sqrt(area(regions)) * 1.4, 1200, 9000)
-  const placed = shelf(regions, total, 80)
+  const placed = shelf(regions, total, 140)
   regions.forEach((r, ri) => {
     const rp = placed.pos[ri] ?? { x: 0, y: 0 }
     r.node.x = rp.x
