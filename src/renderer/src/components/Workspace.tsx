@@ -18,6 +18,7 @@ import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useSettings } from '../stores/settings'
 import { connectionLabel, cx, StatusDot } from './ui'
 import { HomeView } from './Home'
+import { HostAvatar } from './HostAvatar'
 import { useTabs } from '../stores/tabs'
 import { TerminalView } from '../terminal/TerminalView'
 import { ModuleTabView, TabIcon } from './ModuleTabView'
@@ -79,6 +80,9 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
     return t?.kind === 'host' ? t.hostId : null
   })
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
+  const hostLabel = useHosts((s) =>
+    hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.label ?? null) : null
+  )
   const overrides = useSettings((s) => s.settings.keybindings)
   const { menu, open: openMenu } = useContextMenu()
   const key = (id: string): string => displayKeybinding(keybindingFor(id, overrides, isMac))
@@ -195,11 +199,19 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         {envColor && (
           <span
             aria-hidden
-            className={cx('absolute inset-x-0 top-0 h-0.5', hostColorClass[envColor])}
+            className={cx('absolute inset-x-0 top-0 h-[3px]', hostColorClass[envColor])}
           />
         )}
         <span className="relative flex shrink-0">
-          <TabIcon target={target} size={13} className={active ? 'text-fg' : 'text-faint'} />
+          {hostLabel ? (
+            <HostAvatar
+              host={{ label: hostLabel, color: envColor }}
+              size={16}
+              className="rounded"
+            />
+          ) : (
+            <TabIcon target={target} size={13} className={active ? 'text-fg' : 'text-faint'} />
+          )}
           {/* Terminal local luôn "connected" — chỉ hiện chấm khi là phiên từ xa hoặc đã kết thúc. */}
           {((kind !== 'local' && kind !== 'home') || state === 'exited') && (
             <StatusDot

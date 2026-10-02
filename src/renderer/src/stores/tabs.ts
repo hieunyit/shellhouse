@@ -71,8 +71,8 @@ interface TabsState {
   tabs: Tab[]
   activeId: string | null
   closed: ClosedTab[]
-  /** Mở lại tab đóng gần nhất (null = không còn). */
-  reopenClosed: () => string | null
+  /** Mở lại tab đã đóng (mặc định: gần nhất; `index` trong `closed`) — null = không còn. */
+  reopenClosed: (index?: number) => string | null
   /** Tab terminal local; `shellId` = shell cụ thể (không có = shell mặc định). */
   addLocal: (shellId?: string) => string
   /** Mở (hoặc chuyển tới) tab Home. */
@@ -140,10 +140,12 @@ export const useTabs = create<TabsState>((set, get) => {
     tabs: [],
     activeId: null,
     closed: [],
-    reopenClosed: () => {
-      const last = get().closed.at(-1)
+    reopenClosed: (index) => {
+      const closed = get().closed
+      const at = index ?? closed.length - 1
+      const last = closed[at]
       if (!last) return null
-      set((s) => ({ closed: s.closed.slice(0, -1) }))
+      set((s) => ({ closed: s.closed.filter((_, i) => i !== at) }))
       const title =
         last.target.kind === 'local'
           ? (shellName(last.target.shellId) ?? `Local ${++localCounter}`)

@@ -132,3 +132,28 @@ test('mở lại tab vừa đóng: Ctrl+Alt+T và menu tab; Home không vào dan
   await page.getByTestId('tab').last().click({ button: 'right' })
   await expect(page.getByText('Reopen “Home”')).toHaveCount(0)
 })
+
+test('tab: kéo thả đổi thứ tự; "Recently closed" mở lại đúng tab đã chọn', async ({ page }) => {
+  await page.getByTestId('new-tab').click()
+  await page.getByTestId('new-tab').click()
+  const tabs = page.getByTestId('tab')
+  await expect(tabs).toHaveCount(3)
+  const ids = async (): Promise<(string | null)[]> =>
+    tabs.evaluateAll((els) => els.map((e) => e.getAttribute('data-tab-id')))
+  const before = await ids()
+  // Kéo tab cuối lên đầu.
+  await tabs.last().dragTo(tabs.first())
+  await expect.poll(ids).not.toEqual(before)
+  expect((await ids()).sort()).toEqual([...before].sort())
+
+  // Đóng hai tab, mở lại tab đóng TRƯỚC (không phải tab gần nhất) từ menu.
+  const titles = await tabs.allTextContents()
+  await tabs.nth(1).getByTestId('tab-close').click()
+  await tabs.nth(1).getByTestId('tab-close').click()
+  await expect(tabs).toHaveCount(1)
+  await page.getByTestId('new-tab-menu').click()
+  await expect(page.getByText('Recently closed')).toBeVisible()
+  await page.getByTestId('menu-reopen-0').click()
+  await expect(tabs).toHaveCount(2)
+  expect(titles).toContain((await tabs.last().textContent()) ?? '')
+})

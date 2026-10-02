@@ -16,7 +16,8 @@ import {
   Settings,
   SquareTerminal,
   Zap,
-  House
+  House,
+  RotateCcw
 } from 'lucide-react'
 import { parseQuickConnect } from '@shared/quick-connect'
 import { keybindingFor } from '@shared/commands'
@@ -149,6 +150,31 @@ export function TabBar({
                   addLocal(s.id)
                 }
               })),
+              ...(() => {
+                // Tab đã đóng gần đây (mới nhất trước) — mở lại đúng tab muốn.
+                const closed = useTabs.getState().closed
+                if (!closed.length) return []
+                return [
+                  'separator' as const,
+                  {
+                    id: 'recent-header',
+                    label: 'Recently closed',
+                    disabled: true,
+                    onSelect: () => undefined
+                  },
+                  ...closed
+                    .map((c, i) => ({ c, i }))
+                    .reverse()
+                    .map(({ c, i }): MenuEntry => ({
+                      id: `reopen-${String(i)}`,
+                      label: c.title,
+                      icon: <RotateCcw size={14} />,
+                      onSelect: () => {
+                        useTabs.getState().reopenClosed(i)
+                      }
+                    }))
+                ]
+              })(),
               'separator',
               {
                 id: 'shell-refresh',
