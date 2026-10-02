@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
+  ChevronsDownUp,
+  ChevronsUpDown,
   ExternalLink,
   FileText,
   Locate,
@@ -10,6 +12,7 @@ import {
   RefreshCw,
   Search,
   SquareTerminal,
+  Tag,
   X
 } from 'lucide-react'
 import {
@@ -24,13 +27,17 @@ import {
   type Viewport
 } from '@xyflow/react'
 import '@xyflow/react/dist/base.css'
-import { cx } from '../../../renderer/src/components/ui'
+import { cx, Segmented } from '../../../renderer/src/components/ui'
 import { Heading, Pill, SidePanel } from '../../../renderer/src/components/panels'
 import { cleanError } from '../../../renderer/src/lib/format'
 import {
   TECH,
+  filterMapData,
+  groupingKeys,
   impactOf,
   layoutMap,
+  parseLabelSelector,
+  type MapGrouping,
   workloadKindLabel,
   type MapData,
   type MapEdge,
@@ -59,6 +66,7 @@ import {
   type MapFlowNode
 } from './MapFlow'
 import { TechIcon } from './icons'
+import { NodesView } from './NodesView'
 import { useTraffic, type TrafficState } from './useTraffic'
 
 type Request = <T>(op: K8sOp) => Promise<T>
@@ -76,6 +84,19 @@ const OPTIONS_KEY = 'shellhouse.k8s.map'
 
 /** Vị trí xem theo tab — quay lại Map thấy đúng chỗ cũ (không lưu đĩa). */
 const savedViewports = new Map<string, Viewport>()
+
+/**
+ * Namespace gập: `all` = gập hết trừ `except`, ngược lại chỉ gập `except`. Namespace mới xuất hiện
+ * theo mặc định của `all`. null = tự quyết (cluster nhiều namespace → gập hết).
+ */
+interface Fold {
+  all: boolean
+  except: ReadonlySet<string>
+}
+/** Cluster từ chừng này namespace trở lên: mặc định gập hết, mở cái cần xem. */
+const AUTO_FOLD_NAMESPACES = 25
+const savedFolds = new Map<string, Fold>()
+const savedSelectors = new Map<string, string>()
 
 interface Palette {
   accent: string
@@ -105,10 +126,20 @@ interface Options {
   pods: boolean
   edges: boolean
   traffic: boolean
+  grouping: MapGrouping
+  /** Bản đồ workload hay theo node (hạ tầng). */
+  view: 'workloads' | 'nodes'
 }
 
 function loadOptions(): Options {
-  const base: Options = { hideSystem: true, pods: true, edges: true, traffic: true }
+  const base: Options = {
+    hideSystem: true,
+    pods: true,
+    edges: true,
+    traffic: true,
+    grouping: 'purpose',
+    view: 'workloads'
+  }
   try {
     const raw = window.localStorage.getItem(OPTIONS_KEY)
     if (raw) return { ...base, ...(JSON.parse(raw) as Partial<Options>) }
@@ -230,8 +261,20 @@ function MapInner({
   const wrapRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const fitted = useRef(savedViewports.has(tabId))
+  const [foldRaw, setFoldRaw] = useState<Fold | null>(() => savedFolds.get(tabId) ?? null)
+  const [selectorText, setSelectorTextRaw] = useState(() => savedSelectors.get(tabId) ?? '')
+  const setSelectorText = (v: string): void => {
+    savedSelectors.set(tabId, v)
+    setSelectorTextRaw(v)
+  }
+  /** Bay tới node này khi nó có trên bản đồ (vừa mở namespace chứa nó). */
+  const [pendingGo, setPendingGo] = useState<string | null>(null)
+  /** Đang nhập khoá nhãn tuỳ ý để gom vùng (null = không). */
+  const [customGroup, setCustomGroup] = useState<string | null>(null)
+  const goToRef = useRef<(n: MapNode) => void>(() => undefined)
   const nsKey = namespaces.join(',')
-  const traffic = useTraffic(request, active && options.traffic)
+  const nodesView = options.view === 'nodes'
+  const traffic = useTraffic(request, active && options.traffic && !nodesView)
 
   // ——— Dữ liệu ———
   useEffect(() => {
@@ -282,9 +325,63 @@ function MapInner({
     }
   }, [])
 
+  const parsedSelector = useMemo(() => parseLabelSelector(selectorText), [selectorText])
+  const selectorError = parsedSelector && 'error' in parsedSelector ? parsedSelector.error : null
+  const shownData = useMemo(
+    () =>
+      data && parsedSelector && !('error' in parsedSelector)
+        ? filterMapData(data, parsedSelector)
+        : data,
+    [data, parsedSelector]
+  )
+  const fold = useMemo<Fold>(
+    () =>
+      foldRaw ?? {
+        all: (data?.namespaces.length ?? 0) >= AUTO_FOLD_NAMESPACES,
+        except: new Set()
+      },
+    [foldRaw, data]
+  )
+  const isFolded = useCallback((ns: string) => fold.all !== fold.except.has(ns), [fold])
+  const setFold = useCallback(
+    (next: Fold) => {
+      savedFolds.set(tabId, next)
+      setFoldRaw(next)
+    },
+    [tabId]
+  )
+  const toggleNs = useCallback(
+    (ns: string) => {
+      const except = new Set(fold.except)
+      if (except.has(ns)) except.delete(ns)
+      else except.add(ns)
+      setFold({ all: fold.all, except })
+    },
+    [fold, setFold]
+  )
+  const groupKeys = useMemo(() => (data ? groupingKeys(data) : []), [data])
+  /** Gợi ý cho ô lọc: key=value phổ biến trên nhãn workload. */
+  const labelSuggestions = useMemo(() => {
+    const count = new Map<string, number>()
+    for (const w of data?.workloads ?? [])
+      for (const [k, v] of Object.entries(w.labels))
+        if (!/pod-template-hash|controller-revision-hash|statefulset\.kubernetes\.io/.test(k))
+          count.set(`${k}=${v}`, (count.get(`${k}=${v}`) ?? 0) + 1)
+    return [...count.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 60)
+      .map(([k]) => k)
+  }, [data])
   const layout = useMemo<MapLayout | null>(
-    () => (data ? layoutMap(data, { hideSystem: options.hideSystem }) : null),
-    [data, options.hideSystem]
+    () =>
+      shownData
+        ? layoutMap(shownData, {
+            hideSystem: options.hideSystem,
+            grouping: options.grouping,
+            collapsed: isFolded
+          })
+        : null,
+    [shownData, options.hideSystem, options.grouping, isFolded]
   )
   const index = useMemo(() => {
     const byId = new Map<string, MapNode>()
@@ -380,6 +477,28 @@ function MapInner({
       )
       .slice(0, 12)
   }, [query, index])
+  /** Workload trong namespace đang gập khớp ô tìm (chọn → mở namespace rồi bay tới). */
+  const hiddenMatches = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q || !shownData) return []
+    return shownData.workloads
+      .filter((w) => isFolded(w.ns) && w.name.toLowerCase().includes(q))
+      .slice(0, 8)
+  }, [query, shownData, isFolded])
+
+  // Namespace vừa mở đã vẽ xong → bay tới mục đang chờ.
+  useEffect(() => {
+    if (!pendingGo) return
+    const n = index.byId.get(pendingGo)
+    if (!n) return
+    const t = setTimeout(() => {
+      setPendingGo(null)
+      goToRef.current(n)
+    }, 0)
+    return () => {
+      clearTimeout(t)
+    }
+  }, [pendingGo, index])
 
   // ——— Node / cạnh cho React Flow ———
   const nodes = useMemo<MapFlowNode[]>(() => {
@@ -587,6 +706,13 @@ function MapInner({
     }
   }
 
+  const revealWorkload = (w: { kind: string; ns: string; name: string }): void => {
+    setQuery('')
+    setSearchOpen(false)
+    if (isFolded(w.ns)) toggleNs(w.ns)
+    setPendingGo(`w:${w.kind}:${w.ns}/${w.name}`)
+  }
+
   const goTo = (n: MapNode): void => {
     setSelected(n.id)
     setQuery('')
@@ -598,6 +724,10 @@ function MapInner({
     }, 40)
     wrapRef.current?.focus()
   }
+
+  useEffect(() => {
+    goToRef.current = goTo
+  })
 
   /** Bay tới mục có vấn đề tiếp theo (workload / PVC đỏ trước, rồi vàng). */
   const nextProblem = (): void => {
@@ -631,9 +761,10 @@ function MapInner({
       },
       onHoverPod: (pod, e) => {
         setHover(pod && e ? { id: pod.id, ...local(e) } : null)
-      }
+      },
+      onToggleNs: toggleNs
     }),
-    [band, selected, related, problemsOnly, options.pods, index]
+    [band, selected, related, problemsOnly, options.pods, index, toggleNs]
   )
 
   /** Traffic của mục đang chọn (bảng bên phải). */
@@ -656,119 +787,285 @@ function MapInner({
       <div className="relative flex min-w-0 flex-1 flex-col">
         {/* Thanh công cụ của bản đồ */}
         <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 border-b border-line px-2 py-1.5 text-xs">
-          <div className="relative w-64">
-            <div className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent">
-              <Search size={12} className="text-faint" />
+          <Segmented
+            value={options.view}
+            testIdPrefix="k8s-map-view"
+            options={[
+              { value: 'workloads', label: 'Workloads' },
+              { value: 'nodes', label: 'Nodes' }
+            ]}
+            onChange={(view) => {
+              setOpt({ view })
+            }}
+          />
+          <div className={cx(nodesView ? 'hidden' : 'contents')}>
+            <div className="relative w-64">
+              <div className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent">
+                <Search size={12} className="text-faint" />
+                <input
+                  ref={searchRef}
+                  type="search"
+                  placeholder="Find on map…  ( / )"
+                  data-testid="k8s-map-search"
+                  className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint"
+                  value={query}
+                  onFocus={() => {
+                    setSearchOpen(true)
+                  }}
+                  onBlur={() => {
+                    setTimeout(() => {
+                      setSearchOpen(false)
+                    }, 150)
+                  }}
+                  onChange={(e) => {
+                    setQuery(e.target.value)
+                    setSearchOpen(true)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && matches[0]) {
+                      e.preventDefault()
+                      goTo(matches[0])
+                    } else if (e.key === 'Escape') {
+                      setQuery('')
+                      wrapRef.current?.focus()
+                    }
+                  }}
+                />
+              </div>
+              {searchOpen && (matches.length > 0 || hiddenMatches.length > 0) && (
+                <div
+                  className="absolute top-8 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md border border-line bg-elevated p-1 shadow-lg"
+                  data-testid="k8s-map-results"
+                >
+                  {matches.map((n) => (
+                    <button
+                      key={n.id}
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-hover"
+                      data-testid="k8s-map-result"
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        goTo(n)
+                      }}
+                    >
+                      <span className={cx('size-2 shrink-0 rounded-full', DOT[n.tone])} />
+                      <span className="min-w-0 flex-1 truncate text-fg">{n.label}</span>
+                      <span className="shrink-0 text-faint">
+                        {n.kind === 'route' ? routeTitle(n.ref?.kind ?? '') : KIND_TITLE[n.kind]}
+                        {n.ns && n.kind !== 'namespace' ? ` · ${n.ns}` : ''}
+                      </span>
+                    </button>
+                  ))}
+                  {hiddenMatches.map((w) => (
+                    <button
+                      key={`${w.kind}:${w.ns}/${w.name}`}
+                      type="button"
+                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-hover"
+                      data-testid="k8s-map-result"
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        revealWorkload(w)
+                      }}
+                    >
+                      <span className={cx('size-2 shrink-0 rounded-full', DOT[w.tone])} />
+                      <span className="min-w-0 flex-1 truncate text-fg">{w.name}</span>
+                      <span className="shrink-0 text-faint">
+                        {workloadKindLabel(w.kind)} · {w.ns} (collapsed)
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {customGroup !== null ? (
               <input
-                ref={searchRef}
-                type="search"
-                placeholder="Find on map…  ( / )"
-                data-testid="k8s-map-search"
-                className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint"
-                value={query}
-                onFocus={() => {
-                  setSearchOpen(true)
+                autoFocus
+                type="text"
+                spellCheck={false}
+                placeholder="Label key, e.g. team"
+                aria-label="Group by label key"
+                data-testid="k8s-map-grouping-custom"
+                className="h-7 w-48 rounded-md border border-accent bg-subtle px-2 font-mono text-xs text-fg outline-none"
+                value={customGroup}
+                onChange={(e) => {
+                  setCustomGroup(e.target.value)
                 }}
                 onBlur={() => {
-                  setTimeout(() => {
-                    setSearchOpen(false)
-                  }, 150)
-                }}
-                onChange={(e) => {
-                  setQuery(e.target.value)
-                  setSearchOpen(true)
+                  setCustomGroup(null)
                 }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && matches[0]) {
-                    e.preventDefault()
-                    goTo(matches[0])
-                  } else if (e.key === 'Escape') {
-                    setQuery('')
-                    wrapRef.current?.focus()
-                  }
+                  if (e.key === 'Enter') {
+                    const key = customGroup.trim()
+                    if (key) setOpt({ grouping: `label:${key}` })
+                    setCustomGroup(null)
+                  } else if (e.key === 'Escape') setCustomGroup(null)
                 }}
               />
-            </div>
-            {searchOpen && matches.length > 0 && (
-              <div
-                className="absolute top-8 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md border border-line bg-elevated p-1 shadow-lg"
-                data-testid="k8s-map-results"
+            ) : (
+              <label
+                className="flex h-7 items-center gap-1 rounded-md border border-line pl-2 text-muted"
+                title="Group namespaces into regions"
               >
-                {matches.map((n) => (
-                  <button
-                    key={n.id}
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-hover"
-                    data-testid="k8s-map-result"
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      goTo(n)
-                    }}
-                  >
-                    <span className={cx('size-2 shrink-0 rounded-full', DOT[n.tone])} />
-                    <span className="min-w-0 flex-1 truncate text-fg">{n.label}</span>
-                    <span className="shrink-0 text-faint">
-                      {n.kind === 'route' ? routeTitle(n.ref?.kind ?? '') : KIND_TITLE[n.kind]}
-                      {n.ns && n.kind !== 'namespace' ? ` · ${n.ns}` : ''}
-                    </span>
-                  </button>
-                ))}
-              </div>
+                <span className="text-faint">Group</span>
+                <select
+                  data-testid="k8s-map-grouping"
+                  className="h-full max-w-44 cursor-pointer rounded-md bg-transparent pr-1 font-medium text-fg outline-none"
+                  value={options.grouping}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    if (v === '__custom') {
+                      setCustomGroup('')
+                      return
+                    }
+                    setOpt({ grouping: v as MapGrouping })
+                  }}
+                >
+                  <option value="purpose">by purpose</option>
+                  <option value="prefix">by name prefix</option>
+                  {[
+                    ...groupKeys,
+                    ...(options.grouping.startsWith('label:') &&
+                    !groupKeys.includes(options.grouping.slice(6))
+                      ? [options.grouping.slice(6)]
+                      : [])
+                  ].map((k) => (
+                    <option key={k} value={`label:${k}`}>
+                      by {k}
+                    </option>
+                  ))}
+                  <option value="__custom">by label…</option>
+                </select>
+              </label>
             )}
           </div>
-          <Chip
-            on={!options.hideSystem}
-            testId="k8s-map-system"
-            onClick={() => {
-              setOpt({ hideSystem: !options.hideSystem })
-            }}
-          >
-            System namespaces
-          </Chip>
-          <Chip
-            on={options.pods}
-            onClick={() => {
-              setOpt({ pods: !options.pods })
-            }}
-          >
-            Pods
-          </Chip>
-          <Chip
-            on={options.edges}
-            onClick={() => {
-              setOpt({ edges: !options.edges })
-            }}
-          >
-            Connections
-          </Chip>
-          <Chip
-            on={options.traffic}
-            testId="k8s-map-traffic"
+          <div
+            className={cx(
+              'flex h-7 w-60 items-center gap-1.5 rounded-md border bg-subtle px-2',
+              selectorError
+                ? 'border-danger'
+                : selectorText.trim()
+                  ? 'border-accent/60'
+                  : 'border-line focus-within:border-accent'
+            )}
             title={
-              traffic.status === 'unavailable'
-                ? (traffic.reason ?? 'Live traffic is not available')
-                : 'Live traffic between workloads (Caretta)'
+              selectorError ??
+              'Show only workloads whose pod labels match — e.g. tier=backend, app.kubernetes.io/part-of=shop, env in (prod,staging), !canary'
             }
-            onClick={() => {
-              setOpt({ traffic: !options.traffic })
-            }}
           >
-            <span className="inline-flex items-center gap-1.5">
-              Traffic
-              {options.traffic && <TrafficDot status={traffic.status} />}
-            </span>
-          </Chip>
-          <Chip
-            on={problemsOnly}
-            testId="k8s-map-problems"
-            onClick={() => {
-              setProblemsOnly(!problemsOnly)
-            }}
-          >
-            Problems only
-          </Chip>
+            <Tag size={12} className="shrink-0 text-faint" />
+            <input
+              type="text"
+              list="k8s-map-labels"
+              spellCheck={false}
+              placeholder="Filter by label: tier=backend"
+              aria-label="Filter by label"
+              aria-invalid={Boolean(selectorError)}
+              data-testid="k8s-map-label-filter"
+              className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-faint"
+              value={selectorText}
+              onChange={(e) => {
+                setSelectorText(e.target.value)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setSelectorText('')
+              }}
+            />
+            {selectorText && (
+              <button
+                type="button"
+                aria-label="Clear label filter"
+                className="shrink-0 rounded text-faint hover:text-fg"
+                onClick={() => {
+                  setSelectorText('')
+                }}
+              >
+                <X size={12} />
+              </button>
+            )}
+            <datalist id="k8s-map-labels">
+              {labelSuggestions.map((l) => (
+                <option key={l} value={l} />
+              ))}
+            </datalist>
+          </div>
+          <div className={cx(nodesView ? 'hidden' : 'contents')}>
+            <button
+              type="button"
+              className="flex h-7 items-center gap-1 rounded-md border border-line px-2 font-medium whitespace-nowrap text-muted hover:text-fg"
+              data-testid="k8s-map-fold-all"
+              title={
+                fold.all && fold.except.size === 0
+                  ? 'Expand every namespace'
+                  : 'Collapse every namespace'
+              }
+              onClick={() => {
+                setFold({ all: !(fold.all && fold.except.size === 0), except: new Set() })
+              }}
+            >
+              {fold.all && fold.except.size === 0 ? (
+                <>
+                  <ChevronsUpDown size={13} /> Expand all
+                </>
+              ) : (
+                <>
+                  <ChevronsDownUp size={13} /> Collapse all
+                </>
+              )}
+            </button>
+            <Chip
+              on={!options.hideSystem}
+              testId="k8s-map-system"
+              onClick={() => {
+                setOpt({ hideSystem: !options.hideSystem })
+              }}
+            >
+              System namespaces
+            </Chip>
+            <Chip
+              on={options.pods}
+              onClick={() => {
+                setOpt({ pods: !options.pods })
+              }}
+            >
+              Pods
+            </Chip>
+            <Chip
+              on={options.edges}
+              onClick={() => {
+                setOpt({ edges: !options.edges })
+              }}
+            >
+              Connections
+            </Chip>
+            <Chip
+              on={options.traffic}
+              testId="k8s-map-traffic"
+              title={
+                traffic.status === 'unavailable'
+                  ? (traffic.reason ?? 'Live traffic is not available')
+                  : 'Live traffic between workloads (Caretta)'
+              }
+              onClick={() => {
+                setOpt({ traffic: !options.traffic })
+              }}
+            >
+              <span className="inline-flex items-center gap-1.5">
+                Traffic
+                {options.traffic && <TrafficDot status={traffic.status} />}
+              </span>
+            </Chip>
+            <Chip
+              on={problemsOnly}
+              testId="k8s-map-problems"
+              onClick={() => {
+                setProblemsOnly(!problemsOnly)
+              }}
+            >
+              Problems only
+            </Chip>
+          </div>
           <div className="flex-1" />
-          {(counts.bad > 0 || counts.warn > 0) && (
+          {!nodesView && (counts.bad > 0 || counts.warn > 0) && (
             <button
               type="button"
               className="flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-hover"
@@ -780,7 +1077,10 @@ function MapInner({
               {counts.warn > 0 && <Pill tone="warn">{`${counts.warn} degraded`}</Pill>}
             </button>
           )}
-          <span className="text-faint tabular-nums" data-testid="k8s-map-summary">
+          <span
+            className={cx('text-faint tabular-nums', nodesView && 'hidden')}
+            data-testid="k8s-map-summary"
+          >
             {counts.workloads} workloads · {counts.pods} pods
             {data ? ` · nodes ${data.nodes.ready}/${data.nodes.total}` : ''}
           </span>
@@ -802,7 +1102,10 @@ function MapInner({
             This cluster is very large — only part of it is on the map. Pick fewer namespaces.
           </p>
         )}
-        {options.traffic && traffic.status === 'unavailable' && (
+        {nodesView && data && shownData && (
+          <NodesView data={data} shown={shownData} onOpen={onOpen} />
+        )}
+        {!nodesView && options.traffic && traffic.status === 'unavailable' && (
           <p
             className="border-b border-line px-3 py-1.5 text-xs text-faint"
             data-testid="k8s-map-traffic-note"
@@ -817,7 +1120,10 @@ function MapInner({
           role="application"
           aria-label="Cluster map — drag to move, scroll to zoom, click to select"
           data-testid="k8s-map-canvas"
-          className="k8s-map relative min-h-0 flex-1 overflow-hidden bg-canvas outline-none"
+          className={cx(
+            'k8s-map relative min-h-0 flex-1 overflow-hidden bg-canvas outline-none',
+            nodesView && 'hidden'
+          )}
           onKeyDown={onKeyDown}
           onPointerLeave={() => {
             setHover(null)
@@ -963,7 +1269,7 @@ function MapInner({
           </div>
         </div>
       </div>
-      {selectedNode && (
+      {selectedNode && !nodesView && (
         <SidePanel storageKey="k8s-map" defaultWidth={340} testId="k8s-map-panel">
           <MapPanel
             node={selectedNode}
@@ -981,6 +1287,12 @@ function MapInner({
               onLogs(ref, w?.labels ?? null)
             }}
             onShell={onShell}
+            folded={
+              selectedNode.kind === 'namespace' && selectedNode.ns
+                ? isFolded(selectedNode.ns)
+                : null
+            }
+            onToggleNs={toggleNs}
             impact={impactMode}
             onImpact={setImpactMode}
             traffic={nodeTraffic}
@@ -1140,6 +1452,8 @@ function MapPanel({
   onOpen,
   onLogs,
   onShell,
+  folded,
+  onToggleNs,
   impact,
   onImpact,
   traffic
@@ -1152,6 +1466,9 @@ function MapPanel({
   onOpen: (ref: MapRef) => void
   onLogs: (ref: MapRef) => void
   onShell: (ref: MapRef) => void
+  /** Namespace: đang gập không (null = không phải namespace). */
+  folded: boolean | null
+  onToggleNs: (ns: string) => void
   impact: boolean
   onImpact: (on: boolean) => void
   traffic: React.ComponentProps<typeof TrafficSection>['traffic'] | null
@@ -1290,6 +1607,16 @@ function MapPanel({
             label="Shell"
             onClick={() => {
               if (node.ref) onShell(node.ref)
+            }}
+          />
+        )}
+        {folded !== null && (
+          <PanelAction
+            icon={folded ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
+            label={folded ? 'Expand' : 'Collapse'}
+            testId="k8s-map-panel-fold"
+            onClick={() => {
+              if (node.ns) onToggleNs(node.ns)
             }}
           />
         )}

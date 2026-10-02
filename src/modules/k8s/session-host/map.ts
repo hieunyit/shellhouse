@@ -3,6 +3,7 @@ import type {
   MapData,
   MapGateway,
   MapHpa,
+  MapNodeInfo,
   MapPod,
   MapPolicy,
   MapPvc,
@@ -10,8 +11,17 @@ import type {
   MapService,
   MapWorkload
 } from '../shared/map'
-import { podStatus, toRow, type K8sObject } from '../shared/resources'
+import {
+  parseCpu,
+  parseMemory,
+  podRequests,
+  podStatus,
+  toRow,
+  type K8sObject
+} from '../shared/resources'
 import { KubeError, type KubeClient } from './client'
+import { metrics } from './operations'
+import type { MetricsResult } from '../shared/ops'
 
 /**
  * Dữ liệu cho bản đồ cluster: một lượt list các loại cần (song song, có giới hạn), chỉ giữ trường
@@ -99,6 +109,29 @@ function claimNames(kind: string, w: K8sObject, pvcNames: readonly string[]): st
   return [...out]
 }
 
+/**
+ * Namespace đang xem (kèm nhãn — để gom vùng theo nhãn): đọc từng cái; không đọc được (không có
+ * quyền get namespace) → chỉ có tên.
+ */
+async function scopedNamespaces(
+  client: KubeClient,
+  namespaces: readonly string[],
+  signal?: AbortSignal
+): Promise<Listed> {
+  const items = await Promise.all(
+    namespaces.map((n) =>
+      client
+        .json<K8sObject>(
+          'GET',
+          `/api/v1/namespaces/${encodeURIComponent(n)}`,
+          signal ? { signal } : {}
+        )
+        .catch((): K8sObject => ({ metadata: { name: n } }))
+    )
+  )
+  return { items, truncated: false }
+}
+
 export async function mapData(
   client: KubeClient,
   namespaces: readonly string[],
@@ -118,13 +151,11 @@ export async function mapData(
     hpas,
     policies,
     gateways,
+    usage,
     ...workloadLists
   ] = await Promise.all([
     namespaces.length
-      ? Promise.resolve<Listed>({
-          items: namespaces.map((n): K8sObject => ({ metadata: { name: n } })),
-          truncated: false
-        })
+      ? scopedNamespaces(client, namespaces, signal)
       : listAll(client, '/api/v1', 'namespaces', [], signal),
     listAll(client, '/api/v1', 'nodes', [], signal),
     listAll(client, '/api/v1', 'pods', namespaces, signal),
@@ -137,6 +168,10 @@ export async function mapData(
     listAll(client, '/apis/autoscaling/v2', 'horizontalpodautoscalers', namespaces, signal),
     listAll(client, '/apis/networking.k8s.io/v1', 'networkpolicies', namespaces, signal),
     listAll(client, '/apis/gateway.networking.k8s.io/v1', 'gateways', namespaces, signal),
+    metrics(client, 'nodes', undefined, signal).catch((): MetricsResult => ({
+      available: false,
+      items: {}
+    })),
     ...WORKLOAD_KINDS.map((k) => listAll(client, k.path, k.plural, namespaces, signal))
   ])
 
@@ -228,6 +263,7 @@ export async function mapData(
   const mapPods: MapPod[] = pods.items.map((p) => {
     const st = podStatus(p)
     const statuses = a(o(p.status)['containerStatuses'])
+    const req = podRequests(p)
     return {
       ns: p.metadata.namespace ?? '',
       name: p.metadata.name,
@@ -235,7 +271,9 @@ export async function mapData(
       status: st.text,
       tone: st.tone,
       restarts: statuses.reduce((n, c) => n + num(c['restartCount']), 0),
-      node: s(o(p.spec)['nodeName'])
+      node: s(o(p.spec)['nodeName']),
+      ...(req.cpu ? { cpu: req.cpu } : {}),
+      ...(req.memory ? { memory: req.memory } : {})
     }
   })
 
@@ -343,14 +381,53 @@ export async function mapData(
     }
   })
 
-  const nodeReady = nodes.items.filter((n) =>
-    a(o(n.status)['conditions']).some((c) => c['type'] === 'Ready' && c['status'] === 'True')
-  ).length
+  const nodeList: MapNodeInfo[] = nodes.items.map((n) => {
+    const st = o(n.status)
+    const labels = n.metadata.labels ?? {}
+    const alloc = o(st['allocatable'])
+    const conds = a(st['conditions'])
+    const used = usage.items[n.metadata.name]
+    return {
+      name: n.metadata.name,
+      ready: conds.some((c) => c['type'] === 'Ready' && c['status'] === 'True'),
+      unschedulable: o(n.spec)['unschedulable'] === true,
+      roles: Object.keys(labels)
+        .filter((k) => k.startsWith('node-role.kubernetes.io/'))
+        .map((k) => k.slice('node-role.kubernetes.io/'.length))
+        .filter(Boolean)
+        .sort(),
+      zone:
+        labels['topology.kubernetes.io/zone'] ??
+        labels['failure-domain.beta.kubernetes.io/zone'] ??
+        '',
+      instance:
+        labels['node.kubernetes.io/instance-type'] ??
+        labels['beta.kubernetes.io/instance-type'] ??
+        '',
+      kubelet: s(o(st['nodeInfo'])['kubeletVersion']),
+      allocatable: {
+        cpu: parseCpu(alloc['cpu']),
+        memory: parseMemory(alloc['memory']),
+        pods: Number(s(alloc['pods']) || num(alloc['pods'])) || 0
+      },
+      usage: usage.available && used ? used : null,
+      taints: a(o(n.spec)['taints']).map((t) => ({
+        key: s(t['key']),
+        value: s(t['value']),
+        effect: s(t['effect'])
+      })),
+      pressure: conds
+        .filter((c) => c['type'] !== 'Ready' && c['status'] === 'True')
+        .map((c) => s(c['type']))
+    }
+  })
+  const nodeReady = nodeList.filter((n) => n.ready).length
 
   return {
     namespaces: nsList.items.map((n) => ({
       name: n.metadata.name,
-      active: s(o(n.status)['phase']) !== 'Terminating'
+      active: s(o(n.status)['phase']) !== 'Terminating',
+      ...(n.metadata.labels ? { labels: n.metadata.labels } : {})
     })),
     workloads,
     pods: mapPods,
@@ -361,6 +438,7 @@ export async function mapData(
     policies: mapPolicies,
     gateways: mapGateways,
     nodes: { total: nodes.items.length, ready: nodeReady },
+    nodeList,
     truncated: [pods, rs, services, ...workloadLists].some((l) => l.truncated)
   }
 }

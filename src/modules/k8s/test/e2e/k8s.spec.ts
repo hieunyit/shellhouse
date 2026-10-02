@@ -485,6 +485,87 @@ test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi t
   }
 })
 
+test('Kubernetes: bản đồ cluster lớn — gom vùng theo nhãn, lọc nhãn, gập namespace, xem theo node', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await page.setViewportSize({ width: 1366, height: 820 })
+    await view.getByTestId('k8s-nav-map').click()
+    const map = view.getByTestId('k8s-map')
+    const summary = map.getByTestId('k8s-map-summary')
+    await expect(summary).toContainText('2 workloads')
+
+    // Gom vùng theo nhãn team của namespace (gợi ý tự có trong danh sách).
+    await map.getByTestId('k8s-map-grouping').selectOption('label:team')
+    await expect(map.locator('[data-testid="k8s-map-region"][data-name="commerce"]')).toBeVisible()
+    await map.getByTestId('k8s-map-grouping').selectOption('__custom')
+    await map.getByTestId('k8s-map-grouping-custom').fill('tier')
+    await map.getByTestId('k8s-map-grouping-custom').press('Enter')
+    await expect(map.getByTestId('k8s-map-grouping')).toHaveValue('label:tier')
+    await expect(map.locator('[data-testid="k8s-map-region"][data-name="Other"]')).toBeVisible()
+    await map.getByTestId('k8s-map-grouping').selectOption('purpose')
+
+    // Lọc theo nhãn kiểu kubectl.
+    const filter = map.getByTestId('k8s-map-label-filter')
+    await filter.fill('app=nothing')
+    await expect(summary).toContainText('0 workloads')
+    await filter.fill('a=b=c')
+    await expect(filter).toHaveAttribute('aria-invalid', 'true')
+    await filter.fill('app in (web, api)')
+    await expect(filter).toHaveAttribute('aria-invalid', 'false')
+    await expect(summary).toContainText('1 workloads')
+    await filter.press('Escape')
+    await expect(filter).toHaveValue('')
+    await expect(summary).toContainText('2 workloads')
+
+    // Gập namespace shop (bảng bên) → workload không còn trên bản đồ; tìm vẫn thấy và mở lại.
+    await map.getByTestId('k8s-map-search').fill('shop')
+    await map.getByTestId('k8s-map-result').filter({ hasText: 'Namespace' }).first().click()
+    const panel = view.getByTestId('k8s-map-panel')
+    await panel.getByTestId('k8s-map-panel-fold').click()
+    await expect(summary).toContainText('0 workloads')
+    await expect(panel.getByTestId('k8s-map-panel-fold')).toContainText('Expand')
+    await map.getByTestId('k8s-map-search').fill('web')
+    await map.getByTestId('k8s-map-result').filter({ hasText: '(collapsed)' }).first().click()
+    await expect(summary).toContainText('2 workloads')
+    await expect(panel).toContainText('Deployment')
+    // Gập hết / mở hết.
+    await map.getByTestId('k8s-map-fold-all').click()
+    await expect(summary).toContainText('0 workloads')
+    await expect(map.getByTestId('k8s-map-fold-all')).toContainText('Expand all')
+    await map.getByTestId('k8s-map-fold-all').click()
+    await expect(summary).toContainText('2 workloads')
+
+    // Xem theo node: cấp phát / dùng thật, node hỏng nổi lên đầu, bấm pod mở chi tiết.
+    await map.getByTestId('k8s-map-view-nodes').click()
+    const nodes = map.getByTestId('k8s-nodes')
+    await expect(nodes.getByTestId('k8s-nodes-summary')).toContainText('2 nodes · 1 ready')
+    await expect(nodes.getByTestId('k8s-node-card').first()).toHaveAttribute('data-name', 'node-2')
+    const down = nodes.locator('[data-testid="k8s-node-card"][data-name="node-2"]')
+    await expect(down).toHaveAttribute('data-tone', 'bad')
+    await expect(down.getByTestId('k8s-node-issues')).toContainText('Not ready')
+    const up = nodes.locator('[data-testid="k8s-node-card"][data-name="node-1"]')
+    await expect(up.getByTestId('k8s-node-cpu')).toContainText('requested')
+    await expect(up.getByTestId('k8s-node-cpu')).toContainText('1.5 used')
+    await expect(up.getByTestId('k8s-node-memory')).toContainText('2Gi used')
+    await nodes.getByTestId('k8s-nodes-filter').fill('node-1')
+    await expect(nodes.getByTestId('k8s-node-card')).toHaveCount(1)
+    await up.locator('[data-testid="k8s-node-pod"][aria-label="shop/web-1"]').click()
+    await expect(view.getByTestId('k8s-describe')).toContainText('web-1')
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})
+
 test('Kubernetes: trang Deployment (Status / Strategy / Resources / Pods / ReplicaSets), Topology, Security, Metrics', async () => {
   test.setTimeout(60_000)
   const server = await startApiTestServer()

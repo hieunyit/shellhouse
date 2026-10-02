@@ -8,6 +8,18 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Added
 
+- **Kubernetes Map for large clusters** — group namespaces into regions **by name prefix** or **by
+  any label** (`team`, `app.kubernetes.io/part-of`… — read from the namespace, or from the
+  workloads inside it) instead of guessing by name; the labels in use are suggested. **Collapse /
+  expand** each namespace (or all at once — clusters with 25+ namespaces start collapsed); search
+  still finds workloads in collapsed namespaces and opens them. **Filter by label** with kubectl
+  syntax (`tier=backend`, `env in (prod,staging)`, `!canary`): only matching workloads stay,
+  together with the services, routes, volumes and policies connected to them.
+- **Kubernetes Map → Nodes** — the cluster seen machine by machine: CPU / memory requested vs
+  allocatable with live usage (metrics-server), pods on each node (click to open), taints,
+  cordoned / not-ready / pressure warnings, and a warning when every replica of a Deployment or
+  StatefulSet runs on the same node.
+
 - **Kubernetes: cluster Map** — the whole cluster as a live map you can pan and zoom like a
   street map. Namespaces are islands grouped into regions by purpose (your applications, ingress
   & networking, platform, monitoring, system). Zoomed out you see each namespace's workload / pod

@@ -34,6 +34,31 @@ export interface MapPod {
   tone: MapTone
   restarts: number
   node: string
+  /** Tổng requests của container (millicore / byte) — bỏ khi 0. */
+  cpu?: number
+  memory?: number
+}
+
+/** Node (máy) của cluster — cho chế độ xem theo node. */
+export interface MapNodeInfo {
+  name: string
+  ready: boolean
+  /** Đã cordon (spec.unschedulable). */
+  unschedulable: boolean
+  /** node-role.kubernetes.io/<role>. */
+  roles: string[]
+  /** topology.kubernetes.io/zone (hoặc nhãn cũ failure-domain). */
+  zone: string
+  /** node.kubernetes.io/instance-type. */
+  instance: string
+  kubelet: string
+  /** Allocatable: CPU millicore, RAM byte, số pod tối đa. */
+  allocatable: { cpu: number; memory: number; pods: number }
+  /** Đang dùng thật (metrics-server); cluster không có → null. */
+  usage: { cpu: number; memory: number } | null
+  taints: { key: string; value: string; effect: string }[]
+  /** Điều kiện xấu đang bật: MemoryPressure, DiskPressure, PIDPressure, NetworkUnavailable. */
+  pressure: string[]
 }
 
 export interface MapService {
@@ -89,7 +114,8 @@ export interface MapPolicy {
 }
 
 export interface MapData {
-  namespaces: { name: string; active: boolean }[]
+  /** labels: nhãn của namespace (chỉ có khi list được namespace — xem cả cluster). */
+  namespaces: { name: string; active: boolean; labels?: Record<string, string> }[]
   workloads: MapWorkload[]
   pods: MapPod[]
   services: MapService[]
@@ -100,6 +126,8 @@ export interface MapData {
   /** Gateway API (không có CRD → rỗng / thiếu). */
   gateways?: MapGateway[]
   nodes: { total: number; ready: number }
+  /** Chi tiết từng node (thiếu ở dữ liệu cũ / không có quyền list node). */
+  nodeList?: MapNodeInfo[]
   /** Cluster quá lớn — một số loại chỉ lấy phần đầu. */
   truncated: boolean
 }
@@ -142,6 +170,202 @@ export function regionOf(ns: string): MapRegion {
   )
     return 'Platform'
   return 'Applications'
+}
+
+// ——— Gom vùng tuỳ chọn (cluster lớn: namespace đặt theo team / dự án) ———
+
+/**
+ * Cách gom namespace thành vùng: `purpose` — đoán theo tên quen thuộc (mặc định); `prefix` — theo
+ * phần đầu tên (payment-core, payment-api → "payment"); `label:<key>` — theo một nhãn (nhãn của
+ * namespace, không có thì nhãn phổ biến nhất của workload bên trong, vd. app.kubernetes.io/part-of).
+ */
+export type MapGrouping = 'purpose' | 'prefix' | `label:${string}`
+
+/** Vùng của namespace không có nhãn / tiền tố riêng. */
+export const OTHER_GROUP = 'Other'
+
+/** Nhãn hệ thống trên namespace — không có ý nghĩa để gom. */
+const NOISE_KEY =
+  /^kubernetes\.io\/|^pod-security\.kubernetes\.io\/|^field\.cattle\.io\/|^objectset\.rio\.cattle\.io\/|^kustomize\.toolkit\.fluxcd\.io\/|^argocd\.argoproj\.io\/instance$/
+
+/** Nhãn workload hay dùng để chia theo hệ thống / team. */
+const WORKLOAD_GROUP_KEYS = ['app.kubernetes.io/part-of', 'team', 'owner', 'project', 'tier']
+
+/** Namespace → tên vùng theo cách gom; namespace hệ thống không có nhãn → "System". */
+export function groupNamespaces(data: MapData, grouping: MapGrouping): Map<string, string> {
+  const names = [
+    ...new Set([
+      ...data.namespaces.map((n) => n.name),
+      ...data.workloads.map((w) => w.ns),
+      ...data.pods.map((p) => p.ns),
+      ...data.services.map((s) => s.ns)
+    ])
+  ]
+  const out = new Map<string, string>()
+  if (grouping === 'purpose') {
+    for (const ns of names) out.set(ns, regionOf(ns))
+    return out
+  }
+  if (grouping === 'prefix') {
+    const prefixOf = (ns: string): string => ns.split(/[-_.]/)[0] ?? ns
+    const count = new Map<string, number>()
+    for (const ns of names)
+      if (regionOf(ns) !== 'System') count.set(prefixOf(ns), (count.get(prefixOf(ns)) ?? 0) + 1)
+    for (const ns of names) {
+      const p = prefixOf(ns)
+      out.set(ns, regionOf(ns) === 'System' ? 'System' : (count.get(p) ?? 0) >= 2 ? p : OTHER_GROUP)
+    }
+    return out
+  }
+  const key = grouping.slice('label:'.length)
+  const nsLabels = new Map(data.namespaces.map((n) => [n.name, n.labels ?? {}]))
+  // Không có nhãn trên namespace → giá trị nhiều workload dùng nhất (hoà → theo tên).
+  const votes = new Map<string, Map<string, number>>()
+  for (const w of data.workloads) {
+    const v = w.labels[key]
+    if (!v) continue
+    const m = votes.get(w.ns) ?? new Map<string, number>()
+    m.set(v, (m.get(v) ?? 0) + 1)
+    votes.set(w.ns, m)
+  }
+  for (const ns of names) {
+    const own = nsLabels.get(ns)?.[key]
+    const voted = [...(votes.get(ns) ?? new Map<string, number>()).entries()].sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+    )[0]?.[0]
+    out.set(ns, own || voted || (regionOf(ns) === 'System' ? 'System' : OTHER_GROUP))
+  }
+  return out
+}
+
+/** Thứ tự vùng: theo mục đích thì cố định; còn lại theo tên, "Other" và "System" cuối. */
+export function groupOrder(groups: Iterable<string>, grouping: MapGrouping): string[] {
+  const set = new Set(groups)
+  if (grouping === 'purpose') return REGIONS.filter((r) => set.has(r))
+  const tail = (g: string): number => (g === 'System' ? 2 : g === OTHER_GROUP ? 1 : 0)
+  return [...set].sort((a, b) => tail(a) - tail(b) || a.localeCompare(b))
+}
+
+/**
+ * Nhãn gợi ý để gom: nhãn có trên ≥ 2 namespace (bỏ nhãn hệ thống), rồi các nhãn workload quen
+ * (part-of, team…) nếu có workload dùng. Nhiều namespace dùng nhất trước.
+ */
+export function groupingKeys(data: MapData): string[] {
+  const count = new Map<string, number>()
+  for (const n of data.namespaces)
+    for (const k of Object.keys(n.labels ?? {}))
+      if (!NOISE_KEY.test(k)) count.set(k, (count.get(k) ?? 0) + 1)
+  const fromNs = [...count.entries()]
+    // Đang xem một namespace thì nhãn của nó cũng là gợi ý.
+    .filter(([, c]) => c >= Math.min(2, data.namespaces.length))
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([k]) => k)
+  const fromWorkloads = WORKLOAD_GROUP_KEYS.filter(
+    (k) => !fromNs.includes(k) && data.workloads.some((w) => k in w.labels)
+  )
+  return [...fromNs, ...fromWorkloads].slice(0, 12)
+}
+
+// ——— Lọc theo nhãn (label selector kiểu kubectl) ———
+
+export interface ParsedSelector {
+  matchLabels: Record<string, string>
+  matchExpressions: {
+    key: string
+    operator: 'In' | 'NotIn' | 'Exists' | 'DoesNotExist'
+    values: string[]
+  }[]
+}
+
+const KEY = String.raw`[A-Za-z0-9][-A-Za-z0-9_./]*`
+const VALUE = String.raw`[-A-Za-z0-9_.]*`
+
+/**
+ * "tier=backend,app.kubernetes.io/part-of!=shop,env in (prod,staging),!canary" → selector; chuỗi
+ * rỗng → null; sai cú pháp → { error }.
+ */
+export function parseLabelSelector(text: string): ParsedSelector | null | { error: string } {
+  const src = text.trim()
+  if (!src) return null
+  // Tách theo dấu phẩy ngoài ngoặc.
+  const parts: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const ch of src) {
+    if (ch === '(') depth++
+    if (ch === ')') depth--
+    if (ch === ',' && depth === 0) {
+      parts.push(cur)
+      cur = ''
+    } else cur += ch
+  }
+  parts.push(cur)
+  const out: ParsedSelector = { matchLabels: {}, matchExpressions: [] }
+  for (const raw of parts) {
+    const t = raw.trim()
+    if (!t) continue
+    let m: RegExpExecArray | null
+    if ((m = new RegExp(`^(${KEY})\\s*(==|=)\\s*(${VALUE})$`).exec(t)))
+      out.matchLabels[m[1] ?? ''] = m[3] ?? ''
+    else if ((m = new RegExp(`^(${KEY})\\s*!=\\s*(${VALUE})$`).exec(t)))
+      out.matchExpressions.push({ key: m[1] ?? '', operator: 'NotIn', values: [m[2] ?? ''] })
+    else if ((m = new RegExp(`^(${KEY})\\s+(in|notin)\\s*\\(([^)]*)\\)$`, 'i').exec(t)))
+      out.matchExpressions.push({
+        key: m[1] ?? '',
+        operator: (m[2] ?? '').toLowerCase() === 'in' ? 'In' : 'NotIn',
+        values: (m[3] ?? '')
+          .split(',')
+          .map((v) => v.trim())
+          .filter(Boolean)
+      })
+    else if ((m = new RegExp(`^!\\s*(${KEY})$`).exec(t)))
+      out.matchExpressions.push({ key: m[1] ?? '', operator: 'DoesNotExist', values: [] })
+    else if ((m = new RegExp(`^(${KEY})$`).exec(t)))
+      out.matchExpressions.push({ key: m[1] ?? '', operator: 'Exists', values: [] })
+    else
+      return { error: `Can't read "${t}" — use key=value, key!=value, key in (a,b), key or !key` }
+  }
+  return out
+}
+
+/**
+ * Chỉ giữ workload khớp selector (nhãn pod template) cùng những gì nối tới chúng: pod, service
+ * chọn chúng, route tới các service đó, gateway của route, PVC chúng dùng, policy áp lên chúng.
+ * Namespace không còn gì → bỏ.
+ */
+export function filterMapData(data: MapData, selector: ParsedSelector): MapData {
+  const keep = data.workloads.filter((w) => selectorMatches(selector, w.labels, true))
+  const wKey = new Set(keep.map((w) => `${w.ns}|${KIND_LABEL[w.kind] ?? ''}|${w.name}`))
+  const pods = data.pods.filter(
+    (p) => p.owner && wKey.has(`${p.ns}|${p.owner.kind}|${p.owner.name}`)
+  )
+  const services = data.services.filter((s) =>
+    keep.some((w) => w.ns === s.ns && selectorMatches(s.selector, w.labels))
+  )
+  const svcKey = new Set(services.map((s) => `${s.ns}/${s.name}`))
+  const routes = data.routes.filter((r) => r.backends.some((b) => svcKey.has(`${r.ns}/${b}`)))
+  const gwKey = new Set(routes.flatMap((r) => (r.parents ?? []).map((p) => `${p.ns}/${p.name}`)))
+  const pvcKey = new Set(keep.flatMap((w) => w.pvcs.map((v) => `${w.ns}/${v}`)))
+  const nsUsed = new Set([...keep.map((w) => w.ns), ...routes.map((r) => r.ns)])
+  for (const g of gwKey) nsUsed.add(g.split('/')[0] ?? '')
+  return {
+    ...data,
+    namespaces: data.namespaces.filter((n) => nsUsed.has(n.name)),
+    workloads: keep,
+    pods,
+    services,
+    routes,
+    pvcs: data.pvcs.filter((v) => pvcKey.has(`${v.ns}/${v.name}`)),
+    hpas: data.hpas.filter((h) =>
+      keep.some(
+        (w) => w.ns === h.ns && w.name === h.target.name && KIND_LABEL[w.kind] === h.target.kind
+      )
+    ),
+    policies: data.policies.filter((p) =>
+      keep.some((w) => w.ns === p.ns && selectorMatches(p.selector, w.labels, true))
+    ),
+    gateways: (data.gateways ?? []).filter((g) => gwKey.has(`${g.ns}/${g.name}`))
+  }
 }
 
 // ——— Công nghệ (icon) ———
@@ -385,6 +609,8 @@ export interface MapNode {
   replicas?: { ready: number; desired: number }
   /** Workload: tên loại ngắn (Deployment…), trạng thái (CronJob: lịch chạy). */
   status?: string
+  /** Namespace đang gập. */
+  collapsed?: boolean
 }
 
 /**
@@ -411,7 +637,15 @@ export interface MapLayout {
 export interface MapOptions {
   /** Ẩn vùng System (kube-system…). */
   hideSystem: boolean
+  /** Cách gom vùng (mặc định: theo mục đích). */
+  grouping?: MapGrouping
+  /** Namespace đang gập (chỉ còn thẻ tóm tắt — không thẻ con, không cạnh). */
+  collapsed?: (ns: string) => boolean
 }
+
+/** Cỡ đảo namespace khi gập. */
+const COLLAPSED_W = 300
+const COLLAPSED_H = 96
 
 const POD = 10
 const POD_GAP = 4
@@ -545,6 +779,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
   for (const ns of nsNames) {
     const nsId = `n:${ns}`
     const children: MapNode[] = []
+    const edgeStart = edges.length
     // Hàng 1: route (Ingress / HTTPRoute…); hàng 2: service; hàng 3: workload; hàng 4: PVC.
     // Workload có service trỏ tới đứng đầu (ngay dưới service của nó — đường nối ngắn, không
     // chạy ngầm dưới thẻ khác); còn lại theo loại rồi tên.
@@ -819,7 +1054,14 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
             kind: 'policy'
           })
 
-    islands.push({ ns, node, children, w, h })
+    if (options.collapsed?.(ns)) {
+      // Gập: chỉ thẻ tóm tắt — bỏ thẻ con và cạnh trong namespace.
+      edges.length = edgeStart
+      node.collapsed = true
+      node.w = COLLAPSED_W
+      node.h = COLLAPSED_H
+      islands.push({ ns, node, children: [], w: COLLAPSED_W, h: COLLAPSED_H })
+    } else islands.push({ ns, node, children, w, h })
   }
 
   // Gateway → route (gateway có thể ở namespace khác — vd. gateway dùng chung).
@@ -827,11 +1069,12 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
   const gatewayIds = new Set(
     (data.gateways ?? []).filter((g) => shown.has(g.ns)).map((g) => `gw:${g.ns}/${g.name}`)
   )
+  const folded = (ns: string): boolean => options.collapsed?.(ns) ?? false
   for (const r of data.routes) {
-    if (!shown.has(r.ns)) continue
+    if (!shown.has(r.ns) || folded(r.ns)) continue
     for (const p of r.parents ?? []) {
       const gid = `gw:${p.ns}/${p.name}`
-      if (gatewayIds.has(gid))
+      if (gatewayIds.has(gid) && !folded(p.ns))
         edges.push({ from: gid, to: `r:${r.kind}:${r.ns}/${r.name}`, kind: 'attach' })
     }
   }
@@ -843,8 +1086,14 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
     pos: { x: number; y: number }[]
   }
   const regions: RegionBox[] = []
-  for (const region of REGIONS) {
-    const members = islands.filter((i) => regionOf(i.ns) === region)
+  const grouping = options.grouping ?? 'purpose'
+  const groupOfNs = groupNamespaces(data, grouping)
+  const groupOf = (ns: string): string => groupOfNs.get(ns) ?? OTHER_GROUP
+  for (const region of groupOrder(
+    islands.map((i) => groupOf(i.ns)),
+    grouping
+  )) {
+    const members = islands.filter((i) => groupOf(i.ns) === region)
     if (!members.length) continue
     const width = clamp(Math.sqrt(area(members)) * 1.5, 700, 4200)
     const s = shelf(members, width, 32)

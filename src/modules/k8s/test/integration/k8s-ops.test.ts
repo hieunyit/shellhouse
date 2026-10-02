@@ -488,7 +488,23 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     })
 
     const d = await run<MapData>({ op: 'map', namespaces: ['shop'] })
-    expect(d.namespaces).toEqual([{ name: 'shop', active: true }])
+    // Namespace đang xem đọc kèm nhãn (gom vùng theo nhãn); node kèm cấp phát / dùng thật.
+    expect(d.namespaces).toEqual([
+      {
+        name: 'shop',
+        active: true,
+        labels: { 'kubernetes.io/metadata.name': 'shop', team: 'commerce' }
+      }
+    ])
+    expect(d.nodeList?.map((n) => [n.name, n.ready])).toEqual([
+      ['node-1', true],
+      ['node-2', false]
+    ])
+    expect(d.nodeList?.[0]).toMatchObject({
+      allocatable: { cpu: 4000, memory: 8 * 1024 ** 3 },
+      usage: { cpu: 1500, memory: 2 * 1024 ** 3 },
+      kubelet: 'v1.31.2'
+    })
     const api = d.workloads.find((w) => w.name === 'api')
     expect(api).toMatchObject({
       kind: 'deployments.apps',

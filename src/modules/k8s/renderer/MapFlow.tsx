@@ -1,4 +1,5 @@
 import { createContext, memo, useContext } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -38,6 +39,8 @@ export interface MapCtx {
   podsOf: ReadonlyMap<string, MapNode[]>
   onSelect: (id: string) => void
   onHoverPod: (pod: MapNode | null, e?: React.PointerEvent) => void
+  /** Gập / mở một namespace. */
+  onToggleNs: (ns: string) => void
 }
 
 export const MapContext = createContext<MapCtx | null>(null)
@@ -127,6 +130,7 @@ export const RegionNode = memo(function RegionNode({
     <div
       className="size-full rounded-[32px] border border-line bg-subtle/60"
       data-testid="k8s-map-region"
+      data-name={n.label}
     >
       <div
         className="flex items-baseline gap-3 truncate px-7 pt-3.5"
@@ -174,6 +178,55 @@ export const NamespaceNode = memo(function NamespaceNode({
       <div className="bg-danger-solid" style={{ flex: st.bad }} />
     </div>
   )
+  const toggle = (label: string, size: number): React.JSX.Element => (
+    <button
+      type="button"
+      aria-label={`${label} ${n.label}`}
+      title={label}
+      data-testid="k8s-map-ns-toggle"
+      data-ns={n.ns}
+      className="nodrag nopan shrink-0 rounded p-0.5 text-faint hover:bg-hover hover:text-fg"
+      onClick={(e) => {
+        e.stopPropagation()
+        if (n.ns) ctx.onToggleNs(n.ns)
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+      }}
+    >
+      {n.collapsed ? <ChevronRight size={size} /> : <ChevronDown size={size} />}
+    </button>
+  )
+  if (n.collapsed && ctx.band === 'near') {
+    // Đã gập (nhìn gần): thẻ tóm tắt — tên, số liệu, công nghệ chính, thanh tình trạng.
+    return (
+      <div
+        className={cx(
+          'flex size-full flex-col justify-center gap-1.5 rounded-2xl border border-dashed bg-surface px-3.5 shadow-sm',
+          sel ? 'border-accent ring-4 ring-accent/25' : 'border-line-strong'
+        )}
+        data-testid="k8s-map-ns-collapsed"
+        data-ns={n.ns}
+      >
+        <div className="flex items-center gap-1.5">
+          {toggle('Expand', 15)}
+          <KindIcon kind="namespaces" size={16} />
+          <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-fg">
+            {n.label}
+          </span>
+          <HealthPills n={n} />
+        </div>
+        <div className="flex items-center gap-2 pl-6">
+          <span className="min-w-0 flex-1 truncate text-[11.5px] text-faint">{n.sub}</span>
+          {n.techs?.slice(0, 3).map((t) => (
+            <TechIcon key={t} tech={t} size={15} />
+          ))}
+        </div>
+        {health && <div className="ml-6 h-1.5">{health}</div>}
+        <Handles />
+      </div>
+    )
+  }
   if (ctx.band === 'far') {
     // Nhìn xa: tên to giữa đảo, số liệu, logo công nghệ, thanh tình trạng — cỡ theo đảo.
     const fs = Math.max(14, Math.min(n.w * 0.08, n.h * 0.18, 84))
@@ -217,7 +270,8 @@ export const NamespaceNode = memo(function NamespaceNode({
         sel ? 'border-accent ring-4 ring-accent/25' : 'border-line-strong'
       )}
     >
-      <div className="flex h-[34px] items-center gap-2 border-b border-line bg-subtle px-3.5">
+      <div className="flex h-[34px] items-center gap-2 border-b border-line bg-subtle pr-3.5 pl-2">
+        {toggle('Collapse', 16)}
         <KindIcon kind="namespaces" size={17} />
         <span className="max-w-[45%] shrink-0 truncate text-[14px] font-semibold text-fg">
           {n.label}

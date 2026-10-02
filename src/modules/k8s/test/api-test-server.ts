@@ -107,10 +107,15 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     [
       'namespaces',
       new Map(
-        ['default', 'shop', 'restricted'].map((n) => [
-          n,
-          make('v1', 'Namespace', n, undefined, { status: { phase: 'Active' } })
-        ])
+        ['default', 'shop', 'restricted'].map((n) => {
+          const ns = make('v1', 'Namespace', n, undefined, { status: { phase: 'Active' } })
+          // Nhãn team (bản đồ: gom vùng theo nhãn); kubernetes.io/* là nhãn hệ thống, bỏ qua.
+          ns.metadata.labels = {
+            'kubernetes.io/metadata.name': n,
+            ...(n === 'restricted' ? {} : { team: n === 'shop' ? 'commerce' : 'platform' })
+          }
+          return [n, ns]
+        })
       )
     ],
     [

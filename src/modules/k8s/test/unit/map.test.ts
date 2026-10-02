@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  filterMapData,
+  groupNamespaces,
+  groupingKeys,
   layoutMap,
+  parseLabelSelector,
   podGrid,
   regionOf,
   selectorMatches,
@@ -259,5 +263,104 @@ describe('bản đồ cluster (Map)', () => {
     expect(Date.now() - t).toBeLessThan(1000)
     expect(layout.nodes.filter((n) => n.kind === 'pod')).toHaveLength(15000)
     expect(layout.edges).toHaveLength(3000)
+  })
+
+  it('gom vùng theo tiền tố tên và theo nhãn (namespace, không có thì nhãn workload)', () => {
+    const d = data()
+    d.namespaces.push(
+      { name: 'payment-core', active: true, labels: { team: 'pay' } },
+      { name: 'payment-api', active: true, labels: { team: 'pay' } },
+      {
+        name: 'crm-prod',
+        active: true,
+        labels: { team: 'sales', 'kubernetes.io/metadata.name': 'x' }
+      }
+    )
+    d.workloads.push({
+      kind: 'deployments.apps',
+      ns: 'monitoring',
+      name: 'prom',
+      labels: { team: 'sre' },
+      ready: 1,
+      desired: 1,
+      status: '1/1 ready',
+      tone: 'ok',
+      pvcs: []
+    })
+    const prefix = groupNamespaces(d, 'prefix')
+    expect(prefix.get('payment-core')).toBe('payment')
+    expect(prefix.get('payment-api')).toBe('payment')
+    expect(prefix.get('crm-prod')).toBe('Other')
+    expect(prefix.get('kube-system')).toBe('System')
+
+    const team = groupNamespaces(d, 'label:team')
+    expect(team.get('payment-api')).toBe('pay')
+    expect(team.get('crm-prod')).toBe('sales')
+    expect(team.get('monitoring')).toBe('sre') // từ nhãn workload
+    expect(team.get('shop')).toBe('Other')
+    expect(team.get('kube-system')).toBe('System')
+    expect(groupingKeys(d)).toEqual(['team', 'tier'])
+
+    const layout = layoutMap(d, { hideSystem: false, grouping: 'label:team' })
+    expect(layout.nodes.filter((n) => n.kind === 'region').map((n) => n.label)).toEqual([
+      'pay',
+      'sales',
+      'sre',
+      'Other',
+      'System'
+    ])
+  })
+
+  it('label selector kiểu kubectl', () => {
+    expect(parseLabelSelector('  ')).toBeNull()
+    expect(parseLabelSelector('tier=data, app!=x,env in (a, b),!canary,team')).toEqual({
+      matchLabels: { tier: 'data' },
+      matchExpressions: [
+        { key: 'app', operator: 'NotIn', values: ['x'] },
+        { key: 'env', operator: 'In', values: ['a', 'b'] },
+        { key: 'canary', operator: 'DoesNotExist', values: [] },
+        { key: 'team', operator: 'Exists', values: [] }
+      ]
+    })
+    expect(parseLabelSelector('app.kubernetes.io/part-of==shop')).toEqual({
+      matchLabels: { 'app.kubernetes.io/part-of': 'shop' },
+      matchExpressions: []
+    })
+    expect(parseLabelSelector('a=b=c')).toHaveProperty('error')
+  })
+
+  it('lọc theo nhãn: giữ workload khớp cùng service / route / PVC / policy nối tới nó', () => {
+    const sel = parseLabelSelector('app=db')
+    if (!sel || 'error' in sel) throw new Error('selector')
+    const f = filterMapData(data(), sel)
+    expect(f.workloads.map((w) => w.name)).toEqual(['db'])
+    expect(f.pods.map((p) => p.name)).toEqual(['db-0'])
+    expect(f.services.map((s) => s.name)).toEqual(['db'])
+    expect(f.routes).toEqual([])
+    expect(f.pvcs.map((v) => v.name)).toEqual(['data-db-0'])
+    expect(f.policies.map((p) => p.name)).toEqual(['deny-db'])
+    expect(f.hpas).toEqual([])
+    expect(f.namespaces.map((n) => n.name)).toEqual(['shop'])
+    const layout = layoutMap(f, { hideSystem: false })
+    expect(layout.nodes.filter((n) => n.kind === 'namespace').map((n) => n.label)).toEqual(['shop'])
+
+    const api = parseLabelSelector('app=api')
+    if (!api || 'error' in api) throw new Error('selector')
+    expect(filterMapData(data(), api).routes.map((r) => r.name)).toEqual(['web'])
+  })
+
+  it('gập namespace: chỉ còn thẻ tóm tắt, không thẻ con, không cạnh', () => {
+    const open = layoutMap(data(), { hideSystem: false })
+    const folded = layoutMap(data(), { hideSystem: false, collapsed: (ns) => ns === 'shop' })
+    const shop = folded.nodes.find((n) => n.id === 'n:shop')
+    expect(shop).toMatchObject({ collapsed: true, stats: { workloads: 3, pods: 5 } })
+    expect(folded.nodes.some((n) => n.ns === 'shop' && n.kind !== 'namespace')).toBe(false)
+    expect(folded.edges).toHaveLength(0)
+    expect(open.edges.length).toBeGreaterThan(0)
+    // Đảo gập nhỏ hơn hẳn → bản đồ gọn hơn.
+    const openShop = open.nodes.find((n) => n.id === 'n:shop')
+    expect((shop?.h ?? 0) < (openShop?.h ?? 0)).toBe(true)
+    // Namespace khác vẫn đầy đủ.
+    expect(folded.nodes.some((n) => n.ns === 'monitoring' && n.kind === 'workload')).toBe(true)
   })
 })
