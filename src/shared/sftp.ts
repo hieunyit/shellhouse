@@ -14,6 +14,16 @@ export const SftpOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('mkdir'), path: RemotePath }),
   z.object({ op: z.literal('rename'), from: RemotePath, to: RemotePath }),
   z.object({ op: z.literal('remove'), path: RemotePath, recursive: z.boolean() }),
+  /** Xem trước: đọc tối đa `maxBytes` đầu file (văn bản / ảnh), không ghi ra đĩa. */
+  z.object({
+    op: z.literal('preview'),
+    path: RemotePath,
+    maxBytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(8 * 1024 * 1024)
+  }),
   z.object({ op: z.literal('chmod'), path: RemotePath, mode: z.number().int().min(0).max(0o7777) }),
   z.object({
     op: z.literal('download'),
@@ -116,4 +126,13 @@ export function parentRemote(path: string): string {
 export function baseName(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean)
   return parts.at(-1) ?? path
+}
+
+/** Kết quả xem trước file: phần đầu file (base64) + kích thước thật. */
+export interface SftpPreview {
+  path: string
+  size: number
+  /** base64 của tối đa maxBytes đầu file. */
+  data: string
+  truncated: boolean
 }

@@ -41,6 +41,7 @@ import { SortMenu, usePersistentSort } from '../components/SortMenu'
 import { FileTable, type FileColumn } from '../components/files/FileTable'
 import { Empty, ToolButton } from '../components/files/parts'
 import { TransferList } from '../components/files/TransferList'
+import { FilePreview, previewBytes, type PreviewData } from '../components/files/FilePreview'
 import { cleanError, dateFormat, formatSize } from '../lib/format'
 import { FILE_SORT_KEYS, FILE_SORT_OPTIONS, nameOrder, type FileSort } from './file-sort'
 
@@ -126,6 +127,7 @@ export function SftpPanel({
   })
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [dialog, setDialog] = useState<Dialog>(null)
+  const [preview, setPreview] = useState<SftpEntry | null>(null)
   const [dragOver, setDragOver] = useState(false)
   /** Tên file đang tải về để mở trong editor. */
   const [opening, setOpening] = useState<string | null>(null)
@@ -344,6 +346,16 @@ export function SftpPanel({
         icon: <FolderOpen size={14} />,
         onSelect: () => {
           open(single)
+        }
+      })
+    if (single && !single.isDirLike)
+      items.push({
+        id: 'sftp-preview',
+        label: 'Preview',
+        icon: <Eye size={14} />,
+        hint: 'Space',
+        onSelect: () => {
+          setPreview(single)
         }
       })
     if (single && !single.isDirLike)
@@ -615,6 +627,9 @@ export function SftpPanel({
         selected={selected}
         onSelect={setSelected}
         onOpen={open}
+        onPreview={(entry) => {
+          if (!entry.isDirLike) setPreview(entry)
+        }}
         onUp={() => {
           if (path && path !== '/') void load(parentRemote(path))
         }}
@@ -706,14 +721,31 @@ export function SftpPanel({
 
       {dragOver && (
         <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent-soft/80">
-          <p className="flex items-center gap-2 text-sm font-medium text-fg">
-            <Upload size={16} className="text-accent" />
-            Drop to upload
+          <p className="flex max-w-[90%] flex-col items-center gap-1 text-center text-sm font-medium text-fg">
+            <span className="flex items-center gap-2">
+              <Upload size={16} className="text-accent" />
+              Drop to upload
+            </span>
+            {path && (
+              <span className="max-w-full truncate font-mono text-xs font-normal text-muted">
+                to {path}
+              </span>
+            )}
           </p>
         </div>
       )}
 
       {menu}
+      {preview && path && (
+        <FilePreview
+          name={preview.name}
+          load={previewLoader(run, joinRemote(path, preview.name))}
+          onClose={() => {
+            setPreview(null)
+          }}
+          onDownload={() => void download([preview])}
+        />
+      )}
       {dialog && path && (
         <EntryDialog
           dialog={dialog}
@@ -869,4 +901,24 @@ function EntryDialog({
       </form>
     </Modal>
   )
+}
+
+/** Hàm tải nội dung xem trước (ổn định theo đường dẫn — dialog không tải lại khi vẽ lại). */
+const loaders = new Map<string, () => Promise<PreviewData>>()
+function previewLoader(
+  run: (op: SftpOp) => Promise<unknown>,
+  remotePath: string
+): () => Promise<PreviewData> {
+  let l = loaders.get(remotePath)
+  if (!l) {
+    l = () =>
+      run({
+        op: 'preview',
+        path: remotePath,
+        maxBytes: previewBytes(remotePath)
+      }) as Promise<PreviewData>
+    loaders.clear()
+    loaders.set(remotePath, l)
+  }
+  return l
 }

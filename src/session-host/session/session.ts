@@ -487,6 +487,8 @@ export class Session {
       case 'chmod':
         await sftp.chmod(op.path, op.mode)
         return null
+      case 'preview':
+        return sftp.preview(op.path, op.maxBytes)
       case 'download':
         return transfers.enqueue('download', op.localPath, op.remotePath, op.overwrite)
       case 'upload':

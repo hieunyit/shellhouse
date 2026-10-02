@@ -10,7 +10,8 @@ import {
   FolderOpen,
   Laptop,
   RefreshCw,
-  X
+  X,
+  Download
 } from 'lucide-react'
 import { DRAG_LOCAL, DRAG_REMOTE, joinLocal, type LocalListing } from '@shared/local-files'
 import type { TransferStatus } from '@shared/sftp'
@@ -353,7 +354,17 @@ export function LocalPanel({
       )}
       {dragOver && (
         <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent-soft/80">
-          <p className="text-sm font-medium text-fg">Drop to download here</p>
+          <p className="flex max-w-[90%] flex-col items-center gap-1 text-center text-sm font-medium text-fg">
+            <span className="flex items-center gap-2">
+              <Download size={16} className="text-accent" />
+              Drop to download
+            </span>
+            {listing && (
+              <span className="max-w-full truncate font-mono text-xs font-normal text-muted">
+                to {listing.path}
+              </span>
+            )}
+          </p>
         </div>
       )}
       {menu}

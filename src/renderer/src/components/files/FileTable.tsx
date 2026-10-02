@@ -48,6 +48,7 @@ export function FileTable<T, K extends string>({
   onUp,
   onRename,
   onDelete,
+  onPreview,
   onContextMenu,
   rowProps,
   ariaLabel,
@@ -75,6 +76,8 @@ export function FileTable<T, K extends string>({
   onUp?: () => void
   onRename?: (item: T) => void
   onDelete?: (items: T[]) => void
+  /** Space: xem nhanh mục đang chọn (như Quick Look). */
+  onPreview?: (item: T) => void
   onContextMenu?: (event: React.MouseEvent, items: T[]) => void
   rowProps?: (item: T) => React.HTMLAttributes<HTMLDivElement> & { draggable?: boolean }
   ariaLabel: string
@@ -179,6 +182,9 @@ export function FileTable<T, K extends string>({
     } else if (e.key === 'Backspace' && onUp) {
       handled()
       onUp()
+    } else if (e.key === ' ' && one !== undefined && onPreview) {
+      handled()
+      onPreview(one)
     } else if (e.key === 'F2' && one !== undefined && onRename) {
       handled()
       onRename(one)

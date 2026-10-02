@@ -40,9 +40,13 @@ export function TransferList({
   const failed = transfers.filter((t) => t.state === 'error').length
   const total = active.reduce((n, t) => n + t.size, 0)
   const moved = active.reduce((n, t) => n + t.transferred, 0)
+  const speed = active.reduce((n, t) => n + (t.state === 'running' ? t.bytesPerSecond : 0), 0)
+  const remaining = speed > 0 ? (total - moved) / speed : null
   const summary = [
     active.length > 0 &&
-      `${active.length} active${total > 0 ? ` · ${Math.floor((moved / total) * 100)}%` : ''}`,
+      `${active.length} active${total > 0 ? ` · ${Math.floor((moved / total) * 100)}%` : ''}${
+        speed > 0 ? ` · ${formatSize(speed)}/s` : ''
+      }${remaining !== null && remaining > 1 ? ` · ${duration(remaining)} left` : ''}`,
     done > 0 && `${done} done`,
     failed > 0 && `${failed} failed`
   ]
@@ -69,6 +73,30 @@ export function TransferList({
             {summary}
           </span>
         </button>
+        {failed > 0 && onRetry && (
+          <button
+            type="button"
+            className="shrink-0 rounded px-1.5 py-0.5 text-faint hover:bg-hover hover:text-fg"
+            data-testid="transfers-retry-failed"
+            onClick={() => {
+              for (const t of transfers) if (t.state === 'error') onRetry(t.id)
+            }}
+          >
+            Retry failed
+          </button>
+        )}
+        {active.length > 1 && (
+          <button
+            type="button"
+            className="shrink-0 rounded px-1.5 py-0.5 text-faint hover:bg-hover hover:text-danger"
+            data-testid="transfers-cancel-all"
+            onClick={() => {
+              for (const t of active) onCancel(t.id)
+            }}
+          >
+            Cancel all
+          </button>
+        )}
         {active.length < transfers.length && (
           <button
             type="button"
@@ -124,7 +152,18 @@ export function TransferList({
                     </span>
                   )}
                   <span className="shrink-0 text-faint tabular-nums">
-                    {t.state === 'running' && `${pct}% · ${formatSize(t.bytesPerSecond)}/s`}
+                    {t.state === 'running' &&
+                      [
+                        t.size > 0
+                          ? `${formatSize(t.transferred)} of ${formatSize(t.size)}`
+                          : `${pct}%`,
+                        t.bytesPerSecond > 0 && `${formatSize(t.bytesPerSecond)}/s`,
+                        t.bytesPerSecond > 0 &&
+                          t.size > t.transferred &&
+                          `${duration((t.size - t.transferred) / t.bytesPerSecond)} left`
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
                     {t.state === 'queued' && 'Queued'}
                     {t.state === 'done' &&
                       (t.edit
@@ -160,9 +199,9 @@ export function TransferList({
                   )}
                 </div>
                 {t.state === 'running' && (
-                  <div className="mt-1 ml-5 h-0.5 overflow-hidden rounded-full bg-subtle">
+                  <div className="mt-1 ml-5 h-1 overflow-hidden rounded-full bg-subtle">
                     <div
-                      className="h-0.5 rounded-full bg-accent transition-[width] duration-200"
+                      className="h-1 rounded-full bg-accent-solid transition-[width] duration-200"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -179,4 +218,14 @@ export function TransferList({
       )}
     </div>
   )
+}
+
+/** "8s", "1:05", "1:02:05" — thời gian còn lại. */
+export function duration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds))
+  if (s < 60) return `${String(s)}s`
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = String(s % 60).padStart(2, '0')
+  return h ? `${String(h)}:${String(m).padStart(2, '0')}:${sec}` : `${String(m)}:${sec}`
 }

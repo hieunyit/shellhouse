@@ -1,5 +1,5 @@
 import type { Client, SFTPWrapper, Stats } from 'ssh2'
-import type { SftpEntry, SftpListing } from '@shared/sftp'
+import type { SftpEntry, SftpListing , SftpPreview } from '@shared/sftp'
 import { joinRemote } from '@shared/sftp'
 import { createLimiter } from '../../node-shared/pool'
 
@@ -157,6 +157,38 @@ export class SftpService implements LossGuard {
       a.isDirLike === b.isDirLike ? a.name.localeCompare(b.name) : a.isDirLike ? -1 : 1
     )
     return { path: resolved, entries }
+  }
+
+  /** Đọc phần đầu file (xem trước) — tối đa `maxBytes`, không tải về đĩa. */
+  async preview(path: string, maxBytes: number): Promise<SftpPreview> {
+    const s = await this.channel()
+    const st = await this.stat(path)
+    if (st.isDirectory()) throw new Error('This is a folder')
+    const want = Math.min(maxBytes, st.size)
+    const handle = await this.guarded<Buffer>((cb) => {
+      s.open(path, 'r', cb)
+    })
+    try {
+      const buf = Buffer.alloc(want)
+      let read = 0
+      while (read < want) {
+        const n = await this.guarded<number>((cb) => {
+          s.read(handle, buf, read, Math.min(64 * 1024, want - read), read, (err, bytes) => {
+            cb(err, bytes)
+          })
+        })
+        if (n <= 0) break
+        read += n
+      }
+      return {
+        path,
+        size: st.size,
+        data: buf.subarray(0, read).toString('base64'),
+        truncated: st.size > read
+      }
+    } finally {
+      s.close(handle, () => undefined)
+    }
   }
 
   async mkdir(path: string): Promise<void> {
