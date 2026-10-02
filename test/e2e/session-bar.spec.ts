@@ -43,6 +43,13 @@ test('thanh phiên: độ trễ, bảng mã của host (giải mã output), ch�
   // Bảng "Aa": cỡ chữ, font, theme — lưu vào cài đặt.
   await page.getByTestId('terminal-look').click()
   const menu = page.getByTestId('terminal-look-menu')
+  // Bảng thật sự hiện trên màn hình (không bị thanh phiên cắt mất).
+  await expect(menu).toBeInViewport()
+  const onTop = await menu.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2))
+  })
+  expect(onTop).toBe(true)
   await expect(menu.getByTestId('terminal-look-size')).toHaveText('14')
   await menu.getByTestId('terminal-look-bigger').click()
   await expect(menu.getByTestId('terminal-look-size')).toHaveText('15')

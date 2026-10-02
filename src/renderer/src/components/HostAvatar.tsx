@@ -45,9 +45,14 @@ export function HostAvatar({
         hostTileClass[colorFor(host)],
         className
       )}
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.38) }}
+      style={{
+        width: size,
+        height: size,
+        // Nhỏ (tab): một chữ cái to cho dễ đọc; lớn: hai chữ cái.
+        fontSize: Math.round(size * (size < 22 ? 0.6 : 0.38))
+      }}
     >
-      {initials(host.label)}
+      {size < 22 ? initials(host.label).slice(0, 1) : initials(host.label)}
       {session && (
         <StatusDot
           state={session}
