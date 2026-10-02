@@ -49,6 +49,8 @@ export function FileTable<T, K extends string>({
   onRename,
   onDelete,
   onPreview,
+  onCopy,
+  onMove,
   onContextMenu,
   rowProps,
   ariaLabel,
@@ -78,6 +80,9 @@ export function FileTable<T, K extends string>({
   onDelete?: (items: T[]) => void
   /** Space: xem nhanh mục đang chọn (như Quick Look). */
   onPreview?: (item: T) => void
+  /** F5 / F6 (trình quản lý file hai cột, như Total Commander): copy / chuyển sang khung kia. */
+  onCopy?: (items: T[]) => void
+  onMove?: (items: T[]) => void
   onContextMenu?: (event: React.MouseEvent, items: T[]) => void
   rowProps?: (item: T) => React.HTMLAttributes<HTMLDivElement> & { draggable?: boolean }
   ariaLabel: string
@@ -191,6 +196,12 @@ export function FileTable<T, K extends string>({
     } else if (e.key === 'Delete' && chosen.length > 0 && onDelete) {
       handled()
       onDelete(chosen)
+    } else if (e.key === 'F5' && chosen.length > 0 && onCopy) {
+      handled()
+      onCopy(chosen)
+    } else if (e.key === 'F6' && chosen.length > 0 && onMove) {
+      handled()
+      onMove(chosen)
     } else if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
       handled()
       onSelect(new Set(items.map(getKey)))

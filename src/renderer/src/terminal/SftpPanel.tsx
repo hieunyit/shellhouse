@@ -13,6 +13,7 @@ import {
   FolderPlus,
   FolderUp,
   Link2,
+  MoveLeft,
   Loader2,
   Pencil,
   RefreshCw,
@@ -36,6 +37,8 @@ import {
   type SftpPreview,
   type TransferStatus
 } from '@shared/sftp'
+import { settleTransfers } from '@shared/sftp-move'
+import { toast } from '../stores/toasts'
 import {
   fromBase64,
   isBinaryName,
@@ -300,6 +303,42 @@ export function SftpPanel({
     }
   }
 
+  // Trạng thái truyền mới nhất (chờ F6 xong mà không phụ thuộc lần render).
+  const transfersRef = useRef(transfers)
+  useEffect(() => {
+    transfersRef.current = transfers
+  })
+
+  /** F6 (hai cột): tải về khung Local rồi xoá trên server — chỉ những mục đã tải về xong. */
+  const moveToLocal = async (list: SftpEntry[]): Promise<void> => {
+    if (!path || !localTarget || list.length === 0) return
+    const dir = path
+    const label = list.length === 1 ? `“${list[0]?.name ?? ''}”` : `${list.length} items`
+    const before = new Set(transfersRef.current.map((t) => t.id))
+    toast.loading(`Moving ${label} to this computer…`, { group: 'sftp-move', duration: 0 })
+    try {
+      await download(list)
+      const { moved, kept } = await settleTransfers({
+        read: () => transfersRef.current,
+        before,
+        roots: list.map((e) => joinRemote(dir, e.name)),
+        side: 'remote',
+        sep: '/'
+      })
+      for (const remotePath of moved) await run({ op: 'remove', path: remotePath, recursive: true })
+      void load(dir)
+      if (kept.length === 0)
+        toast.success(`Moved ${label} to this computer`, { group: 'sftp-move' })
+      else
+        toast.warning(`Moved ${moved.length}, kept ${kept.length} on the server`, {
+          group: 'sftp-move',
+          description: 'Items that were not downloaded completely stay where they are.'
+        })
+    } catch (e) {
+      toast.error(`Could not move ${label}`, { group: 'sftp-move', description: cleanError(e) })
+    }
+  }
+
   /** Mở trong tab editor của app; Ctrl+S ghi thẳng lên server (op `write`, kiểm tra xung đột). */
   const editInApp = (entry: SftpEntry): void => {
     if (!path) return
@@ -430,10 +469,28 @@ export function SftpPanel({
     items.push(
       {
         id: 'sftp-download',
-        label: list.length > 1 ? `Download ${list.length} items…` : 'Download…',
+        label: localTarget
+          ? list.length > 1
+            ? `Download ${list.length} items`
+            : 'Download'
+          : list.length > 1
+            ? `Download ${list.length} items…`
+            : 'Download…',
         icon: <Download size={14} />,
+        ...(localTarget ? { hint: 'F5' } : {}),
         onSelect: () => void download(list)
       },
+      ...(localTarget
+        ? [
+            {
+              id: 'sftp-move',
+              label: 'Move to this computer',
+              icon: <MoveLeft size={14} />,
+              hint: 'F6',
+              onSelect: () => void moveToLocal(list)
+            }
+          ]
+        : []),
       'separator'
     )
     if (single && path)
@@ -701,6 +758,12 @@ export function SftpPanel({
         onDelete={(list) => {
           setDialog({ kind: 'delete', entries: list })
         }}
+        {...(localTarget
+          ? {
+              onCopy: (list: SftpEntry[]) => void download(list),
+              onMove: (list: SftpEntry[]) => void moveToLocal(list)
+            }
+          : {})}
         onContextMenu={(e, list) => {
           openMenu(e, entryMenu(list))
         }}

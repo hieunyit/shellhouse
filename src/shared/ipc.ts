@@ -210,6 +210,11 @@ export const invokeContract = {
   'serial:list': { args: z.tuple([]), result: z.array(SerialPortInfo) },
   /** Liệt kê thư mục trên máy (null = thư mục home) cho SFTP hai cột. */
   'local:list': { args: z.tuple([z.string().max(4096).nullable()]), result: LocalListing },
+  /** Đưa file / thư mục trên máy vào Thùng rác (F6 "Move" trong trình quản lý file hai cột). */
+  'local:trash': {
+    args: z.tuple([z.array(z.string().min(1).max(4096)).max(1000)]),
+    result: z.void()
+  },
   /** Chọn chương trình (editor) trên máy; null = huỷ. */
   'dialog:pickProgram': { args: z.tuple([]), result: z.string().nullable() },
   /** Chọn thư mục (mở sẵn ở thư mục log hoặc Downloads); null = huỷ. */
@@ -325,6 +330,7 @@ export interface ShellhouseApi {
   pickSaveLocation(defaultName: string): Promise<string | null>
   pickProgram(): Promise<string | null>
   listLocal(path: string | null): Promise<LocalListing>
+  trashLocal(paths: string[]): Promise<void>
   listSerialPorts(): Promise<SerialPortInfo[]>
   commandHistory(target: string): Promise<string[]>
   modules(): Promise<ModuleStateInfo[]>

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { release } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import {
   app,
   BrowserWindow,
@@ -561,6 +561,13 @@ function registerIpc(): void {
     }))
   })
   handle('local:list', isTrustedSender, (path) => listLocal(path, app.getPath('home')))
+  handle('local:trash', isTrustedSender, async (paths) => {
+    // Chỉ đường dẫn tuyệt đối; vào Thùng rác (khôi phục được), không xoá hẳn.
+    for (const p of paths) {
+      if (!isAbsolute(p)) throw new Error('Expected an absolute path')
+      await electronShell.trashItem(p)
+    }
+  })
   handle('dialog:pickProgram', isTrustedSender, async () => {
     const options = {
       title: 'Choose an editor',

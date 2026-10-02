@@ -372,6 +372,92 @@ test('chuột phải host → Open SFTP: trình quản lý file hai cột Local 
   }
 })
 
+test('trình quản lý file hai cột: F5 copy, F6 move (chỉ xoá bản gốc khi đã chuyển xong)', async ({
+  app,
+  page
+}) => {
+  const remote = mkdtempSync(join(tmpdir(), 'sh-remote-'))
+  const local = mkdtempSync(join(tmpdir(), 'sh-local-'))
+  try {
+    writeFileSync(join(remote, 'log-a.txt'), 'A')
+    writeFileSync(join(remote, 'log-b.txt'), 'B')
+    writeFileSync(join(local, 'script.sh'), 'echo hi')
+    writeFileSync(join(local, 'move-me.txt'), 'đi')
+    // Thùng rác giả: ghi lại đường dẫn main được yêu cầu đưa vào thùng rác.
+    await app.evaluate(({ shell }) => {
+      const trashed: string[] = []
+      Object.assign(globalThis, { __trashed: trashed })
+      shell.trashItem = (p) => {
+        trashed.push(p)
+        return Promise.resolve()
+      }
+    })
+    const trashed = (): Promise<string[]> =>
+      app.evaluate(() => (globalThis as unknown as { __trashed: string[] }).__trashed)
+    server = await startTestSshServer([{ username: 'alice', password: 'pw' }], { sftpRoot: remote })
+    await createHost(page, {
+      hostname: '127.0.0.1',
+      port: server.port,
+      username: 'alice',
+      label: 'Box',
+      password: 'pw'
+    })
+    await page.locator('[data-testid="host-row"][data-host-label="Box"]').click({ button: 'right' })
+    await page.getByTestId('menu-sftp').click()
+    await page.getByTestId('hostkey-accept').click()
+    const manager = page.getByTestId('file-manager')
+    const remotePane = manager.getByTestId('sftp-panel')
+    const localPane = manager.getByTestId('local-panel')
+    await localPane.getByTestId('local-path').fill(local)
+    await localPane.getByTestId('local-path').press('Enter')
+    await expect(
+      localPane.locator('[data-testid="local-entry"][data-name="script.sh"]')
+    ).toBeVisible()
+
+    // Local: F5 = copy lên server (bản trên máy giữ nguyên).
+    await localPane.locator('[data-testid="local-entry"][data-name="script.sh"]').click()
+    await page.keyboard.press('F5')
+    await expect
+      .poll(() =>
+        existsSync(join(remote, 'script.sh')) ? readFileSync(join(remote, 'script.sh'), 'utf8') : ''
+      )
+      .toBe('echo hi')
+    expect(existsSync(join(local, 'script.sh'))).toBe(true)
+
+    // Local: F6 = chuyển — tải lên xong mới đưa bản trên máy vào thùng rác.
+    await localPane.locator('[data-testid="local-entry"][data-name="move-me.txt"]').click()
+    await page.keyboard.press('F6')
+    await expect
+      .poll(() =>
+        existsSync(join(remote, 'move-me.txt'))
+          ? readFileSync(join(remote, 'move-me.txt'), 'utf8')
+          : ''
+      )
+      .toBe('đi')
+    await expect.poll(trashed).toEqual([join(local, 'move-me.txt')])
+
+    // Remote: chọn hai file, F6 → về máy, xoá trên server.
+    await remotePane.locator('[data-testid="sftp-entry"][data-name="log-a.txt"]').click()
+    await remotePane
+      .locator('[data-testid="sftp-entry"][data-name="log-b.txt"]')
+      .click({ modifiers: ['Shift'] })
+    await page.keyboard.press('F6')
+    await expect
+      .poll(() => [existsSync(join(local, 'log-a.txt')), existsSync(join(local, 'log-b.txt'))])
+      .toEqual([true, true])
+    await expect
+      .poll(() => [existsSync(join(remote, 'log-a.txt')), existsSync(join(remote, 'log-b.txt'))])
+      .toEqual([false, false])
+    expect(readFileSync(join(local, 'log-b.txt'), 'utf8')).toBe('B')
+    await expect(
+      remotePane.locator('[data-testid="sftp-entry"][data-name="log-a.txt"]')
+    ).toHaveCount(0)
+  } finally {
+    rmSync(remote, { recursive: true, force: true })
+    rmSync(local, { recursive: true, force: true })
+  }
+})
+
 test('host Telnet: tạo bằng form, đăng nhập như console router; ẩn SFTP / Forwarding', async ({
   page
 }) => {

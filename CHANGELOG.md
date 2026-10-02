@@ -30,6 +30,16 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   kept). If someone changed the file since you opened it, you choose: overwrite or reload theirs.
   Windows line endings are preserved, and closing a tab with unsaved changes asks first. Binary
   and very large files still open in your local editor (Settings → Files).
+- **Two-pane file manager: F5 / F6** like Total Commander — F5 copies the selection to the other
+  side, F6 moves it. A move only removes the original after every file arrived (items on this
+  computer go to the Trash); anything that failed stays where it was.
+- **Combined logs with a colour per source** — logs of a whole Deployment / StatefulSet (all pods)
+  or a Compose project give each pod / service its own colour, and chips above the log show or
+  hide sources (double-click a chip to see only that one), like stern / kubetail.
+- **Kubernetes port forwards keep working** when the pod behind a service is replaced (rollout,
+  crash): new connections go to the new pod automatically. Each forward has an on / off switch
+  that keeps it in the list, shows the pod it reaches, the time to open a connection, and
+  **Stop all**.
 
 - **Kubernetes: cluster Map** — the whole cluster as a live map you can pan and zoom like a
   street map. Namespaces are islands grouped into regions by purpose (your applications, ingress

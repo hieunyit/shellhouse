@@ -9,6 +9,7 @@ import {
   Folder,
   FolderOpen,
   Laptop,
+  MoveRight,
   RefreshCw,
   X,
   Download
@@ -22,6 +23,8 @@ import { SortMenu, usePersistentSort } from '../components/SortMenu'
 import { FileTable, type FileColumn } from '../components/files/FileTable'
 import { Empty, ToolButton } from '../components/files/parts'
 import { cleanError, dateFormat, formatSize } from '../lib/format'
+import { toast } from '../stores/toasts'
+import { settleTransfers } from '@shared/sftp-move'
 import { FILE_SORT_KEYS, FILE_SORT_OPTIONS, nameOrder, type FileSort } from './file-sort'
 
 type LocalEntry = LocalListing['entries'][number]
@@ -150,6 +153,41 @@ export function LocalPanel({
 
   const uploadNames = (names: Iterable<string>): void => {
     void actionsRef.current?.upload(pathsOf(names))
+  }
+
+  // Trạng thái truyền mới nhất (chờ F6 xong mà không phụ thuộc lần render).
+  const transfersRef = useRef(transfers)
+  useEffect(() => {
+    transfersRef.current = transfers
+  })
+
+  /** F6: tải lên rồi đưa bản trên máy vào Thùng rác — chỉ những mục đã tải lên xong. */
+  const moveNames = async (names: string[]): Promise<void> => {
+    if (!listing || names.length === 0) return
+    const paths = pathsOf(names)
+    const label = names.length === 1 ? `“${names[0] ?? ''}”` : `${names.length} items`
+    const before = new Set(transfersRef.current.map((t) => t.id))
+    toast.loading(`Moving ${label} to the server…`, { group: 'sftp-move', duration: 0 })
+    try {
+      await actionsRef.current?.upload(paths)
+      const { moved, kept } = await settleTransfers({
+        read: () => transfersRef.current,
+        before,
+        roots: paths,
+        side: 'local',
+        sep: listing.sep
+      })
+      if (moved.length) await window.shellhouse.trashLocal(moved)
+      void load(listing.path)
+      if (kept.length === 0) toast.success(`Moved ${label} to the server`, { group: 'sftp-move' })
+      else
+        toast.warning(`Moved ${moved.length}, kept ${kept.length} on this computer`, {
+          group: 'sftp-move',
+          description: 'Items that were not uploaded completely stay where they are.'
+        })
+    } catch (e) {
+      toast.error(`Could not move ${label}`, { group: 'sftp-move', description: cleanError(e) })
+    }
   }
   const open = (entry: LocalEntry): void => {
     if (listing && entry.isDir) void load(joinLocal(listing.path, entry.name, listing.sep))
@@ -284,6 +322,10 @@ export function LocalPanel({
         onUp={() => {
           if (listing?.parent) void load(listing.parent)
         }}
+        onCopy={(list) => {
+          uploadNames(list.map((x) => x.name))
+        }}
+        onMove={(list) => void moveNames(list.map((x) => x.name))}
         onContextMenu={(e, list) => {
           const single = list.length === 1 ? list[0] : undefined
           openMenu(e, [
@@ -303,9 +345,17 @@ export function LocalPanel({
               id: 'local-upload',
               label: list.length > 1 ? `Upload ${list.length} items` : 'Upload',
               icon: <ArrowRight size={14} />,
+              hint: 'F5',
               onSelect: () => {
                 uploadNames(list.map((x) => x.name))
               }
+            },
+            {
+              id: 'local-move',
+              label: 'Move to server',
+              icon: <MoveRight size={14} />,
+              hint: 'F6',
+              onSelect: () => void moveNames(list.map((x) => x.name))
             },
             ...(single
               ? [
