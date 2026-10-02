@@ -21,7 +21,7 @@ import {
   type TrafficGraphNode
 } from '../shared/traffic'
 import { EDGE_TYPES, MapContext, sides, type MapCtx, type MapFlowEdge } from './MapFlow'
-import type { MapRef } from './MapView'
+import type { MapRef } from './mapModel'
 import { KindIcon } from './icons'
 import type { TrafficState } from './useTraffic'
 
@@ -60,15 +60,19 @@ const PeerNode = memo(function PeerNode({ data }: NodeProps<TNode>): React.JSX.E
       ) : (
         <KindIcon kind={kindId ?? 'pods'} size={20} />
       )}
+      {/* Tên chiếm trọn dòng đầu (không bị cột tốc độ chen); dòng hai: chỗ ở + tốc độ. */}
       <div className="min-w-0 flex-1">
-        <div className="truncate font-mono text-[12px] font-medium text-fg">{p.name}</div>
-        <div className="truncate text-[11px] text-faint">
-          {external ? 'outside the cluster' : `${p.ns} · ${p.kind}`}
+        <div className="truncate font-mono text-[13px] font-medium text-fg">{p.name}</div>
+        <div className="flex items-center gap-2 text-[11px] text-faint">
+          <span className="min-w-0 flex-1 truncate">
+            {external ? 'external' : `${p.ns} · ${p.kind}`}
+          </span>
+          <span className="shrink-0 tabular-nums">
+            {n.inRate >= 1 && <span title="Received">↓ {formatRate(n.inRate)}</span>}
+            {n.inRate >= 1 && n.outRate >= 1 && ' '}
+            {n.outRate >= 1 && <span title="Sent">↑ {formatRate(n.outRate)}</span>}
+          </span>
         </div>
-      </div>
-      <div className="shrink-0 text-right text-[10.5px] leading-tight text-faint tabular-nums">
-        {n.inRate >= 1 && <div title="Received">↓ {formatRate(n.inRate)}</div>}
-        {n.outRate >= 1 && <div title="Sent">↑ {formatRate(n.outRate)}</div>}
       </div>
       {/* Handle ẩn cho cạnh trái / phải */}
       <PeerHandles />
@@ -134,7 +138,7 @@ function TrafficMapInner({
   // Bảng bên phải mở / đóng → khung đổi bề ngang: canh lại cho thấy trọn đồ thị.
   useEffect(() => {
     const t = setTimeout(() => {
-      void rf.fitView({ padding: 0.2, maxZoom: 1.1, duration: 250 })
+      void rf.fitView({ padding: 0.08, maxZoom: 1.1, duration: 250 })
     }, 60)
     return () => {
       clearTimeout(t)
@@ -263,7 +267,7 @@ function TrafficMapInner({
             nodeTypes={NODE_TYPES}
             edgeTypes={EDGE_TYPES}
             fitView
-            fitViewOptions={{ padding: 0.2, maxZoom: 1.1 }}
+            fitViewOptions={{ padding: 0.08, maxZoom: 1.1 }}
             minZoom={0.1}
             maxZoom={2.5}
             nodesDraggable={false}
@@ -293,7 +297,7 @@ function TrafficMapInner({
         >
           <div className="font-mono text-[13px] font-semibold text-fg">{sel.peer.name}</div>
           <div className="mb-3 text-faint">
-            {sel.peer.ns ? `${sel.peer.ns} · ${sel.peer.kind}` : 'outside the cluster'}
+            {sel.peer.ns ? `${sel.peer.ns} · ${sel.peer.kind}` : 'external'}
           </div>
           {(['in', 'out'] as const).map((dir) => {
             const list = flows.filter((e) => (dir === 'in' ? e.to : e.from) === sel.id)

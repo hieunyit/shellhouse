@@ -86,6 +86,31 @@ export const IconButton = forwardRef<
 const control =
   'w-full rounded-md border border-line bg-surface px-2.5 text-[13px] text-fg shadow-xs placeholder:text-faint outline-none transition-[border-color,box-shadow] duration-150 hover:border-line-strong focus:border-accent focus:ring-3 focus:ring-accent/20 focus-visible:outline-none disabled:opacity-50'
 
+/** Nhóm thuộc tính của một class Tailwind (chỉ những nhóm control hay bị ghi đè). */
+function groupOf(cls: string): string | null {
+  if (/^(w-|flex-1$)/.test(cls)) return 'w'
+  if (/^h-/.test(cls)) return 'h'
+  if (/^text-(xs|sm|base|lg|xl|\[\d)/.test(cls)) return 'size'
+  if (/^font-(mono|sans)$/.test(cls)) return 'family'
+  return null
+}
+
+/**
+ * Như `cx`, nhưng class truyền vào ghi đè class gốc cùng nhóm (w-28 thay w-full, h-7 thay h-8,
+ * text-xs thay text-[13px]). Không có bước này cả hai cùng có mặt và thứ tự trong CSS quyết định —
+ * thường là class gốc thắng.
+ */
+function controlCx(base: (string | false | null | undefined)[], extra?: string): string {
+  const over = new Set((extra ?? '').split(/\s+/).map(groupOf).filter(Boolean))
+  const kept = cx(...base)
+    .split(/\s+/)
+    .filter((c) => {
+      const g = groupOf(c)
+      return !(g && over.has(g))
+    })
+  return cx(...kept, extra)
+}
+
 export const Input = forwardRef<
   HTMLInputElement,
   InputHTMLAttributes<HTMLInputElement> & { mono?: boolean }
@@ -93,7 +118,7 @@ export const Input = forwardRef<
   return (
     <input
       ref={ref}
-      className={cx(control, 'h-8', mono && 'font-mono text-xs', className)}
+      className={controlCx([control, 'h-8', mono && 'font-mono text-xs'], className)}
       {...rest}
     />
   )
@@ -104,7 +129,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectHTMLAttributes<HTMLSel
     return (
       <select
         ref={ref}
-        className={cx(control, 'sh-select h-8 cursor-pointer pr-8', className)}
+        className={controlCx([control, 'sh-select h-8 cursor-pointer pr-8'], className)}
         {...rest}
       >
         {children}
@@ -118,7 +143,11 @@ export const TextArea = forwardRef<
   TextareaHTMLAttributes<HTMLTextAreaElement>
 >(function TextArea({ className, ...rest }, ref) {
   return (
-    <textarea ref={ref} className={cx(control, 'py-2 font-mono text-xs', className)} {...rest} />
+    <textarea
+      ref={ref}
+      className={controlCx([control, 'py-2 font-mono text-xs'], className)}
+      {...rest}
+    />
   )
 })
 

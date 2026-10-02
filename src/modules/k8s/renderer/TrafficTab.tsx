@@ -107,7 +107,7 @@ export function TrafficOf({
       )}
       {(status === 'live' || status === 'empty') && (
         <>
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <Total
               label="Total"
               value={totalIn + totalOut}
@@ -161,13 +161,12 @@ function Total({
 }): React.JSX.Element {
   return (
     <div className="rounded-md border border-line p-2" data-testid="k8s-traffic-total">
-      <div className="flex items-center justify-between text-xs">
-        <span className="flex items-center gap-1 text-muted">
-          {icon}
-          {label}
-        </span>
-        <span className="text-sm font-semibold text-fg tabular-nums">{formatRate(value)}</span>
+      {/* Nhãn trên, số dưới — ba thẻ một hàng vẫn đủ chỗ trong bảng hẹp. */}
+      <div className="flex items-center gap-1 text-xs text-muted">
+        {icon}
+        {label}
       </div>
+      <div className="text-sm font-semibold text-fg tabular-nums">{formatRate(value)}</div>
       <Sparkline
         values={series.length > 1 ? series : [value, value]}
         max={Math.max(...series, value, 1)}
@@ -202,7 +201,7 @@ function Peers({
           return (
             <div
               key={`${p.kind}|${p.ns}|${p.name}|${r.port}`}
-              className="grid grid-cols-[minmax(0,1fr)_3.5rem_6rem_4.5rem] items-center gap-2 text-xs"
+              className="grid grid-cols-[minmax(0,1fr)_3.5rem_4.5rem_4.5rem] items-center gap-2 text-xs"
               data-testid="k8s-traffic-peer"
               data-name={p.name}
             >
@@ -218,8 +217,11 @@ function Peers({
                   {p.name}
                 </button>
               ) : (
-                <span className="truncate font-mono text-fg" title={p.name}>
-                  {p.name} <span className="text-faint">({p.kind || 'external'})</span>
+                <span
+                  className="truncate font-mono text-fg"
+                  title={`${p.name} (${p.kind || 'external'})`}
+                >
+                  {p.name}
                 </span>
               )}
               <span className="text-right text-faint tabular-nums">

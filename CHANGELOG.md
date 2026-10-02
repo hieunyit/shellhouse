@@ -6,6 +6,27 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- **UI polish across modules** (reviewed screen by screen, light and dark):
+  - Detail panels no longer repeat a tab as a button — "View YAML" (Kubernetes) and "Inspect"
+    (Docker) stay in the `…` menu and on their shortcut, next to their own tab.
+  - Kubernetes Traffic tab: Total / Incoming / Outgoing on one row; peer names are no longer cut
+    by an "(external)" suffix.
+  - Service map: names use the whole first line, speed sits under it; columns are closer so the
+    map fills the view instead of shrinking to unreadable text.
+  - ConfigMaps and Secrets always open on Data; an unused Secret says "Not used by any workload."
+    instead of "No used by.".
+  - Docker: image ages read "6 years ago" instead of "2,210 days ago"; the Run dialog no longer
+    shows an error before you type; disk-usage bars line up.
+  - Create resource: the container "Name" field label no longer wraps and pushes its row out of
+    line.
+- Sizes passed to text fields and dropdowns now apply (e.g. the log "Last 500" picker was
+  stretched across the whole toolbar).
+- Docs: `docs/k8s-design-guide.md` — density, what is hidden by default, status colours, layout
+  patterns and a pre-merge checklist for module screens. `pnpm screens` now also captures the
+  Kubernetes, Docker and S3 screens.
+
 ### Fixed
 
 - **Traffic service map readable on real clusters** — columns are now "hops from the entry point"

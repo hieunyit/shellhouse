@@ -81,7 +81,10 @@ function ago(ms: number): string {
   if (abs < 60) return relative.format(s, 'second')
   if (abs < 3600) return relative.format(Math.round(s / 60), 'minute')
   if (abs < 86400) return relative.format(Math.round(s / 3600), 'hour')
-  return relative.format(Math.round(s / 86400), 'day')
+  // Quá vài tuần: tháng / năm ("2,210 days ago" khó đọc).
+  if (abs < 86400 * 45) return relative.format(Math.round(s / 86400), 'day')
+  if (abs < 86400 * 365) return relative.format(Math.round(s / (86400 * 30)), 'month')
+  return relative.format(Math.round(s / (86400 * 365)), 'year')
 }
 
 export function portsText(c: ContainerRow): string {
@@ -405,6 +408,8 @@ export function DockerTab({
       label: 'Inspect',
       icon: <Search size={14} />,
       key: 'i',
+      // Bảng chi tiết đã có tab Inspect → chỉ để trong menu.
+      secondary: true,
       run: () => {
         inspect('container', c.id, c.name)
       }
@@ -728,7 +733,7 @@ export function DockerTab({
       {
         id: 'image',
         label: 'Image',
-        className: 'hidden @2xl:block',
+        className: 'hidden @3xl:block',
         render: (c) => <span title={c.image}>{c.image}</span>
       },
       {
@@ -736,7 +741,7 @@ export function DockerTab({
         label: 'CPU',
         align: 'right',
         sort: { key: 'cpu', label: 'CPU', kind: 'number' },
-        className: 'hidden @lg:block',
+        className: 'hidden @xl:block',
         render: (c) => {
           const s = sampleOf(c)
           return c.state === 'running' && s && s.cpuPercent >= 0
@@ -749,18 +754,18 @@ export function DockerTab({
         label: 'Memory',
         align: 'right',
         sort: { key: 'mem', label: 'Memory', kind: 'number' },
-        className: 'hidden @lg:block',
+        className: 'hidden @xl:block',
         render: (c) => {
           const s = sampleOf(c)
           return c.state === 'running' && s ? formatSize(s.memUsage) : '—'
         }
       },
-      { id: 'ports', label: 'Ports', className: 'hidden @3xl:block', render: (c) => portsText(c) },
+      { id: 'ports', label: 'Ports', className: 'hidden @4xl:block', render: (c) => portsText(c) },
       {
         id: 'created',
         label: 'Created',
         sort: { key: 'created', label: 'Created', kind: 'date' },
-        className: 'hidden @xl:block',
+        className: 'hidden @2xl:block',
         render: (c) => ago(c.created)
       },
       { id: 'quick', label: '', align: 'right', render: quick }
@@ -1110,7 +1115,7 @@ export function DockerTab({
                 ) : null
               }
               columns={containerColumns}
-              gridClass="grid-cols-[minmax(9rem,2fr)_5.5rem_7rem] @lg:grid-cols-[minmax(9rem,2fr)_5.5rem_4.5rem_5rem_7rem] @xl:grid-cols-[minmax(9rem,2fr)_5.5rem_4.5rem_5rem_6.5rem_7rem] @2xl:grid-cols-[minmax(9rem,2fr)_5.5rem_minmax(7rem,1.5fr)_4.5rem_5rem_6.5rem_7rem] @3xl:grid-cols-[minmax(9rem,2fr)_5.5rem_minmax(7rem,1.5fr)_4.5rem_5rem_minmax(6rem,1fr)_6.5rem_7rem]"
+              gridClass="grid-cols-[minmax(9rem,2fr)_5.5rem_7rem] @xl:grid-cols-[minmax(9rem,2fr)_5.5rem_4.5rem_5rem_7rem] @2xl:grid-cols-[minmax(9rem,2fr)_5.5rem_4.5rem_5rem_6.5rem_7rem] @3xl:grid-cols-[minmax(9rem,2fr)_5.5rem_minmax(7rem,1.5fr)_4.5rem_5rem_6.5rem_7rem] @4xl:grid-cols-[minmax(9rem,2fr)_5.5rem_minmax(7rem,1.5fr)_4.5rem_5rem_minmax(6rem,1fr)_6.5rem_7rem]"
               nameSort={{ key: 'name', label: 'Name', kind: 'text' }}
               sort={sort}
               onSort={setSort}

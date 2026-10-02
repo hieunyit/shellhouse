@@ -612,7 +612,10 @@ export function RunDialog({
             setAutoRemove(e.target.checked)
           }}
         />
-        {problems.length > 0 && <p className="text-xs text-warning">{problems[0]}</p>}
+        {/* Chưa nhập image: chỉ khoá nút Run, không báo lỗi trên form trống. */}
+        {problems.length > 0 && img.trim() !== '' && (
+          <p className="text-xs text-warning">{problems[0]}</p>
+        )}
         {error && (
           <Notice tone="danger" testId="docker-run-error">
             {error}

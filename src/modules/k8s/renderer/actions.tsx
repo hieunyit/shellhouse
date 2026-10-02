@@ -32,6 +32,8 @@ export interface K8sAction {
   /** Phím tắt (khớp `event.key`, có thể kèm "ctrl+"). */
   key?: string
   danger?: boolean
+  /** Chỉ trong menu "…" / phím tắt — không thành nút chính của bảng chi tiết. */
+  secondary?: boolean
   run(): void
 }
 
@@ -144,6 +146,8 @@ export function actionsFor(
     label: 'View YAML',
     icon: <FileCode size={14} />,
     key: 'y',
+    // Bảng chi tiết đã có tab YAML.
+    secondary: true,
     run: () => {
       h.yaml(obj)
     }

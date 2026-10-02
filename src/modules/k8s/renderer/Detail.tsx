@@ -122,13 +122,13 @@ export function Detail({
     (initialTab === 'related' && !hasRelated) || (initialTab === 'topology' && !hasTopology)
       ? 'overview'
       : // ConfigMap / Secret: nội dung chính là dữ liệu — mở thẳng tab Data.
-        initialTab === 'overview' && hasData
+        (initialTab === 'overview' || initialTab === 'related') && hasData
         ? 'data'
         : initialTab
   )
   const [wide, setWide] = useState(loadWide)
   const { menu, open: openMenu } = useContextMenu()
-  const primary = actions.filter((x) => !x.danger).slice(0, 3)
+  const primary = actions.filter((x) => !x.danger && !x.secondary).slice(0, 3)
   const row = toRow(kindId, obj)
   const statusTone = TONE[row.tone] ?? 'muted'
   const statusText = row.cells['status'] ?? row.cells['ready'] ?? ''
@@ -1236,7 +1236,10 @@ function RelatedOf({
   if (error) return <p className="text-xs text-danger">{error}</p>
   if (!data) return <p className="text-xs text-faint">Finding related resources…</p>
   const shown = data.groups.filter((g) => g.items.length > 0 || g.error || ALWAYS.has(g.id))
-  const empty = data.groups.filter((g) => !shown.includes(g)).map((g) => g.title.toLowerCase())
+  const hidden = data.groups.filter((g) => !shown.includes(g))
+  // "Used by" không phải danh từ → câu riêng ("No used by." sai ngữ pháp).
+  const unused = hidden.some((g) => g.id === 'used-by')
+  const empty = hidden.filter((g) => g.id !== 'used-by').map((g) => g.title.toLowerCase())
   const missing = data.groups.flatMap((g) => g.items.filter((i) => i.missing))
   return (
     <div className="flex flex-col gap-4" data-testid="k8s-related">
@@ -1255,7 +1258,13 @@ function RelatedOf({
         />
       ))}
       <div className="flex items-center gap-2 text-xs text-faint">
-        {empty.length > 0 && <span className="flex-1">No {empty.join(', ')}.</span>}
+        {(empty.length > 0 || unused) && (
+          <span className="flex-1">
+            {unused && 'Not used by any workload.'}
+            {unused && empty.length > 0 && ' '}
+            {empty.length > 0 && `No ${empty.join(', ')}.`}
+          </span>
+        )}
         <button
           type="button"
           className="ml-auto flex items-center gap-1 hover:text-fg"

@@ -188,9 +188,9 @@ export interface TrafficGraph {
   height: number
 }
 
-const NODE_W = 240
+const NODE_W = 250
 const NODE_H = 58
-const COL_GAP = 150
+const COL_GAP = 96
 const ROW_GAP = 22
 
 /**

@@ -136,6 +136,14 @@ export function DockerOverview({
                     Clean up
                   </Button>
                 )}
+                {/* Giữ chỗ cột nút → mọi thanh cùng độ dài. */}
+                {!readOnly && !r.what && (
+                  <span aria-hidden className="invisible">
+                    <Button size="sm" variant="ghost" tabIndex={-1}>
+                      Clean up
+                    </Button>
+                  </span>
+                )}
               </div>
             ))}
           </div>

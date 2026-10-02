@@ -638,7 +638,7 @@ function ContainerEditor({
           />
         </F>
         <Grid>
-          <F label="Container name" required error={e('name')}>
+          <F label="Name" required error={e('name')}>
             <Input
               mono
               value={value.name}

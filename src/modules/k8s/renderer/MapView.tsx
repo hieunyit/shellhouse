@@ -1,38 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Box,
   ChevronsDownUp,
   ChevronsUpDown,
-  ExternalLink,
-  FileText,
-  Locate,
   Maximize,
   Minus,
   Plus,
   RefreshCw,
   Search,
-  SquareTerminal,
   Tag,
   X
 } from 'lucide-react'
 import {
   Background,
   BackgroundVariant,
-  MarkerType,
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
-  useStore,
   type Viewport
 } from '@xyflow/react'
 import '@xyflow/react/dist/base.css'
 import { cx, Segmented } from '../../../renderer/src/components/ui'
-import { Heading, Pill, SidePanel } from '../../../renderer/src/components/panels'
-import { ago, cleanError } from '../../../renderer/src/lib/format'
-import { formatCpu, formatMemory } from '../shared/resources'
+import { Pill, SidePanel } from '../../../renderer/src/components/panels'
+import { cleanError } from '../../../renderer/src/lib/format'
 import {
-  TECH,
   filterMapData,
   groupingKeys,
   impactOf,
@@ -43,47 +34,42 @@ import {
   type MapData,
   type MapEdge,
   type MapLayout,
-  type MapNode,
-  type MapTone
+  type MapNode
 } from '../shared/map'
-import type { K8sOp } from '../shared/ops'
-import {
-  BANDS,
-  WORKLOAD_KIND_ID,
-  bandOf,
-  byPair,
-  formatRate,
-  type TrafficPeer,
-  type TrafficRate
-} from '../shared/traffic'
+import { BANDS, WORKLOAD_KIND_ID, byPair, type TrafficPeer } from '../shared/traffic'
 import {
   EDGE_TYPES,
   MapContext,
   NEAR_ZOOM,
   NODE_TYPES,
-  sides,
   type Band,
   type MapCtx,
   type MapFlowEdge,
   type MapFlowNode
 } from './MapFlow'
-import { TechIcon } from './icons'
 import { NodesView } from './NodesView'
 import { TrafficMap } from './TrafficMap'
-import { useTraffic, type TrafficState } from './useTraffic'
-
-type Request = <T>(op: K8sOp) => Promise<T>
-
-export interface MapRef {
-  kind: string
-  ns?: string
-  name: string
-}
+import { useTraffic } from './useTraffic'
+import {
+  type Request,
+  type MapRef,
+  OPTIONS_KEY,
+  readPalette,
+  MAX_ANIMATED_EDGES,
+  type Options,
+  loadOptions,
+  KIND_TITLE,
+  Z,
+  routeTitle,
+  DOT
+} from './mapModel'
+import { ZoomLabel, TrafficDot, Chip, MapButton, Legend } from './MapControls'
+import { MapPanel, HoverCard } from './MapPanel'
+import { buildMapEdges } from './mapEdges'
 
 const MIN_ZOOM = 0.02
 const MAX_ZOOM = 3
 const REFRESH_MS = 20_000
-const OPTIONS_KEY = 'shellhouse.k8s.map'
 
 /** Vị trí xem theo tab — quay lại Map thấy đúng chỗ cũ (không lưu đĩa). */
 const savedViewports = new Map<string, Viewport>()
@@ -100,109 +86,6 @@ interface Fold {
 const AUTO_FOLD_NAMESPACES = 25
 const savedFolds = new Map<string, Fold>()
 const savedSelectors = new Map<string, string>()
-
-interface Palette {
-  edge: string
-  edgeMuted: string
-  warn: string
-  /** Màu traffic theo băng thông (băng 0 → 4: xanh ngọc → đỏ). */
-  ramp: string[]
-}
-
-/** Màu cạnh lấy từ token của chính khung bản đồ (theo theme / Dark canvas). */
-function readPalette(el: Element | null): Palette {
-  const css = getComputedStyle(el ?? document.documentElement)
-  const v = (name: string, fallback: string): string =>
-    css.getPropertyValue(name).trim() || fallback
-  return {
-    edge: v('--map-edge', '#0d9488'),
-    edgeMuted: v('--map-edge-muted', '#64748b'),
-    warn: v('--map-warn', '#d97706'),
-    ramp: [
-      v('--map-t0', '#0d9488'),
-      v('--map-t1', '#0891b2'),
-      v('--map-t2', '#d97706'),
-      v('--map-t3', '#ea580c'),
-      v('--map-t4', '#e11d48')
-    ]
-  }
-}
-
-/** Đường traffic tối đa còn cho hạt photon chạy (nhiều hơn → chỉ vẽ sợi cáp tĩnh). */
-const MAX_ANIMATED_EDGES = 150
-
-interface Options {
-  hideSystem: boolean
-  pods: boolean
-  edges: boolean
-  traffic: boolean
-  /** Nền tối riêng cho bản đồ (kể cả khi app dùng theme sáng). */
-  darkCanvas: boolean
-  grouping: MapGrouping
-  /** Bản đồ workload, theo node (hạ tầng), hay service map từ Caretta. */
-  view: 'workloads' | 'nodes' | 'traffic'
-}
-
-function loadOptions(): Options {
-  const base: Options = {
-    hideSystem: true,
-    pods: true,
-    edges: true,
-    traffic: true,
-    darkCanvas: false,
-    grouping: 'purpose',
-    view: 'workloads'
-  }
-  try {
-    const raw = window.localStorage.getItem(OPTIONS_KEY)
-    if (raw) return { ...base, ...(JSON.parse(raw) as Partial<Options>) }
-  } catch {
-    // Bỏ qua.
-  }
-  return base
-}
-
-const KIND_TITLE: Record<MapNode['kind'], string> = {
-  region: 'Region',
-  namespace: 'Namespace',
-  workload: 'Workload',
-  pod: 'Pod',
-  service: 'Service',
-  route: 'Route',
-  gateway: 'Gateway',
-  pvc: 'Persistent volume claim',
-  policy: 'NetworkPolicy'
-}
-
-/** Thứ tự chồng: vùng dưới cùng, thẻ trên cùng. */
-const Z: Record<MapNode['kind'], number> = {
-  region: 0,
-  namespace: 1,
-  gateway: 2,
-  route: 2,
-  service: 2,
-  pvc: 2,
-  policy: 2,
-  workload: 3,
-  pod: 4
-}
-
-function routeTitle(kind: string): string {
-  if (kind.startsWith('ingresses')) return 'Ingress'
-  if (kind.startsWith('httproutes')) return 'HTTPRoute'
-  if (kind.startsWith('grpcroutes')) return 'GRPCRoute'
-  return 'Route'
-}
-
-const titleOf = (n: MapNode): string =>
-  n.kind === 'route'
-    ? routeTitle(n.ref?.kind ?? '')
-    : n.kind === 'workload' && n.ref
-      ? workloadKindLabel(n.ref.kind)
-      : KIND_TITLE[n.kind]
-
-const peerLabel = (p: TrafficPeer): string =>
-  p.kind === 'external' || !p.ns ? `${p.name} (${p.kind || 'external'})` : `${p.ns}/${p.name}`
 
 /**
  * Bản đồ cluster (kiểu "Google Maps cho Kubernetes") trên React Flow: vùng → namespace → workload
@@ -222,18 +105,6 @@ export function MapView(props: {
     <ReactFlowProvider>
       <MapInner {...props} />
     </ReactFlowProvider>
-  )
-}
-
-function ZoomLabel(): React.JSX.Element {
-  const pct = useStore((s) => Math.round(s.transform[2] * 100))
-  return (
-    <span
-      className="flex w-12 items-center justify-center border-x border-line text-[11px] text-faint tabular-nums"
-      data-testid="k8s-map-zoom"
-    >
-      {pct}%
-    </span>
   )
 }
 
@@ -581,102 +452,20 @@ function MapInner({
     return out
   }, [index, band])
 
-  const edges = useMemo<MapFlowEdge[]>(() => {
-    const out: MapFlowEdge[] = []
-    // Mũi tên cỡ cố định (không phình theo độ dày đường traffic).
-    const arrow = (color: string): MapFlowEdge['markerEnd'] => ({
-      type: MarkerType.ArrowClosed,
-      color,
-      width: 14,
-      height: 14,
-      markerUnits: 'userSpaceOnUse'
-    })
-    if (band === 'near' && options.edges && layout)
-      for (const e of layout.edges) {
-        const hot = related.has(e.from) && related.has(e.to)
-        // Policy áp lên cả namespace → rất nhiều cạnh; chỉ vẽ đường của chính mục đang chọn.
-        if (e.kind === 'policy' && !(hot && focusId && (e.from === focusId || e.to === focusId)))
-          continue
-        const color =
-          e.kind === 'storage'
-            ? palette.edgeMuted
-            : e.kind === 'policy'
-              ? palette.warn
-              : palette.edge
-        // Khác cột (vd. Ingress frontend → Service backend): nối cạnh bên → cạnh bên bằng đường
-        // cong — thấy trọn đường đi, không chạy ngầm dưới thẻ.
-        const sa = index.byId.get(e.from)
-        const sb = index.byId.get(e.to)
-        const cross =
-          sa !== undefined && sb !== undefined && Math.abs(sa.x + sa.w / 2 - (sb.x + sb.w / 2)) > 24
-        out.push({
-          id: `${e.kind}:${e.from}>${e.to}`,
-          source: e.from,
-          target: e.to,
-          ...(cross ? sides(sa, sb) : { sourceHandle: 'sb', targetHandle: 'tt' }),
-          type: 'map',
-          zIndex: 2,
-          data: {
-            kind: e.kind,
-            color,
-            ...(cross ? { cross: true } : {}),
-            ...(e.label ? { label: e.label } : {})
-          },
-          ...(e.kind === 'storage' || e.kind === 'policy' ? {} : { markerEnd: arrow(color) })
-        })
-      }
-    if (options.traffic && trafficEdges.length) {
-      // Nhìn xa: khác namespace gộp thành đường giữa hai đảo. Nhìn gần / vừa: đường đúng từ thẻ
-      // workload gọi tới thẻ workload nhận (cong, kể cả khác namespace) — thấy rõ ai gọi ai;
-      // cùng namespace chỉ vẽ khi nhìn gần.
-      const cross = new Map<string, { from: string; to: string; rate: number }>()
-      const local: { from: string; to: string; rate: number; cross?: boolean }[] = []
-      for (const tr of trafficEdges) {
-        const a = index.byId.get(tr.from)?.ns
-        const b = index.byId.get(tr.to)?.ns
-        if (!a || !b) continue
-        if (a === b) {
-          if (band === 'near' && tr.from !== tr.to) local.push(tr)
-          continue
-        }
-        if (band !== 'far') {
-          local.push({ ...tr, cross: true })
-          continue
-        }
-        const key = `n:${a}>n:${b}`
-        cross.set(key, {
-          from: `n:${a}`,
-          to: `n:${b}`,
-          rate: (cross.get(key)?.rate ?? 0) + tr.rate
-        })
-      }
-      const list = [...local, ...cross.values()]
-      for (const t of list) {
-        const color = palette.ramp[bandOf(t.rate)] ?? palette.edge
-        out.push({
-          id: `traffic:${t.from}>${t.to}`,
-          source: t.from,
-          target: t.to,
-          ...(() => {
-            const sa = index.byId.get(t.from)
-            const sb = index.byId.get(t.to)
-            return sa && sb ? sides(sa, sb) : { sourceHandle: 'sr', targetHandle: 'tl' }
-          })(),
-          type: 'map',
-          // Dưới thẻ workload (thẻ che phần đường đi qua) — không đè chữ.
-          zIndex: 2,
-          data: {
-            kind: 'traffic',
-            rate: t.rate,
-            color,
-            ...('cross' in t && t.cross ? { cross: true } : {})
-          },
-          markerEnd: arrow(color)
-        })
-      }
-    }
-    return out
-  }, [band, options.edges, options.traffic, layout, related, palette, trafficEdges, index, focusId])
+  const edges = useMemo(
+    () =>
+      buildMapEdges({
+        band,
+        layout,
+        byId: index.byId,
+        related,
+        focusId,
+        palette,
+        structural: options.edges,
+        traffic: options.traffic ? trafficEdges : []
+      }),
+    [band, options.edges, options.traffic, layout, related, palette, trafficEdges, index, focusId]
+  )
 
   // ——— Điều khiển khung nhìn ———
   const flyTo = useCallback(
@@ -1441,677 +1230,6 @@ function MapInner({
             traffic={nodeTraffic}
           />
         </SidePanel>
-      )}
-    </div>
-  )
-}
-
-function TrafficDot({ status }: { status: TrafficState['status'] }): React.JSX.Element {
-  return (
-    <span
-      className={cx(
-        'size-1.5 rounded-full',
-        status === 'live'
-          ? 'bg-success'
-          : status === 'connecting'
-            ? 'animate-pulse bg-warning'
-            : 'bg-line-strong'
-      )}
-      data-testid="k8s-map-traffic-status"
-      data-status={status}
-    />
-  )
-}
-
-/** Traffic của workload đang chọn (bảng bên phải). */
-function TrafficSection({
-  traffic
-}: {
-  traffic: {
-    status: TrafficState['status']
-    reason: string | undefined
-    incoming: TrafficRate[]
-    outgoing: TrafficRate[]
-  }
-}): React.JSX.Element {
-  const row = (r: TrafficRate, peer: TrafficPeer): React.JSX.Element => (
-    <div
-      key={`${peer.kind}|${peer.ns}|${peer.name}`}
-      className="flex h-6 items-center gap-2 text-xs"
-      data-testid="k8s-map-traffic-row"
-    >
-      <span className="min-w-0 flex-1 truncate font-mono text-fg" title={peerLabel(peer)}>
-        {peerLabel(peer)}
-      </span>
-      <span className="shrink-0 text-faint tabular-nums">{formatRate(r.rate)}</span>
-    </div>
-  )
-  return (
-    <section data-testid="k8s-map-node-traffic">
-      <Heading>Live traffic</Heading>
-      {traffic.status === 'unavailable' && (
-        <p className="text-xs text-faint">Unavailable — {traffic.reason ?? 'no Caretta'}.</p>
-      )}
-      {traffic.status === 'connecting' && (
-        <p className="text-xs text-faint">Connecting to Caretta…</p>
-      )}
-      {traffic.status === 'live' && !traffic.incoming.length && !traffic.outgoing.length && (
-        <p className="text-xs text-faint">No traffic observed in the last interval.</p>
-      )}
-      {traffic.incoming.length > 0 && (
-        <>
-          <div className="mt-1 text-[11px] text-faint">In</div>
-          {traffic.incoming.map((r) => row(r, r.client))}
-        </>
-      )}
-      {traffic.outgoing.length > 0 && (
-        <>
-          <div className="mt-1 text-[11px] text-faint">Out</div>
-          {traffic.outgoing.map((r) => row(r, r.server))}
-        </>
-      )}
-    </section>
-  )
-}
-
-const DOT: Record<MapTone, string> = {
-  ok: 'bg-success',
-  warn: 'bg-warning',
-  bad: 'bg-danger-solid',
-  muted: 'bg-line-strong'
-}
-
-function Chip({
-  on,
-  onClick,
-  testId,
-  title,
-  children
-}: {
-  on: boolean
-  onClick: () => void
-  testId?: string
-  title?: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      title={title}
-      data-testid={testId}
-      className={cx(
-        'h-7 rounded-md border px-2 font-medium whitespace-nowrap',
-        on ? 'border-accent/40 bg-accent-soft text-fg' : 'border-line text-muted hover:text-fg'
-      )}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  )
-}
-
-function MapButton({
-  label,
-  testId,
-  onClick,
-  children
-}: {
-  label: string
-  testId?: string
-  onClick: () => void
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      data-testid={testId}
-      className="flex size-7 items-center justify-center text-muted hover:bg-hover hover:text-fg"
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  )
-}
-
-function Legend({ color, label }: { color: string; label: string }): React.JSX.Element {
-  return (
-    <span className="flex items-center gap-1">
-      <span className={cx('size-2 rounded-full', color)} />
-      {label}
-    </span>
-  )
-}
-
-/** Bảng bên phải: mục đang chọn, quan hệ (bấm để bay tới), thao tác. */
-function MapPanel({
-  node,
-  layout,
-  index,
-  onClose,
-  onGo,
-  onOpen,
-  onLogs,
-  onShell,
-  folded,
-  onToggleNs,
-  impact,
-  onImpact,
-  traffic
-}: {
-  node: MapNode
-  layout: MapLayout | null
-  index: { byId: Map<string, MapNode>; edgesOf: Map<string, MapEdge[]>; ordered: MapNode[] }
-  onClose: () => void
-  onGo: (n: MapNode) => void
-  onOpen: (ref: MapRef) => void
-  onLogs: (ref: MapRef) => void
-  onShell: (ref: MapRef) => void
-  /** Namespace: đang gập không (null = không phải namespace). */
-  folded: boolean | null
-  onToggleNs: (ns: string) => void
-  impact: boolean
-  onImpact: (on: boolean) => void
-  traffic: React.ComponentProps<typeof TrafficSection>['traffic'] | null
-}): React.JSX.Element {
-  const affected = useMemo(
-    () =>
-      layout && node.kind !== 'region' && node.kind !== 'namespace'
-        ? impactOf(layout, node.id)
-        : null,
-    [layout, node]
-  )
-  const affectedCounts = (() => {
-    const counts = new Map<string, number>()
-    for (const id of affected ?? []) {
-      const n = index.byId.get(id)
-      if (!n) continue
-      const label = n.kind === 'route' ? 'route' : n.kind === 'pvc' ? 'volume' : n.kind
-      counts.set(label, (counts.get(label) ?? 0) + 1)
-    }
-    return [...counts.entries()].map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`)
-  })()
-  const tech = node.tech ? TECH[node.tech] : undefined
-  const kindTitle =
-    node.kind === 'route'
-      ? routeTitle(node.ref?.kind ?? '')
-      : node.kind === 'workload' && node.ref
-        ? workloadKindLabel(node.ref.kind)
-        : KIND_TITLE[node.kind]
-  const edges = index.edgesOf.get(node.id) ?? []
-  const linked = (dir: 'in' | 'out'): MapNode[] =>
-    edges
-      .filter((e) => (dir === 'in' ? e.to === node.id : e.from === node.id))
-      .map((e) => index.byId.get(dir === 'in' ? e.from : e.to))
-      .filter((n): n is MapNode => Boolean(n))
-  const incoming = linked('in')
-  // NetworkPolicy có mục riêng — không lẫn vào "Uses".
-  const outgoing = linked('out').filter((n) => n.kind !== 'policy')
-  const children = index.ordered.filter((n) => n.parent === node.id)
-  const parent = node.parent ? index.byId.get(node.parent) : undefined
-  const policies = layout?.policies[node.id] ?? []
-  const podTones = children.filter((c) => c.kind === 'pod')
-  const isWorkload = node.kind === 'workload' && Boolean(node.ref)
-
-  const section = (title: string, list: MapNode[]): React.JSX.Element | null =>
-    list.length === 0 ? null : (
-      <section>
-        <Heading>
-          {title} <span className="ml-1 font-normal text-faint">{list.length}</span>
-        </Heading>
-        <div className="flex flex-col">
-          {list.slice(0, 200).map((n) => (
-            <button
-              key={n.id}
-              type="button"
-              className="group flex h-7 items-center gap-2 rounded px-1 text-left text-xs hover:bg-hover"
-              data-testid="k8s-map-link"
-              data-name={n.label}
-              onClick={() => {
-                onGo(n)
-              }}
-            >
-              <span className={cx('size-1.5 shrink-0 rounded-full', DOT[n.tone])} />
-              <span className="min-w-0 flex-1 truncate font-mono text-fg group-hover:text-accent">
-                {n.label}
-              </span>
-              <span className="shrink-0 truncate text-faint">
-                {n.kind === 'route'
-                  ? routeTitle(n.ref?.kind ?? '')
-                  : n.kind === 'workload' && n.ref
-                    ? workloadKindLabel(n.ref.kind)
-                    : KIND_TITLE[n.kind]}
-              </span>
-            </button>
-          ))}
-        </div>
-      </section>
-    )
-
-  return (
-    <>
-      <div className="flex items-start gap-2 border-b border-line px-3 py-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-[13px] font-semibold text-fg" title={node.label}>
-              {node.label}
-            </span>
-            {node.kind !== 'region' && node.kind !== 'namespace' && (
-              <Pill tone={node.tone}>
-                {node.tone === 'ok'
-                  ? 'healthy'
-                  : node.tone === 'bad'
-                    ? 'failing'
-                    : node.tone === 'warn'
-                      ? 'degraded'
-                      : '—'}
-              </Pill>
-            )}
-          </div>
-          <div className="truncate text-xs text-faint">
-            {kindTitle}
-            {node.ns && node.kind !== 'namespace' ? ` · ${node.ns}` : ''}
-          </div>
-        </div>
-        <button
-          type="button"
-          aria-label="Close"
-          className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
-          onClick={onClose}
-        >
-          <X size={15} />
-        </button>
-      </div>
-      <div className="flex flex-wrap gap-1 border-b border-line px-2 py-1.5">
-        {node.ref && (
-          <PanelAction
-            icon={<ExternalLink size={13} />}
-            label={node.kind === 'namespace' ? 'Show resources' : 'Open details'}
-            testId="k8s-map-open"
-            onClick={() => {
-              if (node.ref) onOpen(node.ref)
-            }}
-          />
-        )}
-        {(isWorkload || node.kind === 'pod') && node.ref?.kind !== 'cronjobs.batch' && (
-          <PanelAction
-            icon={<FileText size={13} />}
-            label="Logs"
-            onClick={() => {
-              if (node.ref) onLogs(node.ref)
-            }}
-          />
-        )}
-        {node.kind === 'pod' && (
-          <PanelAction
-            icon={<SquareTerminal size={13} />}
-            label="Shell"
-            onClick={() => {
-              if (node.ref) onShell(node.ref)
-            }}
-          />
-        )}
-        {folded !== null && (
-          <PanelAction
-            icon={folded ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
-            label={folded ? 'Expand' : 'Collapse'}
-            testId="k8s-map-panel-fold"
-            onClick={() => {
-              if (node.ns) onToggleNs(node.ns)
-            }}
-          />
-        )}
-        <PanelAction
-          icon={<Locate size={13} />}
-          label="Center"
-          onClick={() => {
-            onGo(node)
-          }}
-        />
-      </div>
-      <div
-        className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3"
-        data-testid="k8s-map-details"
-      >
-        {isWorkload && (
-          <div
-            className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line"
-            data-testid="k8s-map-stats"
-          >
-            {(
-              [
-                [
-                  'Ready',
-                  node.replicas
-                    ? `${String(node.replicas.ready)}/${String(node.replicas.desired)}`
-                    : String(podTones.length),
-                  node.tone === 'bad' ? 'text-danger' : node.tone === 'warn' ? 'text-warning' : ''
-                ],
-                [
-                  'Restarts',
-                  String(podTones.reduce((n, p) => n + (p.pod?.restarts ?? 0), 0)),
-                  podTones.some((p) => (p.pod?.restarts ?? 0) > 0) ? 'text-warning' : ''
-                ],
-                [
-                  'In / out',
-                  traffic?.status === 'live'
-                    ? `${formatRate(traffic.incoming.reduce((n, r) => n + r.rate, 0))} / ${formatRate(traffic.outgoing.reduce((n, r) => n + r.rate, 0))}`
-                    : '—',
-                  ''
-                ],
-                ['Affected', affected ? String(affected.size) : '—', '']
-              ] as const
-            ).map(([k, v, tone]) => (
-              <div key={k} className="flex flex-col gap-0.5 bg-surface px-2.5 py-1.5">
-                <span className="text-[10px] tracking-wide text-faint uppercase">{k}</span>
-                <span
-                  className={cx('truncate text-[12.5px] font-semibold text-fg tabular-nums', tone)}
-                >
-                  {v}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-        <p className="text-xs text-muted">{node.sub}</p>
-        {tech && (
-          <p className="flex items-center gap-1.5 text-xs text-muted" data-testid="k8s-map-tech">
-            {node.tech && <TechIcon tech={node.tech} size={18} />}
-            {tech.label}
-          </p>
-        )}
-        {node.techs && node.techs.length > 0 && (
-          <p className="text-xs text-muted">
-            Runs {node.techs.map((id) => TECH[id]?.label ?? id).join(', ')}
-          </p>
-        )}
-        {affected && (
-          <section data-testid="k8s-map-impact">
-            <Heading
-              action={
-                <button
-                  type="button"
-                  aria-pressed={impact}
-                  data-testid="k8s-map-impact-toggle"
-                  className={cx(
-                    'rounded px-1.5 py-0.5 text-[11px] font-medium',
-                    impact ? 'bg-warning-soft text-warning' : 'text-accent hover:bg-hover'
-                  )}
-                  onClick={() => {
-                    onImpact(!impact)
-                  }}
-                >
-                  {impact ? 'Showing' : 'Show on map'}
-                </button>
-              }
-            >
-              Blast radius
-            </Heading>
-            <p className="text-xs text-muted" data-testid="k8s-map-impact-summary">
-              {affected.size === 0
-                ? 'Nothing else on the map depends on it.'
-                : `If it changes or fails: ${affectedCounts.join(' · ')}.`}
-            </p>
-          </section>
-        )}
-        {node.badges && node.badges.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {node.badges.map((b) => (
-              <Pill key={b} tone="info">
-                {b}
-              </Pill>
-            ))}
-          </div>
-        )}
-        {node.stats && (
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <Stat label="Workloads" value={node.stats.workloads} />
-            <Stat label="Pods" value={node.stats.pods} />
-            <Stat
-              label="Degraded"
-              value={node.stats.warn}
-              tone={node.stats.warn ? 'text-warning' : undefined}
-            />
-            <Stat
-              label="Failing"
-              value={node.stats.bad}
-              tone={node.stats.bad ? 'text-danger' : undefined}
-            />
-          </div>
-        )}
-        {traffic && traffic.status !== 'off' && <TrafficSection traffic={traffic} />}
-        {podTones.length > 0 && (
-          <section>
-            <Heading>
-              Pods <span className="ml-1 font-normal text-faint">{podTones.length}</span>
-            </Heading>
-            <div className="flex flex-wrap gap-1">
-              {podTones.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  title={`${p.label} — ${p.sub}`}
-                  className={cx(
-                    'size-3 rounded-full ring-offset-1 hover:ring-2 hover:ring-accent',
-                    DOT[p.tone]
-                  )}
-                  onClick={() => {
-                    onGo(p)
-                  }}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-        {section(
-          node.kind === 'workload'
-            ? 'Traffic from'
-            : node.kind === 'policy'
-              ? 'Applies to'
-              : node.kind === 'route'
-                ? 'Gateways'
-                : 'Linked from',
-          incoming
-        )}
-        {section(
-          node.kind === 'service'
-            ? 'Sends traffic to'
-            : node.kind === 'route'
-              ? 'Routes to'
-              : node.kind === 'gateway'
-                ? 'Routes attached'
-                : 'Uses',
-          outgoing
-        )}
-        {policies.length > 0 && (
-          <section>
-            <Heading>Network policies</Heading>
-            <div className="flex flex-col gap-0.5 text-xs">
-              {policies.map((p) => (
-                <span key={p} className="flex items-center gap-1.5 font-mono text-fg">
-                  <Box size={11} className="text-faint" /> {p}
-                </span>
-              ))}
-            </div>
-          </section>
-        )}
-        {node.kind !== 'workload' &&
-          node.kind !== 'pod' &&
-          section(
-            node.kind === 'region' ? 'Namespaces' : 'Inside',
-            children.filter((c) => c.kind !== 'pod')
-          )}
-        {parent && parent.kind !== 'region' && (
-          <section>
-            <Heading>In</Heading>
-            <button
-              type="button"
-              className="flex h-7 items-center gap-2 rounded px-1 text-left text-xs hover:bg-hover"
-              onClick={() => {
-                onGo(parent)
-              }}
-            >
-              <span className={cx('size-1.5 shrink-0 rounded-full', DOT[parent.tone])} />
-              <span className="font-mono text-fg">{parent.label}</span>
-              <span className="text-faint">{KIND_TITLE[parent.kind]}</span>
-            </button>
-          </section>
-        )}
-      </div>
-    </>
-  )
-}
-
-function PanelAction({
-  icon,
-  label,
-  testId,
-  onClick
-}: {
-  icon: React.ReactNode
-  label: string
-  testId?: string
-  onClick: () => void
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium whitespace-nowrap text-muted hover:bg-hover hover:text-fg"
-      onClick={onClick}
-    >
-      {icon}
-      {label}
-    </button>
-  )
-}
-
-function Stat({
-  label,
-  value,
-  tone
-}: {
-  label: string
-  value: number
-  tone?: string | undefined
-}): React.JSX.Element {
-  return (
-    <div className="rounded-md border border-line px-2 py-1.5">
-      <div className="text-[11px] text-faint">{label}</div>
-      <div className={cx('text-sm font-semibold tabular-nums', tone ?? 'text-fg')}>{value}</div>
-    </div>
-  )
-}
-
-/** Thanh nhỏ: đang dùng so với request (vượt request → màu cảnh báo). */
-function UsageBar({
-  label,
-  used,
-  request,
-  format
-}: {
-  label: string
-  used: number
-  request: number | undefined
-  format: (v: number) => string
-}): React.JSX.Element {
-  const ratio = request ? used / request : 0
-  return (
-    <div className="flex flex-col gap-0.5">
-      <div className="flex justify-between gap-3 text-[10.5px]">
-        <span className="text-faint">{label}</span>
-        <span className="text-fg tabular-nums">
-          {format(used)}
-          {request ? <span className="text-faint"> / {format(request)} req</span> : null}
-        </span>
-      </div>
-      {request ? (
-        <div className="h-1 overflow-hidden rounded-full bg-subtle">
-          <div
-            className="h-full rounded-full"
-            style={{
-              width: `${String(Math.min(100, ratio * 100))}%`,
-              background: ratio > 1 ? 'var(--map-warn)' : 'var(--map-accent)'
-            }}
-          />
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-/** Bảng nổi khi rê chuột: pod (trạng thái, restart, node, IP, tuổi, CPU / RAM), workload, v.v. */
-function HoverCard({
-  node,
-  podsOf,
-  x,
-  y,
-  bottom
-}: {
-  node: MapNode
-  podsOf: ReadonlyMap<string, MapNode[]>
-  x: number
-  y?: number
-  bottom?: number
-}): React.JSX.Element {
-  const pod = node.kind === 'pod' ? node.pod : undefined
-  const pods = node.kind === 'workload' ? (podsOf.get(node.id) ?? []) : []
-  const restarts = pods.reduce((n, p) => n + (p.pod?.restarts ?? 0), 0)
-  const row = (k: string, v: React.ReactNode, tone?: string): React.JSX.Element => (
-    <>
-      <span className="text-faint">{k}</span>
-      <span className={cx('truncate text-right font-mono text-fg', tone)}>{v}</span>
-    </>
-  )
-  return (
-    <div
-      className="pointer-events-none absolute z-20 w-72 rounded-xl border border-line bg-elevated/95 p-2.5 text-xs shadow-xl backdrop-blur-sm"
-      style={{ left: x, ...(bottom !== undefined ? { bottom } : { top: y }) }}
-      data-testid="k8s-map-tooltip"
-    >
-      <div className="flex items-center gap-2">
-        <span className={cx('size-2 shrink-0 rounded-full', DOT[node.tone])} />
-        <span className="min-w-0 flex-1 truncate font-semibold text-fg">{node.label}</span>
-        <span className="shrink-0 text-[10.5px] text-faint">{titleOf(node)}</span>
-      </div>
-      {pod ? (
-        <>
-          <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
-            {row('Status', pod.status, node.tone === 'bad' ? '!text-danger' : undefined)}
-            {row('Restarts', pod.restarts, pod.restarts > 0 ? '!text-warning' : undefined)}
-            {pod.node && row('Node', pod.node)}
-            {pod.ip && row('IP', pod.ip)}
-            {pod.startedAt ? row('Up', ago(pod.startedAt)) : null}
-          </div>
-          {pod.usage ? (
-            <div className="mt-2 flex flex-col gap-1.5 border-t border-line pt-2">
-              <UsageBar label="CPU" used={pod.usage.cpu} request={pod.cpu} format={formatCpu} />
-              <UsageBar
-                label="Memory"
-                used={pod.usage.memory}
-                request={pod.memory}
-                format={formatMemory}
-              />
-            </div>
-          ) : (
-            <p className="mt-2 border-t border-line pt-1.5 text-[10.5px] text-faint">
-              No live CPU / memory (metrics-server not available).
-            </p>
-          )}
-        </>
-      ) : node.kind === 'workload' ? (
-        <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
-          {node.replicas &&
-            row('Ready', `${String(node.replicas.ready)} / ${String(node.replicas.desired)}`)}
-          {row('Pods', pods.length)}
-          {row('Restarts', restarts, restarts > 0 ? '!text-warning' : undefined)}
-          {node.status && !node.replicas && row('Status', node.status)}
-          {node.badges && node.badges.length > 0 && row('', node.badges.join(' · '))}
-        </div>
-      ) : (
-        node.sub && <div className="mt-1 truncate font-mono text-[11px] text-faint">{node.sub}</div>
       )}
     </div>
   )

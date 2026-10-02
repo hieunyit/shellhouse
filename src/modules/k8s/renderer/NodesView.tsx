@@ -6,7 +6,7 @@ import type { MapData, MapPod, MapTone } from '../shared/map'
 import { ALLOC_BAD, ALLOC_WARN, summarizeNodes, type NodeView } from '../shared/nodes'
 import { formatCpu, formatMemory } from '../shared/resources'
 import { WORKLOAD_KIND_ID } from '../shared/traffic'
-import type { MapRef } from './MapView'
+import type { MapRef } from './mapModel'
 
 /**
  * Bản đồ theo node (góc nhìn hạ tầng): mỗi máy một thẻ — CPU / RAM đã cấp (requests) so với
