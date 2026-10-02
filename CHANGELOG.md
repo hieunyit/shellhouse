@@ -37,6 +37,17 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - **Terminal text size** — Ctrl+= / Ctrl+- / Ctrl+0 (⌘ on macOS) make the text bigger, smaller
   or back to the default.
 - **Session bar** — shows where you are connected (user@host:port) and for how long.
+- **SFTP quick look** — press Space (or Preview in the menu) to see a text file with line
+  numbers or an image without downloading it; large text files show their beginning.
+- **Transfer queue** — each transfer shows bytes done of total, speed and time left; the header
+  shows the overall speed and time left, with **Cancel all** and **Retry failed**. Drop zones
+  say where the files will go.
+- **Tabs** — tabs of saved hosts show the host's coloured initials and a stronger colour line;
+  the Terminal ▾ menu lists **Recently closed** tabs so you can bring back a specific one.
+- **S3, Docker and Kubernetes look alike** — every empty table now explains itself and offers
+  the next step (Create Job, Run a container, Upload files, Show all namespaces…), a filter
+  with no results offers **Clear filter**, and each page has one solid main action (New bucket /
+  Upload, Run, Create).
 - **Reopen closed tab** — Ctrl+Alt+T (⌘⌥T), the command palette or the tab menu bring back the
   last closed tabs (up to 10), including SFTP file manager tabs.
 - **Home** — Shellhouse now opens on a home page: a large quick-connect box, your recent

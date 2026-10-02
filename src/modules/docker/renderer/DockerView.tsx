@@ -1174,7 +1174,19 @@ export function DockerTab({
                       : 'Run one from an image, or with docker compose.'
                   }
                   action={
-                    !readOnly && !q ? (
+                    q || status !== 'all' ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<X size={13} />}
+                        onClick={() => {
+                          setFilter('')
+                          setStatus('all')
+                        }}
+                      >
+                        Clear filter
+                      </Button>
+                    ) : !readOnly ? (
                       <Button
                         size="sm"
                         icon={<Play size={13} />}
@@ -1286,7 +1298,33 @@ export function DockerTab({
               }}
               ariaLabel="Images"
               rowTestId="docker-image"
-            />
+            >
+              {(images ?? []).length === 0 && (
+                <Empty
+                  icon={<Layers size={18} />}
+                  title={q ? 'Nothing matches' : 'No images'}
+                  text={
+                    q
+                      ? `Nothing matches “${filter}”.`
+                      : 'Images appear here after you pull or build them, or run a container.'
+                  }
+                  action={
+                    q ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<X size={13} />}
+                        onClick={() => {
+                          setFilter('')
+                        }}
+                      >
+                        Clear filter
+                      </Button>
+                    ) : null
+                  }
+                />
+              )}
+            </FileTable>
           ) : section === 'volumes' ? (
             <FileTable
               items={sortList(
@@ -1350,7 +1388,33 @@ export function DockerTab({
               }}
               ariaLabel="Volumes"
               rowTestId="docker-volume"
-            />
+            >
+              {(volumes ?? []).length === 0 && (
+                <Empty
+                  icon={<HardDrive size={18} />}
+                  title={q ? 'Nothing matches' : 'No volumes'}
+                  text={
+                    q
+                      ? `Nothing matches “${filter}”.`
+                      : 'Named volumes keep data when containers are removed.'
+                  }
+                  action={
+                    q ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<X size={13} />}
+                        onClick={() => {
+                          setFilter('')
+                        }}
+                      >
+                        Clear filter
+                      </Button>
+                    ) : null
+                  }
+                />
+              )}
+            </FileTable>
           ) : section === 'networks' ? (
             <FileTable
               items={sortList(
@@ -1414,7 +1478,33 @@ export function DockerTab({
               }}
               ariaLabel="Networks"
               rowTestId="docker-network"
-            />
+            >
+              {(networks ?? []).length === 0 && (
+                <Empty
+                  icon={<Network size={18} />}
+                  title={q ? 'Nothing matches' : 'No networks'}
+                  text={
+                    q
+                      ? `Nothing matches “${filter}”.`
+                      : 'Networks connect containers to each other.'
+                  }
+                  action={
+                    q ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<X size={13} />}
+                        onClick={() => {
+                          setFilter('')
+                        }}
+                      >
+                        Clear filter
+                      </Button>
+                    ) : null
+                  }
+                />
+              )}
+            </FileTable>
           ) : (
             <div className="min-h-0 flex-1 overflow-auto p-3" data-testid="docker-compose">
               {projects.length === 0 ? (

@@ -680,6 +680,17 @@ test('Kubernetes: tạo Deployment + Service bằng form (kiểu Rancher / Lens)
     const view = page.getByTestId('k8s-view')
     await page.setViewportSize({ width: 1366, height: 820 })
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toBeVisible()
+    // Trang trống có hành động gợi ý: Jobs (chưa có) → "Create Job" mở đúng form.
+    await view.getByTestId('k8s-nav-jobs.batch').click()
+    await view.getByTestId('k8s-empty-create').click()
+    await expect(
+      page.getByTestId('k8s-create-dialog').getByTestId('k8s-create-kind-Job')
+    ).toHaveAttribute('aria-current', 'true')
+    await page.keyboard.press('Escape')
+    // Lọc không ra gì → "Clear filter".
+    await view.getByTestId('k8s-filter').fill('khong-co-gi')
+    await view.getByRole('button', { name: 'Clear filter' }).click()
+    await expect(view.getByTestId('k8s-filter')).toHaveValue('')
     await view.getByTestId('k8s-nav-deployments.apps').click()
     await view.getByTestId('k8s-create').click()
     const dialog = page.getByTestId('k8s-create-dialog')

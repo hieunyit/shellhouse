@@ -22,6 +22,7 @@ import type { SortState } from '../../../renderer/src/components/SortMenu'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { toast } from '../../registry/renderer-kit'
 import { CreateResourceDialog } from './CreateResource'
+import { KindIcon } from './icons'
 import type { FormKind } from '../shared/forms'
 import { ConnectionPrompt, setModuleTabParams } from '../../registry/renderer-kit'
 import type { ModuleTabProps } from '../../registry/renderer-types'
@@ -1184,7 +1185,7 @@ export function ClusterTab({
           <span className="flex items-center">
             <Button
               size="sm"
-              variant="ghost"
+              variant="primary"
               icon={<Plus size={13} />}
               data-testid="k8s-create"
               title="Create a resource with a form"
@@ -1398,14 +1399,57 @@ export function ClusterTab({
             >
               {rows.length === 0 && (
                 <Empty
-                  icon={<Box size={18} />}
-                  title={q ? 'Nothing matches' : 'Nothing here'}
+                  icon={<KindIcon kind={kindId} size={22} />}
+                  title={q ? 'Nothing matches' : `No ${titleOf(kindId).toLowerCase()}`}
                   text={
                     q
-                      ? 'Try another filter.'
-                      : `No ${titleOf(kindId).toLowerCase()} in ${scopeNs.length ? scopeNs.join(', ') : 'any namespace'}.`
+                      ? `Nothing matches “${query.trim()}”.`
+                      : `There are no ${titleOf(kindId).toLowerCase()} in ${scopeNs.length ? scopeNs.join(', ') : 'any namespace'}.`
                   }
-                  action={null}
+                  action={
+                    q ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={<X size={13} />}
+                        onClick={() => {
+                          setQuery('')
+                        }}
+                      >
+                        Clear filter
+                      </Button>
+                    ) : (
+                      <span className="flex gap-2">
+                        {!readOnly && FORM_FOR_KIND[kindId] && (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            icon={<Plus size={13} />}
+                            data-testid="k8s-empty-create"
+                            onClick={() => {
+                              setDialog({
+                                kind: 'create',
+                                initial: FORM_FOR_KIND[kindId] ?? 'Deployment'
+                              })
+                            }}
+                          >
+                            Create {kind?.kind ?? titleOf(kindId)}
+                          </Button>
+                        )}
+                        {kind?.namespaced && scopeNs.length > 0 && allNamespaces.length > 1 && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setNamespaces([])
+                            }}
+                          >
+                            Show all namespaces
+                          </Button>
+                        )}
+                      </span>
+                    )
+                  }
                 />
               )}
             </FileTable>

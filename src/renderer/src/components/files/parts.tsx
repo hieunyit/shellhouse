@@ -16,6 +16,7 @@ export function ToolButton({
   labelAt: at,
   testId,
   danger,
+  primary,
   tone,
   title,
   pressed,
@@ -28,6 +29,8 @@ export function ToolButton({
   labelAt: keyof typeof labelAt
   testId?: string
   danger?: boolean
+  /** Hành động chính của trang (nút đặc màu nhấn — một nút mỗi thanh). */
+  primary?: boolean
   /** Trạng thái đang bật cần gây chú ý (ví dụ MultiExec). */
   tone?: 'warning' | undefined
   /** Tooltip dài hơn nhãn. */
@@ -49,13 +52,15 @@ export function ToolButton({
       disabled={disabled}
       className={cx(
         'inline-flex h-7 min-w-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-1.5 text-xs font-medium whitespace-nowrap transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40',
-        danger
-          ? 'text-danger hover:bg-danger-soft'
-          : tone === 'warning'
-            ? 'bg-warning-soft text-warning'
-            : pressed
-              ? 'bg-hover text-fg'
-              : 'text-muted hover:bg-hover hover:text-fg'
+        primary
+          ? 'bg-accent-solid px-2.5 text-accent-fg shadow-xs hover:bg-accent-solid-hover'
+          : danger
+            ? 'text-danger hover:bg-danger-soft'
+            : tone === 'warning'
+              ? 'bg-warning-soft text-warning'
+              : pressed
+                ? 'bg-hover text-fg'
+                : 'text-muted hover:bg-hover hover:text-fg'
       )}
       onClick={onClick}
     >

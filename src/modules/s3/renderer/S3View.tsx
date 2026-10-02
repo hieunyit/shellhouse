@@ -803,6 +803,7 @@ export function S3View({
               icon={<Plus size={14} />}
               label="New bucket"
               labelAt="md"
+              primary
               testId="s3-new-bucket"
               disabled={!ready}
               onClick={() => {
@@ -875,6 +876,7 @@ export function S3View({
               icon={<Upload size={14} />}
               label="Upload"
               labelAt="md"
+              primary
               testId="s3-upload"
               onClick={() => void window.shellhouse.pickFilesToUpload().then(upload)}
             />
@@ -1081,7 +1083,18 @@ export function S3View({
                   : 'Drop files here, or upload from your computer.'
               }
               action={
-                filter ? null : (
+                filter ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={<X size={13} />}
+                    onClick={() => {
+                      setFilter('')
+                    }}
+                  >
+                    Clear filter
+                  </Button>
+                ) : (
                   <Button
                     size="sm"
                     icon={<Upload size={13} />}
