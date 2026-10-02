@@ -109,7 +109,8 @@ describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
     expect(readFileSync(join(remoteRoot, 'hard-link.conf'), 'utf8')).toBe(
       'worker_processes auto;\n'
     )
-    expect(statSync(file).mode & 0o777).toBe(0o640)
+    // Windows không có quyền kiểu POSIX (mode luôn 0o666).
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o640)
     expect(saved.size).toBe(23)
 
     // Người khác sửa file (mtime khác) → không ghi đè, báo FILE_CHANGED.

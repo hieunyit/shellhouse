@@ -367,7 +367,8 @@ select.sh-select option {
   animation: k8s-traffic-flow 1.1s linear infinite;
 }
 @keyframes k8s-photon-pulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 0.85;
     filter: drop-shadow(0 0 2px currentColor);
   }

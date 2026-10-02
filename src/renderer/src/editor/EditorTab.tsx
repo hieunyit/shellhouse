@@ -241,7 +241,14 @@ export function EditorTabView({
           <Button size="sm" data-testid="editor-overwrite" onClick={() => void save(true)}>
             Overwrite with mine
           </Button>
-          <Button size="sm" variant="ghost" data-testid="editor-take-theirs" onClick={() => { load(); }}>
+          <Button
+            size="sm"
+            variant="ghost"
+            data-testid="editor-take-theirs"
+            onClick={() => {
+              load()
+            }}
+          >
             Reload theirs
           </Button>
         </div>
