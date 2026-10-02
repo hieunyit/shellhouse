@@ -66,3 +66,29 @@ test('SFTP: xem nhanh (Space / menu Preview) — văn bản có số dòng, ản
   await page.keyboard.press('Space')
   await expect(dialog.getByTestId('file-preview-none')).toContainText('not text or an image')
 })
+
+test('File manager ↔ terminal giữ nguyên phiên SSH (không mở phiên mới, không mất lệnh đang chạy)', async ({
+  page
+}) => {
+  const remote = mkdtempSync(join(tmpdir(), 'sh-keep-'))
+  dirs.push(remote)
+  writeFileSync(join(remote, 'a.txt'), 'a')
+  server = await startTestSshServer([{ username: 'u', password: 'p' }], { sftpRoot: remote })
+  await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
+  await page.getByTestId('quick-connect').press('Enter')
+  const tab = await activeTab(page)
+  await page.getByTestId('hostkey-accept').click()
+  await page.getByTestId('prompt-input').fill('p')
+  await page.getByTestId('prompt-submit').click()
+  await waitForText(page, tab, 'welcome to test server')
+
+  await page.getByTestId('toggle-files').last().click()
+  await expect(
+    page.getByTestId('sftp-panel').locator('[data-testid="sftp-entry"][data-name="a.txt"]')
+  ).toBeVisible()
+  await page.getByTestId('toggle-files').last().click()
+  await page.waitForTimeout(1500)
+  const text = await page.evaluate((id) => window.__shellhouseTest.bufferText(id), tab)
+  expect(text).not.toContain('new session')
+  expect(text.match(/welcome to test server/g)?.length).toBe(1)
+})

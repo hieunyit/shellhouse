@@ -114,6 +114,9 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   waited forever ("Loading…"); they now notice the session host restarting and reconnect on
   their own, and a stuck TLS handshake with the API server times out and is retried instead of
   hanging.
+- Switching a terminal tab to the file manager and back no longer reconnects SSH — the
+  running shell (and whatever it was doing) stays as it was. Only a tab opened with **Open SFTP**
+  connects again, once, to start its first shell.
 
 ## [1.2.0-beta.4] - 2026-10-01
 

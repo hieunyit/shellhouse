@@ -117,6 +117,8 @@ export class TerminalController {
   private lastOutputAt = 0
   /** Đã từng xem terminal → mọi phiên sau đều mở shell. */
   private shellWanted = false
+  /** Phiên hiện tại được mở không kèm shell (tab "Open SFTP") — chỉ khi đó mới cần kết nối lại. */
+  private openedWithoutShell = false
   /** Đã yêu cầu session đo số liệu server. */
   private statsOn = false
   private readonly disposables: IDisposable[] = []
@@ -967,7 +969,8 @@ export class TerminalController {
         ? { kind: 'host', ...size, hostId, moduleTerminal: { module, params } }
         : { kind: 'module', module, sessionKind: 'terminal', ...size, params, terminal: params }
     }
-    const noShell = this.withoutShell() ? { noShell: true } : {}
+    this.openedWithoutShell = this.withoutShell()
+    const noShell = this.openedWithoutShell ? { noShell: true } : {}
     if (this.target.kind === 'host')
       return { kind: 'host', ...size, hostId: this.target.hostId, ...noShell }
     const { host, port, username } = this.target
@@ -986,9 +989,9 @@ export class TerminalController {
   /** Người dùng muốn xem terminal: nếu phiên hiện tại không có shell thì kết nối lại có shell. */
   openShell(): void {
     if (this.shellWanted) return
-    const hadNoShell = this.withoutShell()
     this.shellWanted = true
-    if (hadNoShell) this.reconnect()
+    // Phiên đã có shell (mở terminal trước rồi mới sang File manager) → giữ nguyên, không kết nối lại.
+    if (this.openedWithoutShell) this.reconnect()
   }
 
   private emitPrompt(): void {
