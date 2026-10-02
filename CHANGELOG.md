@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.8] - 2026-10-02
+
 ### Added
 
 - **Kubernetes Map → Traffic: a service map from Caretta** — every workload, Service and outside
