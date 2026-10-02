@@ -8,6 +8,15 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Added
 
+- **Kubernetes Map redesign** — regions are soft backgrounds instead of boxes inside boxes;
+  namespaces are light islands with a health ring; workloads are layered cards with a status light
+  (only failing ones pulse). Pods are small shaded beads; hovering one shows status, restarts,
+  node, IP, uptime and live CPU / memory against requests. Live traffic is drawn as glowing cables
+  coloured by bandwidth (teal → amber → red) with light pulses flowing in the direction of the
+  data (only up close, off when the system asks for reduced motion). Selecting something lights
+  up its path and sinks everything else; the side panel opens with ready, restarts, traffic in /
+  out and blast radius at a glance. Labels stay readable at any zoom, and **Dark canvas** gives
+  the map a control-room background even with the light theme.
 - **Kubernetes Map for large clusters** — group namespaces into regions **by name prefix** or **by
   any label** (`team`, `app.kubernetes.io/part-of`… — read from the namespace, or from the
   workloads inside it) instead of guessing by name; the labels in use are suggested. **Collapse /

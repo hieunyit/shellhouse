@@ -29,7 +29,8 @@ import {
 import '@xyflow/react/dist/base.css'
 import { cx, Segmented } from '../../../renderer/src/components/ui'
 import { Heading, Pill, SidePanel } from '../../../renderer/src/components/panels'
-import { cleanError } from '../../../renderer/src/lib/format'
+import { ago, cleanError } from '../../../renderer/src/lib/format'
+import { formatCpu, formatMemory } from '../shared/resources'
 import {
   TECH,
   filterMapData,
@@ -49,6 +50,7 @@ import type { K8sOp } from '../shared/ops'
 import {
   BANDS,
   WORKLOAD_KIND_ID,
+  bandOf,
   byPair,
   formatRate,
   type TrafficPeer,
@@ -99,33 +101,42 @@ const savedFolds = new Map<string, Fold>()
 const savedSelectors = new Map<string, string>()
 
 interface Palette {
-  accent: string
-  muted: string
+  edge: string
+  edgeMuted: string
   warn: string
-  faint: string
-  traffic: string
-  trafficHot: string
+  /** Màu traffic theo băng thông (băng 0 → 4: xanh ngọc → đỏ). */
+  ramp: string[]
 }
 
-function readPalette(): Palette {
-  const css = getComputedStyle(document.documentElement)
+/** Màu cạnh lấy từ token của chính khung bản đồ (theo theme / Dark canvas). */
+function readPalette(el: Element | null): Palette {
+  const css = getComputedStyle(el ?? document.documentElement)
   const v = (name: string, fallback: string): string =>
     css.getPropertyValue(name).trim() || fallback
   return {
-    accent: v('--sh-accent', '#0f766e'),
-    muted: v('--sh-muted', '#4b5360'),
-    warn: v('--sh-warning', '#a15c07'),
-    faint: v('--sh-faint', '#606977'),
-    traffic: '#2f7de1',
-    trafficHot: '#e8590c'
+    edge: v('--map-edge', '#0d9488'),
+    edgeMuted: v('--map-edge-muted', '#64748b'),
+    warn: v('--map-warn', '#d97706'),
+    ramp: [
+      v('--map-t0', '#0d9488'),
+      v('--map-t1', '#0891b2'),
+      v('--map-t2', '#d97706'),
+      v('--map-t3', '#ea580c'),
+      v('--map-t4', '#e11d48')
+    ]
   }
 }
+
+/** Đường traffic tối đa còn cho hạt photon chạy (nhiều hơn → chỉ vẽ sợi cáp tĩnh). */
+const MAX_ANIMATED_EDGES = 150
 
 interface Options {
   hideSystem: boolean
   pods: boolean
   edges: boolean
   traffic: boolean
+  /** Nền tối riêng cho bản đồ (kể cả khi app dùng theme sáng). */
+  darkCanvas: boolean
   grouping: MapGrouping
   /** Bản đồ workload hay theo node (hạ tầng). */
   view: 'workloads' | 'nodes'
@@ -137,6 +148,7 @@ function loadOptions(): Options {
     pods: true,
     edges: true,
     traffic: true,
+    darkCanvas: false,
     grouping: 'purpose',
     view: 'workloads'
   }
@@ -251,13 +263,31 @@ function MapInner({
   const [problemsOnly, setProblemsOnly] = useState(false)
   const [impactMode, setImpactMode] = useState(false)
   const [selectedRaw, setSelected] = useState<string | null>(null)
-  const [hover, setHover] = useState<{ id: string; x: number; y: number; w: number } | null>(null)
+  const [hover, setHover] = useState<{
+    id: string
+    x: number
+    y: number
+    w: number
+    h: number
+  } | null>(null)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [band, setBand] = useState<Band>(() =>
     (savedViewports.get(tabId)?.zoom ?? 0.5) >= NEAR_ZOOM ? 'near' : 'far'
   )
-  const [palette, setPalette] = useState<Palette>(readPalette)
+  /** Khung bản đồ (callback ref) — đọc token màu sau khi gắn vào DOM. */
+  const [mapEl, setMapEl] = useState<HTMLDivElement | null>(null)
+  const [themeTick, setThemeTick] = useState(0)
+  const palette = useMemo(
+    () => readPalette(mapEl),
+    // themeTick / darkCanvas: đọc lại khi theme hay nền bản đồ đổi.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mapEl, themeTick, options.darkCanvas]
+  )
+  const reducedMotion = useMemo(
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    []
+  )
   const wrapRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const fitted = useRef(savedViewports.has(tabId))
@@ -308,7 +338,7 @@ function MapInner({
   // Theme đổi → đọc lại màu (cạnh vẽ bằng màu cụ thể).
   useEffect(() => {
     const mo = new MutationObserver(() => {
-      setPalette(readPalette())
+      setThemeTick((n) => n + 1)
     })
     mo.observe(document.documentElement, {
       attributes: true,
@@ -316,7 +346,7 @@ function MapInner({
     })
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     const onScheme = (): void => {
-      setPalette(readPalette())
+      setThemeTick((n) => n + 1)
     }
     mq.addEventListener('change', onScheme)
     return () => {
@@ -447,7 +477,8 @@ function MapInner({
     }
     const visit = (id: string, depth: number): void => {
       set.add(id)
-      if (depth === 0) return
+      // NetworkPolicy áp lên cả nhóm workload — không lan tiếp qua nó (kẻo cả namespace "liên quan").
+      if (depth === 0 || (id !== focusId && index.byId.get(id)?.kind === 'policy')) return
       for (const e of index.edgesOf.get(id) ?? []) {
         const other = e.from === id ? e.to : e.from
         if (!set.has(other)) visit(other, depth - 1)
@@ -524,11 +555,13 @@ function MapInner({
 
   const edges = useMemo<MapFlowEdge[]>(() => {
     const out: MapFlowEdge[] = []
+    // Mũi tên cỡ cố định (không phình theo độ dày đường traffic).
     const arrow = (color: string): MapFlowEdge['markerEnd'] => ({
       type: MarkerType.ArrowClosed,
       color,
-      width: 12,
-      height: 12
+      width: 14,
+      height: 14,
+      markerUnits: 'userSpaceOnUse'
     })
     if (band === 'near' && options.edges && layout)
       for (const e of layout.edges) {
@@ -537,7 +570,11 @@ function MapInner({
         if (e.kind === 'policy' && !(hot && focusId && (e.from === focusId || e.to === focusId)))
           continue
         const color =
-          e.kind === 'storage' ? palette.muted : e.kind === 'policy' ? palette.warn : palette.accent
+          e.kind === 'storage'
+            ? palette.edgeMuted
+            : e.kind === 'policy'
+              ? palette.warn
+              : palette.edge
         out.push({
           id: `${e.kind}:${e.from}>${e.to}`,
           source: e.from,
@@ -572,7 +609,7 @@ function MapInner({
       }
       const list = [...local, ...cross.values()]
       for (const t of list) {
-        const color = t.rate >= BANDS[3].max ? palette.trafficHot : palette.traffic
+        const color = palette.ramp[bandOf(t.rate)] ?? palette.edge
         out.push({
           id: `traffic:${t.from}>${t.to}`,
           source: t.from,
@@ -743,9 +780,17 @@ function MapInner({
     if (next) goTo(next)
   }
 
-  const local = (e: { clientX: number; clientY: number }): { x: number; y: number; w: number } => {
+  const local = (e: {
+    clientX: number
+    clientY: number
+  }): { x: number; y: number; w: number; h: number } => {
     const r = wrapRef.current?.getBoundingClientRect()
-    return { x: e.clientX - (r?.left ?? 0), y: e.clientY - (r?.top ?? 0), w: r?.width ?? 600 }
+    return {
+      x: e.clientX - (r?.left ?? 0),
+      y: e.clientY - (r?.top ?? 0),
+      w: r?.width ?? 600,
+      h: r?.height ?? 400
+    }
   }
 
   const ctx = useMemo<MapCtx>(
@@ -762,9 +807,26 @@ function MapInner({
       onHoverPod: (pod, e) => {
         setHover(pod && e ? { id: pod.id, ...local(e) } : null)
       },
-      onToggleNs: toggleNs
+      onToggleNs: toggleNs,
+      strong: selected !== null,
+      particles:
+        band === 'near' &&
+        !reducedMotion &&
+        options.traffic &&
+        trafficEdges.length <= MAX_ANIMATED_EDGES
     }),
-    [band, selected, related, problemsOnly, options.pods, index, toggleNs]
+    [
+      band,
+      selected,
+      related,
+      problemsOnly,
+      options.pods,
+      index,
+      toggleNs,
+      reducedMotion,
+      options.traffic,
+      trafficEdges.length
+    ]
   )
 
   /** Traffic của mục đang chọn (bảng bên phải). */
@@ -1055,6 +1117,16 @@ function MapInner({
               </span>
             </Chip>
             <Chip
+              on={options.darkCanvas}
+              testId="k8s-map-dark-canvas"
+              title="Dark background for the map, whatever the app theme"
+              onClick={() => {
+                setOpt({ darkCanvas: !options.darkCanvas })
+              }}
+            >
+              Dark canvas
+            </Chip>
+            <Chip
               on={problemsOnly}
               testId="k8s-map-problems"
               onClick={() => {
@@ -1115,13 +1187,17 @@ function MapInner({
           </p>
         )}
         <div
-          ref={wrapRef}
+          ref={(el) => {
+            wrapRef.current = el
+            setMapEl(el)
+          }}
           tabIndex={0}
           role="application"
           aria-label="Cluster map — drag to move, scroll to zoom, click to select"
           data-testid="k8s-map-canvas"
           className={cx(
-            'k8s-map relative min-h-0 flex-1 overflow-hidden bg-canvas outline-none',
+            'k8s-map relative min-h-0 flex-1 overflow-hidden outline-none',
+            options.darkCanvas && 'k8s-map-dark',
             nodesView && 'hidden'
           )}
           onKeyDown={onKeyDown}
@@ -1148,6 +1224,8 @@ function MapInner({
               zoomOnDoubleClick
               proOptions={{ hideAttribution: true }}
               onMove={(_, v) => {
+                // Chữ nhìn xa giữ cỡ trên màn hình (CSS chia cho zoom) — không render lại node.
+                wrapRef.current?.style.setProperty('--map-zoom', String(v.zoom))
                 const next: Band = v.zoom >= NEAR_ZOOM ? 'near' : 'far'
                 if (next !== band) setBand(next)
               }}
@@ -1171,7 +1249,11 @@ function MapInner({
               }}
               onNodeMouseEnter={(e, n) => {
                 if (n.type === 'region') return
-                setHover({ id: n.id, ...local(e) })
+                const at = local(e)
+                // Đang trỏ một pod trong thẻ này → giữ bảng của pod.
+                setHover((h) =>
+                  h && index.byId.get(h.id)?.parent === n.id ? h : { id: n.id, ...at }
+                )
               }}
               onNodeMouseLeave={() => {
                 setHover(null)
@@ -1181,7 +1263,7 @@ function MapInner({
                 variant={BackgroundVariant.Dots}
                 gap={24}
                 size={1}
-                className="!bg-canvas"
+                className="!bg-transparent"
               />
               <MiniMap
                 pannable
@@ -1212,23 +1294,15 @@ function MapInner({
             </div>
           )}
           {hoverNode && hover && (
-            <div
-              className="pointer-events-none absolute z-20 max-w-72 rounded-md border border-line bg-elevated px-2 py-1.5 text-xs shadow-lg"
-              style={{
-                left: Math.min(hover.x + 14, hover.w - 280),
-                top: hover.y + 14
-              }}
-              data-testid="k8s-map-tooltip"
-            >
-              <div className="flex items-center gap-1.5">
-                <span className={cx('size-2 shrink-0 rounded-full', DOT[hoverNode.tone])} />
-                <span className="truncate font-medium text-fg">{hoverNode.label}</span>
-              </div>
-              <div className="mt-0.5 text-faint">
-                {titleOf(hoverNode)}
-                {hoverNode.sub ? ` · ${hoverNode.sub}` : ''}
-              </div>
-            </div>
+            <HoverCard
+              node={hoverNode}
+              podsOf={index.podsOf}
+              x={Math.max(8, Math.min(hover.x + 16, hover.w - 300))}
+              // Gần đáy → bảng hiện phía trên con trỏ.
+              {...(hover.y + 230 > hover.h
+                ? { bottom: hover.h - hover.y + 12 }
+                : { y: hover.y + 16 })}
+            />
           )}
           {/* Điều khiển zoom + chú giải */}
           <div className="absolute right-3 bottom-3 z-10 flex overflow-hidden rounded-md border border-line bg-surface shadow-sm">
@@ -1259,9 +1333,20 @@ function MapInner({
             <Legend color="bg-danger-solid" label="Failing" />
             {options.traffic && traffic.status === 'live' && (
               <span className="flex items-center gap-1" data-testid="k8s-map-traffic-legend">
-                <svg width="34" height="10" aria-hidden>
-                  <line x1="0" y1="5" x2="14" y2="5" stroke={palette.traffic} strokeWidth="1.5" />
-                  <line x1="18" y1="5" x2="34" y2="5" stroke={palette.trafficHot} strokeWidth="6" />
+                <svg width="46" height="10" aria-hidden>
+                  <defs>
+                    <linearGradient id="k8s-map-ramp" x1="0" x2="1" y1="0" y2="0">
+                      {palette.ramp.map((c, i) => (
+                        <stop key={c} offset={i / (palette.ramp.length - 1)} stopColor={c} />
+                      ))}
+                    </linearGradient>
+                  </defs>
+                  <path
+                    d="M1 7 L45 3"
+                    stroke="url(#k8s-map-ramp)"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                  />
                 </svg>
                 traffic {BANDS[0].label} … {BANDS[BANDS.length - 1]?.label}
               </span>
@@ -1632,6 +1717,46 @@ function MapPanel({
         className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-3"
         data-testid="k8s-map-details"
       >
+        {isWorkload && (
+          <div
+            className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line"
+            data-testid="k8s-map-stats"
+          >
+            {(
+              [
+                [
+                  'Ready',
+                  node.replicas
+                    ? `${String(node.replicas.ready)}/${String(node.replicas.desired)}`
+                    : String(podTones.length),
+                  node.tone === 'bad' ? 'text-danger' : node.tone === 'warn' ? 'text-warning' : ''
+                ],
+                [
+                  'Restarts',
+                  String(podTones.reduce((n, p) => n + (p.pod?.restarts ?? 0), 0)),
+                  podTones.some((p) => (p.pod?.restarts ?? 0) > 0) ? 'text-warning' : ''
+                ],
+                [
+                  'In / out',
+                  traffic?.status === 'live'
+                    ? `${formatRate(traffic.incoming.reduce((n, r) => n + r.rate, 0))} / ${formatRate(traffic.outgoing.reduce((n, r) => n + r.rate, 0))}`
+                    : '—',
+                  ''
+                ],
+                ['Affected', affected ? String(affected.size) : '—', '']
+              ] as const
+            ).map(([k, v, tone]) => (
+              <div key={k} className="flex flex-col gap-0.5 bg-surface px-2.5 py-1.5">
+                <span className="text-[10px] tracking-wide text-faint uppercase">{k}</span>
+                <span
+                  className={cx('truncate text-[12.5px] font-semibold text-fg tabular-nums', tone)}
+                >
+                  {v}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         <p className="text-xs text-muted">{node.sub}</p>
         {tech && (
           <p className="flex items-center gap-1.5 text-xs text-muted" data-testid="k8s-map-tech">
@@ -1818,6 +1943,118 @@ function Stat({
     <div className="rounded-md border border-line px-2 py-1.5">
       <div className="text-[11px] text-faint">{label}</div>
       <div className={cx('text-sm font-semibold tabular-nums', tone ?? 'text-fg')}>{value}</div>
+    </div>
+  )
+}
+
+/** Thanh nhỏ: đang dùng so với request (vượt request → màu cảnh báo). */
+function UsageBar({
+  label,
+  used,
+  request,
+  format
+}: {
+  label: string
+  used: number
+  request: number | undefined
+  format: (v: number) => string
+}): React.JSX.Element {
+  const ratio = request ? used / request : 0
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex justify-between gap-3 text-[10.5px]">
+        <span className="text-faint">{label}</span>
+        <span className="text-fg tabular-nums">
+          {format(used)}
+          {request ? <span className="text-faint"> / {format(request)} req</span> : null}
+        </span>
+      </div>
+      {request ? (
+        <div className="h-1 overflow-hidden rounded-full bg-subtle">
+          <div
+            className="h-full rounded-full"
+            style={{
+              width: `${String(Math.min(100, ratio * 100))}%`,
+              background: ratio > 1 ? 'var(--map-warn)' : 'var(--map-accent)'
+            }}
+          />
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/** Bảng nổi khi rê chuột: pod (trạng thái, restart, node, IP, tuổi, CPU / RAM), workload, v.v. */
+function HoverCard({
+  node,
+  podsOf,
+  x,
+  y,
+  bottom
+}: {
+  node: MapNode
+  podsOf: ReadonlyMap<string, MapNode[]>
+  x: number
+  y?: number
+  bottom?: number
+}): React.JSX.Element {
+  const pod = node.kind === 'pod' ? node.pod : undefined
+  const pods = node.kind === 'workload' ? (podsOf.get(node.id) ?? []) : []
+  const restarts = pods.reduce((n, p) => n + (p.pod?.restarts ?? 0), 0)
+  const row = (k: string, v: React.ReactNode, tone?: string): React.JSX.Element => (
+    <>
+      <span className="text-faint">{k}</span>
+      <span className={cx('truncate text-right font-mono text-fg', tone)}>{v}</span>
+    </>
+  )
+  return (
+    <div
+      className="pointer-events-none absolute z-20 w-72 rounded-xl border border-line bg-elevated/95 p-2.5 text-xs shadow-xl backdrop-blur-sm"
+      style={{ left: x, ...(bottom !== undefined ? { bottom } : { top: y }) }}
+      data-testid="k8s-map-tooltip"
+    >
+      <div className="flex items-center gap-2">
+        <span className={cx('size-2 shrink-0 rounded-full', DOT[node.tone])} />
+        <span className="min-w-0 flex-1 truncate font-semibold text-fg">{node.label}</span>
+        <span className="shrink-0 text-[10.5px] text-faint">{titleOf(node)}</span>
+      </div>
+      {pod ? (
+        <>
+          <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+            {row('Status', pod.status, node.tone === 'bad' ? '!text-danger' : undefined)}
+            {row('Restarts', pod.restarts, pod.restarts > 0 ? '!text-warning' : undefined)}
+            {pod.node && row('Node', pod.node)}
+            {pod.ip && row('IP', pod.ip)}
+            {pod.startedAt ? row('Up', ago(pod.startedAt)) : null}
+          </div>
+          {pod.usage ? (
+            <div className="mt-2 flex flex-col gap-1.5 border-t border-line pt-2">
+              <UsageBar label="CPU" used={pod.usage.cpu} request={pod.cpu} format={formatCpu} />
+              <UsageBar
+                label="Memory"
+                used={pod.usage.memory}
+                request={pod.memory}
+                format={formatMemory}
+              />
+            </div>
+          ) : (
+            <p className="mt-2 border-t border-line pt-1.5 text-[10.5px] text-faint">
+              No live CPU / memory (metrics-server not available).
+            </p>
+          )}
+        </>
+      ) : node.kind === 'workload' ? (
+        <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+          {node.replicas &&
+            row('Ready', `${String(node.replicas.ready)} / ${String(node.replicas.desired)}`)}
+          {row('Pods', pods.length)}
+          {row('Restarts', restarts, restarts > 0 ? '!text-warning' : undefined)}
+          {node.status && !node.replicas && row('Status', node.status)}
+          {node.badges && node.badges.length > 0 && row('', node.badges.join(' · '))}
+        </div>
+      ) : (
+        node.sub && <div className="mt-1 truncate font-mono text-[11px] text-faint">{node.sub}</div>
+      )}
     </div>
   )
 }

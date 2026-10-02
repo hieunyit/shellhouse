@@ -37,6 +37,12 @@ export interface MapPod {
   /** Tổng requests của container (millicore / byte) — bỏ khi 0. */
   cpu?: number
   memory?: number
+  /** status.podIP. */
+  ip?: string
+  /** status.startTime (Unix ms). */
+  startedAt?: number
+  /** Đang dùng thật (metrics-server). */
+  usage?: { cpu: number; memory: number }
 }
 
 /** Node (máy) của cluster — cho chế độ xem theo node. */
@@ -611,6 +617,11 @@ export interface MapNode {
   status?: string
   /** Namespace đang gập. */
   collapsed?: boolean
+  /** Pod: chi tiết cho bảng nổi khi rê chuột. */
+  pod?: Pick<
+    MapPod,
+    'status' | 'restarts' | 'node' | 'ip' | 'startedAt' | 'cpu' | 'memory' | 'usage'
+  >
 }
 
 /**
@@ -1015,7 +1026,17 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
           tone: p.tone,
           ns,
           ref: { kind: 'pods', ns, name: p.name },
-          parent: c.id
+          parent: c.id,
+          pod: {
+            status: p.status,
+            restarts: p.restarts,
+            node: p.node,
+            ...(p.ip ? { ip: p.ip } : {}),
+            ...(p.startedAt ? { startedAt: p.startedAt } : {}),
+            ...(p.cpu ? { cpu: p.cpu } : {}),
+            ...(p.memory ? { memory: p.memory } : {}),
+            ...(p.usage ? { usage: p.usage } : {})
+          }
         })
       })
     }

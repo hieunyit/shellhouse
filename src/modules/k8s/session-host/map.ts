@@ -132,6 +132,26 @@ async function scopedNamespaces(
   return { items, truncated: false }
 }
 
+/** CPU / RAM đang dùng của pod (metrics-server); không có → rỗng. */
+async function podMetrics(
+  client: KubeClient,
+  namespaces: readonly string[],
+  signal?: AbortSignal
+): Promise<Map<string, { cpu: number; memory: number }>> {
+  const scopes = namespaces.length ? namespaces : [undefined]
+  const results = await Promise.all(
+    scopes.map((ns) =>
+      metrics(client, 'pods', ns, signal).catch((): MetricsResult => ({
+        available: false,
+        items: {}
+      }))
+    )
+  )
+  const out = new Map<string, { cpu: number; memory: number }>()
+  for (const r of results) for (const [key, u] of Object.entries(r.items)) out.set(key, u)
+  return out
+}
+
 export async function mapData(
   client: KubeClient,
   namespaces: readonly string[],
@@ -152,6 +172,7 @@ export async function mapData(
     policies,
     gateways,
     usage,
+    podUsage,
     ...workloadLists
   ] = await Promise.all([
     namespaces.length
@@ -172,6 +193,7 @@ export async function mapData(
       available: false,
       items: {}
     })),
+    podMetrics(client, namespaces, signal),
     ...WORKLOAD_KINDS.map((k) => listAll(client, k.path, k.plural, namespaces, signal))
   ])
 
@@ -264,6 +286,9 @@ export async function mapData(
     const st = podStatus(p)
     const statuses = a(o(p.status)['containerStatuses'])
     const req = podRequests(p)
+    const status = o(p.status)
+    const started = Date.parse(s(status['startTime']))
+    const used = podUsage.get(`${p.metadata.namespace ?? ''}/${p.metadata.name}`)
     return {
       ns: p.metadata.namespace ?? '',
       name: p.metadata.name,
@@ -273,7 +298,10 @@ export async function mapData(
       restarts: statuses.reduce((n, c) => n + num(c['restartCount']), 0),
       node: s(o(p.spec)['nodeName']),
       ...(req.cpu ? { cpu: req.cpu } : {}),
-      ...(req.memory ? { memory: req.memory } : {})
+      ...(req.memory ? { memory: req.memory } : {}),
+      ...(s(status['podIP']) ? { ip: s(status['podIP']) } : {}),
+      ...(Number.isFinite(started) ? { startedAt: started } : {}),
+      ...(used ? { usage: used } : {})
     }
   })
 
