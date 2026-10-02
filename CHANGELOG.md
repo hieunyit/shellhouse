@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.5] - 2026-10-02
+
 ### Added
 
 - **Kubernetes Map redesign** — regions are soft backgrounds instead of boxes inside boxes;
