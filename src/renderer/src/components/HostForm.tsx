@@ -63,12 +63,14 @@ export function HostForm({
   const [mode, setMode] = useState<HostMode>(host?.mode ?? 'builtin')
   const [direct, setDirect] = useState(host?.direct ?? false)
   const [legacy, setLegacy] = useState(host?.legacyAlgorithms ?? false)
+  const [tmux, setTmux] = useState(host?.tmux ?? false)
   const [encoding, setEncoding] = useState<EncodingId>(
     ENCODINGS.find((e) => e.id === host?.encoding)?.id ?? 'utf-8'
   )
   // Mục Advanced mở sẵn khi host đang dùng một tuỳ chọn trong đó (không giấu cấu hình đang bật).
   const [advancedOpen, setAdvancedOpen] = useState(
     Boolean(host?.legacyAlgorithms) ||
+      Boolean(host?.tmux) ||
       host?.mode === 'system' ||
       Boolean(host?.encoding && host.encoding !== 'utf-8')
   )
@@ -153,6 +155,7 @@ export function HostForm({
       mode,
       ...(direct ? { direct: true } : {}),
       ...(legacy ? { legacyAlgorithms: true } : {}),
+      ...(tmux && mode !== 'system' ? { tmux: true } : {}),
       encoding: encoding === 'utf-8' ? null : encoding,
       tags: tags
         .split(',')
@@ -520,8 +523,9 @@ export function HostForm({
               />
               Advanced
               <span className="text-xs font-normal text-faint">
-                {legacy || mode === 'system' || encoding !== 'utf-8'
+                {legacy || tmux || mode === 'system' || encoding !== 'utf-8'
                   ? [
+                      isSsh && tmux && mode !== 'system' && 'tmux',
                       encoding !== 'utf-8' && encoding,
                       isSsh && legacy && 'legacy algorithms',
                       isSsh && mode === 'system' && 'system ssh'
@@ -529,7 +533,7 @@ export function HostForm({
                       .filter(Boolean)
                       .join(' · ')
                   : isSsh
-                    ? 'Character encoding, legacy algorithms, system ssh'
+                    ? 'tmux, character encoding, legacy algorithms, system ssh'
                     : 'Character encoding'}
               </span>
             </summary>
@@ -554,6 +558,16 @@ export function HostForm({
               </Field>
               {isSsh && (
                 <>
+                  <Checkbox
+                    data-testid="host-tmux"
+                    checked={tmux && mode !== 'system'}
+                    disabled={mode === 'system'}
+                    onChange={(e) => {
+                      setTmux(e.target.checked)
+                    }}
+                    label="Keep sessions alive with tmux"
+                    description="If the server has tmux, each tab runs inside its own tmux session (shellhouse-1, -2…). When Wi-Fi drops or the laptop sleeps, reconnecting brings you back to the same prompt with your programs still running. Type exit to end it."
+                  />
                   <Checkbox
                     data-testid="host-legacy"
                     checked={legacy}

@@ -34,6 +34,8 @@ export interface ResolvedHop {
   legacyAlgorithms?: boolean
   /** Host chọn rõ Password / SSH key: chỉ dùng thông tin đã lưu, không thử agent / key mặc định. */
   storedOnly?: boolean
+  /** Tự gắn vào tmux trên server (chỉ có nghĩa với đích cuối). */
+  tmux?: boolean
 }
 
 /** Thứ Session Host cần để kết nối một host đã lưu. */
@@ -76,6 +78,8 @@ interface HostOptions {
   legacy?: boolean
   /** Bảng mã output của server (không có = UTF-8). */
   encoding?: string
+  /** Tự gắn vào tmux trên server. */
+  tmux?: boolean
   /** Không có = SSH. */
   protocol?: 'telnet' | 'serial'
   serial?: SerialSettings
@@ -163,6 +167,7 @@ export class HostService {
           direct: options.direct === true,
           legacyAlgorithms: options.legacy === true,
           encoding: options.encoding ?? null,
+          ...(options.tmux ? { tmux: true } : {}),
           protocol: options.protocol ?? 'ssh',
           serial: options.protocol === 'serial' ? (options.serial ?? null) : null,
           tags: parseJson<string[]>(r.tags, []),
@@ -248,6 +253,7 @@ export class HostService {
       if (input.direct) options.direct = true
       if (input.legacyAlgorithms) options.legacy = true
       if (input.encoding && input.encoding !== 'utf-8') options.encoding = input.encoding
+      if (input.tmux) options.tmux = true
       if (input.protocol === 'telnet') options.protocol = 'telnet'
       if (input.protocol === 'serial') {
         if (!input.serial) throw new Error('Choose a serial port')
@@ -1014,7 +1020,8 @@ export class HostService {
       credentials,
       ...(options.keyFile ? { keyFiles: [options.keyFile] } : {}),
       ...(options.legacy ? { legacyAlgorithms: true } : {}),
-      ...(row.auth_type === 'password' || row.auth_type === 'key' ? { storedOnly: true } : {})
+      ...(row.auth_type === 'password' || row.auth_type === 'key' ? { storedOnly: true } : {}),
+      ...(options.tmux ? { tmux: true } : {})
     }
   }
 }

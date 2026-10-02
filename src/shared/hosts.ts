@@ -94,6 +94,8 @@ export const HostSummary = z.object({
   legacyAlgorithms: z.boolean(),
   /** Bảng mã output của server (thiết bị cũ: Windows-1252, GBK…); không có = UTF-8. */
   encoding: z.string().max(32).nullable().optional(),
+  /** Mở shell trong tmux (nếu server có) — rớt mạng / gập máy, kết nối lại vẫn ở đúng chỗ cũ. */
+  tmux: z.boolean().optional(),
   protocol: HostProtocol,
   /** Chỉ có khi protocol = 'serial'. */
   serial: SerialSettings.nullable(),
@@ -169,6 +171,8 @@ export const HostInput = z.object({
   legacyAlgorithms: z.boolean().optional(),
   /** Bảng mã output của server; null / không có = UTF-8. */
   encoding: z.enum(ENCODING_IDS).nullable().optional(),
+  /** Tự gắn vào tmux trên server. */
+  tmux: z.boolean().optional(),
   tags: z
     .array(z.string().trim().min(1).max(40, 'Each tag can be at most 40 characters'))
     .max(20, 'At most 20 tags'),

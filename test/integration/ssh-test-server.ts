@@ -139,6 +139,8 @@ export async function startTestSshServer(
     execHome?: string
     /** Thư mục thêm vào đầu PATH của lệnh exec (chương trình giả: `docker`…). */
     execPath?: string
+    /** PATH của lệnh exec chỉ gồm `execPath` (không lẫn chương trình thật của máy chạy test). */
+    execPathOnly?: boolean
     /**
      * streamlocal (kênh tới unix socket trên "server", như `ssh -L /path`): đường dẫn client xin →
      * socket thật trên máy test. Không có = từ chối (như AllowStreamLocalForwarding no).
@@ -374,7 +376,10 @@ export async function startTestSshServer(
           const child = spawn('/bin/sh', ['-c', info.command], {
             env: {
               HOME: options.execHome,
-              PATH: [options.execPath, process.env['PATH'] ?? '/usr/bin:/bin']
+              PATH: [
+                options.execPath,
+                options.execPathOnly ? undefined : (process.env['PATH'] ?? '/usr/bin:/bin')
+              ]
                 .filter(Boolean)
                 .join(':')
             }

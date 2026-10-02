@@ -89,6 +89,8 @@ export interface SessionExtras {
   legacyAlgorithms?: boolean
   storedOnly?: boolean
   log?: SessionLogOptions
+  /** Tên phiên tmux để gắn vào (main cấp theo tab). */
+  tmux?: string
 }
 
 /** Một session terminal: nối transport (PTY/SSH) với MessagePort của renderer. */
@@ -266,6 +268,7 @@ export class Session {
           rows: this.spec.rows,
           ...(this.spec.noShell || this.spec.moduleTerminal ? { shell: false } : {}),
           ...(this.spec.moduleTerminal ? { noShellStatus: 'Authenticated' } : {}),
+          ...(this.extras.tmux ? { tmux: this.extras.tmux } : {}),
           callbacks,
           ctx: this.context(),
           ...this.deps.sshOverrides

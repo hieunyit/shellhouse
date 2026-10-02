@@ -56,7 +56,12 @@ export const HostRequest = z.discriminatedUnion('type', [
         /** ProxyJump: các chặng trung gian theo thứ tự. */
         jumps: z.array(Hop).max(8).optional(),
         /** Forward tự bật ngay khi kết nối xong. */
-        autoForwards: z.array(ForwardSpec).max(64).optional()
+        autoForwards: z.array(ForwardSpec).max(64).optional(),
+        /** Tên phiên tmux để gắn vào thay cho shell thường (server không có tmux → shell thường). */
+        tmux: z
+          .string()
+          .regex(/^[A-Za-z0-9_-]{1,64}$/)
+          .optional()
       })
       .optional(),
     /** Ghi log phiên ra file — đường dẫn do main đặt theo cài đặt. */

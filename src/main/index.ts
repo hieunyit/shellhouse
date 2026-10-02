@@ -50,6 +50,7 @@ import { electronProtector } from './vault/electron-protector'
 import { registerSecurityIpc } from './vault/security-ipc'
 import { Updater } from './updater'
 import { listWslDistros, wslFileExists, type WslDistro } from './wsl'
+import { TmuxSlots } from './tmux-slots'
 
 log.initialize()
 log.transports.file.level = 'info'
@@ -269,6 +270,8 @@ function registerIpc(): void {
     }
   })
 
+  const tmuxSlots = new TmuxSlots()
+
   handle('session:open', isTrustedSender, async (spec) => {
     const window = mainWindow
     if (!window) throw new Error('No window')
@@ -395,6 +398,10 @@ function registerIpc(): void {
             : {})
         }
         const noShell = spec.noShell === true
+        const tmux =
+          spec.kind === 'host' && resolved?.tmux && !noShell && !moduleTerminal
+            ? tmuxSlots.take(sessionId, spec.hostId)
+            : null
         supervisor.openSession(
           sessionId,
           {
@@ -409,7 +416,7 @@ function registerIpc(): void {
             }
           },
           port1,
-          ssh,
+          tmux ? { ...ssh, tmux } : ssh,
           // Không có shell thì không có gì để ghi log.
           noShell ? undefined : log
         )
@@ -421,6 +428,7 @@ function registerIpc(): void {
   })
 
   handle('session:close', isTrustedSender, (sessionId) => {
+    tmuxSlots.release(sessionId)
     supervisor.closeSession(sessionId)
   })
 

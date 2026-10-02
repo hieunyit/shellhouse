@@ -19,6 +19,10 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   allocatable with live usage (metrics-server), pods on each node (click to open), taints,
   cordoned / not-ready / pressure warnings, and a warning when every replica of a Deployment or
   StatefulSet runs on the same node.
+- **Keep SSH sessions alive with tmux** (host → Advanced): if the server has tmux, each tab runs
+  inside its own tmux session (`shellhouse-1`, `-2`…). When Wi-Fi drops or the laptop sleeps,
+  reconnecting — even after restarting Shellhouse — brings you back to the same prompt with your
+  programs still running. Servers without tmux get a plain shell, with a note in the terminal.
 
 - **Kubernetes: cluster Map** — the whole cluster as a live map you can pan and zoom like a
   street map. Namespaces are islands grouped into regions by purpose (your applications, ingress

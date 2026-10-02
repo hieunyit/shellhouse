@@ -65,7 +65,43 @@ export const TIMEOUTS = {
   /** Từ lúc có kết nối tới lúc server gửi host key (KEX). Không tính thời gian người dùng trả lời. */
   handshakeMs: 20_000,
   keepaliveIntervalMs: 15_000,
-  keepaliveCountMax: 3
+  keepaliveCountMax: 3,
+  /** Dò lệnh trên server (có tmux không) — quá hạn coi như không có. */
+  probeMs: 5_000
+}
+
+/** Server có lệnh này không (`command -v` qua kênh exec riêng); lỗi / quá hạn → false. */
+function hasCommand(client: Client, name: string, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let out = ''
+    let done = false
+    const finish = (ok: boolean): void => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      resolve(ok)
+    }
+    const timer = setTimeout(() => {
+      finish(false)
+    }, timeoutMs)
+    try {
+      client.exec(`command -v ${name} >/dev/null 2>&1 && echo found`, (error, channel) => {
+        if (error) {
+          finish(false)
+          return
+        }
+        channel.on('data', (d: Buffer) => {
+          out += d.toString()
+        })
+        channel.stderr.resume()
+        channel.on('close', () => {
+          finish(out.includes('found'))
+        })
+      })
+    } catch {
+      finish(false)
+    }
+  })
 }
 
 export interface SshTarget {
@@ -98,6 +134,11 @@ export interface SshOpenOptions {
   shell?: boolean
   /** Dòng trạng thái khi không mở shell (mặc định: chỉ truyền file). */
   noShellStatus?: string
+  /**
+   * Tên phiên tmux: server có tmux → mở `tmux new-session -A` (gắn vào nếu đã có) thay cho shell
+   * thường, nên rớt mạng rồi kết nối lại vẫn ở đúng chỗ cũ. Không có tmux → shell thường.
+   */
+  tmux?: string
   /** Các jump host theo thứ tự (ProxyJump). */
   jumps?: readonly HopConfig[]
   cols: number
@@ -345,9 +386,26 @@ export async function openSshShell(options: SshOpenOptions): Promise<SshShell> {
       )
       return new SshShell(last, clients, null, options.callbacks)
     }
-    ctx.status('connected', 'Authenticated, opening shell…')
+    const pty = { term: 'xterm-256color', cols: options.cols, rows: options.rows }
+    const tmux = options.tmux && /^[A-Za-z0-9_-]+$/.test(options.tmux) ? options.tmux : null
+    if (tmux && (await hasCommand(last, 'tmux', timeouts.probeMs))) {
+      ctx.status('connected', `Authenticated, attaching to tmux session ${tmux}…`)
+      const stream = await new Promise<ClientChannel>((resolve, reject) => {
+        last.exec(`tmux new-session -A -s ${tmux}`, { pty }, (error, s) => {
+          if (error) reject(error)
+          else resolve(s)
+        })
+      })
+      return new SshShell(last, clients, stream, options.callbacks)
+    }
+    ctx.status(
+      'connected',
+      tmux
+        ? 'Authenticated — tmux is not installed on the server, opening a plain shell…'
+        : 'Authenticated, opening shell…'
+    )
     const stream = await new Promise<ClientChannel>((resolve, reject) => {
-      last.shell({ term: 'xterm-256color', cols: options.cols, rows: options.rows }, (error, s) => {
+      last.shell(pty, (error, s) => {
         if (error) reject(error)
         else resolve(s)
       })
