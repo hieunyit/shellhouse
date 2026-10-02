@@ -41,6 +41,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   kept). If someone changed the file since you opened it, you choose: overwrite or reload theirs.
   Windows line endings are preserved, and closing a tab with unsaved changes asks first. Binary
   and very large files still open in your local editor (Settings → Files).
+  On macOS ⌘S saves the file and ⌘F searches it while you are typing in the editor (elsewhere ⌘S
+  still opens Snippets).
 - **Two-pane file manager: F5 / F6** like Total Commander — F5 copies the selection to the other
   side, F6 moves it. A move only removes the original after every file arrived (items on this
   computer go to the Trash); anything that failed stays where it was.

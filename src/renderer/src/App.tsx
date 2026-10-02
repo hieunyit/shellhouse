@@ -34,6 +34,9 @@ type Overlay =
     }
   | null
 
+/** Lệnh nhường phím cho editor khi con trỏ đang ở trong editor. */
+const EDITOR_KEYS: ReadonlySet<string> = new Set(['snippets.open', 'terminal.find'])
+
 export function App(): React.JSX.Element {
   const [overlay, setOverlay] = useState<Overlay>(null)
   const activeId = useTabs((s) => s.activeId)
@@ -199,6 +202,10 @@ export function App(): React.JSX.Element {
       if (!command) return
       // Đang ghi phím tắt trong trang cài đặt → để ô đó nhận phím.
       if ((event.target as HTMLElement | null)?.dataset['testid'] === 'shortcut-key') return
+      // Trong editor (CodeMirror): ⌘S / Ctrl+S là lưu, ⌘F là tìm trong file — không mở Snippets /
+      // tìm trong terminal (trên Mac phím Snippets là ⌘S).
+      if (EDITOR_KEYS.has(command) && (event.target as HTMLElement | null)?.closest('.cm-editor'))
+        return
       event.preventDefault()
       runCommand(command)
     }
