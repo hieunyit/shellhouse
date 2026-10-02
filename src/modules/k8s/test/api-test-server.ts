@@ -53,6 +53,8 @@ export interface ApiTestServer {
    * forbidden = có agent nhưng không được đọc metric (pods/proxy).
    */
   enableCaretta(options?: { forbidden?: boolean }): void
+  /** Cài Prometheus giả (monitoring/prometheus-operated:9090) trả lời query / query_range. */
+  enablePrometheus(): void
   get(plural: string, namespace: string | undefined, name: string): Obj | undefined
   list(plural: string): Obj[]
   /** Làm các watch sau nhận 410 Gone. */
@@ -411,6 +413,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
   let expired = false
   let metricsDisabled = false
   let caretta: { forbidden: boolean; start: number } | null = null
+  let prometheus = false
   /** Kết nối giả (byte / giây): Internet → Service web; web → pod tool; web → DB bên ngoài. */
   const CARETTA_LINKS = [
     {
@@ -572,6 +575,42 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
               : []
           })
         })
+      // Prometheus giả qua services proxy: CPU ~ 120–180m, RAM ~ 64–80 Mi mỗi pod, dao động theo thời gian.
+      if (
+        prometheus &&
+        p.startsWith(
+          '/api/v1/namespaces/monitoring/services/prometheus-operated:9090/proxy/api/v1/'
+        )
+      ) {
+        if (p.endsWith('/query'))
+          return json(res, 200, {
+            status: 'success',
+            data: { resultType: 'scalar', result: [0, '1'] }
+          })
+        const q = url.searchParams.get('query') ?? ''
+        const start = Number(url.searchParams.get('start'))
+        const end = Number(url.searchParams.get('end'))
+        const step = Number(url.searchParams.get('step'))
+        const pods = (/pod=~"([^"]*)"/.exec(q)?.[1] ?? '')
+          .replace(/\\/g, '')
+          .split('|')
+          .filter(Boolean)
+        const cpu = q.includes('cpu_usage')
+        return json(res, 200, {
+          status: 'success',
+          data: {
+            resultType: 'matrix',
+            result: pods.map((pod, i) => {
+              const values: [number, string][] = []
+              for (let t = start; t <= end; t += step) {
+                const wave = Math.sin(t / 300 + i)
+                values.push([t, String(cpu ? 0.15 + 0.03 * wave : (72 + 8 * wave) * 1024 * 1024)])
+              }
+              return { metric: { pod }, values }
+            })
+          }
+        })
+      }
       if (p.startsWith('/apis/metrics.k8s.io/v1beta1/')) {
         if (metricsDisabled)
           return json(
@@ -939,6 +978,21 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       if (!obj) return
       table?.delete(key)
       notify(plural, 'DELETED', obj)
+    },
+    enablePrometheus: () => {
+      prometheus = true
+      store
+        .get('namespaces')
+        ?.set(
+          'monitoring',
+          make('v1', 'Namespace', 'monitoring', undefined, { status: { phase: 'Active' } })
+        )
+      store.get('services')?.set(
+        'monitoring/prometheus-operated',
+        make('v1', 'Service', 'prometheus-operated', 'monitoring', {
+          spec: { clusterIP: 'None', ports: [{ name: 'web', port: 9090 }] }
+        })
+      )
     },
     enableCaretta: (options = {}) => {
       caretta = { forbidden: options.forbidden ?? false, start: Date.now() }

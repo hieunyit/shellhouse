@@ -200,7 +200,6 @@ export function ClusterTab({
   const discoveredAt = useRef(0)
   const [metrics, setMetrics] = useState<MetricsResult | null>(null)
   const [counts, setCounts] = useState<Record<string, number | null>>({})
-  const [history, setHistory] = useState<Record<string, Usage[]>>({})
   const [helpOpen, setHelpOpen] = useState(false)
   const [tableWidth, setTableWidth] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -329,13 +328,6 @@ export function ClusterTab({
         (m) => {
           if (cancelled) return
           setMetrics(m)
-          if (metricScope === 'pods' && m.available)
-            setHistory((h) => {
-              const next: Record<string, Usage[]> = {}
-              for (const [k, u] of Object.entries(m.items))
-                next[k] = [...(h[k] ?? []).slice(-19), u]
-              return next
-            })
         },
         () => undefined
       )
@@ -1589,7 +1581,6 @@ export function ClusterTab({
             obj={detail.obj}
             request={request}
             actions={actionsFor(kindId, detail.obj, readOnly, handlers)}
-            usage={kindId === 'pods' ? (history[objectKey(detail.obj)] ?? null) : null}
             nodeUsage={kindId === 'nodes' ? (metrics?.items[objectKey(detail.obj)] ?? null) : null}
             onClose={() => {
               setDetailKey(null)

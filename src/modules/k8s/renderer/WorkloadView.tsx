@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { RotateCcw, Server } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
-import { Heading, Meter, Pill, Sparkline, type Tone } from '../../../renderer/src/components/panels'
+import { Heading, Meter, Pill, type Tone } from '../../../renderer/src/components/panels'
 import { cleanError } from '../../../renderer/src/lib/format'
-import type { K8sOp, MetricsResult, RolloutRevision, Usage } from '../shared/ops'
+import { UsagePanel } from './Usage'
+import type { K8sOp, RolloutRevision } from '../shared/ops'
 import {
   age,
   formatCpu,
@@ -639,9 +640,6 @@ function ReplicaSets({
 
 // ——— Metrics ———
 
-const METRICS_MS = 15_000
-const HISTORY = 40
-
 /** CPU / RAM của mọi pod thuộc workload (metrics-server), so với requests / limits. */
 export function MetricsOf({
   kindId,
@@ -652,52 +650,7 @@ export function MetricsOf({
   obj: K8sObject
   request: Request
 }): React.JSX.Element {
-  const ns = obj.metadata.namespace
-  const selector = selectorString(o(obj.spec)['selector'])
-  const [samples, setSamples] = useState<{ total: Usage; pods: [string, Usage][] }[]>([])
-  const [available, setAvailable] = useState<boolean | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    const load = (): void => {
-      Promise.all([
-        request<MetricsResult>({ op: 'metrics', scope: 'pods', ...(ns ? { namespace: ns } : {}) }),
-        request<{ items: K8sObject[] }>({
-          op: 'list',
-          kind: 'pods',
-          ...(ns ? { namespace: ns } : {}),
-          ...(selector ? { labelSelector: selector } : {}),
-          limit: 1000
-        })
-      ]).then(
-        ([m, list]) => {
-          if (cancelled) return
-          setAvailable(m.available)
-          if (!m.available) return
-          const pods: [string, Usage][] = list.items.map((p) => [
-            p.metadata.name,
-            m.items[`${p.metadata.namespace ?? ''}/${p.metadata.name}`] ?? { cpu: 0, memory: 0 }
-          ])
-          const total = pods.reduce(
-            (t, [, u]) => ({ cpu: t.cpu + u.cpu, memory: t.memory + u.memory }),
-            { cpu: 0, memory: 0 }
-          )
-          setSamples((h) => [...h.slice(-(HISTORY - 1)), { total, pods }])
-          setError(null)
-        },
-        (e: unknown) => {
-          if (!cancelled) setError(cleanError(e))
-        }
-      )
-    }
-    load()
-    const t = setInterval(load, METRICS_MS)
-    return () => {
-      cancelled = true
-      clearInterval(t)
-    }
-  }, [request, ns, selector])
-
+  const { pods, error } = usePods(obj, request)
   const spec = templateSpec(kindId, obj)
   const per = a(spec['containers']).reduce<{
     cpuReq: number
@@ -717,112 +670,18 @@ export function MetricsOf({
     { cpuReq: 0, memReq: 0, cpuLim: 0, memLim: 0 }
   )
   if (error) return <p className="text-xs text-danger">{error}</p>
-  if (available === false)
-    return (
-      <p className="text-xs text-faint" data-testid="k8s-metrics-unavailable">
-        This cluster has no metrics-server — CPU and memory usage are not available.
-      </p>
-    )
-  const last = samples.at(-1)
-  if (!last) return <p className="text-xs text-faint">Collecting usage…</p>
-  const n = Math.max(1, last.pods.length)
-  const maxCpu = Math.max(...last.pods.map(([, u]) => u.cpu), 1)
-  const maxMem = Math.max(...last.pods.map(([, u]) => u.memory), 1)
-  const pods = [...last.pods].sort((p, q) => q[1].cpu - p[1].cpu)
-  const block = (
-    label: string,
-    value: number,
-    series: number[],
-    fmt: (v: number) => string,
-    req: number,
-    lim: number
-  ): React.JSX.Element => (
-    <div className="rounded-md border border-line p-2">
-      <div className="flex items-baseline justify-between text-xs">
-        <span className="text-muted">{label}</span>
-        <span className="text-sm font-semibold text-fg tabular-nums">{fmt(value)}</span>
-      </div>
-      <Sparkline values={series} max={Math.max(...series, lim * n, req * n, 1)} />
-      <div className="mt-1 flex flex-col gap-1.5">
-        {req > 0 && (
-          <Meter
-            value={value}
-            max={req * n}
-            label="of requests"
-            detail={`${Math.round((value / (req * n)) * 100)}% of ${fmt(req * n)}`}
-          />
-        )}
-        {lim > 0 && (
-          <Meter
-            value={value}
-            max={lim * n}
-            label="of limits"
-            detail={`${Math.round((value / (lim * n)) * 100)}% of ${fmt(lim * n)}`}
-          />
-        )}
-        {!req && !lim && (
-          <span className="text-[11px] text-warning">No requests or limits set</span>
-        )}
-      </div>
-    </div>
-  )
+  if (!pods) return <p className="text-xs text-faint">Loading…</p>
+  const names = pods.map((p) => p.metadata.name).sort()
+  if (!names.length) return <p className="text-xs text-faint">No pods are running.</p>
+  const n = names.length
   return (
-    <div className="flex flex-col gap-3" data-testid="k8s-metrics">
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-2">
-        {block(
-          'CPU',
-          last.total.cpu,
-          samples.map((x) => x.total.cpu),
-          formatCpu,
-          per.cpuReq,
-          per.cpuLim
-        )}
-        {block(
-          'Memory',
-          last.total.memory,
-          samples.map((x) => x.total.memory),
-          formatMemory,
-          per.memReq,
-          per.memLim
-        )}
-      </div>
-      <section>
-        <Heading>By pod</Heading>
-        <div className="flex flex-col gap-1 text-xs">
-          {pods.map(([name, u]) => (
-            <div key={name} className="grid grid-cols-[minmax(0,1fr)_7rem_7rem] items-center gap-2">
-              <span className="truncate font-mono text-fg" title={name}>
-                {name}
-              </span>
-              <Bar value={u.cpu} max={maxCpu} text={formatCpu(u.cpu)} />
-              <Bar value={u.memory} max={maxMem} text={formatMemory(u.memory)} />
-            </div>
-          ))}
-        </div>
-        <p className="mt-1.5 text-[11px] text-faint">Updates every 15 s while this tab is open.</p>
-      </section>
-    </div>
-  )
-}
-
-function Bar({
-  value,
-  max,
-  text
-}: {
-  value: number
-  max: number
-  text: string
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center gap-1.5">
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-subtle">
-        <div
-          className="h-full rounded-full bg-accent-solid"
-          style={{ width: `${Math.min(100, (value / max) * 100)}%` }}
-        />
-      </div>
-      <span className="w-12 text-right text-faint tabular-nums">{text}</span>
-    </div>
+    <UsagePanel
+      request={request}
+      namespace={obj.metadata.namespace ?? 'default'}
+      pods={names}
+      requests={{ cpu: per.cpuReq * n, memory: per.memReq * n }}
+      limits={{ cpu: per.cpuLim * n, memory: per.memLim * n }}
+      perPod
+    />
   )
 }

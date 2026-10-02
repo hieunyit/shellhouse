@@ -13,6 +13,17 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   unhealthy; created time and UID are dropped (the age is in the header) and Labels are folded
   like Annotations, both at the top of Overview. The Security tab is removed. Topology starts with Access (RBAC) and Scheduling
   turned off — tick them in the filter bar when you need them.
+- **Kubernetes Metrics show real history** — when the cluster runs Prometheus (kube-prometheus-stack,
+  Rancher Monitoring, prometheus-server…), CPU and memory charts load the last 15 min / 1 h / 6 h
+  / 24 h through the Kubernetes API proxy; otherwise live samples are kept for the whole session
+  instead of restarting each time the tab opens. Charts scale to the data (no more flat line at the
+  bottom because the limit sets the scale), show time and value axes, request / limit lines and
+  the value under the pointer. The Pod page uses the same charts.
+- **Pod page is shorter** — one summary line (node, IP) instead of six rows; containers show
+  image, ports and requests / limits, with command, mounts and environment folded under Details.
+  ConfigMaps and Secrets open on their data; empty node fields are hidden.
+- **Map shows full namespace names** at any zoom — long names wrap onto two balanced lines (at the
+  dashes) instead of being cut to "cattle-…".
 
 ## [1.2.0-beta.6] - 2026-10-02
 

@@ -494,7 +494,7 @@ select option {
   line-height: 1.15;
 }
 .k8s-map .k8s-far-sub {
-  font-size: min(calc(11.5px / var(--map-zoom)), calc(var(--cap, 9999px) * 0.62));
+  font-size: min(calc(11.5px / var(--map-zoom)), var(--cap-sub, calc(var(--cap, 9999px) * 0.62)));
 }
 .k8s-map .k8s-far-icon {
   width: min(calc(18px / var(--map-zoom)), var(--cap, 9999px));

@@ -4,6 +4,7 @@ import type { LimitedSpawn } from '../../../registry/host-types'
 import { layoutMap, type MapData } from '../../shared/map'
 import { K8sService, type ResolvedClusterConfig } from '../../session-host/service'
 import type {
+  MetricsRange,
   ApplyResult,
   DrainResult,
   MetricsResult,
@@ -30,14 +31,14 @@ const noSpawn: LimitedSpawn = {
   available: () => false
 }
 
-async function setup(): Promise<{
+async function setup(existing?: ApiTestServer): Promise<{
   server: ApiTestServer
   run: <T>(op: unknown) => Promise<T>
   events: { event: string; data: unknown }[]
   until: (pred: () => boolean) => Promise<void>
 }> {
-  const server = await startApiTestServer()
-  cleanups.push(() => server.close())
+  const server = existing ?? (await startApiTestServer())
+  if (!existing) cleanups.push(() => server.close())
   const config: ResolvedClusterConfig = {
     name: 't',
     server: server.url,
@@ -813,5 +814,34 @@ kind: Broken
     })
     // Xoá ngay (k9s "kill").
     await run({ op: 'delete', kind: 'pods', namespace: 'shop', name: 'web-1', force: true })
+  })
+
+  it('metrics.range: lịch sử CPU / RAM từ Prometheus trong cluster; không có → source none', async () => {
+    const { run, server } = await setup()
+    const none = await run<MetricsRange>({
+      op: 'metrics.range',
+      namespace: 'shop',
+      pods: ['web-1'],
+      minutes: 60
+    })
+    expect(none.source).toBe('none')
+    server.enablePrometheus()
+    // Lần dò trước nhớ "không có" 5 phút → phiên mới dò lại.
+    const { run: run2 } = await setup(server)
+    const r = await run2<MetricsRange>({
+      op: 'metrics.range',
+      namespace: 'shop',
+      pods: ['web-1', 'web-2'],
+      minutes: 60
+    })
+    if (r.source !== 'prometheus') throw new Error(JSON.stringify(r))
+    expect(r.via).toBe('monitoring/prometheus-operated')
+    expect(r.cpu.map((x) => x.pod).sort()).toEqual(['web-1', 'web-2'])
+    expect(r.cpu[0]?.points.length).toBeGreaterThan(100)
+    // CPU đổi sang millicore, RAM byte; giá trị thay đổi theo thời gian (không phẳng).
+    const cpu = r.cpu[0]?.points.map((x) => x[1]) ?? []
+    expect(Math.min(...cpu)).toBeGreaterThan(100)
+    expect(Math.max(...cpu) - Math.min(...cpu)).toBeGreaterThan(20)
+    expect(r.memory[0]?.points[0]?.[1]).toBeGreaterThan(60 * 1024 * 1024)
   })
 })

@@ -1048,7 +1048,8 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
     // Chiều rộng đảo: theo diện tích các làn (đảo vuông vừa phải).
     const width = clamp(Math.sqrt(area(lanes)) * 1.7, 540, 1900)
     let y = NS_HEADER
-    let w = 260
+    // Đủ rộng cho tên namespace dài (cattle-impersonation-system…) ngay trên tiêu đề đảo.
+    let w = Math.max(320, ns.length * 9 + 170)
     const placeRow = (row: MapNode[]): void => {
       if (!row.length) return
       const s = shelf(row, width, GAP, ROW_GAP)
@@ -1179,9 +1180,11 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       // Gập: chỉ thẻ tóm tắt — bỏ thẻ con và cạnh trong namespace.
       edges.length = edgeStart
       node.collapsed = true
-      node.w = COLLAPSED_W
+      // Đủ rộng cho tên dài (không cắt tên namespace trên thẻ gập).
+      const cw = Math.max(COLLAPSED_W, ns.length * 9 + 130)
+      node.w = cw
       node.h = COLLAPSED_H
-      islands.push({ ns, node, children: [], w: COLLAPSED_W, h: COLLAPSED_H })
+      islands.push({ ns, node, children: [], w: cw, h: COLLAPSED_H })
     } else islands.push({ ns, node, children, w, h })
   }
 
@@ -1216,7 +1219,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
   )) {
     const members = islands.filter((i) => groupOf(i.ns) === region)
     if (!members.length) continue
-    const width = clamp(Math.sqrt(area(members)) * 1.5, 700, 4200)
+    const width = clamp(Math.sqrt(area(members)) * 1.5, 760, 4200)
     const s = shelf(members, width, 64)
     const stats = members.reduce(
       (acc, m) => ({
@@ -1294,4 +1297,49 @@ export function impactOf(layout: Pick<MapLayout, 'nodes' | 'edges'>, id: string)
     }
   }
   return out
+}
+
+// ——— Nhãn nhìn xa ———
+
+/**
+ * Tách tên thành tối đa 2 dòng cân đối tại dấu phân cách ('-' / khoảng trắng), giữ dấu ở cuối
+ * dòng đầu — để nhìn xa vẫn hiện TRỌN tên với cỡ chữ lớn nhất có thể.
+ */
+export function splitLabel(label: string, sep: RegExp): string[] {
+  let best: string[] = [label]
+  let bestLen = label.length
+  for (let i = 0; i < label.length; i++) {
+    if (!sep.test(label[i] ?? '')) continue
+    const a = label.slice(0, i + 1).trimEnd()
+    const b = label.slice(i + 1).trimStart()
+    if (!a || !b) continue
+    const len = Math.max(a.length, b.length)
+    if (len < bestLen) {
+      best = [a, b]
+      bestLen = len
+    }
+  }
+  return best
+}
+
+/**
+ * Cỡ chữ (đơn vị thế giới) lớn nhất để hiện TRỌN tên trong bề ngang `width`: một dòng nếu đủ
+ * (đạt trần `max`), không thì hai dòng cân đối. `em` = bề rộng trung bình một ký tự, `extra` =
+ * phần cố định thêm vào dòng (icon…) tính theo em.
+ */
+export function fitLabel(
+  label: string,
+  sep: RegExp,
+  width: number,
+  em: number,
+  extra: number,
+  max: number
+): { lines: string[]; size: number } {
+  const sizeFor = (lines: string[]): number =>
+    width / (Math.max(...lines.map((l) => l.length)) * em + extra)
+  const one = sizeFor([label])
+  if (one >= max) return { lines: [label], size: max }
+  const two = splitLabel(label, sep)
+  const size = Math.min(max, sizeFor(two))
+  return size > one ? { lines: two, size } : { lines: [label], size: one }
 }

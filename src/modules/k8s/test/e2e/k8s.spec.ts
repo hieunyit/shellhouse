@@ -685,6 +685,61 @@ test('Kubernetes: trang Deployment (Status / Resources / Pods / ReplicaSets), To
   }
 })
 
+test('Kubernetes: Metrics lấy lịch sử từ Prometheus trong cluster (chọn 15m / 1h / 6h / 24h), trang Pod gọn', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  server.enablePrometheus()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await view.getByTestId('k8s-nav-deployments.apps').click()
+    await view.locator('[data-testid="k8s-row"][data-name="shop/web"]').click()
+    await page.keyboard.press('d')
+    const detail = view.getByTestId('k8s-describe')
+    await detail.getByTestId('k8s-detail-tab-metrics').click()
+    const metrics = detail.getByTestId('k8s-metrics')
+    await expect(metrics).toHaveAttribute('data-source', 'prometheus')
+    await expect(metrics.getByTestId('k8s-metrics-source')).toContainText(
+      'Prometheus · monitoring/prometheus-operated'
+    )
+    await expect(metrics.getByTestId('k8s-metrics-range-1h')).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+    await metrics.getByTestId('k8s-metrics-range-6h').click()
+    // 6 giờ / ~120 điểm → bước 180 s.
+    await expect
+      .poll(() => server.requests.some((r) => r.includes('query_range') && r.includes('step=180')))
+      .toBe(true)
+    // Rê chuột lên biểu đồ → giá trị tại thời điểm đó.
+    const chart = metrics.getByTestId('k8s-metrics-cpu')
+    const box = await chart.boundingBox()
+    if (!box) throw new Error('chart')
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await expect(metrics.getByTestId('k8s-metrics-cpu-hover')).toContainText('m')
+    await expect(metrics).toContainText('By pod')
+
+    // Trang Pod: dòng tóm tắt + Usage (cùng biểu đồ), không còn QoS / Restart policy.
+    await page.keyboard.press('Escape')
+    await view.getByTestId('k8s-nav-pods').click()
+    await view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]').click()
+    await page.keyboard.press('d')
+    await expect(detail.getByTestId('k8s-pod-summary')).toContainText('node-1')
+    await expect(detail.getByTestId('k8s-metrics')).toHaveAttribute('data-source', 'prometheus')
+    await expect(detail.getByText('Restart policy')).toHaveCount(0)
+    await expect(detail.getByTestId('k8s-container')).toContainText('nginx:1.27')
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})
+
 test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đồ, tab Traffic của Deployment', async () => {
   test.setTimeout(60_000)
   const server = await startApiTestServer()

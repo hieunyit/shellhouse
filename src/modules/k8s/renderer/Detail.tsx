@@ -8,7 +8,6 @@ import {
   LabelChips,
   Meter,
   Pill,
-  Sparkline,
   TabStrip,
   SidePanel,
   type Tone
@@ -29,6 +28,7 @@ import {
 import { HAS_PODS, keyLabel, toMenu, type K8sAction } from './actions'
 import { TOPOLOGY_KINDS, TopologyOf } from './Topology'
 import { TRAFFIC_KINDS, TrafficOf } from './TrafficTab'
+import { UsagePanel } from './Usage'
 import {
   MetricsOf,
   POD_TEMPLATE_KINDS,
@@ -86,7 +86,6 @@ export function Detail({
   obj,
   request,
   actions,
-  usage,
   nodeUsage,
   onClose,
   onOpenPod,
@@ -100,8 +99,6 @@ export function Detail({
   obj: K8sObject
   request: Request
   actions: K8sAction[]
-  /** Lịch sử mức dùng (pod) từ metrics-server. */
-  usage: Usage[] | null
   /** Mức dùng hiện tại (node). */
   nodeUsage: Usage | null
   onClose: () => void
@@ -124,7 +121,10 @@ export function Detail({
   const [tab, setTab] = useState<DetailTab>(
     (initialTab === 'related' && !hasRelated) || (initialTab === 'topology' && !hasTopology)
       ? 'overview'
-      : initialTab
+      : // ConfigMap / Secret: nội dung chính là dữ liệu — mở thẳng tab Data.
+        initialTab === 'overview' && hasData
+        ? 'data'
+        : initialTab
   )
   const [wide, setWide] = useState(loadWide)
   const { menu, open: openMenu } = useContextMenu()
@@ -242,7 +242,6 @@ export function Detail({
           <Overview
             kindId={kindId}
             obj={obj}
-            usage={usage}
             nodeUsage={nodeUsage}
             request={request}
             readOnly={readOnly}
@@ -329,6 +328,8 @@ function Conditions({ list }: { list: Obj[] }): React.JSX.Element | null {
   )
 }
 
+/** Container của pod: tên + trạng thái (chỉ khi khác bình thường), image, port, request / limit;
+ * lệnh, mount và biến môi trường gộp vào "Details" (thu gọn). */
 function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Element {
   const statuses = [...a(status['containerStatuses']), ...a(status['initContainerStatuses'])]
   const list = [
@@ -336,90 +337,105 @@ function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Ele
     ...a(spec['containers']).map((c) => ({ c, init: false }))
   ]
   return (
-    <Section title="Containers">
-      <div className="flex flex-col gap-2">
+    <Section title={`Containers ${String(list.length)}`}>
+      <div className="flex flex-col divide-y divide-line">
         {list.map(({ c, init }) => {
           const st = statuses.find((x) => x['name'] === c['name'])
           const state = o(st?.['state'])
           const stateName = Object.keys(state)[0] ?? 'unknown'
           const reason = s(o(state[stateName])['reason'])
-          const tone: Tone =
-            stateName === 'running'
-              ? st?.['ready'] === true
-                ? 'ok'
-                : 'warn'
+          const healthy = stateName === 'running' && st?.['ready'] === true
+          const done = stateName === 'terminated' && reason === 'Completed'
+          const tone: Tone = healthy
+            ? 'ok'
+            : done
+              ? 'muted'
               : stateName === 'terminated'
-                ? reason === 'Completed'
-                  ? 'muted'
-                  : 'bad'
+                ? 'bad'
                 : 'warn'
+          const restarts = Number(st?.['restartCount'] ?? 0)
           const res = o(c['resources'])
           const req = o(res['requests'])
           const lim = o(res['limits'])
           const env = a(c['env'])
+          const mounts = a(c['volumeMounts'])
+          const ports = a(c['ports'])
+          const command = [
+            ...(Array.isArray(c['command']) ? (c['command'] as unknown[]) : []),
+            ...(Array.isArray(c['args']) ? (c['args'] as unknown[]) : [])
+          ].map(s)
+          const rq = (k: string): string =>
+            req[k] === undefined && lim[k] === undefined
+              ? ''
+              : `${s(req[k]) || '—'} / ${s(lim[k]) || '—'}`
           return (
-            <div
-              key={s(c['name'])}
-              className="rounded-md border border-line p-2"
-              data-testid="k8s-container"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-fg">{s(c['name'])}</span>
-                {init && (
-                  <Pill tone="muted" dot={false}>
-                    init
-                  </Pill>
+            <div key={s(c['name'])} className="py-2 first:pt-0" data-testid="k8s-container">
+              <div className="flex items-center gap-2 text-xs">
+                <span className={cx('size-2 shrink-0 rounded-full', CONTAINER_DOT[tone])} />
+                <span className="font-semibold text-fg">{s(c['name'])}</span>
+                {init && <span className="text-faint">init</span>}
+                {!healthy && <span className={CONTAINER_TEXT[tone]}>{reason || stateName}</span>}
+                {restarts > 0 && (
+                  <span className={restarts > 5 ? 'text-danger' : 'text-warning'}>
+                    {restarts} restart{restarts === 1 ? '' : 's'}
+                  </span>
                 )}
-                <Pill tone={tone}>{reason || stateName}</Pill>
-                <span className="ml-auto text-[11px] text-faint">
-                  {s(st?.['restartCount'] ?? 0)} restarts
-                </span>
               </div>
-              <div className="mt-1 truncate font-mono text-[11px] text-muted" title={s(c['image'])}>
+              <div
+                className="mt-0.5 truncate pl-4 font-mono text-[11px] text-muted"
+                title={s(c['image'])}
+              >
                 {s(c['image'])}
               </div>
-              <DefList
-                className="mt-1.5"
-                items={[
-                  a(c['ports']).length > 0 && [
-                    'Ports',
-                    a(c['ports'])
-                      .map(
-                        (p) =>
-                          `${s(p['containerPort'])}/${s(p['protocol']) || 'TCP'}${p['name'] ? ` (${s(p['name'])})` : ''}`
-                      )
-                      .join(', ')
-                  ],
-                  (req['cpu'] !== undefined || lim['cpu'] !== undefined) && [
-                    'CPU',
-                    `${s(req['cpu']) || '—'} / ${s(lim['cpu']) || '—'}`
-                  ],
-                  (req['memory'] !== undefined || lim['memory'] !== undefined) && [
-                    'Memory',
-                    `${s(req['memory']) || '—'} / ${s(lim['memory']) || '—'}`
-                  ],
-                  Array.isArray(c['command']) && [
-                    'Command',
-                    <span key="c" className="font-mono">
-                      {(c['command'] as unknown[]).map(s).join(' ')}
-                    </span>
-                  ],
-                  a(c['volumeMounts']).length > 0 && [
-                    'Mounts',
-                    <span key="m" className="font-mono">
-                      {a(c['volumeMounts'])
-                        .map((m) => `${s(m['mountPath'])}${m['readOnly'] === true ? ' (ro)' : ''}`)
+              <div className="mt-0.5 flex flex-wrap gap-x-4 pl-4 text-[11px] text-faint">
+                {ports.length > 0 && (
+                  <span>
+                    Ports{' '}
+                    <span className="text-fg">
+                      {ports
+                        .map(
+                          (p) =>
+                            `${s(p['containerPort'])}${p['protocol'] && s(p['protocol']) !== 'TCP' ? `/${s(p['protocol'])}` : ''}`
+                        )
                         .join(', ')}
                     </span>
-                  ]
-                ]}
-              />
-              {env.length > 0 && (
-                <details className="mt-1.5 text-[11px]">
-                  <summary className="cursor-pointer text-faint">
-                    Environment ({env.length})
+                  </span>
+                )}
+                {rq('cpu') && (
+                  <span>
+                    CPU <span className="text-fg tabular-nums">{rq('cpu')}</span>
+                  </span>
+                )}
+                {rq('memory') && (
+                  <span>
+                    Memory <span className="text-fg tabular-nums">{rq('memory')}</span>
+                  </span>
+                )}
+              </div>
+              {(command.length > 0 || mounts.length > 0 || env.length > 0) && (
+                <details className="mt-1 pl-4 text-[11px]">
+                  <summary className="cursor-pointer text-faint hover:text-fg">
+                    Details
+                    {env.length > 0 ? ` · ${String(env.length)} env` : ''}
+                    {mounts.length > 0 ? ` · ${String(mounts.length)} mounts` : ''}
                   </summary>
-                  <div className="mt-1 flex flex-col gap-0.5 font-mono">
+                  <div className="mt-1 flex flex-col gap-1.5 font-mono">
+                    {command.length > 0 && (
+                      <div className="break-all">
+                        <span className="text-faint">$ </span>
+                        <span className="text-fg">{command.join(' ')}</span>
+                      </div>
+                    )}
+                    {mounts.map((m) => (
+                      <div key={s(m['mountPath'])} className="truncate text-muted">
+                        {s(m['mountPath'])}
+                        <span className="text-faint">
+                          {' '}
+                          ← {s(m['name'])}
+                          {m['readOnly'] === true ? ' (ro)' : ''}
+                        </span>
+                      </div>
+                    ))}
                     {env.map((e) => (
                       <div key={s(e['name'])} className="truncate">
                         <span className="text-fg">{s(e['name'])}</span>
@@ -440,6 +456,21 @@ function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Ele
       </div>
     </Section>
   )
+}
+
+const CONTAINER_DOT: Record<Tone, string> = {
+  ok: 'bg-success',
+  warn: 'bg-warning',
+  bad: 'bg-danger-solid',
+  info: 'bg-accent',
+  muted: 'bg-line-strong'
+}
+const CONTAINER_TEXT: Record<Tone, string> = {
+  ok: 'text-success',
+  warn: 'text-warning',
+  bad: 'text-danger',
+  info: 'text-accent',
+  muted: 'text-faint'
 }
 
 /** Labels / Annotations / Owner — thông tin nhận diện, đặt đầu tab Overview (thu gọn). */
@@ -499,7 +530,6 @@ function Overview(props: React.ComponentProps<typeof OverviewBody>): React.JSX.E
 function OverviewBody({
   kindId,
   obj,
-  usage,
   nodeUsage,
   request,
   readOnly,
@@ -509,7 +539,6 @@ function OverviewBody({
 }: {
   kindId: string
   obj: K8sObject
-  usage: Usage[] | null
   nodeUsage: Usage | null
   request: Request
   readOnly: boolean
@@ -523,67 +552,58 @@ function OverviewBody({
   switch (kindId) {
     case 'pods': {
       const st = podStatus(obj)
-      const last = usage?.at(-1)
+      const node = s(spec['nodeName'])
+      const containers = a(spec['containers'])
+      const sum = (pick: (r: Obj) => unknown, parse: (v: unknown) => number): number =>
+        containers.reduce((n, c) => n + parse(pick(o(c['resources']))), 0)
       return (
         <>
-          <Section title="Status">
-            <DefList
-              items={[
-                [
-                  'Status',
-                  <Pill key="s" tone={TONE[st.tone] ?? 'muted'}>
-                    {st.text}
-                  </Pill>
-                ],
-                [
-                  'Node',
-                  spec['nodeName'] && onNavigate ? (
-                    <button
-                      key="n"
-                      type="button"
-                      className="text-left hover:text-accent hover:underline"
-                      data-testid="k8s-pod-node-link"
-                      onClick={() => {
-                        onNavigate('nodes', s(spec['nodeName']))
-                      }}
-                    >
-                      {s(spec['nodeName'])}
-                    </button>
-                  ) : (
-                    s(spec['nodeName']) || '—'
-                  )
-                ],
-                ['Pod IP', s(status['podIP']) || '—'],
-                ['QoS', s(status['qosClass']) || '—'],
-                ['Service acct', s(spec['serviceAccountName']) || 'default'],
-                ['Restart policy', s(spec['restartPolicy'])]
-              ]}
-            />
-          </Section>
-          {usage && usage.length > 0 && last && (
+          <div
+            className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs"
+            data-testid="k8s-pod-summary"
+          >
+            {node ? (
+              onNavigate ? (
+                <button
+                  type="button"
+                  className="text-muted hover:text-accent"
+                  data-testid="k8s-pod-node-link"
+                  onClick={() => {
+                    onNavigate('nodes', node)
+                  }}
+                >
+                  Node <span className="text-fg">{node}</span>
+                </button>
+              ) : (
+                <span className="text-muted">
+                  Node <span className="text-fg">{node}</span>
+                </span>
+              )
+            ) : (
+              <span className="text-warning">Not scheduled</span>
+            )}
+            {s(status['podIP']) && (
+              <span className="text-muted">
+                IP <span className="font-mono text-fg">{s(status['podIP'])}</span>
+              </span>
+            )}
+          </div>
+          {obj.metadata.namespace && st.text === 'Running' && (
             <Section title="Usage">
-              <div className="grid grid-cols-2 gap-3" data-testid="k8s-pod-usage">
-                <div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted">CPU</span>
-                    <span className="text-fg tabular-nums">{formatCpu(last.cpu)}</span>
-                  </div>
-                  <Sparkline
-                    values={usage.map((u) => u.cpu)}
-                    max={Math.max(...usage.map((u) => u.cpu), 1)}
-                  />
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted">Memory</span>
-                    <span className="text-fg tabular-nums">{formatMemory(last.memory)}</span>
-                  </div>
-                  <Sparkline
-                    values={usage.map((u) => u.memory)}
-                    max={Math.max(...usage.map((u) => u.memory), 1)}
-                  />
-                </div>
-              </div>
+              <UsagePanel
+                request={request}
+                namespace={obj.metadata.namespace}
+                pods={[obj.metadata.name]}
+                requests={{
+                  cpu: sum((r) => o(r['requests'])['cpu'], parseCpu),
+                  memory: sum((r) => o(r['requests'])['memory'], parseMemory)
+                }}
+                limits={{
+                  cpu: sum((r) => o(r['limits'])['cpu'], parseCpu),
+                  memory: sum((r) => o(r['limits'])['memory'], parseMemory)
+                }}
+                perPod={false}
+              />
             </Section>
           )}
           <Containers spec={spec} status={status} />
@@ -703,11 +723,18 @@ function OverviewBody({
           <Section title="System">
             <DefList
               items={[
-                ['Kubelet', s(info['kubeletVersion'])],
-                ['OS', `${s(info['osImage'])} (${s(info['architecture'])})`],
-                ['Kernel', s(info['kernelVersion'])],
-                ['Runtime', s(info['containerRuntimeVersion'])],
-                [
+                // Chỉ dòng có giá trị — không hiện "OS ()" hay ô trống.
+                Boolean(s(info['kubeletVersion'])) && ['Kubelet', s(info['kubeletVersion'])],
+                Boolean(s(info['osImage'])) && [
+                  'OS',
+                  `${s(info['osImage'])}${s(info['architecture']) ? ` (${s(info['architecture'])})` : ''}`
+                ],
+                Boolean(s(info['kernelVersion'])) && ['Kernel', s(info['kernelVersion'])],
+                Boolean(s(info['containerRuntimeVersion'])) && [
+                  'Runtime',
+                  s(info['containerRuntimeVersion'])
+                ],
+                a(status['addresses']).length > 0 && [
                   'Addresses',
                   a(status['addresses'])
                     .map((x) => s(x['address']))

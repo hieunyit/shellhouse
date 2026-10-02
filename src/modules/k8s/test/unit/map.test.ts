@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   filterMapData,
+  fitLabel,
+  splitLabel,
   groupNamespaces,
   groupingKeys,
   layoutMap,
@@ -384,5 +386,20 @@ describe('bản đồ cluster (Map)', () => {
     expect(pvc.y > db.y).toBe(true)
     // Làn khác cột với nhau.
     expect(mid(db)).not.toBe(mid(api))
+  })
+
+  it('nhãn nhìn xa: hiện trọn tên — một dòng nếu đủ chỗ, không thì hai dòng cân đối', () => {
+    expect(splitLabel('cattle-impersonation-system', /[-.]/)).toEqual([
+      'cattle-',
+      'impersonation-system'
+    ])
+    expect(splitLabel('INGRESS & NETWORKING', /\s/)).toEqual(['INGRESS &', 'NETWORKING'])
+    expect(splitLabel('default', /[-.]/)).toEqual(['default'])
+    // Tên ngắn trên đảo rộng: một dòng, chạm trần.
+    expect(fitLabel('shop', /[-.]/, 500, 0.6, 1.6, 40)).toEqual({ lines: ['shop'], size: 40 })
+    // Tên dài trên đảo hẹp: hai dòng, chữ to hơn một dòng.
+    const long = fitLabel('cattle-impersonation-system', /[-.]/, 258, 0.6, 1.6, 80)
+    expect(long.lines).toHaveLength(2)
+    expect(long.size).toBeGreaterThan(258 / (27 * 0.6 + 1.6))
   })
 })

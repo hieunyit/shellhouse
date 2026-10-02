@@ -91,6 +91,20 @@ export const K8sOp = z.discriminatedUnion('op', [
     scope: z.enum(['pods', 'nodes']),
     namespace: Namespace.optional()
   }),
+  /**
+   * Lịch sử CPU / RAM của các pod (Prometheus trong cluster nếu có — xem session-host/prometheus).
+   * Không có Prometheus → source 'none'.
+   */
+  z.object({
+    op: z.literal('metrics.range'),
+    namespace: Namespace,
+    pods: z.array(Name).min(1).max(200),
+    minutes: z
+      .number()
+      .int()
+      .min(5)
+      .max(7 * 24 * 60)
+  }),
   /** Số liệu tổng quan cluster (kiểu Lens). */
   z.object({ op: z.literal('overview'), namespaces: z.array(Namespace).max(64) }),
   /** Bản đồ cluster: workload, pod, service, route, PVC, HPA, policy — gọn để vẽ. */
@@ -436,6 +450,25 @@ export interface ApplyResult {
   action: 'configured' | 'error'
   error?: string
 }
+
+/** Một đường theo pod: [thời điểm ms, giá trị] — CPU millicore, RAM byte. */
+export interface MetricsSeries {
+  pod: string
+  points: [number, number][]
+}
+
+export type MetricsRange =
+  | {
+      source: 'prometheus'
+      /** "namespace/service" của Prometheus đang dùng. */
+      via: string
+      start: number
+      end: number
+      step: number
+      cpu: MetricsSeries[]
+      memory: MetricsSeries[]
+    }
+  | { source: 'none'; reason: string }
 
 export interface PortForwardInfo {
   id: string

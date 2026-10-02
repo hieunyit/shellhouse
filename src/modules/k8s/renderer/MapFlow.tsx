@@ -14,7 +14,7 @@ import {
   type NodeProps
 } from '@xyflow/react'
 import { cx } from '../../../renderer/src/components/ui'
-import { podGrid, workloadKindLabel, type MapNode, type MapTone } from '../shared/map'
+import { fitLabel, podGrid, workloadKindLabel, type MapNode, type MapTone } from '../shared/map'
 import { BANDS, bandOf, formatRate } from '../shared/traffic'
 import { HelmBadge, KindIcon, TechIcon } from './icons'
 
@@ -119,6 +119,7 @@ export const RegionNode = memo(function RegionNode({
   const n = data.node
   const { band } = useMap()
   const far = band === 'far'
+  const regionLabel = fitLabel(n.label, /\s/, n.w * 0.9, 0.8, 1, n.w * 0.06)
   // Vùng không có viền: chỉ một mảng nền rất nhạt + nhãn — bớt "hộp lồng hộp".
   return (
     <div
@@ -129,16 +130,19 @@ export const RegionNode = memo(function RegionNode({
     >
       {far ? (
         <div
-          className="k8s-far-label truncate px-[2.5%] pt-[1.2%] font-semibold tracking-[0.16em] uppercase"
+          className="k8s-far-label flex flex-col px-[2.5%] pt-[1.2%] font-semibold tracking-[0.16em] whitespace-nowrap uppercase"
           style={
             {
               color: 'var(--map-region-label)',
               '--map-far-px': '16px',
-              '--cap': `${String(Math.round(n.w * 0.04))}px`
+              // Vừa bề ngang vùng (chữ hoa giãn ~0.8em mỗi ký tự) — hiện trọn tên vùng.
+              '--cap': `${String(Math.round(regionLabel.size))}px`
             } as React.CSSProperties
           }
         >
-          {n.label}
+          {regionLabel.lines.map((l) => (
+            <span key={l}>{l}</span>
+          ))}
         </div>
       ) : (
         <div className="flex items-center gap-2.5 px-7 pt-3.5">
@@ -313,20 +317,35 @@ export const NamespaceNode = memo(function NamespaceNode({
 
   if (ctx.band === 'far') {
     // Nhìn xa: tên + số liệu + vòng tình trạng giữa đảo, chữ cỡ cố định trên màn hình.
-    const cap = `${String(Math.round(Math.min(n.w * 0.16, n.h * 0.3)))}px`
+    // Cỡ chữ vừa đủ để hiện TRỌN tên trên bề ngang đảo (~0.6em mỗi ký tự + vòng tình trạng) —
+    // không cắt "cattle-…"; tên quá dài so với đảo thì xuống dòng.
+    const nsLabel = fitLabel(n.label, /[-.]/, n.w * 0.86, 0.6, 1.6, n.h * 0.26)
+    const cap = `${String(Math.round(nsLabel.size))}px`
     return (
       <div
         className={cx(
           island,
           'flex flex-col items-center justify-center gap-[0.35em] rounded-[28px] px-[6%]'
         )}
-        style={{ '--cap': cap } as React.CSSProperties}
+        style={
+          {
+            '--cap': cap,
+            // Dòng phụ ("2 workloads · 2 pods") cũng hiện trọn: co theo bề ngang đảo.
+            '--cap-sub': `${String(Math.round(Math.min((n.w * 0.86) / (n.sub.length * 0.56), n.h * 0.14)))}px`
+          } as React.CSSProperties
+        }
       >
         <div className="flex max-w-full items-center gap-[0.4em]">
           {ring(20, 3.5, { className: 'k8s-far-icon' })}
-          <span className="k8s-far-label truncate font-semibold text-fg">{n.label}</span>
+          <span className="k8s-far-label flex flex-col font-semibold whitespace-nowrap text-fg">
+            {nsLabel.lines.map((l) => (
+              <span key={l}>{l}</span>
+            ))}
+          </span>
         </div>
-        <div className="k8s-far-sub max-w-full truncate text-faint tabular-nums">{n.sub}</div>
+        <div className="k8s-far-sub max-w-full text-center whitespace-nowrap text-faint tabular-nums">
+          {n.sub}
+        </div>
         {n.techs && n.techs.length > 0 && (
           <div className="flex gap-[0.3em]">
             {n.techs.map((t) => (
@@ -377,7 +396,7 @@ export const NamespaceNode = memo(function NamespaceNode({
       <div className="flex h-[34px] items-center gap-2 pr-3.5 pl-2.5">
         {toggle('Collapse', 15)}
         <KindIcon kind="namespaces" size={16} />
-        <span className="max-w-[45%] shrink-0 truncate text-[13.5px] font-semibold tracking-tight text-fg">
+        <span className="min-w-0 shrink-[0.15] truncate text-[13.5px] font-semibold tracking-tight text-fg">
           {n.label}
         </span>
         <span className="min-w-0 truncate text-[11.5px] text-faint tabular-nums">{n.sub}</span>

@@ -1,3 +1,4 @@
+import { findPrometheus, podRange, type PromTarget } from './prometheus'
 import { randomUUID } from 'node:crypto'
 import { readFile, writeFile } from 'node:fs/promises'
 import { createServer, type Server, type Socket } from 'node:net'
@@ -11,6 +12,7 @@ import {
   isMutating,
   type ContextRef,
   type DiscoveredKind,
+  type MetricsRange,
   type PortForwardInfo
 } from '../shared/ops'
 import {
@@ -100,6 +102,9 @@ interface Forward {
   resolved: { pod: string; port: number }
 }
 
+/** Không thấy Prometheus → dò lại sau chừng này (có thể vừa được cài). */
+const PROM_RETRY_MS = 5 * 60_000
+
 export class K8sService implements HostModuleSession {
   private client: KubeClient | null = null
   private cluster: ResolvedClusterConfig | null = null
@@ -108,6 +113,8 @@ export class K8sService implements HostModuleSession {
   private readonly subscriptions = new Map<string, () => void>()
   private readonly watches = new Map<string, SharedWatch>()
   private readonly forwards = new Map<string, Forward>()
+  /** Prometheus đã dò (null = không có; dò lại sau PROM_RETRY_MS). */
+  private prom: { target: PromTarget | null; at: number } | null = null
   private readonly edits = new Map<string, () => void>()
   private disposed = false
 
@@ -225,6 +232,15 @@ export class K8sService implements HostModuleSession {
         )
       case 'metrics':
         return metrics(client, op.scope, op.namespace, signal)
+      case 'metrics.range': {
+        const target = await this.prometheus(client, signal)
+        if (!target)
+          return {
+            source: 'none',
+            reason: 'No Prometheus found in the cluster (or not allowed to use services/proxy)'
+          } satisfies MetricsRange
+        return podRange(client, target, op.namespace, op.pods, op.minutes, signal)
+      }
       case 'overview':
         return overview(client, op.namespaces)
       case 'argoSync':
@@ -1078,6 +1094,14 @@ export class K8sService implements HostModuleSession {
       'forwards',
       [...this.forwards.values()].map((f) => f.info)
     )
+  }
+
+  private async prometheus(client: KubeClient, signal?: AbortSignal): Promise<PromTarget | null> {
+    if (this.prom && (this.prom.target || Date.now() - this.prom.at < PROM_RETRY_MS))
+      return this.prom.target
+    const target = await findPrometheus(client, signal)
+    this.prom = { target, at: Date.now() }
+    return target
   }
 
   private stopForward(f: Forward): void {
