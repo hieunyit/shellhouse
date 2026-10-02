@@ -442,7 +442,61 @@ function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Ele
   )
 }
 
-function Overview({
+/** Labels / Annotations / Owner — thông tin nhận diện, đặt đầu tab Overview (thu gọn). */
+function MetaHeader({ obj }: { obj: K8sObject }): React.JSX.Element | null {
+  const meta = obj.metadata
+  const owners = meta.ownerReferences ?? []
+  const annotations = Object.entries(meta.annotations ?? {})
+  if (!owners.length && !annotations.length && !Object.keys(meta.labels ?? {}).length) return null
+  return (
+    <div
+      className="mb-3 flex flex-col gap-1 border-b border-line pb-3"
+      data-testid="k8s-meta-header"
+    >
+      {owners.length > 0 && (
+        <p className="text-xs text-faint">
+          Owned by{' '}
+          <span className="text-fg">{owners.map((x) => `${x.kind}/${x.name}`).join(', ')}</span>
+        </p>
+      )}
+      {Object.keys(meta.labels ?? {}).length > 0 && (
+        <details className="text-xs" data-testid="k8s-labels">
+          <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-faint uppercase">
+            Labels ({Object.keys(meta.labels ?? {}).length})
+          </summary>
+          <div className="mt-1.5">
+            <LabelChips labels={meta.labels} />
+          </div>
+        </details>
+      )}
+      {annotations.length > 0 && (
+        <details className="text-xs" data-testid="k8s-annotations">
+          <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-faint uppercase">
+            Annotations ({annotations.length})
+          </summary>
+          <div className="mt-1 flex flex-col gap-1 font-mono text-[11px]">
+            {annotations.map(([k, v]) => (
+              <div key={k} className="break-all">
+                <span className="text-muted">{k}</span>: <span className="text-fg">{v}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
+
+function Overview(props: React.ComponentProps<typeof OverviewBody>): React.JSX.Element {
+  return (
+    <>
+      <MetaHeader obj={props.obj} />
+      <OverviewBody {...props} />
+    </>
+  )
+}
+
+function OverviewBody({
   kindId,
   obj,
   usage,
@@ -465,43 +519,7 @@ function Overview({
 }): React.JSX.Element {
   const spec = o(obj.spec)
   const status = o(obj.status)
-  const meta = obj.metadata
-  const owners = meta.ownerReferences ?? []
-  const annotations = Object.entries(meta.annotations ?? {})
-  const common = (
-    <>
-      {owners.length > 0 && (
-        <p className="mb-3 text-xs text-faint">
-          Owned by{' '}
-          <span className="text-fg">{owners.map((x) => `${x.kind}/${x.name}`).join(', ')}</span>
-        </p>
-      )}
-      {Object.keys(meta.labels ?? {}).length > 0 && (
-        <details className="mb-2 text-xs" data-testid="k8s-labels">
-          <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-faint uppercase">
-            Labels ({Object.keys(meta.labels ?? {}).length})
-          </summary>
-          <div className="mt-1.5">
-            <LabelChips labels={meta.labels} />
-          </div>
-        </details>
-      )}
-      {annotations.length > 0 && (
-        <details className="mb-4 text-xs">
-          <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-faint uppercase">
-            Annotations ({annotations.length})
-          </summary>
-          <div className="mt-1 flex flex-col gap-1 font-mono text-[11px]">
-            {annotations.map(([k, v]) => (
-              <div key={k} className="break-all">
-                <span className="text-muted">{k}</span>: <span className="text-fg">{v}</span>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-    </>
-  )
+
   switch (kindId) {
     case 'pods': {
       const st = podStatus(obj)
@@ -570,7 +588,6 @@ function Overview({
           )}
           <Containers spec={spec} status={status} />
           <Conditions list={a(status['conditions'])} />
-          {common}
         </>
       )
     }
@@ -586,12 +603,7 @@ function Overview({
           onOpenPod={onOpenPod}
           {...(onNavigate ? { onNavigate } : {})}
           {...(onNotify ? { onNotify } : {})}
-          common={
-            <>
-              <Conditions list={a(status['conditions'])} />
-              {common}
-            </>
-          }
+          common={<Conditions list={a(status['conditions'])} />}
         />
       )
     case 'replicasets.apps': {
@@ -650,7 +662,6 @@ function Overview({
             />
           </Section>
           <Conditions list={a(status['conditions'])} />
-          {common}
         </>
       )
     }
@@ -724,7 +735,6 @@ function Overview({
             </Section>
           )}
           <Conditions list={a(status['conditions'])} />
-          {common}
         </>
       )
     }
@@ -767,7 +777,6 @@ function Overview({
               ]}
             />
           </Section>
-          {common}
         </>
       )
     case 'ingresses.networking.k8s.io':
@@ -801,7 +810,6 @@ function Overview({
               </div>
             </Section>
           )}
-          {common}
         </>
       )
     case 'cronjobs.batch':
@@ -839,7 +847,6 @@ function Overview({
               ]}
             />
           </Section>
-          {common}
         </>
       )
     case 'jobs.batch':
@@ -863,7 +870,6 @@ function Overview({
             />
           </Section>
           <Conditions list={a(status['conditions'])} />
-          {common}
         </>
       )
     case 'persistentvolumeclaims':
@@ -884,14 +890,12 @@ function Overview({
               ]}
             />
           </Section>
-          {common}
         </>
       )
     default:
       return (
         <>
           <Conditions list={a(status['conditions'])} />
-          {common}
         </>
       )
   }

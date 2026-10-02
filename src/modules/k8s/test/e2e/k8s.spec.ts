@@ -600,6 +600,10 @@ test('Kubernetes: trang Deployment (Status / Resources / Pods / ReplicaSets), To
     await expect(detail.getByTestId('k8s-resources-table')).toContainText('nginx:1.27')
     await expect(detail.getByTestId('k8s-replicaset-row')).toHaveCount(2)
     await expect(detail.getByTestId('k8s-replicaset-rollback')).toHaveCount(1)
+    // Labels / Annotations (thu gọn) đứng đầu Overview, trước Status.
+    const metaBox = await detail.getByTestId('k8s-meta-header').boundingBox()
+    const statusBox = await detail.getByTestId('k8s-workload-status').boundingBox()
+    expect((metaBox?.y ?? 1e9) < (statusBox?.y ?? 0)).toBe(true)
     // Gọn: không còn Strategy / UID.
     await expect(detail.getByText('Strategy', { exact: true })).toHaveCount(0)
     await expect(detail.getByText('UID', { exact: true })).toHaveCount(0)
