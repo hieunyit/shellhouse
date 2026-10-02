@@ -359,4 +359,34 @@ describe('Map — công nghệ, gateway, policy, blast radius', () => {
       { from: root.id, to: 'external||cdn.segment.io', type: 'calls', label: '10 B/s' }
     ])
   })
+
+  it('đường từ ingress controller ghi rõ Ingress nào đang route tới workload', () => {
+    const root = {
+      id: 'deployments.apps|console-stg|console-frontend',
+      kindLabel: 'Deployment',
+      namespace: 'console-stg',
+      name: 'console-frontend'
+    }
+    const r = liveTopology(
+      root,
+      [
+        {
+          client: { kind: 'Deployment', ns: 'ingress-nginx', name: 'ingress-nginx-controller' },
+          server: { kind: 'Deployment', ns: 'console-stg', name: 'console-frontend' },
+          rate: 2048
+        },
+        {
+          client: { kind: 'Deployment', ns: 'console-stg', name: 'console-backend' },
+          server: { kind: 'Deployment', ns: 'console-stg', name: 'console-frontend' },
+          rate: 5
+        }
+      ],
+      (v) => `${String(v)} B/s`,
+      ['console-frontend-ingress']
+    )
+    expect(r.edges.map((e) => e.label)).toEqual([
+      '2048 B/s · via Ingress console-frontend-ingress',
+      '5 B/s'
+    ])
+  })
 })

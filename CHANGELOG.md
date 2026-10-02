@@ -6,6 +6,20 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Traffic service map readable on real clusters** — columns are now "hops from the entry point"
+  instead of the longest call chain, so services that call each other back and forth no longer
+  stretch the map into dozens of columns; within a column services are ordered next to the ones
+  they talk to, so cables cross less.
+- **Workload map: traffic between namespaces goes card to card** — when zoomed in, live traffic
+  from another namespace is drawn from the exact workload that calls to the exact workload being
+  called (not namespace to namespace). Workloads inside a collapsed namespace connect to its
+  island. The far zoom still sums traffic between namespaces.
+- **Topology names the Ingress behind the ingress controller** — Caretta sees the real TCP
+  connection from the controller pods (ingress-nginx, Traefik…), so the live edge now reads e.g.
+  "2.1 KB/s · via Ingress console-frontend-ingress".
+
 ## [1.2.0-beta.8] - 2026-10-02
 
 ### Added

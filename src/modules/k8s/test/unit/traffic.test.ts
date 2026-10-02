@@ -89,4 +89,40 @@ describe('Caretta — parse, gộp, tốc độ, băng cố định', () => {
       for (const b of g.nodes)
         if (a !== b && a.col === b.col) expect(Math.abs(a.y - b.y) >= a.h).toBe(true)
   })
+
+  it('service map: mesh gọi qua lại dày đặc vẫn gọn (cột = số bước từ điểm vào)', () => {
+    const peer = (name: string) => ({ kind: 'Deployment', ns: 'app', name })
+    const names = Array.from({ length: 30 }, (_, i) => `svc-${String(i)}`)
+    const rates = names.flatMap((n, i) =>
+      names
+        .filter((_, j) => j !== i && (j + i) % 3 === 0)
+        .map((m) => ({ client: peer(n), server: peer(m), port: '80', rate: 10 }))
+    )
+    const nginx = { kind: 'Deployment', ns: 'ingress', name: 'nginx' }
+    const g = trafficGraph([
+      { client: nginx, server: peer('svc-0'), port: '80', rate: 5 },
+      ...rates,
+      {
+        client: peer('svc-1'),
+        server: { kind: 'external', ns: '', name: 'db' },
+        port: '5432',
+        rate: 1
+      }
+    ])
+    expect(new Set(g.nodes.map((n) => n.col)).size).toBeLessThanOrEqual(6)
+    expect(g.nodes.find((n) => n.peer.name === 'nginx')?.col).toBe(0)
+    expect(g.nodes.find((n) => n.peer.name === 'db')?.col).toBe(
+      Math.max(...g.nodes.map((n) => n.col))
+    )
+    // Không có điểm vào (toàn vòng) vẫn xếp đủ node.
+    const ring = trafficGraph(
+      names.map((n, i) => ({
+        client: peer(n),
+        server: peer(names[(i + 1) % 30] ?? n),
+        port: '80',
+        rate: 1
+      }))
+    )
+    expect(ring.nodes).toHaveLength(30)
+  })
 })

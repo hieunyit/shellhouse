@@ -278,6 +278,10 @@ const PEER_KIND: Record<string, { id: string; label: string }> = {
  * Bên gọi tới / được gọi bởi workload gốc theo Caretta → node + cạnh `calls` (nhãn = băng thông).
  * Bên ở namespace khác hay ngoài cluster vẫn hiện — chính là thứ Topology cấu hình không thấy.
  */
+/** Tên workload của các ingress controller / gateway phổ biến. */
+export const INGRESS_CONTROLLER =
+  /ingress|nginx|traefik|haproxy|envoy|contour|kong|gateway|istio-ingress|ambassador|emissary/i
+
 export function liveTopology(
   root: { id: string; kindLabel: string; namespace: string; name: string },
   rates: readonly {
@@ -285,7 +289,9 @@ export function liveTopology(
     server: { kind: string; ns: string; name: string }
     rate: number
   }[],
-  format: (rate: number) => string
+  format: (rate: number) => string,
+  /** Tên các Ingress đang route tới root — gắn vào đường từ ingress controller. */
+  ingresses: readonly string[] = []
 ): TopologyResult {
   const isRoot = (p: { kind: string; ns: string; name: string }): boolean =>
     p.kind === root.kindLabel && p.ns === root.namespace && p.name === root.name
@@ -295,7 +301,12 @@ export function liveTopology(
     return k ? `${k.id}|${p.ns}|${p.name}` : `external||${p.name}`
   }
   const nodes = new Map<string, TopologyNode>()
-  const sums = new Map<string, { from: string; to: string; rate: number }>()
+  const sums = new Map<string, { from: string; to: string; rate: number; via?: string }>()
+  // Ingress chỉ là cấu hình; kết nối TCP thật đi từ pod controller (nginx, traefik…) → ghi rõ
+  // controller đang phục vụ Ingress nào.
+  const via = ingresses.length
+    ? `via Ingress ${ingresses.slice(0, 2).join(', ')}${ingresses.length > 2 ? ` +${String(ingresses.length - 2)}` : ''}`
+    : undefined
   for (const r of rates) {
     if (!isRoot(r.client) && !isRoot(r.server)) continue
     if (isRoot(r.client) && isRoot(r.server)) continue
@@ -317,7 +328,13 @@ export function liveTopology(
     const key = `${from}>${to}`
     const prev = sums.get(key)
     if (prev) prev.rate += r.rate
-    else sums.set(key, { from, to, rate: r.rate })
+    else
+      sums.set(key, {
+        from,
+        to,
+        rate: r.rate,
+        ...(via && isRoot(r.server) && INGRESS_CONTROLLER.test(r.client.name) ? { via } : {})
+      })
   }
   return {
     root: root.id,
@@ -326,7 +343,7 @@ export function liveTopology(
       from: e.from,
       to: e.to,
       type: 'calls' as const,
-      label: format(e.rate)
+      label: e.via ? `${format(e.rate)} · ${e.via}` : format(e.rate)
     })),
     notes: []
   }

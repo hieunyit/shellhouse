@@ -458,20 +458,26 @@ function MapInner({
         const id = `w:${kind}:${p.ns}/${p.name}`
         return index.byId.has(id) ? id : null
       }
-      if (p.kind === 'Pod') return index.byId.get(`p:${p.ns}/${p.name}`)?.parent ?? null
-      return null
+      if (p.kind === 'Pod') {
+        const parent = index.byId.get(`p:${p.ns}/${p.name}`)?.parent
+        if (parent) return parent
+      }
+      // Workload không có thẻ (namespace đang thu gọn) → nối vào đảo namespace của nó.
+      return p.ns && index.byId.has(`n:${p.ns}`) ? `n:${p.ns}` : null
     },
     [index]
   )
   const trafficEdges = useMemo(() => {
-    const out: { from: string; to: string; rate: number }[] = []
+    // Nhiều workload cùng một đảo thu gọn → gộp cặp trùng (id cạnh phải duy nhất).
+    const out = new Map<string, { from: string; to: string; rate: number }>()
     for (const r of byPair(traffic.rates)) {
       const a = peerNode(r.client)
       const b = peerNode(r.server)
       if (!a || !b || a === b) continue
-      out.push({ from: a, to: b, rate: r.rate })
+      const key = `${a}>${b}`
+      out.set(key, { from: a, to: b, rate: (out.get(key)?.rate ?? 0) + r.rate })
     }
-    return out
+    return [...out.values()]
   }, [traffic.rates, peerNode])
 
   // Liên quan tới mục đang chọn / trỏ: chính nó, cha, con, và mọi thứ nối qua cạnh (3 bước).
@@ -620,16 +626,21 @@ function MapInner({
         })
       }
     if (options.traffic && trafficEdges.length) {
-      // Khác namespace: luôn gộp thành đường giữa hai đảo (không xuyên qua thẻ trong đảo);
-      // cùng namespace (nhìn gần): đường giữa hai thẻ workload.
+      // Nhìn xa: khác namespace gộp thành đường giữa hai đảo. Nhìn gần / vừa: đường đúng từ thẻ
+      // workload gọi tới thẻ workload nhận (cong, kể cả khác namespace) — thấy rõ ai gọi ai;
+      // cùng namespace chỉ vẽ khi nhìn gần.
       const cross = new Map<string, { from: string; to: string; rate: number }>()
-      const local: { from: string; to: string; rate: number }[] = []
+      const local: { from: string; to: string; rate: number; cross?: boolean }[] = []
       for (const tr of trafficEdges) {
         const a = index.byId.get(tr.from)?.ns
         const b = index.byId.get(tr.to)?.ns
         if (!a || !b) continue
         if (a === b) {
-          if (band === 'near') local.push(tr)
+          if (band === 'near' && tr.from !== tr.to) local.push(tr)
+          continue
+        }
+        if (band !== 'far') {
+          local.push({ ...tr, cross: true })
           continue
         }
         const key = `n:${a}>n:${b}`
@@ -654,7 +665,12 @@ function MapInner({
           type: 'map',
           // Dưới thẻ workload (thẻ che phần đường đi qua) — không đè chữ.
           zIndex: 2,
-          data: { kind: 'traffic', rate: t.rate, color },
+          data: {
+            kind: 'traffic',
+            rate: t.rate,
+            color,
+            ...('cross' in t && t.cross ? { cross: true } : {})
+          },
           markerEnd: arrow(color)
         })
       }

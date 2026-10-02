@@ -187,7 +187,15 @@ export function TopologyOf({
     const extra = liveTopology(
       { id: graph.root, kindLabel: liveKind, namespace: ns ?? '', name },
       traffic.rates,
-      formatRate
+      formatRate,
+      // Ingress phía trước root (Ingress → Service → root) trong đồ thị đã có.
+      graph.nodes
+        .filter(
+          (n) =>
+            n.kind === 'ingresses.networking.k8s.io' &&
+            graph.edges.some((e) => e.from === n.id && e.type === 'routes')
+        )
+        .map((n) => n.name)
     )
     return extra.edges.length ? mergeTopology(graph, extra) : graph
   }, [graph, liveKind, traffic.status, traffic.rates, ns, name])

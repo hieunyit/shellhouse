@@ -761,7 +761,8 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await page.keyboard.press('Escape')
     await view.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
-    // Lấy hai mẫu (5 s) → live; traffic shop → default (web → pod tool) nối giữa hai đảo.
+    // Lấy hai mẫu (5 s) → live; traffic shop → default: nối đúng thẻ web → thẻ pod lẻ của default
+    // (không gộp thành đường giữa hai đảo).
     await expect(map.getByTestId('k8s-map-traffic-status')).toHaveAttribute('data-status', 'live', {
       timeout: 15_000
     })
@@ -769,7 +770,7 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await map.getByTestId('k8s-map-result').filter({ hasText: 'Workload' }).first().click()
     await expect(
       map.locator(
-        '[data-testid="k8s-map-traffic-edge"][data-source="n:shop"][data-target="n:default"]'
+        '[data-testid="k8s-map-traffic-edge"][data-source="w:deployments.apps:shop/web"][data-target="w:pods:default/standalone"]'
       )
     ).toHaveCount(1)
     const panel = view.getByTestId('k8s-map-panel')

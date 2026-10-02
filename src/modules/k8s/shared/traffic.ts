@@ -195,7 +195,8 @@ const ROW_GAP = 22
 
 /**
  * Service map: mỗi bên (workload / ngoài cluster) một node, xếp cột trái → phải theo hướng gọi
- * (nguồn trước, đích ngoài cluster ở cột cuối). Vòng lặp (A ↔ B) không làm lệch cột vô hạn.
+ * (cột = số bước từ điểm vào, đích ngoài cluster ở cột cuối) — vòng gọi không kéo dãn bản đồ. Trong
+ * cột sắp theo vị trí các bên nối tới (barycenter) để ít đường cắt nhau.
  */
 export function trafficGraph(rates: readonly TrafficRate[]): TrafficGraph {
   const pairs = byPair(rates)
@@ -207,25 +208,40 @@ export function trafficGraph(rates: readonly TrafficRate[]): TrafficGraph {
   const edges = pairs
     .map((r) => ({ from: peerKey(r.client), to: peerKey(r.server), rate: r.rate }))
     .filter((e) => e.from !== e.to)
-  const incoming = new Map<string, number>()
-  for (const e of edges) incoming.set(e.to, (incoming.get(e.to) ?? 0) + 1)
-  // Cột = đường dài nhất từ một nguồn (lặp có giới hạn — chịu được vòng).
-  const col = new Map<string, number>([...peers.keys()].map((k) => [k, 0]))
-  for (let i = 0; i < peers.size; i++) {
-    let changed = false
-    for (const e of edges) {
-      const c = (col.get(e.from) ?? 0) + 1
-      if (c > (col.get(e.to) ?? 0) && c < peers.size) {
-        col.set(e.to, c)
-        changed = true
-      }
+  const out = new Map<string, string[]>()
+  const indeg = new Map<string, number>([...peers.keys()].map((k) => [k, 0]))
+  for (const e of edges) {
+    out.set(e.from, [...(out.get(e.from) ?? []), e.to])
+    indeg.set(e.to, (indeg.get(e.to) ?? 0) + 1)
+  }
+  // Cột = số bước gọi tính từ điểm vào (BFS từ các node không ai gọi tới). Không dùng đường dài
+  // nhất: mesh gọi qua lại dày đặc sẽ thành chuỗi hàng chục cột; số bước thì luôn gọn.
+  const col = new Map<string, number>()
+  const sent = new Map<string, number>()
+  for (const e of edges) sent.set(e.from, (sent.get(e.from) ?? 0) + e.rate)
+  let queue = [...peers.keys()].filter((k) => (indeg.get(k) ?? 0) === 0)
+  for (;;) {
+    for (const k of queue) col.set(k, 0)
+    while (queue.length) {
+      const next: string[] = []
+      for (const u of queue)
+        for (const v of out.get(u) ?? [])
+          if (!col.has(v)) {
+            col.set(v, (col.get(u) ?? 0) + 1)
+            next.push(v)
+          }
+      queue = next
     }
-    if (!changed) break
+    // Phần chỉ toàn vòng (không có điểm vào): lấy node gửi nhiều nhất làm gốc.
+    const rest = [...peers.keys()].filter((k) => !col.has(k))
+    if (!rest.length) break
+    rest.sort((x, y) => (sent.get(y) ?? 0) - (sent.get(x) ?? 0) || x.localeCompare(y))
+    queue = rest.slice(0, 1)
   }
   // Đích ngoài cluster chỉ nhận (DB, API bên ngoài): cột cuối.
   const last = Math.max(0, ...col.values())
   for (const [k, p] of peers)
-    if (p.kind === 'external' && (incoming.get(k) ?? 0) > 0 && !edges.some((e) => e.from === k))
+    if (p.kind === 'external' && (indeg.get(k) ?? 0) > 0 && !(out.get(k)?.length ?? 0))
       col.set(k, Math.max(last, 1))
   const rateIn = new Map<string, number>()
   const rateOut = new Map<string, number>()
@@ -233,16 +249,44 @@ export function trafficGraph(rates: readonly TrafficRate[]): TrafficGraph {
     rateIn.set(e.to, (rateIn.get(e.to) ?? 0) + e.rate)
     rateOut.set(e.from, (rateOut.get(e.from) ?? 0) + e.rate)
   }
-  const cols = new Map<number, string[]>()
-  for (const [k, c] of col) cols.set(c, [...(cols.get(c) ?? []), k])
+  const maxCol = Math.max(0, ...col.values())
+  const cols: string[][] = Array.from({ length: maxCol + 1 }, () => [])
+  for (const [k, c] of col) cols[c]?.push(k)
+  // Thứ tự trong cột: ban đầu theo namespace / tên; rồi vài lượt barycenter theo cột bên trái
+  // và bên phải (đường ngắn, ít cắt nhau).
+  const label = (k: string): string => {
+    const p = peers.get(k)
+    return `${p?.ns || '~'}/${p?.name ?? ''}`
+  }
+  for (const c of cols) c.sort((a, b) => label(a).localeCompare(label(b)))
+  const pos = new Map<string, number>()
+  const reindex = (): void => {
+    for (const c of cols) c.forEach((k, i) => pos.set(k, i / Math.max(1, c.length - 1)))
+  }
+  reindex()
+  const neighbours = new Map<string, string[]>()
+  for (const e of edges) {
+    neighbours.set(e.from, [...(neighbours.get(e.from) ?? []), e.to])
+    neighbours.set(e.to, [...(neighbours.get(e.to) ?? []), e.from])
+  }
+  for (let pass = 0; pass < 4; pass++) {
+    for (const c of cols) {
+      const bary = new Map<string, number>()
+      for (const k of c) {
+        const ns = (neighbours.get(k) ?? []).filter((n) => col.get(n) !== col.get(k))
+        bary.set(
+          k,
+          ns.length ? ns.reduce((n, x) => n + (pos.get(x) ?? 0), 0) / ns.length : (pos.get(k) ?? 0)
+        )
+      }
+      c.sort((a, b) => (bary.get(a) ?? 0) - (bary.get(b) ?? 0) || label(a).localeCompare(label(b)))
+    }
+    reindex()
+  }
   const nodes: TrafficGraphNode[] = []
-  let height = 0
-  for (const [c, keys] of [...cols.entries()].sort((a, b) => a[0] - b[0])) {
-    keys.sort((a, b) => {
-      const pa = peers.get(a)
-      const pb = peers.get(b)
-      return `${pa?.ns ?? ''}/${pa?.name ?? ''}`.localeCompare(`${pb?.ns ?? ''}/${pb?.name ?? ''}`)
-    })
+  const height = Math.max(0, ...cols.map((c) => c.length * (NODE_H + ROW_GAP) - ROW_GAP))
+  cols.forEach((keys, c) => {
+    const offset = (height - (keys.length * (NODE_H + ROW_GAP) - ROW_GAP)) / 2
     keys.forEach((k, i) => {
       const peer = peers.get(k)
       if (!peer) return
@@ -251,20 +295,13 @@ export function trafficGraph(rates: readonly TrafficRate[]): TrafficGraph {
         peer,
         col: c,
         x: c * (NODE_W + COL_GAP),
-        y: i * (NODE_H + ROW_GAP),
+        y: offset + i * (NODE_H + ROW_GAP),
         w: NODE_W,
         h: NODE_H,
         inRate: rateIn.get(k) ?? 0,
         outRate: rateOut.get(k) ?? 0
       })
     })
-    height = Math.max(height, keys.length * (NODE_H + ROW_GAP) - ROW_GAP)
-  }
-  // Canh giữa từng cột theo chiều dọc (đồ thị cân, đường ngắn hơn).
-  for (const n of nodes) {
-    const count = cols.get(n.col)?.length ?? 1
-    n.y += (height - (count * (NODE_H + ROW_GAP) - ROW_GAP)) / 2
-  }
-  const maxCol = Math.max(0, ...nodes.map((n) => n.col))
+  })
   return { nodes, edges, width: (maxCol + 1) * (NODE_W + COL_GAP) - COL_GAP, height }
 }
