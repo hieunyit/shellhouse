@@ -1,6 +1,6 @@
 import type { Client, SFTPWrapper, Stats } from 'ssh2'
-import type { SftpEntry, SftpListing , SftpPreview } from '@shared/sftp'
-import { joinRemote } from '@shared/sftp'
+import type { SftpEntry, SftpListing, SftpPreview } from '@shared/sftp'
+import { FILE_CHANGED, MAX_WRITE_BYTES, joinRemote } from '@shared/sftp'
 import { createLimiter } from '../../node-shared/pool'
 
 const MAX_RECURSIVE_DELETE = 10_000
@@ -183,12 +183,52 @@ export class SftpService implements LossGuard {
       return {
         path,
         size: st.size,
+        mtime: st.mtime * 1000,
         data: buf.subarray(0, read).toString('base64'),
         truncated: st.size > read
       }
     } finally {
       s.close(handle, () => undefined)
     }
+  }
+
+  /** Ghi đè nội dung file tại chỗ (giữ owner / quyền / hard link) — xem op `write`. */
+  async write(
+    path: string,
+    data: Buffer,
+    expect?: { mtime: number; size: number }
+  ): Promise<{ size: number; mtime: number }> {
+    if (data.length > MAX_WRITE_BYTES)
+      throw new Error('The file is too large to save from the editor')
+    const s = await this.channel()
+    if (expect) {
+      const st = await this.statOrNull(path)
+      if (st && (st.mtime * 1000 !== expect.mtime || st.size !== expect.size))
+        throw new Error(FILE_CHANGED)
+    }
+    const handle = await this.guarded<Buffer>((cb) => {
+      s.open(path, 'w', cb)
+    })
+    try {
+      let written = 0
+      while (written < data.length) {
+        const len = Math.min(32 * 1024, data.length - written)
+        await this.guarded<undefined>((cb) => {
+          s.write(handle, data, written, len, written, (err) => {
+            cb(err, undefined)
+          })
+        })
+        written += len
+      }
+    } finally {
+      await new Promise<void>((resolve) => {
+        s.close(handle, () => {
+          resolve()
+        })
+      })
+    }
+    const st = await this.stat(path)
+    return { size: st.size, mtime: st.mtime * 1000 }
   }
 
   async mkdir(path: string): Promise<void> {

@@ -13,7 +13,17 @@ export function FilesSection(): React.JSX.Element {
       <SectionTitle description="Editing files on a server opens a local copy; every save is uploaded back.">
         Remote files
       </SectionTitle>
-      <Field label="Editor" hint="Leave empty to use the app your system opens the file type with.">
+      <Checkbox
+        label="Edit text files in Shellhouse"
+        description="Opens config files, scripts and other text in an editor tab with syntax highlighting; Ctrl+S saves straight to the server. Binary and very large files still open in the editor below."
+        data-testid="setting-editor-in-app"
+        checked={files.inApp}
+        onChange={(e) => void update({ files: { inApp: e.target.checked } })}
+      />
+      <Field
+        label="External editor"
+        hint="Leave empty to use the app your system opens the file type with."
+      >
         <div className="flex gap-2">
           <Input
             mono

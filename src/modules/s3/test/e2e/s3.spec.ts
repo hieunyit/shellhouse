@@ -91,6 +91,25 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
       .poll(() => (existsSync(saved) ? readFileSync(saved, 'utf8') : ''))
       .toBe('nội dung báo cáo')
 
+    // Sửa ngay trong app: nút Edit → tab editor, Ctrl+S ghi thẳng lên bucket.
+    await file.click()
+    await view.getByTestId('s3-edit').click()
+    const editor = page.getByTestId('editor')
+    await expect(editor.getByTestId('editor-path')).toHaveText('s3://demo/reports/bao-cao.txt')
+    await expect(editor.locator('.cm-content')).toContainText('nội dung báo cáo')
+    await editor.locator('.cm-line').first().click()
+    await page.keyboard.press('End')
+    await page.keyboard.type(' (đã sửa)')
+    await page.keyboard.press('Control+s')
+    await expect(editor.getByTestId('editor-state')).toHaveText('Saved')
+    expect(await (await fetch(url)).text()).toBe('nội dung báo cáo (đã sửa)')
+    await page
+      .locator('[data-testid="tab"]')
+      .filter({ hasText: 'bao-cao.txt' })
+      .getByTestId('tab-close')
+      .click()
+    await expect(editor).toHaveCount(0)
+
     // Đổi tên (F2), rồi copy ra gốc bucket (copy trên server).
     await file.click()
     await page.keyboard.press('F2')
@@ -130,7 +149,7 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
     await row.getByTestId('s3-bucket-calc').click()
     await expect(row.getByTestId('s3-bucket-objects')).toHaveText('2')
     await expect(row.getByTestId('s3-bucket-size')).toHaveText(
-      `${2 * Buffer.byteLength('nội dung báo cáo')} B`
+      `${2 * Buffer.byteLength('nội dung báo cáo (đã sửa)')} B`
     )
 
     // Bỏ ghim từ thanh bên.

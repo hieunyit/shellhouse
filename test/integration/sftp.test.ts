@@ -1,8 +1,17 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { FOLDER_EXISTS, type TransferStatus } from '@shared/sftp'
+import { FILE_CHANGED, FOLDER_EXISTS, type TransferStatus } from '@shared/sftp'
 import { downloadFolder, uploadFolder } from '../../src/session-host/sftp/folders'
 import { SftpService } from '../../src/session-host/sftp/service'
 import { PART_SUFFIX, TransferQueue } from '../../src/session-host/sftp/transfers'
@@ -82,6 +91,37 @@ describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
     expect(file).toMatchObject({ size: 5 })
     // Windows OpenSSH chỉ giả lập quyền POSIX (không có 0o640) — app hiển thị đúng thứ server báo.
     if (process.platform !== 'win32') expect(file?.mode).toBe(0o640)
+  })
+
+  it('editor trong app: ghi tại chỗ (giữ quyền, hard link), báo khi file đã bị sửa nơi khác', async () => {
+    const { remoteRoot, sftp } = await setup()
+    const file = join(remoteRoot, 'nginx.conf')
+    writeFileSync(file, 'worker_processes 1;\n', { mode: 0o640 })
+    linkSync(file, join(remoteRoot, 'hard-link.conf'))
+    const opened = await sftp.preview(file, 1024)
+    expect(opened.size).toBe(20)
+
+    const saved = await sftp.write(file, Buffer.from('worker_processes auto;\n'), {
+      mtime: opened.mtime,
+      size: opened.size
+    })
+    expect(readFileSync(file, 'utf8')).toBe('worker_processes auto;\n')
+    expect(readFileSync(join(remoteRoot, 'hard-link.conf'), 'utf8')).toBe(
+      'worker_processes auto;\n'
+    )
+    expect(statSync(file).mode & 0o777).toBe(0o640)
+    expect(saved.size).toBe(23)
+
+    // Người khác sửa file (mtime khác) → không ghi đè, báo FILE_CHANGED.
+    writeFileSync(file, 'changed elsewhere\n')
+    utimesSync(file, new Date(), new Date(Date.now() + 5000))
+    await expect(
+      sftp.write(file, Buffer.from('mine\n'), { mtime: saved.mtime, size: saved.size })
+    ).rejects.toThrow(FILE_CHANGED)
+    expect(readFileSync(file, 'utf8')).toBe('changed elsewhere\n')
+    // Người dùng chọn ghi đè → không kèm expect.
+    await sftp.write(file, Buffer.from('mine\n'))
+    expect(readFileSync(file, 'utf8')).toBe('mine\n')
   })
 
   it('mkdir, rename, chmod, xoá đệ quy (không đi theo symlink ra ngoài)', async () => {

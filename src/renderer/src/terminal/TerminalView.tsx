@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { LookMenu } from './LookMenu'
 import { useTerminalFind } from '../stores/terminal-find'
 import { FindBar } from './FindBar'
@@ -108,6 +108,12 @@ export function TerminalView({
     setLastState(state)
     if (state === 'connected') setConnectedSeq((n) => n + 1)
   }
+  // Editor trong app mở từ SFTP của tab này: "nơi chứa" hiện trên thanh editor.
+  const tabTitle = useTabs((s) => s.tabs.find((t) => t.id === tabId)?.title ?? '')
+  const sftpOrigin = useMemo(
+    () => ({ key: tabId, label: tabTitle.replace(/ \(SFTP\)$/, '') }),
+    [tabId, tabTitle]
+  )
   const runSftp = useCallback(
     (op: SftpOp) =>
       controllers.get(tabId)?.sftp(op) ?? Promise.reject(new Error('The tab was closed')),
@@ -336,6 +342,7 @@ export function TerminalView({
                   layout="pane"
                   localTarget={localTarget}
                   actionsRef={sftpActions}
+                  origin={sftpOrigin}
                 />
                 {prompt && !multiExec && (
                   <PromptDialog
@@ -375,7 +382,12 @@ export function TerminalView({
           />
         )}
         {panel === 'sftp' && (
-          <SftpPanel run={runSftp} transfers={transfers} connected={connected} />
+          <SftpPanel
+            run={runSftp}
+            transfers={transfers}
+            connected={connected}
+            origin={sftpOrigin}
+          />
         )}
         {panel === 'forwards' && (
           <ForwardsPanel

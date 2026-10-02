@@ -36,7 +36,26 @@ export interface HomeTarget {
   kind: 'home'
 }
 
-export type TabTarget = TerminalTarget | ModuleTabTarget | HomeTarget
+/** Editor trong app: `key` trỏ vào tài liệu đang mở (stores/editors — chỉ trong bộ nhớ). */
+export interface EditorTarget {
+  kind: 'editor'
+  key: string
+}
+
+export type TabTarget = TerminalTarget | ModuleTabTarget | HomeTarget | EditorTarget
+
+/** Tab không mở lại / nhân bản / chia màn hình được (không có "phiên" để tạo lại). */
+const singular = (t: TabTarget): boolean => t.kind === 'home' || t.kind === 'editor'
+
+/**
+ * Chặn đóng tab (editor còn thay đổi chưa lưu): trả false = giữ tab. Đặt bởi chính view của tab.
+ */
+const closeGuards = new Map<string, () => boolean>()
+export function setCloseGuard(tabId: string, guard: (() => boolean) | null): void {
+  if (guard) closeGuards.set(tabId, guard)
+  else closeGuards.delete(tabId)
+}
+const mayClose = (id: string): boolean => closeGuards.get(id)?.() ?? true
 
 export interface Tab {
   id: string
@@ -77,6 +96,8 @@ interface TabsState {
   addLocal: (shellId?: string) => string
   /** Mở (hoặc chuyển tới) tab Home. */
   openHome: () => string
+  /** Mở (hoặc chuyển tới) tab editor của tài liệu `key`. */
+  openEditor: (title: string, key: string) => string
   addSsh: (target: { host: string; port: number; username: string }) => string
   addHost: (host: { id: string; label: string }, options?: OpenHostOptions) => string
   /** Mở tab của module (dùng `openModuleTab` của registry — nó kiểm tham số, đặt tiêu đề). */
@@ -106,7 +127,7 @@ let localCounter = 0
 /** Nhớ tab vừa đóng (bỏ Home và terminal của module — mở lại không có nghĩa). */
 function remember(closed: ClosedTab[], tabs: Tab[]): ClosedTab[] {
   const add = tabs
-    .filter((t) => t.target.kind !== 'home' && t.target.kind !== 'module-terminal')
+    .filter((t) => !singular(t.target) && t.target.kind !== 'module-terminal')
     .map((t) => ({ title: t.title, target: t.target, ...(t.view ? { view: t.view } : {}) }))
   return [...closed, ...add].slice(-MAX_CLOSED)
 }
@@ -164,6 +185,14 @@ export const useTabs = create<TabsState>((set, get) => {
       }
       return add('Home', { kind: 'home' })
     },
+    openEditor: (title, key) => {
+      const existing = get().tabs.find((t) => t.target.kind === 'editor' && t.target.key === key)
+      if (existing) {
+        set({ activeId: existing.id })
+        return existing.id
+      }
+      return add(title, { kind: 'editor', key })
+    },
     addSsh: (t) =>
       add(`${t.username}@${t.host}${t.port === 22 ? '' : `:${t.port}`}`, { kind: 'ssh', ...t }),
     addHost: (host, options) => {
@@ -215,7 +244,7 @@ export const useTabs = create<TabsState>((set, get) => {
     split: (direction) => {
       const { tabs, activeId } = get()
       const source = tabs.find((t) => t.id === activeId)
-      if (!source || source.target.kind === 'home') return null
+      if (!source || singular(source.target)) return null
       const title =
         source.target.kind === 'local'
           ? (shellName(source.target.shellId) ?? `Local ${++localCounter}`)
@@ -224,7 +253,7 @@ export const useTabs = create<TabsState>((set, get) => {
     },
     duplicate: (id) => {
       const source = get().tabs.find((t) => t.id === id)
-      if (!source || source.target.kind === 'home') return null
+      if (!source || singular(source.target)) return null
       const title =
         source.target.kind === 'local'
           ? (shellName(source.target.shellId) ?? `Local ${++localCounter}`)
@@ -238,16 +267,23 @@ export const useTabs = create<TabsState>((set, get) => {
       )
     },
     closeOthers: (id) => {
+      // Tab còn việc chưa lưu (và người dùng chọn giữ) ở lại.
+      const keep = new Set(
+        get()
+          .tabs.filter((t) => t.id !== id && !mayClose(t.id))
+          .map((t) => t.id)
+      )
       set((s) => ({
-        tabs: s.tabs.filter((t) => t.id === id),
+        tabs: s.tabs.filter((t) => t.id === id || keep.has(t.id)),
         activeId: id,
         closed: remember(
           s.closed,
-          s.tabs.filter((t) => t.id !== id)
+          s.tabs.filter((t) => t.id !== id && !keep.has(t.id))
         )
       }))
     },
     close: (id) => {
+      if (!mayClose(id)) return
       set((s) => {
         const index = s.tabs.findIndex((t) => t.id === id)
         if (index === -1) return s

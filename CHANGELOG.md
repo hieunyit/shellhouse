@@ -23,6 +23,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   inside its own tmux session (`shellhouse-1`, `-2`…). When Wi-Fi drops or the laptop sleeps,
   reconnecting — even after restarting Shellhouse — brings you back to the same prompt with your
   programs still running. Servers without tmux get a plain shell, with a note in the terminal.
+- **Built-in editor** — double-click a text file in SFTP (or **Edit** on an S3 object) to open it
+  in an editor tab: syntax highlighting for YAML, JSON, nginx, shell, Dockerfile, INI / .env,
+  Python, SQL and more, search, line numbers, word wrap. **Ctrl+S saves straight to the server**
+  (in place — owner, permissions and hard links are kept; on S3 the content type and metadata are
+  kept). If someone changed the file since you opened it, you choose: overwrite or reload theirs.
+  Windows line endings are preserved, and closing a tab with unsaved changes asks first. Binary
+  and very large files still open in your local editor (Settings → Files).
 
 - **Kubernetes: cluster Map** — the whole cluster as a live map you can pan and zoom like a
   street map. Namespaces are islands grouped into regions by purpose (your applications, ingress

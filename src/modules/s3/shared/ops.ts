@@ -67,6 +67,11 @@ const LocalPath = z
   .max(4096)
   .refine((p) => !p.includes('\0'))
 
+/** Editor trong app: object lớn nhất đọc / ghi được. */
+export const S3_EDIT_MAX_BYTES = 8 * 1024 * 1024
+/** Lưu mà object đã đổi (ETag khác) kể từ lúc mở. */
+export const S3_OBJECT_CHANGED = 'The object was changed in the bucket since you opened it'
+
 export const S3Op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('listBuckets') }),
   z.object({ op: z.literal('createBucket'), bucket: Bucket }),
@@ -124,6 +129,19 @@ export const S3Op = z.discriminatedUnion('op', [
   }),
   /** Tải object về `localPath` rồi theo dõi: lưu trong editor → tải lên đè (nếu server chưa đổi). */
   z.object({ op: z.literal('edit'), bucket: Bucket, key: Key, localPath: LocalPath }),
+  /** Editor trong app: đọc nội dung object (≤ S3_EDIT_MAX_BYTES) kèm ETag. */
+  z.object({ op: z.literal('readText'), bucket: Bucket, key: Key }),
+  /**
+   * Editor trong app: ghi đè object, giữ Content-Type / metadata. `expectEtag` = object phải còn
+   * đúng như lúc mở, khác → lỗi S3_OBJECT_CHANGED.
+   */
+  z.object({
+    op: z.literal('writeText'),
+    bucket: Bucket,
+    key: Key,
+    data: z.string().max(Math.ceil((8 * 1024 * 1024 * 4) / 3) + 4),
+    expectEtag: z.string().max(256).optional()
+  }),
   z.object({ op: z.literal('cancel'), transferId: z.string().max(64) }),
   /** Bucket của một tài khoản khác (đích đồng bộ). */
   z.object({ op: z.literal('listBucketsOf'), accountId: z.string().min(1).max(64) }),

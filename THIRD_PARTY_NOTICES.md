@@ -10,3 +10,5 @@ listed in `node_modules/*/LICENSE`):
 - **Simple Icons** — CC0 1.0 (https://simpleicons.org). Brand logos are trademarks of their
   respective owners and are shown only to identify the software running in a cluster.
 - **React Flow (@xyflow/react)** — © webkid GmbH, MIT License.
+- **CodeMirror 6 (codemirror, @codemirror/\*, @lezer/\*)** — © Marijn Haverbeke and others, MIT
+  License. Used for the built-in file editor.

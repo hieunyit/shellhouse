@@ -80,6 +80,15 @@
   --sh-shadow: 0 12px 32px rgb(16 24 40 / 0.14), 0 2px 6px rgb(16 24 40 / 0.08);
   --sh-overlay: rgb(15 20 30 / 0.2);
   --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234b5360' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  /* Tô màu cú pháp của editor (CodeMirror). */
+  --sh-syn-keyword: #8b3fc9;
+  --sh-syn-string: #2b7a0b;
+  --sh-syn-number: #b45309;
+  --sh-syn-comment: #6b7280;
+  --sh-syn-name: #0f5fb3;
+  --sh-syn-type: #0e7490;
+  --sh-syn-property: #9a3412;
+  --sh-syn-meta: #6d28d9;
 }
 
 [data-theme='dark'] {
@@ -112,6 +121,14 @@
   --sh-shadow: 0 16px 40px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.35);
   --sh-overlay: rgb(0 0 0 / 0.45);
   --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a3abb5' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --sh-syn-keyword: #c792ea;
+  --sh-syn-string: #a5d6a7;
+  --sh-syn-number: #f6b26b;
+  --sh-syn-comment: #7f8895;
+  --sh-syn-name: #82aaff;
+  --sh-syn-type: #67d8ef;
+  --sh-syn-property: #f78c6c;
+  --sh-syn-meta: #b39ddb;
 }
 
 html,

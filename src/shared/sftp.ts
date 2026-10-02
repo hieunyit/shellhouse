@@ -25,6 +25,17 @@ export const SftpOp = z.discriminatedUnion('op', [
       .max(8 * 1024 * 1024)
   }),
   z.object({ op: z.literal('chmod'), path: RemotePath, mode: z.number().int().min(0).max(0o7777) }),
+  /**
+   * Ghi đè nội dung file (editor trong app) — ghi tại chỗ: giữ owner, quyền, hard link. `expect` =
+   * file phải còn đúng như lúc mở (mtime + size), khác → lỗi FILE_CHANGED (đã bị sửa nơi khác).
+   */
+  z.object({
+    op: z.literal('write'),
+    path: RemotePath,
+    /** base64, tối đa MAX_WRITE_BYTES. */
+    data: z.string().max(Math.ceil((8 * 1024 * 1024 * 4) / 3) + 4),
+    expect: z.object({ mtime: z.number(), size: z.number().int().nonnegative() }).optional()
+  }),
   z.object({
     op: z.literal('download'),
     remotePath: RemotePath,
@@ -61,6 +72,12 @@ export const SftpOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('clearDone') })
 ])
 export type SftpOp = z.infer<typeof SftpOp>
+
+/** Ghi file từ editor trong app: lớn nhất chừng này byte. */
+export const MAX_WRITE_BYTES = 8 * 1024 * 1024
+
+/** Lỗi khi lưu mà file trên server đã đổi kể từ lúc mở — renderer hỏi "ghi đè?". */
+export const FILE_CHANGED = 'The file was changed on the server since you opened it'
 
 /** Lỗi khi tải thư mục mà đích đã có thư mục cùng tên — renderer hỏi "gộp và ghi đè?". */
 export const FOLDER_EXISTS = 'A folder with this name already exists at the destination'
@@ -132,6 +149,8 @@ export function baseName(path: string): string {
 export interface SftpPreview {
   path: string
   size: number
+  /** Unix ms (để phát hiện file bị sửa nơi khác khi lưu). */
+  mtime: number
   /** base64 của tối đa maxBytes đầu file. */
   data: string
   truncated: boolean

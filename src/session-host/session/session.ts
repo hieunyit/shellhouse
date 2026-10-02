@@ -492,6 +492,8 @@ export class Session {
         return null
       case 'preview':
         return sftp.preview(op.path, op.maxBytes)
+      case 'write':
+        return sftp.write(op.path, Buffer.from(op.data, 'base64'), op.expect)
       case 'download':
         return transfers.enqueue('download', op.localPath, op.remotePath, op.overwrite)
       case 'upload':

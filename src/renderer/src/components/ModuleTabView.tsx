@@ -1,5 +1,5 @@
 import { createElement } from 'react'
-import { Puzzle, Server, House, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { FileCode, Puzzle, Server, House, SquareTerminal, type LucideIcon } from 'lucide-react'
 import {
   moduleIcon,
   moduleTab,
@@ -77,6 +77,7 @@ export function TabIcon({
 }): React.JSX.Element {
   let icon: LucideIcon = Server
   if (target?.kind === 'home') icon = House
+  else if (target?.kind === 'editor') icon = FileCode
   else if (!target || target.kind === 'local' || target.kind === 'module-terminal')
     icon = SquareTerminal
   else if (target.kind === 'module')

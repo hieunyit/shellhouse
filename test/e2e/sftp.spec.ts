@@ -138,7 +138,10 @@ test('SFTP qua giao diện: tải lên, tạo thư mục, tải về, xoá', asy
   expect(existsSync(join(remote, 'tai-len.bin'))).toBe(false)
 })
 
-test('sửa file trên server: bấm đúp mở editor, lưu → tự tải lên', async ({ app, page }) => {
+test('sửa file trên server bằng editor trên máy (menu chuột phải), lưu → tự tải lên', async ({
+  app,
+  page
+}) => {
   const remote = mkdtempSync(join(tmpdir(), 'sh-remote-'))
   dirs.push(remote)
   writeFileSync(join(remote, 'app.conf'), 'port=80\n')
@@ -166,7 +169,8 @@ test('sửa file trên server: bấm đúp mở editor, lưu → tự tải lên
   await page.getByTestId('toggle-sftp').last().click()
   const panel = page.getByTestId('sftp-panel')
 
-  await panel.locator('[data-testid="sftp-entry"][data-name="app.conf"]').dblclick()
+  await panel.locator('[data-testid="sftp-entry"][data-name="app.conf"]').click({ button: 'right' })
+  await page.getByTestId('menu-sftp-edit').click()
   await expect.poll(async () => (await opened()).length).toBe(1)
   const [local] = await opened()
   if (!local) throw new Error('editor was not opened')
@@ -175,6 +179,82 @@ test('sửa file trên server: bấm đúp mở editor, lưu → tự tải lên
   writeFileSync(local, 'port=8080\n') // "Lưu" trong editor
   await expect.poll(() => readFileSync(join(remote, 'app.conf'), 'utf8')).toBe('port=8080\n')
   await expect(panel.getByTestId('transfer-row').last()).toContainText('Saved to server')
+})
+
+test('editor trong app: bấm đúp file cấu hình, tô màu, Ctrl+S lưu thẳng lên server, xung đột, đóng khi chưa lưu', async ({
+  page
+}) => {
+  const remote = mkdtempSync(join(tmpdir(), 'sh-remote-'))
+  dirs.push(remote)
+  writeFileSync(join(remote, 'nginx.conf'), 'server {\r\n  listen 80;\r\n}\r\n')
+  writeFileSync(join(remote, 'blob.dat'), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00, 0x01]))
+  server = await startTestSshServer([{ username: 'u', password: 'p' }], { sftpRoot: remote })
+
+  await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
+  await page.getByTestId('quick-connect').press('Enter')
+  const tab = await activeTab(page)
+  await page.getByTestId('hostkey-accept').click()
+  await page.getByTestId('prompt-input').fill('p')
+  await page.getByTestId('prompt-submit').click()
+  await waitForText(page, tab, 'welcome to test server')
+  await page.getByTestId('toggle-sftp').last().click()
+  const panel = page.getByTestId('sftp-panel')
+
+  await panel.locator('[data-testid="sftp-entry"][data-name="nginx.conf"]').dblclick()
+  const editor = page.getByTestId('editor')
+  await expect(editor.getByTestId('editor-path')).toHaveText(join(remote, 'nginx.conf'))
+  await expect(editor.getByTestId('editor-language')).toHaveValue('nginx')
+  await expect(editor.locator('.cm-content')).toContainText('listen 80;')
+  await expect(editor.getByTestId('editor-state')).toHaveText('Saved')
+  await expect(editor).toContainText('CRLF')
+
+  // Sửa: dòng 2 → "listen 8080;", Ctrl+S → ghi lên server, giữ CRLF.
+  await editor.locator('.cm-line').nth(1).click()
+  await page.keyboard.press('End')
+  // Home của CodeMirror dừng sau phần thụt lề → chỉ thay phần chữ.
+  await page.keyboard.press('Shift+Home')
+  await page.keyboard.type('listen 8080;')
+  await expect(editor.getByTestId('editor-state')).toHaveText('Modified')
+  await expect(
+    page.locator(`[data-testid="tab"][data-tab-id]`).filter({ hasText: '● nginx.conf' })
+  ).toBeVisible()
+  await page.keyboard.press('Control+s')
+  await expect(editor.getByTestId('editor-state')).toHaveText('Saved')
+  await expect
+    .poll(() => readFileSync(join(remote, 'nginx.conf'), 'utf8'))
+    .toBe('server {\r\n  listen 8080;\r\n}\r\n')
+
+  // Ai đó sửa file trên server → lưu báo xung đột; chọn ghi đè.
+  writeFileSync(join(remote, 'nginx.conf'), 'server {\r\n  listen 9090;\r\n}\r\n')
+  utimesSync(join(remote, 'nginx.conf'), new Date(), new Date(Date.now() + 10_000))
+  await editor.locator('.cm-line').nth(0).click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' # mine')
+  await page.keyboard.press('Control+s')
+  await expect(editor.getByTestId('editor-conflict')).toBeVisible()
+  expect(readFileSync(join(remote, 'nginx.conf'), 'utf8')).toContain('9090')
+  await editor.getByTestId('editor-overwrite').click()
+  await expect(editor.getByTestId('editor-conflict')).toHaveCount(0)
+  await expect
+    .poll(() => readFileSync(join(remote, 'nginx.conf'), 'utf8'))
+    .toBe('server { # mine\r\n  listen 8080;\r\n}\r\n')
+
+  // Chưa lưu → đóng tab hỏi lại; chọn giữ thì tab còn.
+  await editor.locator('.cm-line').nth(2).click()
+  await page.keyboard.type('x')
+  await expect(editor.getByTestId('editor-state')).toHaveText('Modified')
+  const editorTab = page.locator('[data-testid="tab"]').filter({ hasText: 'nginx.conf' })
+  page.once('dialog', (d) => void d.dismiss())
+  await editorTab.getByTestId('tab-close').click()
+  await expect(editorTab).toHaveCount(1)
+  page.once('dialog', (d) => void d.accept())
+  await editorTab.getByTestId('tab-close').click()
+  await expect(editorTab).toHaveCount(0)
+
+  // File nhị phân: không mở bằng editor của app (menu "Edit" vẫn báo rõ).
+  await panel.locator('[data-testid="sftp-entry"][data-name="blob.dat"]').click({ button: 'right' })
+  await page.getByTestId('menu-sftp-edit-app').click()
+  await expect(page.getByTestId('editor-message')).toContainText('binary')
 })
 
 test('tải cả thư mục lên và về qua giao diện', async ({ app, page }) => {

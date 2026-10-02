@@ -80,6 +80,8 @@ const AppearanceSettings = z.object({
 const FileSettings = z.object({
   /** Chương trình mở file khi sửa file trên server; '' = ứng dụng mặc định của hệ điều hành. */
   editor: z.string().max(1024).catch(''),
+  /** Sửa file văn bản bằng editor trong app (false = luôn mở bằng editor trên máy). */
+  inApp: z.boolean().catch(true),
   /** Bấm đúp file trong SFTP: mở để sửa (tự tải lên khi lưu) hoặc tải về. */
   doubleClick: z.enum(['edit', 'download']).catch('edit'),
   /** Số yêu cầu SFTP cùng lúc khi duyệt / tạo / xoá thư mục (sftp-server xử lý tuần tự: >16 ít lợi). */

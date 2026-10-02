@@ -62,6 +62,19 @@ export function whenHostRunning(timeoutMs = 15_000): Promise<void> {
 
 /** Thông báo nổi (toast) của app — module dùng để báo kết quả thao tác. */
 export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
+/** Editor trong app (tab riêng): module cung cấp cách đọc / ghi file. */
+export {
+  openEditorDoc,
+  isBinaryName,
+  fromBase64,
+  toBase64,
+  type EditorDoc,
+  type EditorVersion
+} from '../../renderer/src/editor/docs'
+/** Người dùng muốn sửa file văn bản bằng editor trong app (Cài đặt → Files). */
+export function useEditInApp(): boolean {
+  return useSettings((s) => s.settings.files.inApp)
+}
 export function registerRendererModules(modules: readonly RendererModule[]): void {
   registered = modules
 }

@@ -1,8 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { addStats, type S3Listing, type S3StatsProgress } from '../../shared/ops'
+import { addStats, S3_OBJECT_CHANGED, type S3Listing, type S3StatsProgress } from '../../shared/ops'
 import type { TransferStatus } from '@shared/sftp'
 import { S3Service } from '../../session-host/service'
 import { tempDir } from '../../../../../test/unit/helpers'
@@ -140,6 +141,56 @@ describe('S3', () => {
       expect(existsSync(join(out, 'site'))).toBe(true) // bản trên máy không bị đụng
     }
   )
+
+  it('editor trong app: đọc / ghi object, giữ Content-Type + metadata, báo khi ETag đổi', async () => {
+    const { s } = await setup()
+    const srv = server
+    if (!srv) throw new Error('server')
+    const raw = new S3Client({
+      endpoint: srv.endpoint,
+      region: 'us-east-1',
+      forcePathStyle: true,
+      credentials: { accessKeyId: srv.accessKeyId, secretAccessKey: srv.secretAccessKey }
+    })
+    await raw.send(
+      new PutObjectCommand({
+        Bucket: 'demo',
+        Key: 'conf/app.yaml',
+        Body: 'replicas: 1\n',
+        ContentType: 'application/yaml',
+        Metadata: { owner: 'ops' }
+      })
+    )
+    const opened = (await s.run({ op: 'readText', bucket: 'demo', key: 'conf/app.yaml' })) as {
+      data: string
+      etag: string
+    }
+    expect(Buffer.from(opened.data, 'base64').toString()).toBe('replicas: 1\n')
+    const saved = (await s.run({
+      op: 'writeText',
+      bucket: 'demo',
+      key: 'conf/app.yaml',
+      data: Buffer.from('replicas: 3\n').toString('base64'),
+      expectEtag: opened.etag
+    })) as { etag: string }
+    const head = await raw.send(new HeadObjectCommand({ Bucket: 'demo', Key: 'conf/app.yaml' }))
+    expect(head.ContentType).toBe('application/yaml')
+    expect(head.Metadata).toEqual({ owner: 'ops' })
+    expect(head.ETag).toBe(saved.etag)
+
+    // Ai đó ghi đè object → lưu với ETag cũ bị từ chối.
+    await raw.send(new PutObjectCommand({ Bucket: 'demo', Key: 'conf/app.yaml', Body: 'x: 1\n' }))
+    await expect(
+      s.run({
+        op: 'writeText',
+        bucket: 'demo',
+        key: 'conf/app.yaml',
+        data: Buffer.from('mine\n').toString('base64'),
+        expectEtag: saved.etag
+      })
+    ).rejects.toThrow(S3_OBJECT_CHANGED)
+    raw.destroy()
+  })
 
   it('thống kê, copy / move / đổi tên file và thư mục', { timeout: 60_000 }, async () => {
     const { s, settled } = await setup()

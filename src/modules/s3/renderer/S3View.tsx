@@ -12,6 +12,7 @@ import {
   Download,
   FileDown,
   File,
+  FileCode,
   FilePen,
   Folder,
   FolderInput,
@@ -30,7 +31,15 @@ import {
   Upload,
   X
 } from 'lucide-react'
-import { parentPrefix, type S3Bucket, type S3Entry, type S3Listing, type S3Op } from '../shared/ops'
+import {
+  parentPrefix,
+  S3_EDIT_MAX_BYTES,
+  S3_OBJECT_CHANGED,
+  type S3Bucket,
+  type S3Entry,
+  type S3Listing,
+  type S3Op
+} from '../shared/ops'
 import { joinLocal } from '@shared/local-files'
 import type { TransferStatus } from '@shared/sftp'
 import { Button, cx, IconButton, Notice } from '../../../renderer/src/components/ui'
@@ -61,7 +70,15 @@ import {
 } from './parts'
 import { useS3 } from './store'
 import { s3Api } from './api'
-import { setModuleTabParams, setTabState } from '../../registry/renderer-kit'
+import {
+  fromBase64,
+  isBinaryName,
+  openEditorDoc,
+  setModuleTabParams,
+  setTabState,
+  toBase64,
+  useEditInApp
+} from '../../registry/renderer-kit'
 import type { ModuleTabProps } from '../../registry/renderer-types'
 import type { S3BrowserParams } from '../shared/ipc'
 import { S3SessionClient } from './s3-client'
@@ -140,6 +157,7 @@ export function S3View({
   const here = useRef<string | null>(null)
   const firstLocation = useRef(initialLocation)
   const accountName = account?.name ?? 'S3'
+  const editInAppPreferred = useEditInApp()
 
   const run = useCallback(async (op: S3Op): Promise<unknown> => {
     const client = clientRef.current
@@ -374,6 +392,44 @@ export function S3View({
     }
   }
 
+  /** Mở trong tab editor của app; Ctrl+S ghi thẳng lên bucket (kiểm tra ETag). */
+  const editInApp = (entry: S3Entry): void => {
+    if (bucket === null || entry.isFolder) return
+    const b = bucket
+    openEditorDoc({
+      key: `s3:${accountId}:${b}/${entry.key}`,
+      name: entry.name,
+      path: `s3://${b}/${entry.key}`,
+      where: accountName,
+      read: async () => {
+        const r = (await run({ op: 'readText', bucket: b, key: entry.key })) as {
+          data: string
+          etag: string | null
+        }
+        return { bytes: fromBase64(r.data), version: r.etag ? { etag: r.etag } : null }
+      },
+      write: async (bytes, expect) => {
+        const etag = typeof expect?.['etag'] === 'string' ? expect['etag'] : undefined
+        const r = (await run({
+          op: 'writeText',
+          bucket: b,
+          key: entry.key,
+          data: toBase64(bytes),
+          ...(etag ? { expectEtag: etag } : {})
+        })) as { etag: string | null }
+        return r.etag ? { etag: r.etag } : null
+      },
+      isConflict: (e) => cleanError(e).includes(S3_OBJECT_CHANGED)
+    })
+  }
+
+  /** Nút "Edit": văn bản vừa sức → editor của app; còn lại → editor trên máy. */
+  const editBest = (entry: S3Entry): void => {
+    if (editInAppPreferred && entry.size <= S3_EDIT_MAX_BYTES && !isBinaryName(entry.name))
+      editInApp(entry)
+    else void edit(entry)
+  }
+
   const folderStats = (list: S3Entry[]): void => {
     if (bucket === null) return
     const folders = list.filter((e) => e.isFolder)
@@ -395,13 +451,23 @@ export function S3View({
         icon: <FolderOpen size={14} />,
         onSelect: () => void load(bucket, one.key)
       })
-    if (one && !one.isFolder)
+    if (one && !one.isFolder) {
+      if (one.size <= S3_EDIT_MAX_BYTES)
+        items.push({
+          id: 's3-edit-app',
+          label: 'Edit',
+          icon: <FileCode size={14} />,
+          onSelect: () => {
+            editInApp(one)
+          }
+        })
       items.push({
         id: 's3-edit',
         label: 'Edit in local editor',
         icon: <FilePen size={14} />,
         onSelect: () => void edit(one)
       })
+    }
     items.push({
       id: 's3-download',
       label: list.length > 1 ? `Download ${list.length} items…` : 'Download…',
@@ -920,7 +986,9 @@ export function S3View({
                     labelAt="3xl"
                     testId="s3-edit"
                     disabled={opening !== null}
-                    onClick={() => void edit(one)}
+                    onClick={() => {
+                      editBest(one)
+                    }}
                   />
                 )}
                 <ToolButton

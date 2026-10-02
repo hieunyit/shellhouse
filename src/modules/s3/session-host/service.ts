@@ -24,6 +24,8 @@ import { replaceUnsafeFileChars } from '@shared/file-names'
 import {
   objectNameProblem,
   parentPrefix,
+  S3_EDIT_MAX_BYTES,
+  S3_OBJECT_CHANGED,
   type S3Bucket,
   type S3BucketInfo,
   type S3Entry,
@@ -182,6 +184,10 @@ export class S3Service {
       }
       case 'bucketInfo':
         return this.bucketInfo(op.bucket)
+      case 'readText':
+        return this.readText(op.bucket, op.key)
+      case 'writeText':
+        return this.writeText(op.bucket, op.key, Buffer.from(op.data, 'base64'), op.expectEtag)
       case 'writeFile':
         await writeFile(op.localPath, op.content, 'utf8')
         return null
@@ -731,6 +737,49 @@ export class S3Service {
     }
     await mkdir(root, { recursive: true })
     return count
+  }
+
+  /** Editor trong app: đọc cả object (nhỏ) vào bộ nhớ. */
+  private async readText(
+    bucket: string,
+    key: string
+  ): Promise<{ data: string; size: number; etag: string | null }> {
+    const head = await this.client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
+    const size = head.ContentLength ?? 0
+    if (size > S3_EDIT_MAX_BYTES) throw new Error('The object is too large for the editor')
+    const out = await this.client.send(new GetObjectCommand({ Bucket: bucket, Key: key }))
+    const chunks: Buffer[] = []
+    for await (const chunk of out.Body as Readable) chunks.push(chunk as Buffer)
+    return { data: Buffer.concat(chunks).toString('base64'), size, etag: out.ETag ?? null }
+  }
+
+  /** Editor trong app: ghi đè object, giữ Content-Type / metadata; kiểm tra ETag nếu có. */
+  private async writeText(
+    bucket: string,
+    key: string,
+    data: Buffer,
+    expectEtag: string | undefined
+  ): Promise<{ etag: string | null; size: number }> {
+    if (data.length > S3_EDIT_MAX_BYTES) throw new Error('The object is too large for the editor')
+    const head = await this.client
+      .send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
+      .catch((error: unknown) => {
+        if (isNotFound(error)) return null
+        throw error
+      })
+    if (expectEtag && head && head.ETag !== expectEtag) throw new Error(S3_OBJECT_CHANGED)
+    const out = await this.client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: data,
+        ...(head?.ContentType ? { ContentType: head.ContentType } : {}),
+        ...(head?.CacheControl ? { CacheControl: head.CacheControl } : {}),
+        ...(head?.ContentDisposition ? { ContentDisposition: head.ContentDisposition } : {}),
+        ...(head?.Metadata ? { Metadata: head.Metadata } : {})
+      })
+    )
+    return { etag: out.ETag ?? null, size: data.length }
   }
 
   private async download(

@@ -18,6 +18,7 @@ import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useSettings } from '../stores/settings'
 import { connectionLabel, cx, StatusDot } from './ui'
 import { HomeView } from './Home'
+import { EditorTabView } from '../editor/EditorTab'
 import { HostAvatar } from './HostAvatar'
 import { useTabs } from '../stores/tabs'
 import { TerminalView } from '../terminal/TerminalView'
@@ -50,6 +51,8 @@ function TerminalPanel(props: IDockviewPanelProps<PanelParams>): React.JSX.Eleme
 
   if (!tab) return null
   if (tab.target.kind === 'home') return <HomeView />
+  if (tab.target.kind === 'editor')
+    return <EditorTabView tabId={tab.id} docKey={tab.target.key} active={active} />
   if (tab.target.kind === 'module')
     return <ModuleTabView tabId={tab.id} target={tab.target} active={active} visible={visible} />
   return <TerminalView tabId={tab.id} target={tab.target} active={active} visible={visible} />
@@ -90,9 +93,9 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
     e.preventDefault()
     const tabs = useTabs.getState()
     const others = tabs.tabs.length > 1
-    // Tab Home: không có kết nối / không nhân bản / không chia màn hình.
+    // Tab Home / editor: không có kết nối / không nhân bản / không chia màn hình.
     const skip =
-      kind === 'home'
+      kind === 'home' || kind === 'editor'
         ? new Set(['tab-reconnect', 'tab-duplicate', 'tab-split-right', 'tab-split-below'])
         : null
     const menuOf = (items: Parameters<typeof openMenu>[1]): Parameters<typeof openMenu>[1] =>
@@ -192,7 +195,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
           // Chuột giữa = đóng tab, như trình duyệt.
           if (e.button === 1) {
             e.preventDefault()
-            props.api.close()
+            useTabs.getState().close(tabId)
           }
         }}
       >
@@ -213,7 +216,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
             <TabIcon target={target} size={13} className={active ? 'text-fg' : 'text-faint'} />
           )}
           {/* Terminal local luôn "connected" — chỉ hiện chấm khi là phiên từ xa hoặc đã kết thúc. */}
-          {((kind !== 'local' && kind !== 'home') || state === 'exited') && (
+          {((kind !== 'local' && kind !== 'home' && kind !== 'editor') || state === 'exited') && (
             <StatusDot
               state={state}
               className={cx(
@@ -236,7 +239,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
             e.stopPropagation()
           }}
           onClick={() => {
-            props.api.close()
+            useTabs.getState().close(tabId)
           }}
         >
           <X size={12} />
@@ -259,8 +262,8 @@ export function captureWorkspaceItems(): WorkspaceItem[] {
   const { tabs } = useTabs.getState()
   return layoutToItems(grid.root, grid.orientation, (panelId) => {
     const tab = tabs.find((t) => t.id === panelId)
-    // Tab Home không thuộc bố cục làm việc — không lưu vào workspace.
-    return tab && tab.target.kind !== 'home'
+    // Tab Home / editor không thuộc bố cục làm việc — không lưu vào workspace.
+    return tab && tab.target.kind !== 'home' && tab.target.kind !== 'editor'
       ? { target: tab.target, title: tab.title, view: tab.view }
       : null
   })

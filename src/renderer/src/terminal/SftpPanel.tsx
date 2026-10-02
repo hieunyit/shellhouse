@@ -6,6 +6,7 @@ import {
   Eye,
   EyeOff,
   File,
+  FileCode,
   FilePen,
   Folder,
   FolderOpen,
@@ -23,15 +24,25 @@ import {
 } from 'lucide-react'
 import {
   baseName,
+  FILE_CHANGED,
   FOLDER_EXISTS,
+  MAX_WRITE_BYTES,
   formatMode,
   joinRemote,
   parentRemote,
   type SftpEntry,
   type SftpListing,
   type SftpOp,
+  type SftpPreview,
   type TransferStatus
 } from '@shared/sftp'
+import {
+  fromBase64,
+  isBinaryName,
+  openEditorDoc,
+  toBase64,
+  type EditorVersion
+} from '../editor/docs'
 import { Button, cx, IconButton, Input, Modal, Notice } from '../components/ui'
 import { replaceUnsafeFileChars } from '@shared/file-names'
 import { DRAG_LOCAL, DRAG_REMOTE, joinLocal } from '@shared/local-files'
@@ -47,7 +58,6 @@ import { FILE_SORT_KEYS, FILE_SORT_OPTIONS, nameOrder, type FileSort } from './f
 
 /** Sửa file lớn hơn thế này qua editor thường là nhầm (log, file nhị phân) — gợi ý tải về. */
 const MAX_EDIT_BYTES = 50 * 1024 * 1024
-
 type Dialog =
   | { kind: 'mkdir' }
   | { kind: 'rename'; entry: SftpEntry }
@@ -105,7 +115,8 @@ export function SftpPanel({
   connected,
   layout = 'side',
   localTarget,
-  actionsRef
+  actionsRef,
+  origin
 }: {
   run: (op: SftpOp) => Promise<unknown>
   transfers: TransferStatus[]
@@ -114,6 +125,8 @@ export function SftpPanel({
   layout?: 'side' | 'pane'
   localTarget?: LocalTarget | undefined
   actionsRef?: RefObject<SftpActions | null>
+  /** Tab chứa panel (khoá + tên hiện trên editor trong app). */
+  origin?: { key: string; label: string }
 }): React.JSX.Element {
   const [path, setPath] = useState<string | null>(null)
   const [pathInput, setPathInput] = useState('')
@@ -132,6 +145,7 @@ export function SftpPanel({
   /** Tên file đang tải về để mở trong editor. */
   const [opening, setOpening] = useState<string | null>(null)
   const doubleClick = useSettings((s) => s.settings.files.doubleClick)
+  const inApp = useSettings((s) => s.settings.files.inApp)
   const lastDone = useRef(0)
   const { menu, open: openMenu } = useContextMenu()
 
@@ -286,9 +300,47 @@ export function SftpPanel({
     }
   }
 
+  /** Mở trong tab editor của app; Ctrl+S ghi thẳng lên server (op `write`, kiểm tra xung đột). */
+  const editInApp = (entry: SftpEntry): void => {
+    if (!path) return
+    const full = joinRemote(path, entry.name)
+    openEditorDoc({
+      key: `sftp:${origin?.key ?? ''}:${full}`,
+      name: entry.name,
+      path: full,
+      where: origin?.label ?? 'SFTP',
+      read: async () => {
+        const p = (await run({
+          op: 'preview',
+          path: full,
+          maxBytes: MAX_WRITE_BYTES
+        })) as SftpPreview
+        if (p.truncated)
+          throw new Error(
+            `“${entry.name}” is too large for the editor (${formatSize(p.size)}). Use “Edit in local editor”.`
+          )
+        return { bytes: fromBase64(p.data), version: { mtime: p.mtime, size: p.size } }
+      },
+      write: async (bytes, expect) =>
+        (await run({
+          op: 'write',
+          path: full,
+          data: toBase64(bytes),
+          ...(expect ? { expect: expect as { mtime: number; size: number } } : {})
+        })) as EditorVersion,
+      isConflict: (e) => cleanError(e).includes(FILE_CHANGED)
+    })
+  }
+
+  /** Bấm đúp / Enter: văn bản vừa sức → editor của app; còn lại → editor trên máy. */
+  const editBest = (entry: SftpEntry): void => {
+    if (inApp && entry.size <= MAX_WRITE_BYTES && !isBinaryName(entry.name)) editInApp(entry)
+    else void edit(entry)
+  }
+
   const open = (entry: SftpEntry): void => {
     if (entry.isDirLike && path) void load(joinRemote(path, entry.name))
-    else if (doubleClick === 'edit') void edit(entry)
+    else if (doubleClick === 'edit') editBest(entry)
     else void download([entry])
   }
 
@@ -358,13 +410,23 @@ export function SftpPanel({
           setPreview(single)
         }
       })
-    if (single && !single.isDirLike)
+    if (single && !single.isDirLike) {
+      if (single.size <= MAX_WRITE_BYTES)
+        items.push({
+          id: 'sftp-edit-app',
+          label: 'Edit',
+          icon: <FileCode size={14} />,
+          onSelect: () => {
+            editInApp(single)
+          }
+        })
       items.push({
         id: 'sftp-edit',
         label: 'Edit in local editor',
         icon: <FilePen size={14} />,
         onSelect: () => void edit(single)
       })
+    }
     items.push(
       {
         id: 'sftp-download',
