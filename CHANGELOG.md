@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.7] - 2026-10-02
+
 ### Changed
 
 - **Kubernetes details are calmer** — the Strategy section is gone; pods are listed one per line
