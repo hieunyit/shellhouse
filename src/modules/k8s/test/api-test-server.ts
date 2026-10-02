@@ -858,6 +858,12 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       return
     }
     requests.push(`WS ${url.pathname}${url.search}`)
+    // Pod không còn (bị xoá / thay) → 404 như API server thật.
+    const target = /\/namespaces\/([^/]+)\/pods\/([^/]+)\/(exec|portforward)$/.exec(url.pathname)
+    if (target && !store.get('pods')?.has(`${target[1] ?? ''}/${target[2] ?? ''}`)) {
+      socket.end('HTTP/1.1 404 Not Found\r\n\r\n')
+      return
+    }
     wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
       if (url.pathname.endsWith('/exec')) {
         // "Shell" giả: in lệnh đã chạy, dội stdin, báo kích thước terminal; "exit" → kết thúc.

@@ -188,6 +188,9 @@ export const K8sOp = z.discriminatedUnion('op', [
       .max(16)
   }),
   z.object({ op: z.literal('portForward.stop'), id: z.string().max(64) }),
+  /** Tắt tạm (đóng cổng trên máy, giữ cấu hình) / bật lại đúng cổng cũ. */
+  z.object({ op: z.literal('portForward.pause'), id: z.string().max(64) }),
+  z.object({ op: z.literal('portForward.resume'), id: z.string().max(64) }),
   z.object({ op: z.literal('portForwards') }),
   z.object({
     op: z.literal('secret.reveal'),
@@ -442,6 +445,14 @@ export interface PortForwardInfo {
   remotePort: number
   connections: number
   error: string | null
+  /** active = đang nghe; paused = tắt tạm; error = lần kết nối gần nhất hỏng (vẫn nghe, thử lại). */
+  state: 'active' | 'paused' | 'error'
+  /** Pod đang nhận kết nối (service → pod hiện tại). */
+  pod: string
+  /** Thời gian mở kênh tới pod của kết nối gần nhất (ms). */
+  latencyMs: number | null
+  /** Số lần tự chuyển sang pod mới (pod cũ bị thay / khởi động lại). */
+  reconnects: number
 }
 
 /** Tham số tab cluster. */

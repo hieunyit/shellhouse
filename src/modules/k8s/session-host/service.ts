@@ -92,8 +92,12 @@ interface SharedWatch {
 
 interface Forward {
   info: PortForwardInfo
-  server: Server
+  /** null = đang tắt tạm. */
+  server: Server | null
   sockets: Set<Socket>
+  client: KubeClient
+  /** Pod + cổng đích hiện tại (tìm lại khi pod bị thay). */
+  resolved: { pod: string; port: number }
 }
 
 export class K8sService implements HostModuleSession {
@@ -392,6 +396,16 @@ export class K8sService implements HostModuleSession {
       case 'portForward.stop': {
         const f = this.forwards.get(op.id)
         if (f) this.stopForward(f)
+        return null
+      }
+      case 'portForward.pause': {
+        const f = this.forwards.get(op.id)
+        if (f) this.pauseForward(f)
+        return null
+      }
+      case 'portForward.resume': {
+        const f = this.forwards.get(op.id)
+        if (f) await this.listenForward(f)
         return null
       }
       case 'portForwards':
@@ -904,7 +918,11 @@ export class K8sService implements HostModuleSession {
     return { pod: pod.metadata.name, port: targetPort }
   }
 
-  /** Port-forward: cổng trên máy (127.0.0.1) → WebSocket portforward tới pod (mỗi kết nối một WS). */
+  /**
+   * Port-forward: cổng trên máy (127.0.0.1) → WebSocket portforward tới pod (mỗi kết nối một WS).
+   * Kết nối hỏng (pod bị thay khi rollout / khởi động lại) → tìm lại pod đích rồi thử lần nữa, nên
+   * forward tới service tự "nối lại" mà không phải tạo lại.
+   */
   private async portForward(
     client: KubeClient,
     namespace: string,
@@ -915,62 +933,118 @@ export class K8sService implements HostModuleSession {
     for (const [local, remote] of ports) {
       const resolved = await this.resolveTarget(client, namespace, target, remote)
       const id = randomUUID()
-      const sockets = new Set<Socket>()
-      const info: PortForwardInfo = {
-        id,
-        namespace,
-        target,
-        localPort: local,
-        remotePort: remote,
-        connections: 0,
-        error: null
+      const f: Forward = {
+        info: {
+          id,
+          namespace,
+          target,
+          localPort: local,
+          remotePort: remote,
+          connections: 0,
+          error: null,
+          state: 'active',
+          pod: resolved.pod,
+          latencyMs: null,
+          reconnects: 0
+        },
+        server: null,
+        sockets: new Set(),
+        client,
+        resolved
       }
-      const server = createServer((socket) => {
-        sockets.add(socket)
-        info.connections++
-        this.emitForwards()
-        socket.on('close', () => {
-          sockets.delete(socket)
-          info.connections--
-          this.emitForwards()
-        })
-        void this.pipeForward(client, namespace, resolved.pod, resolved.port, socket).catch(
-          (error: unknown) => {
-            info.error = error instanceof Error ? error.message : String(error)
-            this.emitForwards()
-            socket.destroy()
-          }
-        )
-      })
-      await new Promise<void>((resolve, reject) => {
-        server.once('error', reject)
-        server.listen(local, '127.0.0.1', () => {
-          server.removeListener('error', reject)
-          resolve()
-        })
-      })
-      const address = server.address()
-      if (address && typeof address === 'object') info.localPort = address.port
-      this.forwards.set(id, { info, server, sockets })
-      out.push(info)
+      await this.listenForward(f)
+      this.forwards.set(id, f)
+      out.push(f.info)
     }
     this.emitForwards()
     return out
   }
 
-  private async pipeForward(
-    client: KubeClient,
-    namespace: string,
-    pod: string,
-    port: number,
-    socket: Socket
-  ): Promise<void> {
+  /** Mở (lại) cổng trên máy của forward — bật lại dùng đúng cổng cũ. */
+  private async listenForward(f: Forward): Promise<void> {
+    if (f.server) return
+    const server = createServer((socket) => {
+      f.sockets.add(socket)
+      f.info.connections++
+      this.emitForwards()
+      socket.on('close', () => {
+        f.sockets.delete(socket)
+        f.info.connections--
+        this.emitForwards()
+      })
+      void this.connectForward(f, socket)
+    })
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(f.info.localPort, '127.0.0.1', () => {
+        server.removeListener('error', reject)
+        resolve()
+      })
+    })
+    const address = server.address()
+    if (address && typeof address === 'object') f.info.localPort = address.port
+    f.server = server
+    f.info.state = f.info.error ? 'error' : 'active'
+    this.emitForwards()
+  }
+
+  private pauseForward(f: Forward): void {
+    f.server?.close()
+    f.server = null
+    for (const s of f.sockets) s.destroy()
+    f.info.state = 'paused'
+    this.emitForwards()
+  }
+
+  /** Một kết nối tới cổng trên máy: nối tới pod hiện tại; hỏng → tìm lại pod, thử lần nữa. */
+  private async connectForward(f: Forward, socket: Socket): Promise<void> {
+    const { info } = f
+    try {
+      await this.pipeForward(f, socket)
+    } catch {
+      if (socket.destroyed) return
+      try {
+        const next = await this.resolveTarget(
+          f.client,
+          info.namespace,
+          info.target,
+          info.remotePort
+        )
+        const moved = next.pod !== f.resolved.pod
+        f.resolved = next
+        info.pod = next.pod
+        await this.pipeForward(f, socket)
+        if (moved) info.reconnects++
+      } catch (error) {
+        info.error = error instanceof Error ? error.message : String(error)
+        info.state = 'error'
+        this.emitForwards()
+        socket.destroy()
+        return
+      }
+    }
+    if (info.error || info.state === 'error') {
+      info.error = null
+      info.state = 'active'
+    }
+    this.emitForwards()
+  }
+
+  /** Mở kênh portforward tới pod hiện tại của forward và nối với socket (đo thời gian mở kênh). */
+  private async pipeForward(f: Forward, socket: Socket): Promise<void> {
     socket.pause()
-    const ws: WebSocket = await client.websocket(
-      `/api/v1/namespaces/${encodeURIComponent(namespace)}/pods/${encodeURIComponent(pod)}/portforward`,
+    const { pod, port } = f.resolved
+    const started = performance.now()
+    const ws: WebSocket = await f.client.websocket(
+      `/api/v1/namespaces/${encodeURIComponent(f.info.namespace)}/pods/${encodeURIComponent(pod)}/portforward`,
       { ports: String(port) },
       ['v4.channel.k8s.io']
     )
+    f.info.latencyMs = Math.round(performance.now() - started)
+    if (socket.destroyed) {
+      ws.close()
+      return
+    }
     const seen = new Set<number>()
     ws.on('message', (data: Buffer) => {
       if (data.length === 0) return
@@ -1007,7 +1081,7 @@ export class K8sService implements HostModuleSession {
   }
 
   private stopForward(f: Forward): void {
-    f.server.close()
+    f.server?.close()
     for (const s of f.sockets) s.destroy()
     this.forwards.delete(f.info.id)
     this.emitForwards()

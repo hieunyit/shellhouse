@@ -505,6 +505,36 @@ describe('Kubernetes qua API server giả (HTTPS, chứng chỉ test)', () => {
     })
     // service/web cổng 80 → targetPort "http" → containerPort 8080 của pod web-*.
     expect(reply).toBe('echo:8080:ping')
+    const ping = (): Promise<string> =>
+      new Promise<string>((resolve, reject) => {
+        const c = connect(fwd?.localPort ?? 0, '127.0.0.1')
+        c.once('connect', () => {
+          c.write('ping')
+        })
+        c.once('data', (d) => {
+          resolve(d.toString('utf8'))
+          c.destroy()
+        })
+        c.once('error', reject)
+      })
+    const info = async (): Promise<PortForwardInfo | undefined> =>
+      (await run<PortForwardInfo[]>({ op: 'portForwards' })).find((f) => f.id === fwd?.id)
+    expect(await info()).toMatchObject({ state: 'active', pod: 'web-1' })
+    expect((await info())?.latencyMs).toBeGreaterThanOrEqual(0)
+
+    // Pod đang nhận kết nối bị thay (rollout) → kết nối mới tự sang pod khác của service.
+    server.remove('pods', 'shop', 'web-1')
+    expect(await ping()).toBe('echo:8080:ping')
+    expect(await info()).toMatchObject({ state: 'active', pod: 'web-2', reconnects: 1 })
+
+    // Tắt tạm: cổng đóng; bật lại: đúng cổng cũ, chạy tiếp.
+    await run({ op: 'portForward.pause', id: fwd?.id })
+    expect(await info()).toMatchObject({ state: 'paused' })
+    await expect(ping()).rejects.toThrow(/ECONNREFUSED/)
+    await run({ op: 'portForward.resume', id: fwd?.id })
+    expect(await info()).toMatchObject({ state: 'active', localPort: fwd?.localPort })
+    expect(await ping()).toBe('echo:8080:ping')
+
     await run({ op: 'portForward.stop', id: fwd?.id })
     expect(await run<PortForwardInfo[]>({ op: 'portForwards' })).toEqual([])
   })
