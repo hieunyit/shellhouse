@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.9] - 2026-10-03
+
 ### Changed
 
 - **UI polish across modules** (reviewed screen by screen, light and dark):
