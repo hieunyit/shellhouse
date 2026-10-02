@@ -839,6 +839,15 @@ test('Kubernetes: tạo Deployment + Service bằng form (kiểu Rancher / Lens)
     })
     // Mở luôn đối tượng vừa tạo.
     await expect(view.getByTestId('k8s-describe')).toContainText('api')
+
+    // "Edit as YAML": chuyển sang trình sửa YAML, giữ nội dung form (không đóng mất).
+    await view.getByTestId('k8s-create').click()
+    await page.getByTestId('k8s-create-dialog').getByTestId('k8s-form-name').fill('worker')
+    await page.getByTestId('k8s-create-dialog').getByTestId('k8s-create-edit-yaml').click()
+    await expect(page.getByTestId('k8s-create-dialog')).toHaveCount(0)
+    const yamlEditor = page.getByTestId('k8s-yaml-editor')
+    await expect(yamlEditor).toBeVisible()
+    await expect(yamlEditor).toContainText('name: worker')
   } finally {
     await launched.close()
     await server.close()

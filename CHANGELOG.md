@@ -25,6 +25,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 - Dropdown lists (Map grouping and others) were unreadable in the dark theme — white text on a
   white list.
+- Kubernetes create form: **Edit as YAML** closed the dialog instead of opening the YAML editor
+  with the generated manifest.
 
 ## [1.2.0-beta.5] - 2026-10-02
 

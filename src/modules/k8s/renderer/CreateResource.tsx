@@ -2201,8 +2201,9 @@ export function CreateResourceDialog({
                   className="ml-auto text-accent hover:underline"
                   data-testid="k8s-create-edit-yaml"
                   onClick={() => {
+                    // Chuyển sang trình sửa YAML (thay hộp thoại này) — không gọi onClose: nó đóng
+                    // luôn hộp thoại YAML vừa mở.
                     onEditYaml(yaml)
-                    onClose()
                   }}
                 >
                   Edit as YAML
