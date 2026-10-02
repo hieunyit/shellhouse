@@ -791,6 +791,31 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await expect(traffic.locator('[data-testid="k8s-traffic-peer"][data-name="tool"]')).toHaveCount(
       1
     )
+
+    // Topology của Deployment: thêm bên gọi tới / được gọi theo Caretta (namespace khác, ngoài cluster).
+    await detail.getByTestId('k8s-detail-tab-topology').click()
+    const topo = detail.getByTestId('k8s-topology')
+    await expect(
+      topo.locator('[data-testid="k8s-topology-node"][data-name="db.example.com"]')
+    ).toHaveCount(1)
+    await expect(
+      topo.locator('[data-testid="k8s-topology-filter"][data-category="live"]')
+    ).toBeVisible()
+
+    // Map → Traffic: service map dựng từ Caretta trên mọi namespace (luồng đo dùng chung → có ngay).
+    await page.keyboard.press('Escape')
+    await view.getByTestId('k8s-nav-map').click()
+    await map.getByTestId('k8s-map-view-traffic').click()
+    const tmap = view.getByTestId('k8s-traffic-map')
+    await expect(tmap.locator('[data-testid="k8s-traffic-node"][data-name="web"]')).toHaveCount(1)
+    await expect(
+      tmap.locator('[data-testid="k8s-traffic-node"][data-name="db.example.com"]')
+    ).toHaveCount(1)
+    await tmap.locator('[data-testid="k8s-traffic-node"][data-name="web"]').click()
+    const tpanel = view.getByTestId('k8s-traffic-panel')
+    await expect(tpanel).toContainText('Calls')
+    await expect(tpanel).toContainText('db.example.com')
+    await expect(tpanel).toContainText('MB/s')
   } finally {
     await launched.close()
     await server.close()

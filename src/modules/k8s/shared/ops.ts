@@ -352,6 +352,8 @@ export type TopologyEdgeType =
   | 'identity'
   | 'grants'
   | 'subject'
+  /** Traffic thật (Caretta): client → server. */
+  | 'calls'
 
 export interface TopologyNode {
   /** `${kind}|${namespace}|${name}` (namespace rỗng với loại cluster). */

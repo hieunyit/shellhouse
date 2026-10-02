@@ -6,6 +6,7 @@ import {
   formatRate,
   mergeLinks,
   parseCaretta,
+  trafficGraph,
   trafficRates,
   type TrafficSample
 } from '../../shared/traffic'
@@ -57,8 +58,35 @@ describe('Caretta — parse, gộp, tốc độ, băng cố định', () => {
     expect(bandOf(50_000)).toBe(2)
     expect(bandOf(5_000_000)).toBe(4)
     expect(bandOf(1e12)).toBe(BANDS.length - 1)
-    expect(formatRate(0.2)).toBe('0 B/s')
+    expect(formatRate(0.2)).toBe('idle')
     expect(formatRate(2048)).toBe('2.0 KB/s')
     expect(formatRate(2_097_152)).toBe('2.0 MB/s')
+  })
+
+  it('service map: cột theo hướng gọi, đích ngoài cluster ở cột cuối, chịu được vòng', () => {
+    const peer = (kind: string, ns: string, name: string) => ({ kind, ns, name })
+    const ing = peer('Deployment', 'ingress-nginx', 'ingress-nginx-controller')
+    const fe = peer('Deployment', 'console-stg', 'console-frontend')
+    const be = peer('Deployment', 'console-stg', 'console-backend')
+    const db = peer('external', '', 'pg.rds.amazonaws.com')
+    const g = trafficGraph([
+      { client: ing, server: fe, port: '80', rate: 100 },
+      { client: ing, server: be, port: '8000', rate: 50 },
+      { client: fe, server: be, port: '8000', rate: 20 },
+      { client: be, server: db, port: '5432', rate: 10 },
+      // Vòng: backend gọi ngược frontend.
+      { client: be, server: fe, port: '80', rate: 1 }
+    ])
+    const col = (p: { kind: string; ns: string; name: string }) =>
+      g.nodes.find((n) => n.peer.name === p.name)?.col
+    expect(col(ing)).toBe(0)
+    expect((col(fe) ?? 0) > 0 && (col(be) ?? 0) > 0).toBe(true)
+    expect(col(db)).toBe(Math.max(...g.nodes.map((n) => n.col)))
+    expect(g.nodes.find((n) => n.peer.name === ing.name)?.outRate).toBe(150)
+    expect(g.edges).toHaveLength(5)
+    // Không chồng nhau trong cùng cột.
+    for (const a of g.nodes)
+      for (const b of g.nodes)
+        if (a !== b && a.col === b.col) expect(Math.abs(a.y - b.y) >= a.h).toBe(true)
   })
 })

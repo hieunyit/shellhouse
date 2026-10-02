@@ -86,7 +86,7 @@ export function TrafficOf({
         </span>
         <span className="text-faint">
           {status === 'live' &&
-            `from ${String(traffic.agents)} Caretta agent${traffic.agents === 1 ? '' : 's'} · every 15 s`}
+            `from ${String(traffic.agents)} Caretta agent${traffic.agents === 1 ? '' : 's'} · average over the last minute`}
           {status === 'connecting' && 'taking the first two samples to measure throughput'}
           {status === 'empty' &&
             'Caretta is running but saw no connections to or from this workload in the last interval.'}

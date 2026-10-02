@@ -69,6 +69,7 @@ import {
 } from './MapFlow'
 import { TechIcon } from './icons'
 import { NodesView } from './NodesView'
+import { TrafficMap } from './TrafficMap'
 import { useTraffic, type TrafficState } from './useTraffic'
 
 type Request = <T>(op: K8sOp) => Promise<T>
@@ -138,8 +139,8 @@ interface Options {
   /** Nền tối riêng cho bản đồ (kể cả khi app dùng theme sáng). */
   darkCanvas: boolean
   grouping: MapGrouping
-  /** Bản đồ workload hay theo node (hạ tầng). */
-  view: 'workloads' | 'nodes'
+  /** Bản đồ workload, theo node (hạ tầng), hay service map từ Caretta. */
+  view: 'workloads' | 'nodes' | 'traffic'
 }
 
 function loadOptions(): Options {
@@ -308,8 +309,13 @@ function MapInner({
   const [customGroup, setCustomGroup] = useState<string | null>(null)
   const goToRef = useRef<(n: MapNode) => void>(() => undefined)
   const nsKey = namespaces.join(',')
-  const nodesView = options.view === 'nodes'
-  const traffic = useTraffic(request, active && options.traffic && !nodesView)
+  const trafficView = options.view === 'traffic'
+  // Nodes / Traffic: không vẽ bản đồ workload (ẩn các điều khiển của nó).
+  const nodesView = options.view !== 'workloads'
+  const traffic = useTraffic(
+    request,
+    active && (trafficView || (options.traffic && options.view === 'workloads'))
+  )
 
   // ——— Dữ liệu ———
   useEffect(() => {
@@ -880,7 +886,8 @@ function MapInner({
             testIdPrefix="k8s-map-view"
             options={[
               { value: 'workloads', label: 'Workloads' },
-              { value: 'nodes', label: 'Nodes' }
+              { value: 'nodes', label: 'Nodes' },
+              { value: 'traffic', label: 'Traffic' }
             ]}
             onChange={(view) => {
               setOpt({ view })
@@ -1200,8 +1207,19 @@ function MapInner({
             This cluster is very large — only part of it is on the map. Pick fewer namespaces.
           </p>
         )}
-        {nodesView && data && shownData && (
+        {options.view === 'nodes' && data && shownData && (
           <NodesView data={data} shown={shownData} onOpen={onOpen} />
+        )}
+        {trafficView && (
+          <div className={cx('k8s-map flex min-h-0 flex-1', options.darkCanvas && 'k8s-map-dark')}>
+            <TrafficMap
+              traffic={traffic}
+              scope={namespaces}
+              palette={palette.ramp}
+              particles={!reducedMotion && traffic.rates.length <= MAX_ANIMATED_EDGES}
+              onOpen={onOpen}
+            />
+          </div>
         )}
         {!nodesView && options.traffic && traffic.status === 'unavailable' && (
           <p

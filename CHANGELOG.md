@@ -6,6 +6,24 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- **Kubernetes Map → Traffic: a service map from Caretta** — every workload, Service and outside
+  address that talks to another, across all namespaces (not only the ones you are viewing):
+  callers on the left, databases and external APIs on the right, cables sized and coloured by
+  bandwidth. Click one to see who calls it and what it calls; double-click to open it.
+- **Topology shows live callers** — a Deployment's topology adds what Caretta saw calling it and
+  being called by it, including other namespaces (e.g. the ingress controller) and addresses
+  outside the cluster ("Live traffic" in the filter bar).
+
+### Changed
+
+- **Live traffic is faster and steadier** — one Caretta reader per cluster is shared by the Map,
+  the Traffic tab and Topology, so switching views shows data immediately; the first figures
+  appear after about 2 s; agents and Service → workload lookups are reused for a minute instead
+  of being re-read every time. Throughput is averaged over the last minute, and a connection with
+  no bytes in that window shows as "idle" instead of "0 B/s".
+
 ## [1.2.0-beta.7] - 2026-10-02
 
 ### Changed

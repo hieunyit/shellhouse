@@ -6,6 +6,7 @@ import {
   dependentsOf,
   filterTopology,
   layoutTopology,
+  liveTopology,
   mergeTopology,
   TOPO_NODE_H,
   TOPO_NODE_W
@@ -312,6 +313,50 @@ describe('Map — công nghệ, gateway, policy, blast radius', () => {
     // Gateway đổi → route gắn vào nó.
     expect([...impactOf(l, 'gw:gw/public')]).toEqual([
       'r:httproutes.gateway.networking.k8s.io:shop/api'
+    ])
+  })
+
+  it('traffic thật quanh workload: bên gọi tới / được gọi (namespace khác, ngoài cluster) thành cạnh calls', () => {
+    const root = {
+      id: 'deployments.apps|console-stg|console-frontend',
+      kindLabel: 'Deployment',
+      namespace: 'console-stg',
+      name: 'console-frontend'
+    }
+    const r = liveTopology(
+      root,
+      [
+        {
+          client: { kind: 'Deployment', ns: 'ingress-nginx', name: 'ingress-nginx-controller' },
+          server: { kind: 'Deployment', ns: 'console-stg', name: 'console-frontend' },
+          rate: 2048
+        },
+        {
+          client: { kind: 'Deployment', ns: 'console-stg', name: 'console-frontend' },
+          server: { kind: 'external', ns: '', name: 'cdn.segment.io' },
+          rate: 10
+        },
+        // Không liên quan tới gốc → bỏ.
+        {
+          client: { kind: 'Deployment', ns: 'a', name: 'x' },
+          server: { kind: 'Deployment', ns: 'a', name: 'y' },
+          rate: 5
+        }
+      ],
+      (v) => `${String(v)} B/s`
+    )
+    expect(r.nodes.map((n) => n.id).sort()).toEqual([
+      'deployments.apps|ingress-nginx|ingress-nginx-controller',
+      'external||cdn.segment.io'
+    ])
+    expect(r.edges).toEqual([
+      {
+        from: 'deployments.apps|ingress-nginx|ingress-nginx-controller',
+        to: root.id,
+        type: 'calls',
+        label: '2048 B/s'
+      },
+      { from: root.id, to: 'external||cdn.segment.io', type: 'calls', label: '10 B/s' }
     ])
   })
 })

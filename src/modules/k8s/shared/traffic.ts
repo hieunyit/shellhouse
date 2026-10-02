@@ -138,7 +138,7 @@ export function bandOf(rate: number): number {
 }
 
 export function formatRate(rate: number): string {
-  if (rate < 1) return '0 B/s'
+  if (rate < 1) return 'idle'
   if (rate < 1024) return `${rate.toFixed(0)} B/s`
   if (rate < 1_048_576) return `${(rate / 1024).toFixed(rate < 10_240 ? 1 : 0)} KB/s`
   return `${(rate / 1_048_576).toFixed(rate < 10_485_760 ? 1 : 0)} MB/s`
@@ -163,4 +163,108 @@ export function byPair(rates: readonly TrafficRate[]): TrafficRate[] {
     else m.set(key, { ...r, port: '' })
   }
   return [...m.values()]
+}
+
+// ——— Service map từ Caretta ———
+
+export interface TrafficGraphNode {
+  id: string
+  peer: TrafficPeer
+  /** Cột (0 = nguồn: ingress / client ngoài cluster). */
+  col: number
+  x: number
+  y: number
+  w: number
+  h: number
+  /** Tổng byte / giây vào / ra. */
+  inRate: number
+  outRate: number
+}
+
+export interface TrafficGraph {
+  nodes: TrafficGraphNode[]
+  edges: { from: string; to: string; rate: number }[]
+  width: number
+  height: number
+}
+
+const NODE_W = 240
+const NODE_H = 58
+const COL_GAP = 150
+const ROW_GAP = 22
+
+/**
+ * Service map: mỗi bên (workload / ngoài cluster) một node, xếp cột trái → phải theo hướng gọi
+ * (nguồn trước, đích ngoài cluster ở cột cuối). Vòng lặp (A ↔ B) không làm lệch cột vô hạn.
+ */
+export function trafficGraph(rates: readonly TrafficRate[]): TrafficGraph {
+  const pairs = byPair(rates)
+  const peers = new Map<string, TrafficPeer>()
+  for (const r of pairs) {
+    peers.set(peerKey(r.client), r.client)
+    peers.set(peerKey(r.server), r.server)
+  }
+  const edges = pairs
+    .map((r) => ({ from: peerKey(r.client), to: peerKey(r.server), rate: r.rate }))
+    .filter((e) => e.from !== e.to)
+  const incoming = new Map<string, number>()
+  for (const e of edges) incoming.set(e.to, (incoming.get(e.to) ?? 0) + 1)
+  // Cột = đường dài nhất từ một nguồn (lặp có giới hạn — chịu được vòng).
+  const col = new Map<string, number>([...peers.keys()].map((k) => [k, 0]))
+  for (let i = 0; i < peers.size; i++) {
+    let changed = false
+    for (const e of edges) {
+      const c = (col.get(e.from) ?? 0) + 1
+      if (c > (col.get(e.to) ?? 0) && c < peers.size) {
+        col.set(e.to, c)
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+  // Đích ngoài cluster chỉ nhận (DB, API bên ngoài): cột cuối.
+  const last = Math.max(0, ...col.values())
+  for (const [k, p] of peers)
+    if (p.kind === 'external' && (incoming.get(k) ?? 0) > 0 && !edges.some((e) => e.from === k))
+      col.set(k, Math.max(last, 1))
+  const rateIn = new Map<string, number>()
+  const rateOut = new Map<string, number>()
+  for (const e of edges) {
+    rateIn.set(e.to, (rateIn.get(e.to) ?? 0) + e.rate)
+    rateOut.set(e.from, (rateOut.get(e.from) ?? 0) + e.rate)
+  }
+  const cols = new Map<number, string[]>()
+  for (const [k, c] of col) cols.set(c, [...(cols.get(c) ?? []), k])
+  const nodes: TrafficGraphNode[] = []
+  let height = 0
+  for (const [c, keys] of [...cols.entries()].sort((a, b) => a[0] - b[0])) {
+    keys.sort((a, b) => {
+      const pa = peers.get(a)
+      const pb = peers.get(b)
+      return `${pa?.ns ?? ''}/${pa?.name ?? ''}`.localeCompare(`${pb?.ns ?? ''}/${pb?.name ?? ''}`)
+    })
+    keys.forEach((k, i) => {
+      const peer = peers.get(k)
+      if (!peer) return
+      nodes.push({
+        id: k,
+        peer,
+        col: c,
+        x: c * (NODE_W + COL_GAP),
+        y: i * (NODE_H + ROW_GAP),
+        w: NODE_W,
+        h: NODE_H,
+        inRate: rateIn.get(k) ?? 0,
+        outRate: rateOut.get(k) ?? 0
+      })
+    })
+    height = Math.max(height, keys.length * (NODE_H + ROW_GAP) - ROW_GAP)
+  }
+  // Canh giữa từng cột theo chiều dọc (đồ thị cân, đường ngắn hơn).
+  for (const n of nodes) {
+    const count = cols.get(n.col)?.length ?? 1
+    n.y += (height - (count * (NODE_H + ROW_GAP) - ROW_GAP)) / 2
+  }
+  const maxCol = Math.max(0, ...nodes.map((n) => n.col))
+  return { nodes, edges, width: (maxCol + 1) * (NODE_W + COL_GAP) - COL_GAP, height }
 }

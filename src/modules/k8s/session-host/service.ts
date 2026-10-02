@@ -46,7 +46,7 @@ import {
 import { mapData } from './map'
 import { related } from './related'
 import { rbacReach, topology } from './topology'
-import { trafficSample } from './traffic'
+import { trafficSample, type TrafficCache } from './traffic'
 
 /** Kết quả `fromMain('resolve')` (xem main/kubeconfig.ts). */
 export interface ResolvedClusterConfig {
@@ -115,6 +115,8 @@ export class K8sService implements HostModuleSession {
   private readonly forwards = new Map<string, Forward>()
   /** Prometheus đã dò (null = không có; dò lại sau PROM_RETRY_MS). */
   private prom: { target: PromTarget | null; at: number } | null = null
+  /** Agent Caretta / Service → workload đã dò (dùng lại 60 s). */
+  private readonly trafficCache: TrafficCache = {}
   private readonly edits = new Map<string, () => void>()
   private disposed = false
 
@@ -277,7 +279,7 @@ export class K8sService implements HostModuleSession {
         return topology(client, kind.id, obj, signal)
       }
       case 'traffic':
-        return trafficSample(client, signal)
+        return trafficSample(client, this.trafficCache, signal)
       case 'rbacReach':
         return rbacReach(client, op.namespace, op.serviceAccount, signal)
       case 'rolloutHistory':

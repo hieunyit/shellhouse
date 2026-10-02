@@ -25,6 +25,14 @@ const DEFAULT_PORT = 7117
 /** Cluster rất nhiều node: đọc tối đa chừng này agent mỗi lượt. */
 const MAX_AGENTS = 300
 const CONCURRENCY = 16
+/** Danh sách agent / bảng Service → workload ít đổi: dùng lại trong chừng này (đọc nhanh hơn hẳn). */
+const CACHE_MS = 60_000
+
+/** Bộ nhớ đệm theo client (mỗi cluster một client). */
+export interface TrafficCache {
+  agents?: { at: number; value: { pods: K8sObject[] } | { reason: string } }
+  services?: { at: number; byNs: Map<string, Map<string, TrafficPeer[]>> }
+}
 
 async function readText(client: KubeClient, path: string, signal?: AbortSignal): Promise<string> {
   const res = await client.open('GET', path, signal ? { signal } : {})
@@ -71,6 +79,7 @@ async function findAgents(
 async function resolveServices(
   client: KubeClient,
   links: TrafficLink[],
+  cache: TrafficCache,
   signal?: AbortSignal
 ): Promise<TrafficLink[]> {
   const namespaces = [
@@ -83,38 +92,50 @@ async function resolveServices(
   ].filter(Boolean)
   if (!namespaces.length) return links
   const opts = signal ? { signal } : {}
+  if (!cache.services || Date.now() - cache.services.at > CACHE_MS)
+    cache.services = { at: Date.now(), byNs: new Map() }
+  const byNs = cache.services.byNs
   const behind = new Map<string, TrafficPeer[]>()
+  for (const ns of namespaces)
+    for (const [svc, peers] of byNs.get(ns) ?? []) behind.set(`${ns}/${svc}`, peers)
   await Promise.all(
-    namespaces.map(async (ns) => {
-      const base = `/namespaces/${encodeURIComponent(ns)}`
-      const get = (path: string): Promise<K8sObject[]> =>
-        client
-          .json<{ items: K8sObject[] }>('GET', path, opts)
-          .then((r) => r.items)
-          .catch(() => [])
-      const [services, deps, sts, ds] = await Promise.all([
-        get(`/api/v1${base}/services`),
-        get(`/apis/apps/v1${base}/deployments`),
-        get(`/apis/apps/v1${base}/statefulsets`),
-        get(`/apis/apps/v1${base}/daemonsets`)
-      ])
-      const workloads = [
-        ...deps.map((w) => ({ w, kind: 'Deployment', id: 'deployments.apps' })),
-        ...sts.map((w) => ({ w, kind: 'StatefulSet', id: 'statefulsets.apps' })),
-        ...ds.map((w) => ({ w, kind: 'DaemonSet', id: 'daemonsets.apps' }))
-      ]
-      for (const svc of services) {
-        const selector = o(o(svc.spec)['selector'])
-        if (!Object.keys(selector).length) continue
-        const peers = workloads
-          .filter(({ w, id }) => {
-            const tpl = podTemplate(id, w)
-            return tpl ? selectorMatches(selector, tpl.labels) : false
-          })
-          .map(({ w, kind }) => ({ ns, name: w.metadata.name, kind }))
-        if (peers.length) behind.set(`${ns}/${svc.metadata.name}`, peers)
-      }
-    })
+    namespaces
+      .filter((ns) => !byNs.has(ns))
+      .map(async (ns) => {
+        const found = new Map<string, TrafficPeer[]>()
+        byNs.set(ns, found)
+        const base = `/namespaces/${encodeURIComponent(ns)}`
+        const get = (path: string): Promise<K8sObject[]> =>
+          client
+            .json<{ items: K8sObject[] }>('GET', path, opts)
+            .then((r) => r.items)
+            .catch(() => [])
+        const [services, deps, sts, ds] = await Promise.all([
+          get(`/api/v1${base}/services`),
+          get(`/apis/apps/v1${base}/deployments`),
+          get(`/apis/apps/v1${base}/statefulsets`),
+          get(`/apis/apps/v1${base}/daemonsets`)
+        ])
+        const workloads = [
+          ...deps.map((w) => ({ w, kind: 'Deployment', id: 'deployments.apps' })),
+          ...sts.map((w) => ({ w, kind: 'StatefulSet', id: 'statefulsets.apps' })),
+          ...ds.map((w) => ({ w, kind: 'DaemonSet', id: 'daemonsets.apps' }))
+        ]
+        for (const svc of services) {
+          const selector = o(o(svc.spec)['selector'])
+          if (!Object.keys(selector).length) continue
+          const peers = workloads
+            .filter(({ w, id }) => {
+              const tpl = podTemplate(id, w)
+              return tpl ? selectorMatches(selector, tpl.labels) : false
+            })
+            .map(({ w, kind }) => ({ ns, name: w.metadata.name, kind }))
+          if (peers.length) {
+            behind.set(`${ns}/${svc.metadata.name}`, peers)
+            found.set(svc.metadata.name, peers)
+          }
+        }
+      })
   )
   const out: TrafficLink[] = []
   for (const l of links) {
@@ -142,10 +163,17 @@ async function resolveServices(
 /** Một lượt đọc mọi agent Caretta. */
 export async function trafficSample(
   client: KubeClient,
+  cache: TrafficCache,
   signal?: AbortSignal
 ): Promise<TrafficSample> {
   const at = Date.now()
-  const found = await findAgents(client, signal)
+  // Chỉ nhớ khi đã thấy agent — chưa cài / chưa được phép thì lần sau dò lại (vừa cài là thấy ngay).
+  let found: { pods: K8sObject[] } | { reason: string }
+  if (cache.agents && at - cache.agents.at <= CACHE_MS) found = cache.agents.value
+  else {
+    found = await findAgents(client, signal)
+    if ('pods' in found) cache.agents = { at, value: found }
+  }
   if ('reason' in found)
     return { status: 'unavailable', reason: found.reason, at, agents: 0, links: [] }
   const pods = found.pods.slice(0, MAX_AGENTS)
@@ -167,7 +195,9 @@ export async function trafficSample(
       }
     })
   )
-  if (!seen.ok)
+  if (!seen.ok) {
+    // Agent có thể vừa đổi (rollout) → lần sau dò lại.
+    delete cache.agents
     return {
       status: 'unavailable',
       reason: seen.forbidden
@@ -177,6 +207,7 @@ export async function trafficSample(
       agents: pods.length,
       links: []
     }
-  const links = await resolveServices(client, mergeLinks(rows), signal)
+  }
+  const links = await resolveServices(client, mergeLinks(rows), cache, signal)
   return { status: 'ok', at, agents: seen.ok, links }
 }

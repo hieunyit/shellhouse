@@ -36,6 +36,8 @@ import {
 import { cx } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { KindIcon } from './icons'
+import { useTraffic } from './useTraffic'
+import { formatRate } from '../shared/traffic'
 import type { K8sOp, TopologyEdge, TopologyNode, TopologyResult } from '../shared/ops'
 import type { K8sObject } from '../shared/resources'
 import {
@@ -46,6 +48,7 @@ import {
   dependentsOf,
   filterTopology,
   layoutTopology,
+  liveTopology,
   mergeTopology,
   type PlacedNode,
   type TopologyCategory
@@ -78,6 +81,7 @@ export const TOPOLOGY_KINDS = new Set([
 const STYLE: Record<TopologyCategory, { color: string; dash?: string }> = {
   ownership: { color: 'text-faint' },
   network: { color: 'text-accent' },
+  live: { color: 'text-sky-500' },
   config: { color: 'text-muted', dash: '5 3' },
   scheduling: { color: 'text-faint', dash: '1.5 3' },
   policy: { color: 'text-warning', dash: '6 3' },
@@ -98,7 +102,8 @@ const EDGE_TEXT: Record<TopologyEdge['type'], string> = {
   isolates: 'isolates',
   identity: 'runs as',
   subject: 'bound by',
-  grants: 'grants'
+  grants: 'grants',
+  calls: 'calls'
 }
 
 /** Tỉ lệ nhỏ nhất khi vừa khung mà chữ còn đọc được. */
@@ -108,6 +113,13 @@ interface View {
   x: number
   y: number
   k: number
+}
+
+/** Workload có traffic Caretta (id loại → tên loại như Caretta báo). */
+const LIVE_KINDS: Record<string, string> = {
+  'deployments.apps': 'Deployment',
+  'statefulsets.apps': 'StatefulSet',
+  'daemonsets.apps': 'DaemonSet'
 }
 
 /**
@@ -167,7 +179,22 @@ export function TopologyOf({
     }
   }, [request, kindId, ns, name, tick])
 
-  const filtered = useMemo(() => (graph ? filterTopology(graph, hidden) : null), [graph, hidden])
+  // Traffic thật (Caretta) quanh workload: bên gọi tới / được gọi, kể cả namespace khác / ngoài cluster.
+  const liveKind = LIVE_KINDS[kindId]
+  const traffic = useTraffic(request, Boolean(liveKind) && !hidden.has('live'))
+  const withLive = useMemo(() => {
+    if (!graph || !liveKind || traffic.status !== 'live') return graph
+    const extra = liveTopology(
+      { id: graph.root, kindLabel: liveKind, namespace: ns ?? '', name },
+      traffic.rates,
+      formatRate
+    )
+    return extra.edges.length ? mergeTopology(graph, extra) : graph
+  }, [graph, liveKind, traffic.status, traffic.rates, ns, name])
+  const filtered = useMemo(
+    () => (withLive ? filterTopology(withLive, hidden) : null),
+    [withLive, hidden]
+  )
   // Khung đổi cỡ (thu / phóng bảng) → chọn lại hướng và vừa khung.
   const [size, setSize] = useState<{ w: number; h: number } | null>(null)
   useEffect(() => {
@@ -371,7 +398,7 @@ export function TopologyOf({
   if (!graph || !layout) return <p className="text-xs text-faint">Mapping relationships…</p>
 
   const sel = selected ? byId.get(selected) : undefined
-  const categories = [...new Set(graph.edges.map((e) => EDGE_CATEGORY[e.type]))]
+  const categories = [...new Set((withLive ?? graph).edges.map((e) => EDGE_CATEGORY[e.type]))]
   const missing = graph.nodes.filter((n) => n.missing)
 
   return (
@@ -603,6 +630,7 @@ type TopoFlowEdge = Edge<{ edge: TopologyEdge }, 'topo'>
 const STROKE: Record<TopologyCategory, string> = {
   ownership: 'var(--sh-faint)',
   network: 'var(--sh-accent)',
+  live: '#0ea5e9',
   config: 'var(--sh-muted)',
   scheduling: 'var(--sh-faint)',
   policy: 'var(--sh-warning)',

@@ -5,7 +5,8 @@ import type { TopologyEdge, TopologyEdgeType, TopologyNode, TopologyResult } fro
  * RBAC), thứ tự trong cột theo trọng tâm hàng xóm để ít cắt nhau. Thuần — test được.
  */
 
-export type TopologyCategory = 'ownership' | 'network' | 'config' | 'scheduling' | 'policy' | 'rbac'
+export type TopologyCategory =
+  'ownership' | 'network' | 'live' | 'config' | 'scheduling' | 'policy' | 'rbac'
 
 export const EDGE_CATEGORY: Record<TopologyEdgeType, TopologyCategory> = {
   owns: 'ownership',
@@ -21,12 +22,14 @@ export const EDGE_CATEGORY: Record<TopologyEdgeType, TopologyCategory> = {
   isolates: 'policy',
   identity: 'rbac',
   subject: 'rbac',
-  grants: 'rbac'
+  grants: 'rbac',
+  calls: 'live'
 }
 
 export const CATEGORY_LABEL: Record<TopologyCategory, string> = {
   ownership: 'Ownership',
   network: 'Traffic',
+  live: 'Live traffic',
   config: 'Config & storage',
   scheduling: 'Scheduling',
   policy: 'Policies',
@@ -256,4 +259,75 @@ export function dependentsOf(graph: { edges: readonly TopologyEdge[] }, id: stri
     }
   }
   return out
+}
+
+// ——— Traffic thật (Caretta) quanh một workload ———
+
+const PEER_KIND: Record<string, { id: string; label: string }> = {
+  Deployment: { id: 'deployments.apps', label: 'Deployment' },
+  StatefulSet: { id: 'statefulsets.apps', label: 'StatefulSet' },
+  DaemonSet: { id: 'daemonsets.apps', label: 'DaemonSet' },
+  Job: { id: 'jobs.batch', label: 'Job' },
+  CronJob: { id: 'cronjobs.batch', label: 'CronJob' },
+  Pod: { id: 'pods', label: 'Pod' },
+  Service: { id: 'services', label: 'Service' },
+  Node: { id: 'nodes', label: 'Node' }
+}
+
+/**
+ * Bên gọi tới / được gọi bởi workload gốc theo Caretta → node + cạnh `calls` (nhãn = băng thông).
+ * Bên ở namespace khác hay ngoài cluster vẫn hiện — chính là thứ Topology cấu hình không thấy.
+ */
+export function liveTopology(
+  root: { id: string; kindLabel: string; namespace: string; name: string },
+  rates: readonly {
+    client: { kind: string; ns: string; name: string }
+    server: { kind: string; ns: string; name: string }
+    rate: number
+  }[],
+  format: (rate: number) => string
+): TopologyResult {
+  const isRoot = (p: { kind: string; ns: string; name: string }): boolean =>
+    p.kind === root.kindLabel && p.ns === root.namespace && p.name === root.name
+  const idOf = (p: { kind: string; ns: string; name: string }): string => {
+    if (isRoot(p)) return root.id
+    const k = PEER_KIND[p.kind]
+    return k ? `${k.id}|${p.ns}|${p.name}` : `external||${p.name}`
+  }
+  const nodes = new Map<string, TopologyNode>()
+  const sums = new Map<string, { from: string; to: string; rate: number }>()
+  for (const r of rates) {
+    if (!isRoot(r.client) && !isRoot(r.server)) continue
+    if (isRoot(r.client) && isRoot(r.server)) continue
+    const other = isRoot(r.client) ? r.server : r.client
+    const id = idOf(other)
+    const k = PEER_KIND[other.kind]
+    if (!nodes.has(id))
+      nodes.set(id, {
+        id,
+        kind: k?.id ?? 'external',
+        kindLabel: k?.label ?? 'External',
+        name: other.name,
+        ...(other.ns ? { namespace: other.ns } : {}),
+        summary: k ? 'live traffic' : 'outside the cluster',
+        tone: 'ok'
+      })
+    const from = idOf(r.client)
+    const to = idOf(r.server)
+    const key = `${from}>${to}`
+    const prev = sums.get(key)
+    if (prev) prev.rate += r.rate
+    else sums.set(key, { from, to, rate: r.rate })
+  }
+  return {
+    root: root.id,
+    nodes: [...nodes.values()],
+    edges: [...sums.values()].map((e) => ({
+      from: e.from,
+      to: e.to,
+      type: 'calls' as const,
+      label: format(e.rate)
+    })),
+    notes: []
+  }
 }
