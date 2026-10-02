@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.6] - 2026-10-02
+
 ### Changed
 
 - **Kubernetes Map is roomier and easier to follow** — each workload gets its own column with its
