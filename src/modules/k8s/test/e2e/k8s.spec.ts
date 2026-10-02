@@ -566,7 +566,7 @@ test('Kubernetes: bản đồ cluster lớn — gom vùng theo nhãn, lọc nhã
   }
 })
 
-test('Kubernetes: trang Deployment (Status / Strategy / Resources / Pods / ReplicaSets), Topology, Security, Metrics', async () => {
+test('Kubernetes: trang Deployment (Status / Resources / Pods / ReplicaSets), Topology, Metrics', async () => {
   test.setTimeout(60_000)
   const server = await startApiTestServer()
   const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
@@ -600,6 +600,9 @@ test('Kubernetes: trang Deployment (Status / Strategy / Resources / Pods / Repli
     await expect(detail.getByTestId('k8s-resources-table')).toContainText('nginx:1.27')
     await expect(detail.getByTestId('k8s-replicaset-row')).toHaveCount(2)
     await expect(detail.getByTestId('k8s-replicaset-rollback')).toHaveCount(1)
+    // Gọn: không còn Strategy / UID.
+    await expect(detail.getByText('Strategy', { exact: true })).toHaveCount(0)
+    await expect(detail.getByText('UID', { exact: true })).toHaveCount(0)
 
     // Phóng to thành cả trang.
     await detail.getByTestId('k8s-detail-wide').click()
@@ -613,6 +616,11 @@ test('Kubernetes: trang Deployment (Status / Strategy / Resources / Pods / Repli
     await expect(node('deployments.apps', 'web')).toHaveAttribute('data-root', 'true')
     await expect(node('replicasets.apps', 'web-rs2')).toHaveCount(1)
     await expect(node('pods', 'web-2')).toHaveCount(1)
+    // RBAC và Scheduling mặc định tắt — bật ở thanh lọc mới thấy Node / Role.
+    await expect(node('nodes', 'node-1')).toHaveCount(0)
+    await expect(node('roles.rbac.authorization.k8s.io', 'secret-reader')).toHaveCount(0)
+    await topo.locator('[data-testid="k8s-topology-filter"][data-category="scheduling"]').click()
+    await topo.locator('[data-testid="k8s-topology-filter"][data-category="rbac"]').click()
     await expect(node('nodes', 'node-1')).toHaveCount(1)
     await expect(node('roles.rbac.authorization.k8s.io', 'secret-reader')).toHaveCount(1)
     await expect(node('gateways.gateway.networking.k8s.io', 'public')).toHaveCount(1)
@@ -649,14 +657,8 @@ test('Kubernetes: trang Deployment (Status / Strategy / Resources / Pods / Repli
       .poll(async () => Math.round((await pod.boundingBox())?.x ?? 0))
       .toBe(Math.round(before.x))
 
-    // Security: cấu hình pod + ServiceAccount đọc được Secret.
-    await detail.getByTestId('k8s-detail-tab-security').click()
-    await expect(
-      detail.locator('[data-testid="k8s-security-finding"][data-id="no-memory-limit"]')
-    ).toHaveCount(1)
-    await expect(
-      detail.locator('[data-testid="k8s-rbac-grant"][data-risk="high"]').first()
-    ).toContainText('secrets')
+    // Không còn tab Security.
+    await expect(detail.getByTestId('k8s-detail-tab-security')).toHaveCount(0)
 
     // Metrics: tổng CPU / RAM và theo pod.
     await detail.getByTestId('k8s-detail-tab-metrics').click()

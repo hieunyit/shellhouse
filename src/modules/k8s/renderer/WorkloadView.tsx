@@ -1,16 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { RotateCcw, Server } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
-import {
-  DefList,
-  Heading,
-  Meter,
-  Pill,
-  Sparkline,
-  type Tone
-} from '../../../renderer/src/components/panels'
+import { Heading, Meter, Pill, Sparkline, type Tone } from '../../../renderer/src/components/panels'
 import { cleanError } from '../../../renderer/src/lib/format'
-import type { K8sOp, MetricsResult, RbacReach, RolloutRevision, Usage } from '../shared/ops'
+import type { K8sOp, MetricsResult, RolloutRevision, Usage } from '../shared/ops'
 import {
   age,
   formatCpu,
@@ -21,7 +14,6 @@ import {
   selectorString,
   type K8sObject
 } from '../shared/resources'
-import { securityFindings, type Severity } from '../shared/security'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 type Obj = Record<string, unknown>
@@ -325,10 +317,6 @@ export function WorkloadOverview({
         )}
       </Section>
 
-      <Section title="Strategy">
-        <StrategyOf kindId={kindId} spec={spec} status={st} />
-      </Section>
-
       <Section title="Resources and limits" testId="k8s-workload-resources">
         <ResourcesOf spec={templateSpec(kindId, obj)} replicas={want} />
       </Section>
@@ -367,86 +355,6 @@ export function WorkloadOverview({
       )}
       {common}
     </>
-  )
-}
-
-function StrategyOf({
-  kindId,
-  spec,
-  status
-}: {
-  kindId: string
-  spec: Obj
-  status: Obj
-}): React.JSX.Element {
-  if (kindId === 'deployments.apps') {
-    const strat = o(spec['strategy'])
-    const ru = o(strat['rollingUpdate'])
-    const type = s(strat['type']) || 'RollingUpdate'
-    return (
-      <DefList
-        items={[
-          ['Type', type],
-          type === 'RollingUpdate' && ['Max surge', s(ru['maxSurge']) || '25%'],
-          type === 'RollingUpdate' && ['Max unavailable', s(ru['maxUnavailable']) || '25%'],
-          ['Min ready', `${s(spec['minReadySeconds']) || '0'}s`],
-          ['Deadline', `${s(spec['progressDeadlineSeconds']) || '600'}s`],
-          ['History limit', s(spec['revisionHistoryLimit']) || '10'],
-          [
-            'Selector',
-            <span key="s" className="font-mono text-[11px]">
-              {selectorString(spec['selector']) ?? '—'}
-            </span>
-          ]
-        ]}
-      />
-    )
-  }
-  if (kindId === 'statefulsets.apps') {
-    const strat = o(spec['updateStrategy'])
-    return (
-      <DefList
-        items={[
-          ['Update', s(strat['type']) || 'RollingUpdate'],
-          o(strat['rollingUpdate'])['partition'] !== undefined && [
-            'Partition',
-            s(o(strat['rollingUpdate'])['partition'])
-          ],
-          ['Pod order', s(spec['podManagementPolicy']) || 'OrderedReady'],
-          ['Service', s(spec['serviceName']) || '—'],
-          [
-            'Revision',
-            <span key="r" className="font-mono text-[11px]">
-              {s(status['updateRevision']) || '—'}
-            </span>
-          ],
-          [
-            'Claims',
-            a(spec['volumeClaimTemplates'])
-              .map((t) => s(o(t['metadata'])['name']))
-              .join(', ') || '—'
-          ]
-        ]}
-      />
-    )
-  }
-  const strat = o(spec['updateStrategy'])
-  const ru = o(strat['rollingUpdate'])
-  return (
-    <DefList
-      items={[
-        ['Update', s(strat['type']) || 'RollingUpdate'],
-        ['Max unavailable', s(ru['maxUnavailable']) || '1'],
-        ru['maxSurge'] !== undefined && ['Max surge', s(ru['maxSurge'])],
-        ['Misscheduled', s(status['numberMisscheduled']) || '0'],
-        [
-          'Node selector',
-          Object.entries(o(o(o(spec['template'])['spec'])['nodeSelector']))
-            .map(([k, v]) => `${k}=${s(v)}`)
-            .join(', ') || 'all nodes'
-        ]
-      ]}
-    />
   )
 }
 
@@ -529,15 +437,22 @@ function ResourcesOf({ spec, replicas }: { spec: Obj; replicas: number }): React
   )
 }
 
-const TONE_BORDER: Record<Tone, string> = {
-  ok: 'border-l-success',
-  warn: 'border-l-warning',
-  bad: 'border-l-danger',
-  info: 'border-l-accent',
-  muted: 'border-l-line-strong'
+const DOT_BG: Record<Tone, string> = {
+  ok: 'bg-success',
+  warn: 'bg-warning',
+  bad: 'bg-danger-solid',
+  info: 'bg-accent',
+  muted: 'bg-line-strong'
+}
+const TONE_TEXT_CLS: Record<Tone, string> = {
+  ok: 'text-success',
+  warn: 'text-warning',
+  bad: 'text-danger',
+  info: 'text-accent',
+  muted: 'text-faint'
 }
 
-/** Lưới pod đầy bề ngang: lỗi trước; bấm thẻ mở pod, bấm node mở node. */
+/** Pod của workload: mỗi pod một dòng gọn — lỗi lên đầu; bấm mở pod, bấm node mở node. */
 function PodGrid({
   pods,
   prefix,
@@ -556,15 +471,13 @@ function PodGrid({
       p.metadata.name.localeCompare(q.metadata.name)
   )
   return (
-    <div
-      className="grid grid-cols-[repeat(auto-fill,minmax(10.5rem,1fr))] gap-1.5"
-      data-testid="k8s-pod-grid"
-    >
+    <div className="flex flex-col" data-testid="k8s-pod-grid">
       {sorted.map((p) => {
         const ps = podStatus(p)
         const tone = TONE[ps.tone] ?? 'muted'
         const statuses = a(o(p.status)['containerStatuses'])
         const readyN = statuses.filter((c) => c['ready'] === true).length
+        const total = statuses.length || a(o(p.spec)['containers']).length
         const restarts = statuses.reduce((n, c) => n + (Number(c['restartCount']) || 0), 0)
         const node = s(o(p.spec)['nodeName'])
         const short = p.metadata.name.startsWith(`${prefix}-`)
@@ -578,10 +491,7 @@ function PodGrid({
             data-testid="k8s-pod-tile"
             data-name={p.metadata.name}
             title={p.metadata.name}
-            className={cx(
-              'flex min-w-0 cursor-pointer flex-col gap-0.5 rounded-md border border-l-[3px] border-line bg-surface px-2 py-1.5 text-xs hover:border-line-strong',
-              TONE_BORDER[tone]
-            )}
+            className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1.5 text-xs hover:bg-hover"
             onClick={() => {
               onOpenPod(p)
             }}
@@ -589,27 +499,20 @@ function PodGrid({
               if (e.key === 'Enter') onOpenPod(p)
             }}
           >
-            <div className="flex items-center gap-1.5">
-              <span className="min-w-0 flex-1 truncate font-mono text-fg">{short}</span>
-              <span className="shrink-0 text-faint tabular-nums">
-                {readyN}/{statuses.length || a(o(p.spec)['containers']).length}
+            <span className={cx('size-2 shrink-0 rounded-full', DOT_BG[tone])} />
+            <span className="shrink-0 font-mono text-fg">{short}</span>
+            {ps.text !== 'Running' && (
+              <span className={cx('shrink-0', TONE_TEXT_CLS[tone])}>{ps.text}</span>
+            )}
+            {restarts > 0 && (
+              <span className={cx('shrink-0', restarts > 5 ? 'text-danger' : 'text-warning')}>
+                {restarts} restart{restarts === 1 ? '' : 's'}
               </span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Pill tone={tone}>{ps.text}</Pill>
-              {restarts > 0 && (
-                <span className={cx('text-[11px]', restarts > 5 ? 'text-danger' : 'text-warning')}>
-                  ↻{restarts}
-                </span>
-              )}
-              <span className="ml-auto text-[11px] text-faint">
-                {age(Date.parse(p.metadata.creationTimestamp ?? ''))}
-              </span>
-            </div>
+            )}
             {node ? (
               <button
                 type="button"
-                className="flex min-w-0 items-center gap-1 self-start text-[11px] text-muted hover:text-accent hover:underline"
+                className="flex min-w-0 items-center gap-1 text-[11px] text-faint hover:text-accent"
                 data-testid="k8s-pod-node"
                 title={`Open node ${node}`}
                 onClick={(e) => {
@@ -623,6 +526,14 @@ function PodGrid({
             ) : (
               <span className="text-[11px] text-warning">Not scheduled</span>
             )}
+            <span className="ml-auto flex shrink-0 gap-3 text-faint tabular-nums">
+              <span title="Ready containers">
+                {readyN}/{total}
+              </span>
+              <span className="w-8 text-right">
+                {age(Date.parse(p.metadata.creationTimestamp ?? ''))}
+              </span>
+            </span>
           </div>
         )
       })}
@@ -912,168 +823,6 @@ function Bar({
         />
       </div>
       <span className="w-12 text-right text-faint tabular-nums">{text}</span>
-    </div>
-  )
-}
-
-// ——— Security ———
-
-const SEVERITY_TONE: Record<Severity, Tone> = { high: 'bad', medium: 'warn', low: 'muted' }
-
-/** Cấu hình rủi ro của pod template + ServiceAccount với tới được gì (RBAC). */
-export function SecurityOf({
-  kindId,
-  obj,
-  request,
-  onNavigate
-}: {
-  kindId: string
-  obj: K8sObject
-  request: Request
-  onNavigate?: (kind: string, name: string, namespace?: string) => void
-}): React.JSX.Element {
-  const spec = templateSpec(kindId, obj)
-  const findings = useMemo(() => securityFindings(spec), [spec])
-  const sa = s(spec['serviceAccountName']) || s(spec['serviceAccount']) || 'default'
-  const ns = obj.metadata.namespace ?? ''
-  const [reach, setReach] = useState<RbacReach | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [showLow, setShowLow] = useState(false)
-  useEffect(() => {
-    let cancelled = false
-    request<RbacReach>({ op: 'rbacReach', namespace: ns, serviceAccount: sa }).then(
-      (r) => {
-        if (!cancelled) setReach(r)
-      },
-      (e: unknown) => {
-        if (!cancelled) setError(cleanError(e))
-      }
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [request, ns, sa])
-  const count = (sev: Severity): number => findings.filter((f) => f.severity === sev).length
-  const shown = showLow ? findings : findings.filter((f) => f.severity !== 'low')
-  const grants = reach?.grants ?? []
-  const risky = grants.filter((g) => g.risk !== 'low')
-  return (
-    <div className="flex flex-col gap-4" data-testid="k8s-security">
-      <section>
-        <Heading
-          action={
-            <span className="flex gap-1">
-              <Pill tone={count('high') ? 'bad' : 'muted'}>{count('high')} high</Pill>
-              <Pill tone={count('medium') ? 'warn' : 'muted'}>{count('medium')} medium</Pill>
-              <Pill tone="muted">{count('low')} low</Pill>
-            </span>
-          }
-        >
-          Pod configuration
-        </Heading>
-        {shown.length === 0 && (
-          <p className="text-xs text-success">
-            {findings.length ? 'Only low-risk hardening suggestions.' : 'No issues found.'}
-          </p>
-        )}
-        <div className="flex flex-col gap-1.5">
-          {shown.map((f, i) => (
-            <div
-              key={`${f.id}-${f.container ?? ''}-${String(i)}`}
-              className="flex gap-2 text-xs"
-              data-testid="k8s-security-finding"
-              data-id={f.id}
-              data-severity={f.severity}
-            >
-              <span className="mt-0.5 shrink-0">
-                <Pill tone={SEVERITY_TONE[f.severity]}>{f.severity}</Pill>
-              </span>
-              <div className="min-w-0">
-                <div className="text-fg">
-                  {f.title}
-                  {f.container && (
-                    <span className="ml-1 font-mono text-faint">({f.container})</span>
-                  )}
-                </div>
-                <div className="text-faint">{f.detail}</div>
-              </div>
-            </div>
-          ))}
-        </div>
-        {count('low') > 0 && (
-          <button
-            type="button"
-            className="mt-1.5 text-xs text-accent hover:underline"
-            onClick={() => {
-              setShowLow((v) => !v)
-            }}
-          >
-            {showLow ? 'Hide' : 'Show'} {count('low')} low-risk suggestion
-            {count('low') === 1 ? '' : 's'}
-          </button>
-        )}
-      </section>
-      <section data-testid="k8s-security-rbac">
-        <Heading>
-          If compromised — service account{' '}
-          <button
-            type="button"
-            className="font-mono normal-case hover:text-accent hover:underline"
-            onClick={() => onNavigate?.('serviceaccounts', sa, ns)}
-          >
-            {sa}
-          </button>
-        </Heading>
-        {spec['automountServiceAccountToken'] === false && (
-          <p className="mb-1 text-xs text-success">
-            The token is not mounted — pods cannot use these permissions.
-          </p>
-        )}
-        {error && <p className="text-xs text-danger">{error}</p>}
-        {!reach && !error && <p className="text-xs text-faint">Checking permissions…</p>}
-        {reach?.error && <p className="mb-1 text-xs text-warning">{reach.error}</p>}
-        {reach && grants.length === 0 && !reach.error && (
-          <p className="text-xs text-success">No RBAC permissions beyond the defaults.</p>
-        )}
-        {reach && grants.length > 0 && (
-          <>
-            <p className="mb-1.5 text-xs text-muted">
-              {risky.length
-                ? `${risky.length} sensitive permission${risky.length === 1 ? '' : 's'} through ${reach.bindings.length} binding${reach.bindings.length === 1 ? '' : 's'}.`
-                : `${grants.length} low-risk permission${grants.length === 1 ? '' : 's'}.`}
-            </p>
-            <div className="flex flex-col divide-y divide-line text-xs">
-              {grants.slice(0, 80).map((g, i) => (
-                <div
-                  key={`${g.via}-${g.resource}-${String(i)}`}
-                  className="grid grid-cols-[3.5rem_minmax(0,1fr)] gap-2 py-1"
-                  data-testid="k8s-rbac-grant"
-                  data-risk={g.risk}
-                >
-                  <Pill tone={SEVERITY_TONE[g.risk]}>{g.risk}</Pill>
-                  <div className="min-w-0">
-                    <div className="text-fg">
-                      <span className="font-mono">{g.resource}</span>
-                      {g.names.length > 0 && (
-                        <span className="text-faint"> ({g.names.join(', ')})</span>
-                      )}
-                      <span className="text-muted"> · {g.verbs.join(', ')}</span>
-                      <span className="text-faint">
-                        {' '}
-                        · {g.scope === '*' ? 'all namespaces' : g.scope}
-                      </span>
-                    </div>
-                    <div className="truncate text-faint" title={g.via}>
-                      {g.reason ? `${g.reason} — ` : ''}
-                      {g.via}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </section>
     </div>
   )
 }

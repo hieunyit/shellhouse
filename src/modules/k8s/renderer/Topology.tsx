@@ -130,7 +130,11 @@ export function TopologyOf({
   const [graph, setGraph] = useState<TopologyResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
-  const [hidden, setHidden] = useState<Set<TopologyCategory>>(new Set())
+  // Mặc định tắt RBAC (ServiceAccount → Role…) và Scheduling (Node, PriorityClass…): nhiều mà ít
+  // khi cần — bật ở thanh lọc khi muốn xem.
+  const [hidden, setHidden] = useState<Set<TopologyCategory>>(
+    () => new Set<TopologyCategory>(['rbac', 'scheduling'])
+  )
   const [selectedRaw, setSelected] = useState<string | null>(null)
   const [hover, setHover] = useState<string | null>(null)
   const [impact, setImpact] = useState(false)

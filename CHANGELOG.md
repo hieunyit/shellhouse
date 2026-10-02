@@ -6,6 +6,14 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- **Kubernetes details are calmer** — the Strategy section is gone; pods are listed one per line
+  (status, restarts, node, ready, age) instead of large tiles; Conditions only appear when one is
+  unhealthy; created time and UID are dropped (the age is in the header) and Labels are folded
+  like Annotations. The Security tab is removed. Topology starts with Access (RBAC) and Scheduling
+  turned off — tick them in the filter bar when you need them.
+
 ## [1.2.0-beta.6] - 2026-10-02
 
 ### Changed

@@ -32,7 +32,6 @@ import { TRAFFIC_KINDS, TrafficOf } from './TrafficTab'
 import {
   MetricsOf,
   POD_TEMPLATE_KINDS,
-  SecurityOf,
   WORKLOAD_VIEW_KINDS,
   WorkloadOverview
 } from './WorkloadView'
@@ -48,16 +47,7 @@ const s = (v: unknown): string =>
 const TONE: Record<string, Tone> = { ok: 'ok', warn: 'warn', bad: 'bad', muted: 'muted' }
 
 export type DetailTab =
-  | 'overview'
-  | 'topology'
-  | 'related'
-  | 'pods'
-  | 'metrics'
-  | 'traffic'
-  | 'security'
-  | 'data'
-  | 'events'
-  | 'yaml'
+  'overview' | 'topology' | 'related' | 'pods' | 'metrics' | 'traffic' | 'data' | 'events' | 'yaml'
 
 const WIDE_KEY = 'shellhouse.k8s.detail.wide'
 const loadWide = (): boolean => {
@@ -130,7 +120,6 @@ export function Detail({
   const hasData = kindId === 'configmaps' || kindId === 'secrets'
   const hasRelated = RELATED_KINDS.includes(kindId) && Boolean(ns)
   const hasTopology = TOPOLOGY_KINDS.has(kindId)
-  const hasTemplate = POD_TEMPLATE_KINDS.has(kindId) || kindId === 'pods'
   const hasMetrics = POD_TEMPLATE_KINDS.has(kindId) && kindId !== 'cronjobs.batch'
   const [tab, setTab] = useState<DetailTab>(
     (initialTab === 'related' && !hasRelated) || (initialTab === 'topology' && !hasTopology)
@@ -230,7 +219,6 @@ export function Detail({
             : []),
           ...(hasMetrics ? [{ id: 'metrics' as const, label: 'Metrics' }] : []),
           ...(TRAFFIC_KINDS.has(kindId) ? [{ id: 'traffic' as const, label: 'Traffic' }] : []),
-          ...(hasTemplate ? [{ id: 'security' as const, label: 'Security' }] : []),
           ...(hasData
             ? [
                 {
@@ -280,14 +268,6 @@ export function Detail({
             {...(onNavigate ? { onNavigate } : {})}
           />
         )}
-        {tab === 'security' && (
-          <SecurityOf
-            kindId={kindId}
-            obj={obj}
-            request={request}
-            {...(onNavigate ? { onNavigate } : {})}
-          />
-        )}
         {tab === 'related' && (
           <RelatedOf
             kindId={kindId}
@@ -324,18 +304,24 @@ function Section({
   )
 }
 
+/** Điều kiện "xấu" khi True (MemoryPressure, NetworkUnavailable…); còn lại xấu khi khác True. */
+const NEGATIVE_CONDITION = /Pressure|Unavailable|Failure|Failed|Disrupt|Unschedulable/
+
+/** Chỉ hiện điều kiện bất thường — bình thường (Available, Progressing…) thì không chiếm chỗ. */
 function Conditions({ list }: { list: Obj[] }): React.JSX.Element | null {
-  if (list.length === 0) return null
+  const bad = list.filter((c) =>
+    NEGATIVE_CONDITION.test(s(c['type'])) ? s(c['status']) === 'True' : s(c['status']) !== 'True'
+  )
+  if (bad.length === 0) return null
   return (
     <Section title="Conditions">
-      <div className="flex flex-col gap-1 text-xs">
-        {list.map((c) => (
+      <div className="flex flex-col gap-1 text-xs" data-testid="k8s-conditions">
+        {bad.map((c) => (
           <div key={s(c['type'])} className="flex items-center gap-2" title={s(c['message'])}>
-            <span className={s(c['status']) === 'True' ? 'text-success' : 'text-warning'}>
-              {s(c['status']) === 'True' ? '✓' : '✗'}
-            </span>
+            <span className="size-1.5 shrink-0 rounded-full bg-warning" />
             <span className="text-fg">{s(c['type'])}</span>
-            <span className="truncate text-faint">{s(c['reason'])}</span>
+            <span className="text-faint">{s(c['status'])}</span>
+            <span className="truncate text-muted">{s(c['message']) || s(c['reason'])}</span>
           </div>
         ))}
       </div>
@@ -484,27 +470,21 @@ function Overview({
   const annotations = Object.entries(meta.annotations ?? {})
   const common = (
     <>
-      <Section title="Metadata">
-        <DefList
-          items={[
-            [
-              'Created',
-              meta.creationTimestamp ? new Date(meta.creationTimestamp).toLocaleString() : '—'
-            ],
-            owners.length > 0 && ['Owner', owners.map((x) => `${x.kind}/${x.name}`).join(', ')],
-            Boolean(meta.uid) && [
-              'UID',
-              <span key="u" className="font-mono text-[11px]">
-                {meta.uid}
-              </span>
-            ]
-          ]}
-        />
-      </Section>
+      {owners.length > 0 && (
+        <p className="mb-3 text-xs text-faint">
+          Owned by{' '}
+          <span className="text-fg">{owners.map((x) => `${x.kind}/${x.name}`).join(', ')}</span>
+        </p>
+      )}
       {Object.keys(meta.labels ?? {}).length > 0 && (
-        <Section title="Labels">
-          <LabelChips labels={meta.labels} />
-        </Section>
+        <details className="mb-2 text-xs" data-testid="k8s-labels">
+          <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-faint uppercase">
+            Labels ({Object.keys(meta.labels ?? {}).length})
+          </summary>
+          <div className="mt-1.5">
+            <LabelChips labels={meta.labels} />
+          </div>
+        </details>
       )}
       {annotations.length > 0 && (
         <details className="mb-4 text-xs">
