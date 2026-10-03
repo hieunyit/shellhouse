@@ -1,4 +1,3 @@
-import { pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { isAppUrl, isSafeExternalUrl } from '../../src/main/security-policy'
 
@@ -41,9 +40,30 @@ describe('isAppUrl', () => {
 
   it('đường dẫn có dấu cách / chữ có dấu (mã hoá %xx)', () => {
     const odd = '/home/Nguyễn Văn/Shellhouse/out/renderer/index.html'
-    expect(isAppUrl(pathToFileURL(odd).href, undefined, odd, 'linux')).toBe(true)
+    // URL viết sẵn (pathToFileURL theo máy chạy: trên Windows sẽ gắn ổ đĩa).
+    const oddUrl = 'file:///home/Nguy%E1%BB%85n%20V%C4%83n/Shellhouse/out/renderer/index.html'
+    expect(isAppUrl(oddUrl, undefined, odd, 'linux')).toBe(true)
     expect(
       isAppUrl('file:///home/Nguy%E1%BB%85n%20V%C4%83n/x/index.html', undefined, odd, 'linux')
+    ).toBe(false)
+  })
+
+  it('Windows: ổ đĩa, dấu \\, không phân biệt hoa thường, dấu cách', () => {
+    const winIndex = 'C:\\Program Files\\Shellhouse\\resources\\app.asar\\out\\renderer\\index.html'
+    const url = 'file:///C:/Program%20Files/Shellhouse/resources/app.asar/out/renderer/index.html'
+    expect(isAppUrl(url, undefined, winIndex, 'win32')).toBe(true)
+    expect(isAppUrl(url.replace('C:', 'c:'), undefined, winIndex, 'win32')).toBe(true)
+    expect(isAppUrl(`${url}#/x`, undefined, winIndex, 'win32')).toBe(true)
+    expect(isAppUrl('file:///C:/Users/u/Downloads/index.html', undefined, winIndex, 'win32')).toBe(
+      false
+    )
+    expect(
+      isAppUrl(
+        'file://server/share/Shellhouse/resources/app.asar/out/renderer/index.html',
+        undefined,
+        winIndex,
+        'win32'
+      )
     ).toBe(false)
   })
 

@@ -21,6 +21,11 @@ allowBuilds:
 # - GHSA-wm7h-9275-46v2 (dicer ≤0.3.1): chỉ qua s3rver — server S3 giả lập CHỈ dùng trong test
 #   (devDependency, không có trong app phát hành). Lỗi nằm ở phần nhận form upload multipart
 #   (HTML POST), test không dùng tới.
+# - GHSA-ch52-4w7c-c8xp (http-cache-semantics ≤4.2.0, chưa có bản vá): chỉ qua electron-builder →
+#   @electron/get → got — tải Electron / công cụ đóng gói LÚC BUILD (devDependency, không có trong
+#   app phát hành). Lỗi là lộ response giữa nhiều người dùng chung một cache HTTP; ở đây cache là
+#   của một người build, không chia sẻ. Bỏ khỏi danh sách khi có bản vá.
 auditConfig:
   ignoreGhsas:
     - GHSA-wm7h-9275-46v2
+    - GHSA-ch52-4w7c-c8xp

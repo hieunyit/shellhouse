@@ -24,7 +24,15 @@ function parseMeta(text: string): PartMeta | null {
     return {
       size: meta.size,
       mtime: meta.mtime,
-      remote: typeof meta.remote === 'string' && meta.remote.startsWith('/') ? meta.remote : null
+      // Đường dẫn trên server (chỉ dùng để stat nguồn trên server của chính tab): thường "/…", nhưng
+      // không ép — server SFTP trên Windows / test có thể dùng dạng khác. Chỉ chặn rỗng / NUL / quá dài.
+      remote:
+        typeof meta.remote === 'string' &&
+        meta.remote.length > 0 &&
+        meta.remote.length <= 4096 &&
+        !meta.remote.includes('\0')
+          ? meta.remote
+          : null
     }
   } catch {
     return null

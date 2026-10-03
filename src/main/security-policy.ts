@@ -1,4 +1,4 @@
-import { pathToFileURL } from 'node:url'
+import { posix, win32 } from 'node:path'
 
 // Hàm thuần, không phụ thuộc Electron — để unit test được.
 
@@ -23,6 +23,16 @@ function filePathname(url: URL, platform: NodeJS.Platform): string | null {
 }
 
 /**
+ * Pathname (đã giải mã) mà URL file: của `index` sẽ có — tính theo `platform`, KHÔNG theo máy đang
+ * chạy (pathToFileURL dùng quy tắc của máy chạy: trên Windows nó gắn thêm ổ đĩa cho "/app/…").
+ * C:\\app\\index.html → /c:/app/index.html ; /app/index.html → /app/index.html.
+ */
+function indexPathname(index: string, platform: NodeJS.Platform): string {
+  if (platform === 'win32') return `/${win32.normalize(index).replace(/\\/g, '/')}`.toLowerCase()
+  return posix.normalize(index)
+}
+
+/**
  * URL mà renderer của app được phép ở lại (và được gọi IPC). Bản dev: đúng origin của dev server.
  * Bản build: ĐÚNG file index.html của renderer (bỏ qua #hash / ?query) — không phải mọi file:
  * (một file HTML bất kỳ trên đĩa mà được nạp vào cửa sổ sẽ có toàn quyền IPC).
@@ -39,7 +49,7 @@ export function isAppUrl(
     // host khác rỗng = đường dẫn mạng (file://server/share/...) — không bao giờ là app.
     if (url.protocol !== 'file:' || url.host !== '') return false
     const actual = filePathname(url, platform)
-    return actual !== null && actual === filePathname(pathToFileURL(appIndexHtml), platform)
+    return actual !== null && actual === indexPathname(appIndexHtml, platform)
   } catch {
     return false
   }
