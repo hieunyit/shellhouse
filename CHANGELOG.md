@@ -6,6 +6,62 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.10] - 2026-10-03
+
+### Added
+
+- **Vietnamese interface** — Settings → Appearance → Language: System / English / Tiếng Việt
+  (restart to apply). Dates, times, numbers and sizes follow the language (`17/08/2026, 22:44`,
+  `1,5 KB`). Technical terms (pod, label, endpoint, container, bucket, Running, Pending, Scale,
+  Drain…) stay in English, the way Vietnamese engineers use them.
+- **Kubernetes Topology** is now the default Map view and works without any traffic data:
+  - Lanes Entry → Services → Workloads → Pods, with every Ingress host/path rule as its own line
+    and Service `port → targetPort`; opens at a readable zoom showing the whole chain.
+  - Problems explained in words: Service selector matches no pods, no Ready endpoints, targetPort
+    not exposed by any container, Ingress backend Service or TLS Secret missing, CrashLoop /
+    Pending / image pull errors, HPA at max, unbound PVC, NetworkPolicy isolation.
+  - Hover/select highlights the whole path; inspector with Logs / Shell / YAML / Port-forward;
+    focus mode; search by name or `label=value`; overview cards stay readable when zoomed out.
+  - Map toolbar fits narrow windows (actions fold into icons / the View menu).
+- **Kubernetes**: multi-select bulk actions (delete, restart, scale, cordon); Helm rollback,
+  uninstall and revision diff (no helm CLI needed); `kubectl debug` for pods and nodes; diff
+  before apply; live events; YAML editor with syntax highlighting; Overview "Needs attention".
+- **Docker**: create volumes and networks, connect/disconnect containers; private registries
+  (credentials encrypted in the vault) for pull / push / tag; image builds with live output;
+  Files tab to copy files in and out of containers; healthcheck status; disk usage bars show real
+  usage with Clean up for build cache.
+- **S3**: object versions (show, restore, delete), metadata and tags editing, bucket settings
+  (versioning, lifecycle rules, CORS), object details panel, share links with chosen expiry.
+- Terminal: warning before pasting multiple lines; confirmation before closing a connected tab;
+  SSH password prompt with show/hide, Caps Lock warning and "Save password in vault".
+- Interrupted downloads: `*.shellhouse-part` files are hidden; Resume / Discard in Transfers and a
+  banner in the local file pane.
+
+### Changed
+
+- Module tabs collapse the host sidebar to an icon rail (hover to peek) for more room.
+- Host form: chip tags, labelled colours, inline validation. Favorites / Recent are compact and no
+  longer duplicate each other.
+- Startup bundle halved (1.9 MB → 0.94 MB); faster startup, lower memory; large transfer queues
+  and big host lists no longer stall the UI.
+
+### Fixed
+
+- A network error during login could crash the session host and close every tab.
+- Security hardening: external editor chosen only through a file picker; only the app's own
+  `index.html` gets IPC; path traversal in S3/SFTP folder downloads; read-only mode now enforced by
+  the app (no exec / shell / port-forward); kubeconfig exec plugins limited to sign-in commands
+  with a sanitised environment.
+- SFTP: saves are atomic (no truncated file on a dropped connection); resume checks the source
+  has not changed; downloaded private files keep restrictive permissions.
+- Kubernetes OIDC token refresh never worked; requests now time out and reuse connections (much
+  faster through an SSH bastion).
+- Docker Engine 29+ (API version negotiation); volume prune no longer removes named volumes.
+- Production-context Restart / Sync in Kubernetes did nothing; switching context could hang on
+  "Loading…".
+- Escape now closes a dialog the moment it appears; Map/Topology search results stay open when
+  the window loses focus.
+
 ## [1.2.0-beta.9] - 2026-10-03
 
 ### Changed
