@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { tk } from './i18n'
 import { ArrowLeft, Copy, GitCompare } from 'lucide-react'
 import type { Extension } from '@codemirror/state'
 import { parseDocument } from 'yaml'
@@ -366,10 +367,10 @@ export function YamlEditor({
         {busy
           ? mode === 'edit'
             ? t('Saving…')
-            : t('Applying…')
+            : tk('Applying…')
           : mode === 'edit'
             ? t('Save')
-            : t('Apply')}
+            : tk('Apply')}
       </Button>
     </>
   ) : (

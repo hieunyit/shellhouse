@@ -176,12 +176,13 @@ function VersioningPane({
       <div className="flex items-center gap-2 text-[13px]">
         <span className="text-muted">{t('Status')}</span>
         <span data-testid="s3-versioning-status" data-status={status}>
+          {/* Tên trạng thái của S3 (như AWS console) — giữ nguyên, không dịch. */}
           {status === 'Enabled' ? (
-            <Pill tone="ok">{t('Enabled')}</Pill>
+            <Pill tone="ok">Enabled</Pill>
           ) : status === 'Suspended' ? (
-            <Pill tone="warn">{t('Suspended')}</Pill>
+            <Pill tone="warn">Suspended</Pill>
           ) : (
-            <Pill tone="muted">{t('Off')}</Pill>
+            <Pill tone="muted">Disabled</Pill>
           )}
         </span>
       </div>

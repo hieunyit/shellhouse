@@ -20,7 +20,7 @@ export const main: Readonly<Record<string, string>> = {
   'All files': 'Tất cả file',
   'Restore data': 'Khôi phục dữ liệu',
   'A copy of your current data is kept in the backups folder. The app will restart.':
-    'Một bản sao dữ liệu hiện tại được giữ trong thư mục backups. Ứng dụng sẽ khởi động lại.',
+    'Một bản sao dữ liệu hiện tại được giữ trong thư mục backups. App sẽ khởi động lại.',
   Restore: 'Khôi phục',
   'Replace all current data with "{file}" ({n} host)?':
     'Thay toàn bộ dữ liệu hiện tại bằng "{file}" ({n} host)?',
@@ -29,9 +29,9 @@ export const main: Readonly<Record<string, string>> = {
   'Only available in installed builds (this is a development build).':
     'Chỉ có ở bản cài đặt (đây là bản dev).',
   'This build has no release channel configured.': 'Bản này chưa cấu hình kênh phát hành.',
-  'This build has no update signing key.': 'Bản này không có khoá ký bản cập nhật.',
+  'This build has no update signing key.': 'Bản này không có signing key cho bản cập nhật.',
   'Update {version} is not signed with a trusted key and was not downloaded.':
-    'Bản cập nhật {version} không được ký bằng khoá tin cậy nên không được tải về.',
+    'Bản cập nhật {version} không được ký bằng key tin cậy nên không được tải về.',
   'Could not open the file (not a Shellhouse data file?)':
     'Không mở được file (không phải file dữ liệu Shellhouse?)',
   'Not a valid SQLite database': 'Không phải cơ sở dữ liệu SQLite hợp lệ',
@@ -42,7 +42,7 @@ export const main: Readonly<Record<string, string>> = {
   'The file does not contain a vault': 'File không chứa vault',
   'Wrong master password for this backup': 'Sai master password của bản sao lưu này',
   'The data uses schema v{db}, newer than this version of the app supports (v{app}). Update the app or restore a backup.':
-    'Dữ liệu dùng schema v{db}, mới hơn mức phiên bản ứng dụng này hỗ trợ (v{app}). Hãy cập nhật ứng dụng hoặc khôi phục bản sao lưu.',
+    'Dữ liệu dùng schema v{db}, mới hơn mức app này hỗ trợ (v{app}). Hãy cập nhật app hoặc khôi phục bản sao lưu.',
   'The operating system does not provide a keychain to store the key securely.':
     'Hệ điều hành không có keychain để lưu key an toàn.',
   'No secure keychain found (GNOME Keyring / KWallet). The key would only be obfuscated, not encrypted, so this option is disabled.':
@@ -59,7 +59,7 @@ export const main: Readonly<Record<string, string>> = {
     'Không tìm thấy cột host (cần một cột tên Hostname, Host, IP hoặc Address)',
   'Invalid hostname: {value}': 'Hostname không hợp lệ: {value}',
   'Invalid port: {value}': 'Port không hợp lệ: {value}',
-  'Invalid username: {value}': 'Username không hợp lệ: {value}',
+  'Invalid username: {value}': 'Tên đăng nhập không hợp lệ: {value}',
   'Private key not found: {path}': 'Không tìm thấy private key: {path}',
   'Invalid jump host: {value}': 'Jump host không hợp lệ: {value}',
   'Invalid jump host user: {value}': 'User của jump host không hợp lệ: {value}',
@@ -135,6 +135,6 @@ export const main: Readonly<Record<string, string>> = {
   'The key is used by {n} host': 'Key đang được {n} host dùng',
   'The key is used by {n} hosts': 'Key đang được {n} host dùng',
   'Could not reach the update server. Check your connection.':
-    'Không kết nối được máy chủ cập nhật. Hãy kiểm tra mạng.',
+    'Không kết nối được server cập nhật. Hãy kiểm tra mạng.',
   'Update check failed.': 'Kiểm tra cập nhật thất bại.'
 }
