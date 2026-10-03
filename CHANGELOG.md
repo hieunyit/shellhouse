@@ -6,6 +6,48 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.11] - 2026-10-04
+
+### Added
+
+- **Remote Desktop (RDP)** — new host type next to SSH / Telnet / Serial:
+  - **Opens inside a tab** (IronRDP): the remote desktop resizes with the tab (HiDPI aware), with
+    Ctrl+Alt+Del, Windows key, clipboard, fit / 100 %, full screen and reconnect; several RDP tabs
+    at once, tabs can be saved in workspaces.
+  - The server certificate is confirmed on first connect and flagged if it changes (like SSH host
+    keys); passwords come from the vault or are asked in the tab ("Save password in vault").
+  - Can go through an SSH host without opening a local port; RD Gateway hosts can open in the
+    external client.
+  - Or open in the system client: mstsc (Windows), Windows App (macOS), xfreerdp / Remmina (Linux);
+    the password is never written to a file or command line except Windows' `cmdkey`.
+  - Import `.rdp` files.
+- **Server OS icons** — after an SSH login Shellhouse detects the OS (Ubuntu, Debian, RHEL, CentOS,
+  Rocky, AlmaLinux, Fedora, Amazon Linux, SUSE, Arch, Alpine, Oracle, Kali, Raspberry Pi OS,
+  FreeBSD, macOS, Windows…) and shows its icon on the host, Home cards and tabs.
+- **Kubernetes Traffic service map** — follows the selected namespaces; other namespaces collapse
+  into one node each, external addresses group by /16 or domain (expand on demand), idle
+  connections hidden, top connections first; click a service for per-peer rates. The workload
+  Traffic tab gets a small focused map (callers → workload → callees).
+- **Docker** — checkbox selection with bulk Start / Stop / Restart / Pause / Kill / Remove for
+  containers, and bulk actions for images, volumes and networks.
+
+### Changed
+
+- Docker Compose page rebuilt as a full-width table: actions sit next to the project name, rows
+  expand into services (image, state, health, ports, replicas, quick actions).
+- Kubernetes Topology: every Ingress rule gets its own lane and entry point, so edges no longer
+  merge into one trunk or cross in opposite directions.
+- Consistent type scale on Kubernetes Overview and detail pages.
+- Home adapts to the window width (1 → 3 columns).
+
+### Fixed
+
+- Kubernetes namespace / context menus were hidden under the Map toolbar and did not close when
+  clicking outside.
+- Map → Traffic ignored the selected namespaces.
+- Opening a module item from the collapsed sidebar left the sidebar covering the new tab.
+- Kubernetes requests on reused connections were ~100 ms slower on macOS (TCP_NODELAY).
+
 ## [1.2.0-beta.10] - 2026-10-03
 
 ### Added
