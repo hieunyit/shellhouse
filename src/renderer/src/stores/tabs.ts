@@ -44,7 +44,13 @@ export interface EditorTarget {
   key: string
 }
 
-export type TabTarget = TerminalTarget | ModuleTabTarget | HomeTarget | EditorTarget
+/** Remote Desktop trong tab (IronRDP — src/renderer/src/rdp). */
+export interface RdpTabTarget {
+  kind: 'rdp'
+  hostId: string
+}
+
+export type TabTarget = TerminalTarget | ModuleTabTarget | HomeTarget | EditorTarget | RdpTabTarget
 
 /** Tab không mở lại / nhân bản / chia màn hình được (không có "phiên" để tạo lại). */
 const singular = (target: TabTarget): boolean => target.kind === 'home' || target.kind === 'editor'
@@ -101,6 +107,15 @@ export interface ClosedTab {
 }
 
 const MAX_CLOSED = 10
+
+/**
+ * Host không mở thành tab (Remote Desktop: client RDP của hệ điều hành) — stores/rdp đăng ký. Trả
+ * true = đã tự mở, không tạo tab.
+ */
+let hostOpener: ((hostId: string) => boolean) | null = null
+export function setHostOpener(opener: ((hostId: string) => boolean) | null): void {
+  hostOpener = opener
+}
 
 interface TabsState {
   tabs: Tab[]
@@ -229,6 +244,8 @@ export const useTabs = create<TabsState>((set, get) => {
         ...target
       }),
     addHost: (host, options) => {
+      // Host Remote Desktop: mở bằng client RDP của hệ điều hành, không có tab terminal.
+      if (hostOpener?.(host.id)) return get().activeId ?? ''
       const active = get().activeId
       const splitFrom =
         options?.split && active ? { tabId: active, direction: options.split } : undefined
@@ -241,7 +258,9 @@ export const useTabs = create<TabsState>((set, get) => {
       )
     },
     addTarget: (title, target) => add(title, target),
-    openHosts: (hosts, layout) => {
+    openHosts: (all, layout) => {
+      // Host Remote Desktop mở bằng client RDP riêng, không thành ô trong lưới / tab.
+      const hosts = all.filter((h) => !hostOpener?.(h.id))
       const ids: string[] = []
       // Lưới gần vuông: 4 host → 2×2, 6 → 3×2. Hàng đầu chia phải, các hàng sau chia xuống từ ô phía trên.
       const cols = Math.ceil(Math.sqrt(hosts.length))

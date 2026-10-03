@@ -48,6 +48,9 @@ interface SidebarLayout {
   /** Yêu cầu mở tạm (peek) thanh bên đang gọn; `focusSearch` = đưa con trỏ vào ô tìm host. */
   peek: { seq: number; focusSearch: boolean } | null
   requestPeek: (focusSearch: boolean) => void
+  /** Thanh bên đầy đủ đang mở tạm (đè lên nội dung) khi ở dạng gọn. */
+  peekOpen: boolean
+  setPeekOpen: (open: boolean) => void
 }
 
 export const useSidebarLayout = create<SidebarLayout>((set, get) => ({
@@ -64,8 +67,35 @@ export const useSidebarLayout = create<SidebarLayout>((set, get) => ({
   peek: null,
   requestPeek: (focusSearch) => {
     set({ peek: { seq: (get().peek?.seq ?? 0) + 1, focusSearch } })
+  },
+  peekOpen: false,
+  setPeekOpen: (open) => {
+    if (get().peekOpen !== open) set({ peekOpen: open })
   }
 }))
+
+interface TabFocusState {
+  activeId: string | null
+  tabs: readonly unknown[]
+  closed: readonly unknown[]
+}
+
+/**
+ * Lần cập nhật store tab này có phải là "mở / chuyển tới một tab" không: tab đang chọn đổi (mở tab
+ * mới, chuyển tab, đóng tab đang chọn), hoặc gọi lại activate() cho chính tab đang chọn (chỉ
+ * `activeId` được ghi, danh sách tab giữ nguyên). Đổi tiêu đề / tham số tab (tabs đổi) thì không.
+ */
+export function isTabFocusChange(next: TabFocusState, prev: TabFocusState): boolean {
+  if (next.activeId !== prev.activeId) return true
+  return next.activeId !== null && next.tabs === prev.tabs && next.closed === prev.closed
+}
+
+// Mở tab từ thanh bên đang mở tạm (nhấp đúp host / tài khoản S3, Enter, menu "Open"…) → đóng phần
+// mở tạm, không để nó đè lên nội dung tab vừa mở.
+useTabs.subscribe((state, prev) => {
+  if (!useSidebarLayout.getState().peekOpen) return
+  if (isTabFocusChange(state, prev)) useSidebarLayout.getState().setPeekOpen(false)
+})
 
 /** Loại thanh bên theo tab đang chọn. */
 export function modeForTab(kind: string | undefined): SidebarMode {

@@ -1483,11 +1483,13 @@ export function layoutTopology(
       return s ? centerY(s) + (sOff.get(e.id) ?? 0) : 0
     }
     list.sort((a, b) => srcY(a) - srcY(b) || compare(a.id, b.id))
-    // Gom các cạnh từ cùng một thẻ nguồn vào một điểm (đỡ rối khi nhiều luật tới cùng Service).
+    // Mỗi cổng nguồn (thẻ + dòng luật) một điểm vào riêng ở đích — các đường chỉ gặp nhau ở thẻ
+    // đích, không nhập vào nhau trước đó. Cạnh trùng cổng nguồn (hiếm) dùng chung điểm.
+    const port = (e: TopoEdge): string => `${e.from}#${String(e.fromRow ?? '')}`
     const groups: TopoEdge[][] = []
     for (const e of list) {
       const g = groups.at(-1)
-      if (g && g[0]?.from === e.from) g.push(e)
+      if (g?.[0] && port(g[0]) === port(e)) g.push(e)
       else groups.push([e])
     }
     const offs = new Map<string, number>()
@@ -1501,26 +1503,43 @@ export function layoutTopology(
       for (const e of g) tOff.set(e.id, off)
     }
   }
-  // Đoạn dọc: lệch nhẹ theo thẻ nguồn trong cùng cột — hai nguồn khác nhau không chồng nét dọc.
-  const slot = new Map<string, number>()
-  const byCol = groupBy(placed, (n) => columnLane(n.lane))
-  for (const list of byCol.values())
-    list
-      .sort((a, b) => a.y - b.y)
-      .forEach((n, i) => {
-        slot.set(n.id, i % 4)
-      })
+  // Đoạn dọc: mỗi cạnh một làn dọc riêng trong khe giữa hai cột (xem `routeChannels`).
+  const gapOf = new Map<TopoLane, { from: number; to: number }>()
+  columns.forEach((c, i) => {
+    const next = columns[i + 1]
+    gapOf.set(c.lane, { from: c.x + c.w, to: next ? next.x : c.x + c.w + 48 })
+  })
+  const wires: Wire[] = []
+  for (const e of kept) {
+    const s = at.get(e.from)
+    const tg = at.get(e.to)
+    if (!s || !tg || columnLane(s.lane) === columnLane(tg.lane)) continue
+    if (tg.x - (s.x + s.w) <= 16) continue
+    const sy = centerY(s) + (sOff.get(e.id) ?? 0)
+    const ty = centerY(tg) + (tOff.get(e.id) ?? 0)
+    if (Math.abs(ty - sy) < 0.5) continue
+    wires.push({
+      id: e.id,
+      gap: columnLane(s.lane),
+      sy,
+      ty,
+      sPort: `${e.from}#${String(e.fromRow ?? '')}`,
+      tPort: `${e.to}@${String(tOff.get(e.id) ?? 0)}`
+    })
+  }
+  const trackX = routeChannels(wires, gapOf)
   const edges: PlacedTopoEdge[] = kept.map((e) => {
     const s = at.get(e.from)
     const tg = at.get(e.to)
     const gap = s && tg ? Math.max(24, tg.x - (s.x + s.w)) : 60
-    const base = Math.min(28, gap / 3)
     const tree = s && tg && columnLane(s.lane) === columnLane(tg.lane)
+    const x = trackX.get(e.id)
     return {
       ...e,
       sOff: sOff.get(e.id) ?? 0,
       tOff: tOff.get(e.id) ?? 0,
-      bend: base + (slot.get(e.from) ?? 0) * Math.min(8, gap / 12),
+      // Đường thẳng (không đoạn dọc) / đi lùi: giữ khoảng mặc định.
+      bend: s && x !== undefined ? x - (s.x + s.w) : Math.min(28, gap / 3),
       ...(tree ? { tree: { sw: s.w, sh: s.h, th: tg.h } } : {})
     }
   })
@@ -1556,6 +1575,117 @@ function spread(list: readonly { id: string }[], h: number, out: Map<string, num
   const step = n > 1 ? Math.min(14, usable / (n - 1)) : 0
   const start = -((n - 1) * step) / 2
   list.forEach((e, i) => out.set(e.id, start + i * step))
+}
+
+/** Cạnh có đoạn dọc, cần một làn dọc (track) trong khe sau cột nguồn. */
+export interface Wire {
+  id: string
+  /** Cột nguồn — khe ngay sau cột này chứa đoạn dọc. */
+  gap: TopoLane
+  sy: number
+  ty: number
+  /** Cổng nguồn (thẻ + dòng) / điểm vào ở đích. */
+  sPort: string
+  tPort: string
+}
+
+const lo = (w: Wire): number => Math.min(w.sy, w.ty)
+const hi = (w: Wire): number => Math.max(w.sy, w.ty)
+/** Khoảng đệm: hai đoạn dọc gần sát nhau (< 4 px) cũng coi là chồng. */
+const WIRE_PAD = 4
+
+/**
+ * Hai cạnh không được dùng chung một làn dọc khi đoạn dọc của chúng chồng nhau. Ngoại lệ: chung
+ * cổng nguồn (hoặc chung điểm vào ở đích) và đi ngược chiều — chỉ chạm nhau ở đúng cổng đó (rẽ nhánh).
+ */
+function wiresClash(a: Wire, b: Wire): boolean {
+  if (lo(a) >= hi(b) + WIRE_PAD || lo(b) >= hi(a) + WIRE_PAD) return false
+  const opposite = a.ty > a.sy !== b.ty > b.sy
+  if (opposite && (a.sPort === b.sPort || a.tPort === b.tPort)) return false
+  return true
+}
+
+/**
+ * Số chỗ cắt khi `a` dùng làn bên trái `b` (đường ngang → dọc → ngang). Đoạn ngang cuối của `a`
+ * cắt đoạn dọc của `b` khi `a.ty` nằm trong khoảng dọc của `b`; đoạn ngang đầu của `b` cắt đoạn
+ * dọc của `a` khi `b.sy` nằm trong khoảng dọc của `a`. Chạm ở đầu mút (chung cổng) không tính.
+ */
+function crossLeft(a: Wire, b: Wire): number {
+  return (lo(b) < a.ty && a.ty < hi(b) ? 1 : 0) + (lo(a) < b.sy && b.sy < hi(a) ? 1 : 0)
+}
+
+/** Nhóm lớn hơn thế này: bỏ bước chèn tối ưu (O(n²)), giữ thứ tự theo độ cao đích. */
+const MAX_ORDERED_WIRES = 400
+
+/**
+ * Định tuyến trực giao trong từng khe giữa hai cột: mỗi cạnh một làn dọc riêng — hai cạnh khác
+ * đích không bao giờ chung một đoạn dọc. Thứ tự làn (trái → phải) chọn để ít chỗ cắt nhất: xếp
+ * theo độ cao đích rồi chèn từng cạnh vào vị trí ít cắt nhất (tham lam, tất định). Làn được dùng
+ * lại khi đoạn dọc không chồng nhau (cạnh ở hàng / namespace khác). Trả về x tuyệt đối của làn.
+ */
+export function routeChannels(
+  wires: readonly Wire[],
+  gaps: ReadonlyMap<string, { from: number; to: number }>
+): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const [lane, list] of groupBy(wires, (w) => w.gap)) {
+    const gap = gaps.get(lane)
+    if (!gap) continue
+    // Thứ tự gốc: theo đích (trên → dưới), rồi nguồn, rồi id — ổn định giữa các lần vẽ.
+    const sorted = [...list].sort((a, b) => a.ty - b.ty || a.sy - b.sy || compare(a.id, b.id))
+    // Tách thành các cụm có đoạn dọc chồng nhau (quét theo đầu trên) — mỗi cụm xếp làn riêng.
+    const byTop = [...sorted].sort((a, b) => lo(a) - lo(b) || compare(a.id, b.id))
+    const clusterOf = new Map<string, number>()
+    let cluster = -1
+    let reach = -Infinity
+    for (const w of byTop) {
+      if (lo(w) >= reach + WIRE_PAD) cluster++
+      reach = Math.max(reach, hi(w))
+      clusterOf.set(w.id, cluster)
+    }
+    for (const group of groupBy(sorted, (w) => String(clusterOf.get(w.id))).values()) {
+      // Chèn tham lam: vị trí p làm tổng chỗ cắt với các cạnh đã xếp nhỏ nhất (hoà → cuối).
+      let order: Wire[] = []
+      if (group.length > MAX_ORDERED_WIRES) order = group
+      else
+        for (const w of group) {
+          let cost = order.reduce((sum, x) => sum + crossLeft(x, w), 0)
+          let best = cost
+          let at = order.length
+          for (let p = order.length - 1; p >= 0; p--) {
+            const x = order[p]
+            if (!x) continue
+            cost += crossLeft(w, x) - crossLeft(x, w)
+            if (cost < best) {
+              best = cost
+              at = p
+            }
+          }
+          order = [...order.slice(0, at), w, ...order.slice(at)]
+        }
+      // Gán làn theo thứ tự: mỗi cạnh nằm bên phải mọi cạnh đã xếp mà nó chồng lên.
+      const track = new Map<string, number>()
+      let tracks = 0
+      for (let i = 0; i < order.length; i++) {
+        const w = order[i]
+        if (!w) continue
+        let k = 0
+        for (let j = 0; j < i; j++) {
+          const x = order[j]
+          if (x && wiresClash(x, w)) k = Math.max(k, (track.get(x.id) ?? 0) + 1)
+        }
+        track.set(w.id, k)
+        tracks = Math.max(tracks, k + 1)
+      }
+      // Làn chia đều quanh giữa khe, cách hai mép ≥ 12 px (chỗ cho góc bo + mũi tên).
+      const left = gap.from + 12
+      const right = Math.max(left, gap.to - 14)
+      const step = tracks > 1 ? Math.min(10, (right - left) / (tracks - 1)) : 0
+      const first = (left + right) / 2 - (step * (tracks - 1)) / 2
+      for (const w of group) out.set(w.id, first + (track.get(w.id) ?? 0) * step)
+    }
+  }
+  return out
 }
 
 /** Khoá cấu trúc (id node + cạnh + cỡ thẻ): cùng khoá → cùng bố cục. */

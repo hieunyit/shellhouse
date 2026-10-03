@@ -17,6 +17,7 @@ import {
 import {
   ChevronRight,
   EyeOff,
+  ExternalLink,
   ChevronsDownUp,
   ChevronsUpDown,
   Clock,
@@ -29,6 +30,7 @@ import {
   FolderOpen,
   FolderPlus,
   LayoutGrid,
+  Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -52,6 +54,8 @@ import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
 import { ModuleSections } from './sidebar/ModuleSections'
 import { moduleHostActions } from '../../../modules/registry/renderer-kit'
+import { rdpAddress } from '@shared/rdp'
+import { openRdpHost } from '../stores/rdp'
 import { useContextMenu, type MenuEntry } from './ContextMenu'
 import { hostTextClass } from './hostColors'
 import {
@@ -219,10 +223,15 @@ export const Sidebar = memo(
 
     const mode = useSidebarMode()
     const compact = useSidebarLayout((s) => s.compact[mode])
-    const [peek, setPeek] = useState(false)
+    const peek = useSidebarLayout((s) => s.peekOpen)
+    const setPeek = useSidebarLayout((s) => s.setPeekOpen)
+    const asideRef = useRef<HTMLElement>(null)
     const panelRef = useRef<HTMLDivElement>(null)
     const peekTimer = useRef<number | null>(null)
     const hovering = useRef(false)
+    // Vừa đóng phần mở tạm trong khi con trỏ có thể vẫn nằm trên thanh icon → không mở lại theo rê
+    // chuột cho tới khi con trỏ rời thanh icon (hoặc di chuyển ở chỗ khác).
+    const suppressHover = useRef(false)
     const clearPeekTimer = (): void => {
       if (peekTimer.current !== null) window.clearTimeout(peekTimer.current)
       peekTimer.current = null
@@ -231,7 +240,58 @@ export const Sidebar = memo(
     // Về dạng đầy đủ (tab terminal…) → không còn gì để "mở tạm".
     useEffect(() => {
       if (!compact) setPeek(false)
-    }, [compact])
+    }, [compact, setPeek])
+    // Đóng phần mở tạm (bất kể lý do: mở tab, nhấp ra ngoài, Esc…) → quên trạng thái rê chuột, trả
+    // focus khỏi panel (panel thành inert).
+    useEffect(() => {
+      if (peek) return
+      clearPeekTimer()
+      const panel = panelRef.current
+      if (panel?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
+      if (!hovering.current) return
+      hovering.current = false
+      suppressHover.current = true
+      const onMove = (e: PointerEvent): void => {
+        const rail = asideRef.current?.querySelector('[data-testid="sidebar-rail"]')
+        if (e.target instanceof Node && rail?.contains(e.target)) return
+        suppressHover.current = false
+        document.removeEventListener('pointermove', onMove, true)
+      }
+      document.addEventListener('pointermove', onMove, true)
+      return () => {
+        document.removeEventListener('pointermove', onMove, true)
+      }
+    }, [peek])
+    useEffect(() => {
+      if (!compact || !peek) return
+      const aside = asideRef.current
+      const close = (): void => {
+        setPeek(false)
+        const panel = panelRef.current
+        if (panel?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
+      }
+      // Nhấp ra ngoài thanh bên (trừ menu chuột phải / hộp thoại mở từ thanh bên) → đóng.
+      const onPointerDown = (e: PointerEvent): void => {
+        const target = e.target
+        if (!(target instanceof Element)) return
+        if (aside?.contains(target)) return
+        if (target.closest('[data-testid="context-menu"], [role="dialog"]')) return
+        close()
+      }
+      // Esc ở bất kỳ đâu (panel tự xử lý Esc của nó — ô tìm đang có chữ thì Esc chỉ xoá chữ).
+      const onKeyDown = (e: KeyboardEvent): void => {
+        if (e.key !== 'Escape' || e.defaultPrevented) return
+        if (e.target instanceof Node && panelRef.current?.contains(e.target)) return
+        if (document.querySelector('[data-testid="context-menu"], [role="dialog"]')) return
+        close()
+      }
+      document.addEventListener('pointerdown', onPointerDown, true)
+      window.addEventListener('keydown', onKeyDown)
+      return () => {
+        document.removeEventListener('pointerdown', onPointerDown, true)
+        window.removeEventListener('keydown', onKeyDown)
+      }
+    }, [compact, peek, setPeek])
     const schedulePeek = (open: boolean): void => {
       clearPeekTimer()
       peekTimer.current = window.setTimeout(
@@ -265,7 +325,7 @@ export const Sidebar = memo(
       () =>
         useSidebarLayout.subscribe((state, prev) => {
           if (!state.peek || state.peek === prev.peek) return
-          setPeek(true)
+          state.setPeekOpen(true)
           if (state.peek.focusSearch) focusSearch()
         }),
       []
@@ -469,14 +529,36 @@ export const Sidebar = memo(
               connect(host)
             }
           },
-          {
-            id: 'split',
-            label: t('Connect in split'),
-            icon: <Columns2 size={14} />,
-            onSelect: () => {
-              connect(host, { split: 'right' })
-            }
-          },
+          // Remote Desktop không có tab để chia đôi — thay bằng mở toàn màn hình.
+          host.protocol === 'rdp'
+            ? {
+                id: 'connect-full',
+                label: t('Connect full screen'),
+                icon: <Maximize2 size={14} />,
+                onSelect: () => {
+                  openRdpHost(host.id, { fullScreen: true })
+                }
+              }
+            : {
+                id: 'split',
+                label: t('Connect in split'),
+                icon: <Columns2 size={14} />,
+                onSelect: () => {
+                  connect(host, { split: 'right' })
+                }
+              },
+          ...(host.protocol === 'rdp' && host.rdp?.openWith !== 'native'
+            ? [
+                {
+                  id: 'connect-external',
+                  label: t('Open in external client'),
+                  icon: <ExternalLink size={14} />,
+                  onSelect: () => {
+                    openRdpHost(host.id, { external: true })
+                  }
+                }
+              ]
+            : []),
           // SFTP và lệnh ssh chỉ có với host SSH.
           ...(host.protocol === 'ssh'
             ? [
@@ -503,6 +585,19 @@ export const Sidebar = memo(
                   onSelect: () =>
                     void window.shellhouse.writeClipboard(sshCommandFor(host)).then(() => {
                       toast.success(t('SSH command copied'), { description: sshCommandFor(host) })
+                    })
+                }
+              ]
+            : []),
+          ...(host.protocol === 'rdp'
+            ? [
+                {
+                  id: 'copy-address',
+                  label: t('Copy address'),
+                  icon: <Copy size={14} />,
+                  onSelect: () =>
+                    void window.shellhouse.writeClipboard(rdpAddress(host)).then(() => {
+                      toast.success(t('Address copied'), { description: rdpAddress(host) })
                     })
                 }
               ]
@@ -1189,6 +1284,7 @@ export const Sidebar = memo(
 
     return (
       <aside
+        ref={asideRef}
         className="relative flex shrink-0 border-r border-line bg-surface"
         style={{ width: compact ? RAIL_WIDTH : width }}
         data-testid="sidebar"
@@ -1198,8 +1294,13 @@ export const Sidebar = memo(
           <SidebarRail
             favorites={favorites}
             onPeek={(open) => {
+              if (!open) suppressHover.current = false
+              else if (suppressHover.current) return
               hovering.current = open
               schedulePeek(open)
+            }}
+            onOpenPanel={() => {
+              setPeek(true)
             }}
             onSearch={() => {
               setPeek(true)
@@ -1238,7 +1339,7 @@ export const Sidebar = memo(
           )}
           style={compact ? { width } : undefined}
           onMouseEnter={() => {
-            if (!compact) return
+            if (!compact || !peek) return
             hovering.current = true
             clearPeekTimer()
           }}

@@ -331,5 +331,31 @@ export const k8sMap: Readonly<Record<string, string>> = {
   '{n} pod here': '{n} pod ở đây',
   '{n} pods here': '{n} pod ở đây',
   'Change view': 'Đổi chế độ xem',
-  'View options': 'Tuỳ chọn hiển thị'
+  'View options': 'Tuỳ chọn hiển thị',
+  // Service map (Map → Traffic, tab Traffic của workload)
+  'External clients': 'Client bên ngoài',
+  'outside scope': 'ngoài phạm vi',
+  'smaller peers': 'các bên nhỏ hơn',
+  'Rates appear after two samples (a few seconds).': 'Tốc độ hiện sau hai lần lấy mẫu (vài giây).',
+  'No connections yet': 'Chưa có kết nối nào',
+  'Only selected': 'Chỉ namespace đã chọn',
+  'Find service…': 'Tìm service…',
+  'Find service': 'Tìm service',
+  'No traffic in the last minute — showing the connections Caretta has seen, dimmed.':
+    'Không có traffic trong phút vừa qua — đang hiện mờ các kết nối Caretta đã thấy.',
+  'No connections in {scope}': 'Không có kết nối nào trong {scope}',
+  'Caretta saw traffic elsewhere in the cluster, but none to or from this scope.':
+    'Caretta thấy traffic ở chỗ khác trong cluster, nhưng không có gì đi vào hay ra khỏi phạm vi này.',
+  'Fit everything': 'Xem toàn bộ',
+  'Collapse group': 'Gộp lại',
+  Contains: 'Gồm',
+  '{n} address': '{n} địa chỉ',
+  '{n} addresses': '{n} địa chỉ',
+  'Show idle ({n})': 'Hiện kết nối idle ({n})',
+  '+{n} more connection': '+{n} kết nối nữa',
+  '+{n} more connections': '+{n} kết nối nữa',
+  'Top {n} only': 'Chỉ top {n}',
+  'Expand {n}': 'Mở rộng {n}',
+  'Service map': 'Service map',
+  'callers → this workload → callees': 'bên gọi → workload này → bên được gọi'
 }

@@ -127,7 +127,17 @@ const api: ShellhouseApi = {
   restoreBackup: (password) => invoke('vault:restoreBackup', password),
   onVaultState: (listener) => subscribe('vault:state', listener),
   readClipboard: () => invoke('clipboard:readText'),
-  writeClipboard: (text) => invoke('clipboard:writeText', text)
+  writeClipboard: (text) => invoke('clipboard:writeText', text),
+  rdpCheck: (hostId) => invoke('rdp:check', hostId),
+  rdpLaunch: (request) => invoke('rdp:launch', request),
+  rdpStop: (launchId) => invoke('rdp:stop', launchId),
+  onRdpStatus: (listener) => subscribe('rdp:status', listener),
+  scanRdpFiles: () => invoke('rdp:scan'),
+  importRdpFiles: (aliases) => invoke('rdp:import', aliases),
+  rdpViewPrepare: (hostId) => invoke('rdpView:prepare', hostId),
+  rdpViewProbe: (request) => invoke('rdpView:probe', request),
+  rdpViewTrust: (hostId, fingerprint) => invoke('rdpView:trust', hostId, fingerprint),
+  rdpViewOpen: (request) => invoke('rdpView:open', request)
 }
 
 // MessagePort không đi qua contextBridge được → chuyển vào main world bằng window.postMessage.

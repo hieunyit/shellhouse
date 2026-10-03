@@ -158,6 +158,43 @@ describe('stores/sidebar-layout', () => {
       default: false
     })
   })
+
+  it('đang mở tạm (peek) → mở / chuyển tab thì tự đóng; đổi tiêu đề tab thì không', async () => {
+    const { useSidebarLayout, isTabFocusChange } =
+      await import('../../src/renderer/src/stores/sidebar-layout')
+    const { useTabs } = await import('../../src/renderer/src/stores/tabs')
+    const layout = useSidebarLayout.getState()
+    const first = useTabs.getState().openHome()
+    layout.setPeekOpen(true)
+    // Nhấp đúp một tài khoản S3 trong panel → tab module mới.
+    const s3 = useTabs.getState().addTarget('S3', {
+      kind: 'module',
+      module: 's3',
+      tab: 'browser',
+      params: {}
+    })
+    expect(useSidebarLayout.getState().peekOpen).toBe(false)
+    layout.setPeekOpen(true)
+    useTabs.getState().setTitle(s3, 'bucket-a')
+    expect(useSidebarLayout.getState().peekOpen).toBe(true)
+    useTabs.getState().activate(first)
+    expect(useSidebarLayout.getState().peekOpen).toBe(false)
+    // Mở lại chính tab đang chọn (Home đã mở) cũng tính là "mở tab".
+    layout.setPeekOpen(true)
+    useTabs.getState().openHome()
+    expect(useSidebarLayout.getState().peekOpen).toBe(false)
+    const tabs = [1]
+    expect(
+      isTabFocusChange(
+        { activeId: 'a', tabs, closed: [] },
+        { activeId: 'a', tabs: [1], closed: [] }
+      )
+    ).toBe(false)
+    expect(
+      isTabFocusChange({ activeId: null, tabs, closed: [] }, { activeId: null, tabs, closed: [] })
+    ).toBe(false)
+    useTabs.setState({ tabs: [], activeId: null, closed: [] })
+  })
 })
 
 describe('TagInput: addTags', () => {

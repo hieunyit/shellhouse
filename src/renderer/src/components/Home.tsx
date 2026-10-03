@@ -26,6 +26,9 @@ import { HostAvatar } from './HostAvatar'
 import { Logo } from './Logo'
 import { cx, Kbd } from './ui'
 
+/** Lưới thẻ host: 1 cột (hẹp) → 2 → 3 cột theo độ rộng vùng Home. */
+const HOST_GRID = 'grid grid-cols-1 gap-2 @3xl/home:grid-cols-2 @5xl/home:grid-cols-3'
+
 /** Một lựa chọn bắt đầu. */
 function StartCard({
   icon,
@@ -218,8 +221,13 @@ export function HomeView(): React.JSX.Element {
   const hasHosts = hosts.length > 0
 
   return (
-    <div className="animate-fade-in h-full overflow-auto bg-canvas" data-testid="welcome">
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-6 py-10">
+    // @container: lưới co giãn theo độ rộng THẬT của vùng Home (panel dockview, có thể bị chia đôi /
+    // thanh bên rộng hẹp), không theo cửa sổ (breakpoint md/lg) — phóng to cửa sổ là lưới giãn theo.
+    <div
+      className="animate-fade-in @container/home h-full overflow-auto bg-canvas"
+      data-testid="welcome"
+    >
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-5 py-8 @3xl/home:px-8 @3xl/home:py-10">
         <header className="flex items-center gap-4">
           <Logo size={48} className="drop-shadow-md" />
           <div className="min-w-0">
@@ -286,7 +294,7 @@ export function HomeView(): React.JSX.Element {
                 <h2 className="mb-2 text-[11px] font-semibold tracking-wider text-faint uppercase">
                   {t('Recent')}
                 </h2>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                <div className={HOST_GRID}>
                   {recent.map((h) => (
                     <HostCard key={h.id} host={h} />
                   ))}
@@ -298,7 +306,7 @@ export function HomeView(): React.JSX.Element {
                 <h2 className="mb-2 text-[11px] font-semibold tracking-wider text-faint uppercase">
                   {t('Favorites')}
                 </h2>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                <div className={HOST_GRID}>
                   {favorites.map((h) => (
                     <HostCard key={h.id} host={h} />
                   ))}
@@ -310,7 +318,7 @@ export function HomeView(): React.JSX.Element {
                 <h2 className="mb-2 text-[11px] font-semibold tracking-wider text-faint uppercase">
                   {t('Your hosts')}
                 </h2>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                <div className={HOST_GRID}>
                   {saved.map((h) => (
                     <HostCard key={h.id} host={h} />
                   ))}
@@ -324,7 +332,7 @@ export function HomeView(): React.JSX.Element {
           <h2 className="mb-2 text-[11px] font-semibold tracking-wider text-faint uppercase">
             {hasHosts ? t('Start something new') : t('Get started')}
           </h2>
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2.5 @xl/home:grid-cols-2 @4xl/home:grid-cols-3">
             <StartCard
               icon={<Server size={18} />}
               title={t('Add a host')}
@@ -361,7 +369,7 @@ export function HomeView(): React.JSX.Element {
               title={t('Add tools')}
               text={t('S3 storage, Docker and Kubernetes — turn on what you need.')}
               testId="welcome-add-tools"
-              className="lg:col-span-2"
+              className="@xl/home:col-span-2"
               onClick={() => {
                 browseModules()
               }}

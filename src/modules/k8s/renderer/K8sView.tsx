@@ -674,8 +674,9 @@ export function ClusterTab({
         data-tab={tabId}
         data-ready={ready && (loaded || onOverview || onMap)}
       >
-        {/* Thanh trên: context, namespace, lọc / lệnh, thao tác chung. */}
-        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-2">
+        {/* Thanh trên: context, namespace, lọc / lệnh, thao tác chung. z-40: gợi ý lệnh / menu thả
+            xuống của thanh này nằm trên thanh công cụ của Map (z-30) và bảng chi tiết. */}
+        <div className="relative z-40 flex h-11 shrink-0 items-center gap-2 border-b border-line px-2">
           <IconButton
             label={navHidden ? t('Show the resource list') : t('Hide the resource list')}
             size="sm"

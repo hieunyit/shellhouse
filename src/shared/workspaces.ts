@@ -25,6 +25,8 @@ const CurrentTarget = z.discriminatedUnion('kind', [
     username: z.string().min(1).max(128)
   }),
   z.object({ kind: z.literal('host'), hostId: z.string().min(1).max(64) }),
+  /** Remote Desktop trong tab. */
+  z.object({ kind: z.literal('rdp'), hostId: z.string().min(1).max(64) }),
   /** Tab của module (ADR-014). */
   z.object({
     kind: z.literal('module'),

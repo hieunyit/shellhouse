@@ -76,6 +76,16 @@ const terminalView = preloadable(
 )
 export const TerminalView = terminalView.Component
 
+/**
+ * Remote Desktop trong tab: view nhỏ; backend IronRDP (WASM ~6 MB) là chunk riêng, chỉ nạp khi kết
+ * nối lần đầu (rdp/ironrdp.ts).
+ */
+const rdpView = preloadable(
+  () => import('./rdp/RdpView').then((m) => m.RdpView),
+  <div className="h-full bg-terminal" data-testid="rdp-view-loading" />
+)
+export const RdpView = rdpView.Component
+
 /** Nạp chunk terminal sớm nhất có thể (gọi một lần lúc khởi động; gọi lại không tốn gì). */
 export function preloadTerminal(): Promise<void> {
   return terminalView.preload()

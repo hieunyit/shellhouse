@@ -208,6 +208,126 @@ test('Docker: tổng quan, lọc trạng thái, chạy container mới, log cả
   }
 })
 
+test('Docker: chọn nhiều dòng (ô chọn, Shift, Ctrl+A, Esc), thao tác hàng loạt', async () => {
+  test.setTimeout(60_000)
+  test.skip(isWindows, 'Engine giả dùng unix socket')
+  const engine = await startEngineTestServer()
+  const launched = await launchApp({ DOCKER_HOST: `unix://${engine.path}` })
+  const { page } = launched
+  try {
+    await enableDocker(page)
+    await page.locator('[data-testid="docker-endpoint"][data-name="This computer"]').dblclick()
+    const view = page.getByTestId('docker-view')
+    const rows = view.getByTestId('docker-container')
+    await expect(rows).toHaveCount(3)
+    const bar = view.getByTestId('docker-selection-bar')
+    const check = (name: string) =>
+      view
+        .locator(`[data-testid="docker-container"][data-name="${name}"]`)
+        .getByTestId('docker-row-check')
+
+    // Ô chọn trên dòng + Shift+bấm = cả khoảng; ô chọn tất cả ở trạng thái "một phần".
+    await check('db').click()
+    await expect(bar).toHaveAttribute('data-selected', '1')
+    await check('web').click({ modifiers: ['Shift'] })
+    await expect(bar).toHaveAttribute('data-selected', '3')
+    await check('old-job').click()
+    await expect(bar).toHaveAttribute('data-selected', '2')
+    expect(
+      await view
+        .getByTestId('docker-select-all')
+        .evaluate((el) => (el as HTMLInputElement).indeterminate)
+    ).toBe(true)
+    await page.keyboard.press('Escape')
+    await expect(bar).toHaveAttribute('data-selected', '0')
+
+    // Ctrl/Cmd+A khi bảng có focus → chọn hết; Stop chỉ tác động container đang chạy.
+    await rows.first().click()
+    await page.keyboard.press('ControlOrMeta+a')
+    await expect(view.getByTestId('docker-bulk-count')).toContainText('3 selected')
+    await view.getByTestId('docker-bulk-stop').click()
+    const dialog = page.getByTestId('docker-bulk-dialog')
+    await expect(dialog).toContainText('Stop 2 containers?')
+    await expect(page.getByTestId('docker-bulk-skipped')).toContainText('old-job')
+    await page.getByTestId('docker-bulk-ok').click()
+    await expect(dialog).toHaveCount(0)
+    await expect.poll(() => engine.containers.filter((c) => c.State === 'exited').length).toBe(3)
+
+    // Vẫn giữ lựa chọn sau thao tác không xoá → xoá hàng loạt kèm anonymous volume (docker rm -v).
+    await expect(view.getByTestId('docker-bulk-count')).toContainText('3 selected')
+    await view.getByTestId('docker-bulk-remove').click()
+    await page.getByTestId('docker-bulk-option').check()
+    await page.getByTestId('docker-bulk-ok').click()
+    await expect(rows).toHaveCount(0)
+    expect(
+      engine.requests.filter((r) => r.startsWith('DELETE') && r.includes('v=true'))
+    ).toHaveLength(3)
+
+    // Volume: một mục lỗi (đang dùng) → kết quả từng mục, mục khác vẫn xoá.
+    await view.getByTestId('docker-nav-volumes').click()
+    await expect(view.getByTestId('docker-volume')).toHaveCount(3)
+    await view.getByTestId('docker-select-all').click()
+    await view.getByTestId('docker-bulk-remove').click()
+    await page.getByTestId('docker-bulk-ok').click()
+    await expect(page.getByTestId('docker-bulk-results')).toContainText('in use')
+    await expect(page.locator('[data-testid="docker-bulk-result"][data-ok="true"]')).toHaveCount(2)
+    await page.getByTestId('docker-bulk-close').click()
+    await expect(view.getByTestId('docker-volume')).toHaveCount(1)
+  } finally {
+    await launched.close()
+    await engine.close()
+  }
+})
+
+test('Docker: Compose — bảng project, thao tác cạnh tên, service mở rộng', async () => {
+  test.setTimeout(60_000)
+  test.skip(isWindows, 'Engine giả dùng unix socket')
+  const engine = await startEngineTestServer()
+  const launched = await launchApp({ DOCKER_HOST: `unix://${engine.path}` })
+  const { page } = launched
+  try {
+    await enableDocker(page)
+    await page.locator('[data-testid="docker-endpoint"][data-name="This computer"]').dblclick()
+    const view = page.getByTestId('docker-view')
+    await view.getByTestId('docker-nav-compose').click()
+    const shop = view.locator('[data-testid="docker-project"][data-name="shop"]')
+    await expect(shop).toContainText('2/2 running')
+    await expect(shop).toHaveAttribute('aria-expanded', 'true')
+    const services = view.getByTestId('docker-compose-service')
+    await expect(services).toHaveCount(2)
+    await expect(
+      view.locator('[data-testid="docker-compose-service"][data-name="db"]')
+    ).toContainText('postgres:16')
+    // Thu gọn / mở lại.
+    await shop.getByTestId('docker-compose-toggle').click()
+    await expect(services).toHaveCount(0)
+    await shop.getByTestId('docker-compose-toggle').click()
+    await expect(services).toHaveCount(2)
+
+    // Menu "⋯" cạnh tên: Pull, sao chép đường dẫn, Down.
+    await shop.getByTestId('docker-compose-more').click()
+    await expect(page.getByRole('menuitem', { name: /Copy folder path/ })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: /Down/ })).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    // Restart một service → Engine nhận lệnh cho đúng container.
+    await view
+      .locator('[data-testid="docker-compose-service"][data-name="db"]')
+      .getByTestId('docker-compose-service-restart')
+      .click()
+    await expect
+      .poll(() => engine.requests.some((r) => /\/containers\/db-[^/]+\/restart/.test(r)))
+      .toBe(true)
+    // Stop cả project (hỏi lại trước).
+    await shop.getByTestId('docker-compose-stop').click()
+    await page.getByTestId('docker-confirm-ok').click()
+    await expect(shop).toContainText('0/2 running')
+  } finally {
+    await launched.close()
+    await engine.close()
+  }
+})
+
 test('Docker qua SSH: menu host "Docker…", socket qua streamlocal, shell vào container thành tab terminal', async () => {
   // Nhiều bước + khởi động Electron (runner macOS lần đầu ~25 giây).
   test.setTimeout(60_000)

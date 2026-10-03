@@ -5,6 +5,7 @@ import type { SettingsSectionId } from './components/settings/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { TabBar } from './components/TabBar'
 import { Toaster } from './components/Toaster'
+import { RdpConnections } from './components/RdpConnections'
 import { ConfirmHost } from './components/ConfirmHost'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { toast } from './stores/toasts'
@@ -214,6 +215,9 @@ export function App(): React.JSX.Element {
       if (!command) return
       // Đang ghi phím tắt trong trang cài đặt → để ô đó nhận phím.
       if ((event.target as HTMLElement | null)?.dataset['testid'] === 'shortcut-key') return
+      // Màn hình Remote Desktop đang nhận phím (chế độ gửi mọi phím sang máy từ xa).
+      if ((event.target as HTMLElement | null)?.closest('[data-rdp-keyboard="capture"] canvas'))
+        return
       // Trong editor (CodeMirror): ⌘S / Ctrl+S là lưu, ⌘F là tìm trong file — không mở Snippets /
       // tìm trong terminal (trên Mac phím Snippets là ⌘S).
       if (EDITOR_KEYS.has(command) && (event.target as HTMLElement | null)?.closest('.cm-editor'))
@@ -263,6 +267,7 @@ export function App(): React.JSX.Element {
   return (
     <div className="flex h-full">
       <Toaster />
+      <RdpConnections />
       {/* Mỗi vùng có ErrorBoundary riêng: thanh bên lỗi không gỡ vùng terminal (mất phiên). */}
       {!sidebarHidden && (
         <ErrorBoundary label="sidebar" compact>

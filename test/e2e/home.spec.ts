@@ -1,5 +1,5 @@
 import { startTestSshServer, type TestSshServer } from '../integration/ssh-test-server'
-import { activeTab, expect, test, waitForText } from './fixtures'
+import { activeTab, expect, setWindowSize, test, waitForText } from './fixtures'
 
 let server: TestSshServer | null = null
 test.afterEach(async () => {
@@ -71,4 +71,37 @@ test('Home: mở bằng nút Home (một tab duy nhất), kết nối gần đâ
   await page.getByTestId('open-settings').click()
   await page.getByTestId('setting-startup-terminal').click()
   await expect(page.getByTestId('setting-startup-terminal')).toHaveAttribute('aria-checked', 'true')
+})
+
+test('Home: co giãn theo cửa sổ — nhỏ rồi phóng to thì lưới giãn ra, nội dung căn giữa', async ({
+  launched,
+  page
+}) => {
+  await setWindowSize(launched, 720, 640)
+  await page.getByTestId('open-home').click()
+  const home = page.locator('[data-testid="welcome"]:visible')
+  const grid = home.getByTestId('welcome-add-host').locator('..')
+  const columns = (): Promise<number> =>
+    grid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length)
+  await expect.poll(columns).toBeLessThanOrEqual(2)
+  const small = await home.locator('header').evaluate((el) => el.getBoundingClientRect().width)
+
+  await setWindowSize(launched, 1600, 900)
+  await expect.poll(columns).toBe(3)
+  const content = await home.locator('header').evaluate((el) => {
+    const box = el.getBoundingClientRect()
+    const area = el.closest('[data-testid="welcome"]')?.getBoundingClientRect()
+    return {
+      width: box.width,
+      left: box.left - (area?.left ?? 0),
+      right: (area?.right ?? 0) - box.right
+    }
+  })
+  expect(content.width).toBeGreaterThan(small + 300)
+  // Căn giữa (lề hai bên gần bằng nhau).
+  expect(Math.abs(content.left - content.right)).toBeLessThan(24)
+
+  // Thu nhỏ lại → về một / hai cột.
+  await setWindowSize(launched, 720, 640)
+  await expect.poll(columns).toBeLessThanOrEqual(2)
 })

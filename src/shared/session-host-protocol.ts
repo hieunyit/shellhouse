@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import { ResolvedSessionSpec } from './stream-protocol'
 import { ForwardSpec } from './forwards'
+import { HostOs } from './host-os'
+import { RdpViewTarget } from './rdp-viewer'
 
 export const HostKeyCheck = z.discriminatedUnion('status', [
   z.object({ status: z.literal('match') }),
@@ -61,7 +63,9 @@ export const HostRequest = z.discriminatedUnion('type', [
         tmux: z
           .string()
           .regex(/^[A-Za-z0-9_-]{1,64}$/)
-          .optional()
+          .optional(),
+        /** Dò hệ điều hành server sau khi kết nối (host đã lưu). */
+        detectOs: z.boolean().optional()
       })
       .optional(),
     /** Ghi log phiên ra file — đường dẫn do main đặt theo cài đặt. */
@@ -96,6 +100,15 @@ export const HostRequest = z.discriminatedUnion('type', [
     type: z.literal('module:grant-result'),
     requestId: z.number().int(),
     allowed: z.boolean()
+  }),
+  /** Remote Desktop trong tab: dò chứng chỉ TLS của server (trả `rdp:result`). */
+  z.object({ type: z.literal('rdp:probe'), id: z.number().int(), target: RdpViewTarget }),
+  /** Remote Desktop trong tab: cấp token proxy RDCleanPath cho đích + dấu chứng chỉ đã tin. */
+  z.object({
+    type: z.literal('rdp:open'),
+    id: z.number().int(),
+    target: RdpViewTarget,
+    pin: z.string().max(128)
   }),
   /** Chỉ dùng trong dev/E2E để kiểm tra cơ chế tự phục hồi. */
   z.object({ type: z.literal('crash') })
@@ -152,6 +165,16 @@ export const HostEvent = z.discriminatedUnion('type', [
     binary: z.string().max(64),
     path: z.string().max(4096),
     sha256: z.string().regex(/^[0-9a-f]{64}$/)
+  }),
+  /** Đã nhận ra hệ điều hành server của phiên SSH (main lưu vào host của phiên). */
+  z.object({ type: z.literal('session:os'), sessionId: z.uuid(), os: HostOs }),
+  /** Trả lời `rdp:probe` / `rdp:open`. */
+  z.object({
+    type: z.literal('rdp:result'),
+    id: z.number().int(),
+    ok: z.boolean(),
+    result: z.unknown().optional(),
+    error: z.string().optional()
   }),
   z.object({
     type: z.literal('log'),

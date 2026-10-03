@@ -153,7 +153,21 @@ export class SessionHostSupervisor {
     return event.modules
   }
 
-  private request(message: HostRequest, id: number): Promise<HostEvent> {
+  /** Remote Desktop trong tab: dò chứng chỉ / cấp token proxy (kết quả `rdp:result`). */
+  async rdpRequest(
+    message:
+      | Omit<Extract<HostRequest, { type: 'rdp:probe' }>, 'id'>
+      | Omit<Extract<HostRequest, { type: 'rdp:open' }>, 'id'>,
+    timeoutMs = 45_000
+  ): Promise<unknown> {
+    const id = this.nextId++
+    const event = await this.request({ ...message, id }, id, timeoutMs)
+    if (event.type !== 'rdp:result') throw new Error(`Invalid response: ${event.type}`)
+    if (!event.ok) throw new Error(event.error ?? 'Failed')
+    return event.result
+  }
+
+  private request(message: HostRequest, id: number, timeoutMs?: number): Promise<HostEvent> {
     const child = this.child
     if (!child || this.status.state !== 'running') {
       return Promise.reject(
@@ -164,7 +178,7 @@ export class SessionHostSupervisor {
       const timer = setTimeout(() => {
         this.pending.delete(id)
         reject(new Error(t('The session host did not respond in time')))
-      }, this.opts.requestTimeoutMs)
+      }, timeoutMs ?? this.opts.requestTimeoutMs)
       this.pending.set(id, { resolve, reject, timer })
       child.postMessage(message)
     })
@@ -219,6 +233,15 @@ export class SessionHostSupervisor {
       case 'pong':
         this.pingSentAt = null
         break
+      case 'rdp:result': {
+        const pending = this.pending.get(event.id)
+        if (pending) {
+          clearTimeout(pending.timer)
+          this.pending.delete(event.id)
+          pending.resolve(event)
+        }
+        break
+      }
       case 'selfcheck:result': {
         const pending = this.pending.get(event.id)
         if (pending) {

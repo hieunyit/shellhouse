@@ -19,7 +19,9 @@ import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useSettings } from '../stores/settings'
 import { connectionLabel, cx, StatusDot } from './ui'
 import { HomeView } from './Home'
-import { EditorTabView, TerminalView } from '../lazy'
+import { EditorTabView, RdpView, TerminalView } from '../lazy'
+import '../rdp/register'
+import { rdpControllers } from '../rdp/registry'
 import { ErrorBoundary } from './ErrorBoundary'
 import { HostAvatar } from './HostAvatar'
 import { useTabs, type TabTarget } from '../stores/tabs'
@@ -64,6 +66,8 @@ function panelContent(
   visible: boolean
 ): React.JSX.Element {
   if (target.kind === 'home') return <HomeView />
+  if (target.kind === 'rdp')
+    return <RdpView tabId={tabId} hostId={target.hostId} active={active} visible={visible} />
   if (target.kind === 'editor')
     return <EditorTabView tabId={tabId} docKey={target.key} active={active} />
   if (target.kind === 'module')
@@ -93,11 +97,14 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
   const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
   const hostId = useTabs((s) => {
     const found = s.tabs.find((x) => x.id === tabId)?.target
-    return found?.kind === 'host' ? found.hostId : null
+    return found?.kind === 'host' || found?.kind === 'rdp' ? found.hostId : null
   })
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
   const hostLabel = useHosts((s) =>
     hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.label ?? null) : null
+  )
+  const hostOs = useHosts((s) =>
+    hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.os ?? null) : null
   )
   const overrides = useSettings((s) => s.settings.keybindings)
   const { menu, open: openMenu } = useContextMenu()
@@ -129,6 +136,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
           onSelect: () => {
             tabs.activate(tabId)
             controllers.get(tabId)?.reconnect()
+            rdpControllers.get(tabId)?.reconnect()
           }
         },
         {
@@ -221,7 +229,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         <span className="relative flex shrink-0">
           {hostLabel ? (
             <HostAvatar
-              host={{ label: hostLabel, color: envColor }}
+              host={{ label: hostLabel, color: envColor, os: hostOs }}
               size={16}
               className="rounded"
             />

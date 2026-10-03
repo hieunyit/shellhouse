@@ -1,6 +1,6 @@
 import { t, tn } from '@shared/i18n'
 import { formatRelative } from '@shared/i18n/format'
-import type { ContainerAction, ContainerRow, ImageRow, StatsSample } from './ops'
+import type { ContainerAction, ContainerRow, Health, ImageRow, StatsSample } from './ops'
 
 /**
  * Phần thuần (không React, không DOM) của tab Docker: lọc, sắp xếp, nhóm Compose, câu xác nhận.
@@ -66,13 +66,88 @@ export function matches(q: string, ...parts: (string | null | undefined)[]): boo
   return !q || parts.some((p) => p?.toLowerCase().includes(q))
 }
 
+export interface ComposeService {
+  name: string
+  /** Image của container đầu tiên (các replica thường cùng image). */
+  image: string
+  containers: ContainerRow[]
+  running: number
+  /** Healthcheck gộp (xấu nhất trong các replica). */
+  health: Health
+  ports: string
+}
+
 export interface ComposeProject {
   name: string
   services: number
   running: number
   containers: ContainerRow[]
+  serviceList: ComposeService[]
+  /** Nhãn `com.docker.compose.project.working_dir` / `config_files` (nếu có). */
+  workingDir: string | null
+  configFiles: string[]
+  /** Lần tạo container gần nhất (ms) — "cập nhật lần cuối" của project. */
+  updated: number
+  /** Container unhealthy / restarting / dead. */
+  unhealthy: number
+  status: 'running' | 'partial' | 'stopped'
 }
 
+/** Healthcheck xấu nhất: unhealthy > starting > healthy > không có. */
+export function worstHealth(list: readonly Health[]): Health {
+  if (list.includes('unhealthy')) return 'unhealthy'
+  if (list.includes('starting')) return 'starting'
+  if (list.includes('healthy')) return 'healthy'
+  return null
+}
+
+export const isUnhealthy = (c: Pick<ContainerRow, 'health' | 'state'>): boolean =>
+  c.health === 'unhealthy' || c.state === 'restarting' || c.state === 'dead'
+
+function project(name: string, list: ContainerRow[]): ComposeProject {
+  const byService = new Map<string, ContainerRow[]>()
+  for (const c of list) {
+    const key = c.service ?? c.name
+    const s = byService.get(key)
+    if (s) s.push(c)
+    else byService.set(key, [c])
+  }
+  const serviceList = [...byService.entries()]
+    .map(([service, cs]) => {
+      const sorted = [...cs].sort((a, b) => nameOrder.compare(a.name, b.name))
+      return {
+        name: service,
+        image: sorted[0]?.image ?? '',
+        containers: sorted,
+        running: sorted.filter((c) => c.state === 'running').length,
+        health: worstHealth(sorted.map((c) => c.health)),
+        ports: [...new Set(sorted.map(portsText).filter(Boolean))].join(', ')
+      }
+    })
+    .sort((a, b) => nameOrder.compare(a.name, b.name))
+  const running = list.filter((c) => c.state === 'running').length
+  const withDir = list.find((c) => c.composeDir)
+  const files = list.find((c) => c.composeFiles)?.composeFiles
+  return {
+    name,
+    containers: list,
+    services: serviceList.length,
+    running,
+    serviceList,
+    workingDir: withDir?.composeDir ?? null,
+    configFiles: files
+      ? files
+          .split(',')
+          .map((f) => f.trim())
+          .filter(Boolean)
+      : [],
+    updated: Math.max(0, ...list.map((c) => c.created)),
+    unhealthy: list.filter(isUnhealthy).length,
+    status: running === 0 ? 'stopped' : running === list.length ? 'running' : 'partial'
+  }
+}
+
+/** Nhóm container theo Compose project; lọc theo tên project, service hoặc image. */
 export function groupProjects(containers: readonly ContainerRow[], q: string): ComposeProject[] {
   const map = new Map<string, ContainerRow[]>()
   for (const c of containers)
@@ -82,13 +157,13 @@ export function groupProjects(containers: readonly ContainerRow[], q: string): C
       else map.set(c.project, [c])
     }
   return [...map.entries()]
-    .map(([name, list]) => ({
-      name,
-      containers: list,
-      services: new Set(list.map((c) => c.service ?? c.name)).size,
-      running: list.filter((c) => c.state === 'running').length
-    }))
-    .filter((p) => !q || p.name.toLowerCase().includes(q))
+    .map(([name, list]) => project(name, list))
+    .filter(
+      (p) =>
+        !q ||
+        matches(q, p.name, p.workingDir) ||
+        p.serviceList.some((s) => matches(q, s.name, s.image))
+    )
     .sort((a, b) => nameOrder.compare(a.name, b.name))
 }
 

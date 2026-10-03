@@ -1,21 +1,120 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { cx } from '../../../renderer/src/components/ui'
 import { t, tn } from '../../registry/renderer-kit'
 
-/** Hộp thả xuống đóng khi bấm ra ngoài. */
-function useOutsideClose(open: boolean, close: () => void): React.RefObject<HTMLDivElement | null> {
-  const box = useRef<HTMLDivElement>(null)
+/**
+ * Menu thả xuống của thanh công cụ cluster. Portal ra gốc trang K8s (`k8s-view`, không có thì
+ * `<body>`), z-50: luôn nằm trên thanh công cụ của Map / bảng chi tiết (z-30 / z-40 — trước đây
+ * menu bị đè, mục đầu bị che) và không bị khung cha cắt. Vị trí bám nút mở, kẹp trong trang.
+ *
+ * Đóng khi: bấm ra ngoài (pointerdown pha capture trên window — bản đồ React Flow chặn lan truyền
+ * mousedown nên nghe ở document không đủ), Esc (không phụ thuộc focus), đổi kích thước cửa sổ.
+ */
+function DropMenu({
+  anchor,
+  onClose,
+  className,
+  testId,
+  menuRef,
+  role,
+  label,
+  children
+}: {
+  /** Khối chứa nút mở — bấm vào đây không tính là "bấm ra ngoài" (nút tự bật / tắt). */
+  anchor: React.RefObject<HTMLElement | null>
+  onClose: (refocus: boolean) => void
+  className: string
+  testId: string
+  menuRef?: React.RefObject<HTMLDivElement | null>
+  role?: 'menu'
+  label?: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  const own = useRef<HTMLDivElement>(null)
+  // Gốc trang K8s (menu vẫn nằm trong `k8s-view` → locator / phím của trang vẫn thấy menu). Menu
+  // chỉ gắn sau khi bấm nút mở → nút đã có trong DOM.
+  const [host] = useState<HTMLElement>(
+    () => anchor.current?.closest<HTMLElement>('[data-testid="k8s-view"]') ?? document.body
+  )
+  const [pos, setPos] = useState<{ left: number; top: number; maxHeight: number } | null>(null)
+  const latest = useRef(onClose)
   useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (!box.current?.contains(e.target as Node)) close()
+    latest.current = onClose
+  })
+  // Đo ngay khi gắn (trước lần vẽ đầu) — bám nút mở, kẹp trong khung chứa.
+  useLayoutEffect(() => {
+    const a = anchor.current?.getBoundingClientRect()
+    const m = own.current
+    if (!a || !m) return
+    const box =
+      host === document.body
+        ? {
+            left: 0,
+            top: 0,
+            width: document.documentElement.clientWidth,
+            height: window.innerHeight
+          }
+        : host.getBoundingClientRect()
+    const top = Math.round(a.bottom + 4 - box.top)
+    setPos({
+      left: Math.round(Math.max(8, Math.min(a.left - box.left, box.width - m.offsetWidth - 8))),
+      top,
+      maxHeight: Math.max(120, box.height - top - 8)
+    })
+  }, [anchor, host])
+  useEffect(() => {
+    const inside = (target: EventTarget | null): boolean =>
+      target instanceof Node &&
+      (!!own.current?.contains(target) || !!anchor.current?.contains(target))
+    const onDown = (e: PointerEvent | MouseEvent): void => {
+      if (!inside(e.target)) latest.current(false)
     }
-    document.addEventListener('mousedown', onDown)
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      e.preventDefault()
+      e.stopPropagation()
+      latest.current(inside(document.activeElement))
+    }
+    const onResize = (): void => {
+      latest.current(false)
+    }
+    window.addEventListener('pointerdown', onDown, true)
+    window.addEventListener('mousedown', onDown, true)
+    window.addEventListener('keydown', onKey, true)
+    window.addEventListener('resize', onResize)
     return () => {
-      document.removeEventListener('mousedown', onDown)
+      window.removeEventListener('pointerdown', onDown, true)
+      window.removeEventListener('mousedown', onDown, true)
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('resize', onResize)
     }
-  }, [open, close])
-  return box
+  }, [anchor])
+  return createPortal(
+    <div
+      ref={(el) => {
+        own.current = el
+        if (menuRef) menuRef.current = el
+      }}
+      role={role}
+      aria-label={label}
+      data-testid={testId}
+      className={cx(
+        'z-50 flex flex-col rounded-md border border-line bg-elevated p-1 shadow-lg',
+        host === document.body ? 'fixed' : 'absolute',
+        className
+      )}
+      // Lần vẽ đầu chưa đo xong → ẩn (tránh nháy ở góc trái trên).
+      style={
+        pos
+          ? { left: pos.left, top: pos.top, maxHeight: pos.maxHeight }
+          : { left: 0, top: 0, visibility: 'hidden' }
+      }
+    >
+      {children}
+    </div>,
+    host
+  )
 }
 
 /**
@@ -69,10 +168,11 @@ export function ContextPicker({
   const [open, setOpen] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
   const list = useRef<HTMLDivElement>(null)
-  const close = useCallback(() => {
+  const box = useRef<HTMLDivElement>(null)
+  const close = useCallback((refocus: boolean) => {
     setOpen(false)
+    if (refocus) button.current?.focus()
   }, [])
-  const box = useOutsideClose(open, close)
   // Mở → focus mục đang dùng (dùng phím ngay).
   useEffect(() => {
     if (!open) return
@@ -81,16 +181,15 @@ export function ContextPicker({
       list.current?.querySelector<HTMLElement>('[data-menu-item]')
     el?.focus()
   }, [open])
-  const closeAndFocus = (): void => {
-    setOpen(false)
-    button.current?.focus()
-  }
   return (
     <div
       className="relative"
       ref={box}
       onKeyDown={(e) => {
-        if (open) menuKeyDown(e, list.current, closeAndFocus)
+        if (open)
+          menuKeyDown(e, list.current, () => {
+            close(true)
+          })
       }}
     >
       <button
@@ -123,12 +222,14 @@ export function ContextPicker({
         </span>
       </button>
       {open && (
-        <div
-          ref={list}
+        <DropMenu
+          anchor={box}
+          onClose={close}
+          menuRef={list}
           role="menu"
-          aria-label={t('Contexts')}
-          className="absolute top-9 left-0 z-30 max-h-80 w-72 overflow-auto rounded-md border border-line bg-elevated p-1 shadow-lg"
-          data-testid="k8s-context-menu"
+          label={t('Contexts')}
+          className="w-72 overflow-auto"
+          testId="k8s-context-menu"
         >
           {contexts.map((c) => (
             <button
@@ -155,7 +256,7 @@ export function ContextPicker({
               </span>
             </button>
           ))}
-        </div>
+        </DropMenu>
       )}
     </div>
   )
@@ -174,20 +275,17 @@ export function NamespacePicker({
   const [filter, setFilter] = useState('')
   const button = useRef<HTMLButtonElement>(null)
   const list = useRef<HTMLDivElement>(null)
-  const close = useCallback(() => {
+  const box = useRef<HTMLDivElement>(null)
+  const close = useCallback((refocus: boolean) => {
     setOpen(false)
+    if (refocus) button.current?.focus()
   }, [])
-  const box = useOutsideClose(open, close)
   const many = all.length > 8
   // Mở (không có ô tìm) → focus mục đầu.
   useEffect(() => {
     if (!open || many) return
     list.current?.querySelector<HTMLElement>('[data-menu-item]')?.focus()
   }, [open, many])
-  const closeAndFocus = (): void => {
-    setOpen(false)
-    button.current?.focus()
-  }
   const label =
     value.length === 0
       ? t('All namespaces')
@@ -201,7 +299,10 @@ export function NamespacePicker({
       className="relative"
       ref={box}
       onKeyDown={(e) => {
-        if (open) menuKeyDown(e, list.current, closeAndFocus)
+        if (open)
+          menuKeyDown(e, list.current, () => {
+            close(true)
+          })
       }}
     >
       <button
@@ -224,10 +325,7 @@ export function NamespacePicker({
         {label} ▾
       </button>
       {open && (
-        <div
-          className="absolute top-9 left-0 z-30 w-60 rounded-md border border-line bg-elevated p-1 shadow-lg"
-          data-testid="k8s-namespace-menu"
-        >
+        <DropMenu anchor={box} onClose={close} className="w-60" testId="k8s-namespace-menu">
           {many && (
             <input
               autoFocus
@@ -252,7 +350,7 @@ export function NamespacePicker({
             ref={list}
             role="menu"
             aria-label={t('Namespaces')}
-            className="max-h-72 overflow-auto"
+            className="max-h-72 min-h-0 overflow-auto"
           >
             <button
               type="button"
@@ -297,7 +395,7 @@ export function NamespacePicker({
               </label>
             ))}
           </div>
-        </div>
+        </DropMenu>
       )}
     </div>
   )

@@ -15,6 +15,7 @@ import {
 import { cleanError } from '../../../renderer/src/lib/format'
 import { formatDateTime, formatRelative, t, tn } from '../../registry/renderer-kit'
 import { tk } from './i18n'
+import { TY } from './typography'
 import type { K8sOp, RelatedGroup, RelatedItem, RelatedResult, Usage } from '../shared/ops'
 import {
   age,
@@ -380,7 +381,7 @@ function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Ele
             <div key={s(c['name'])} className="py-2 first:pt-0" data-testid="k8s-container">
               <div className="flex items-center gap-2 text-xs">
                 <span className={cx('size-2 shrink-0 rounded-full', CONTAINER_DOT[tone])} />
-                <span className="font-semibold text-fg">{s(c['name'])}</span>
+                <span className="font-medium text-fg">{s(c['name'])}</span>
                 {init && <span className="text-faint">init</span>}
                 {!healthy && <span className={CONTAINER_TEXT[tone]}>{reason || stateName}</span>}
                 {restarts > 0 && (
@@ -389,17 +390,14 @@ function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Ele
                   </span>
                 )}
               </div>
-              <div
-                className="mt-0.5 truncate pl-4 font-mono text-[11px] text-muted"
-                title={s(c['image'])}
-              >
+              <div className={cx('mt-0.5 truncate pl-4 text-muted', TY.id)} title={s(c['image'])}>
                 {s(c['image'])}
               </div>
-              <div className="mt-0.5 flex flex-wrap gap-x-4 pl-4 text-[11px] text-faint">
+              <div className={cx('mt-0.5 flex flex-wrap gap-x-4 pl-4', TY.label)}>
                 {ports.length > 0 && (
                   <span>
                     {t('Ports')}{' '}
-                    <span className="text-fg">
+                    <span className="text-fg tabular-nums">
                       {ports
                         .map(
                           (p) =>
@@ -421,13 +419,13 @@ function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Ele
                 )}
               </div>
               {(command.length > 0 || mounts.length > 0 || env.length > 0) && (
-                <details className="mt-1 pl-4 text-[11px]">
+                <details className="mt-1 pl-4 text-xs">
                   <summary className="cursor-pointer text-faint hover:text-fg">
                     {t('Details')}
                     {env.length > 0 ? ` · ${t('{n} env', { n: env.length })}` : ''}
                     {mounts.length > 0 ? ` · ${t('{n} mounts', { n: mounts.length })}` : ''}
                   </summary>
-                  <div className="mt-1 flex flex-col gap-1.5 font-mono">
+                  <div className={cx('mt-1 flex flex-col gap-1', TY.id)}>
                     {command.length > 0 && (
                       <div className="break-all">
                         <span className="text-faint">$ </span>
@@ -495,7 +493,9 @@ function MetaHeader({ obj }: { obj: K8sObject }): React.JSX.Element | null {
       {owners.length > 0 && (
         <p className="text-xs text-faint">
           {t('Owned by')}{' '}
-          <span className="text-fg">{owners.map((x) => `${x.kind}/${x.name}`).join(', ')}</span>
+          <span className={cx('text-fg', TY.id)}>
+            {owners.map((x) => `${x.kind}/${x.name}`).join(', ')}
+          </span>
         </p>
       )}
       {Object.keys(meta.labels ?? {}).length > 0 && (
@@ -513,7 +513,7 @@ function MetaHeader({ obj }: { obj: K8sObject }): React.JSX.Element | null {
           <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-faint uppercase">
             {t('Annotations ({n})', { n: annotations.length })}
           </summary>
-          <div className="mt-1 flex flex-col gap-1 font-mono text-[11px]">
+          <div className={cx('mt-1.5 flex flex-col gap-1', TY.id)}>
             {annotations.map(([k, v]) => (
               <div key={k} className="break-all">
                 <span className="text-muted">{k}</span>: <span className="text-fg">{v}</span>
@@ -574,25 +574,25 @@ function OverviewBody({
               onNavigate ? (
                 <button
                   type="button"
-                  className="text-muted hover:text-accent"
+                  className="text-faint hover:text-accent"
                   data-testid="k8s-pod-node-link"
                   onClick={() => {
                     onNavigate('nodes', node)
                   }}
                 >
-                  Node <span className="text-fg">{node}</span>
+                  Node <span className={cx('text-fg', TY.id)}>{node}</span>
                 </button>
               ) : (
-                <span className="text-muted">
-                  Node <span className="text-fg">{node}</span>
+                <span className="text-faint">
+                  Node <span className={cx('text-fg', TY.id)}>{node}</span>
                 </span>
               )
             ) : (
               <span className="text-warning">{t('Not scheduled')}</span>
             )}
             {s(status['podIP']) && (
-              <span className="text-muted">
-                IP <span className="font-mono text-fg">{s(status['podIP'])}</span>
+              <span className="text-faint">
+                IP <span className={cx('text-fg', TY.id)}>{s(status['podIP'])}</span>
               </span>
             )}
           </div>
@@ -674,13 +674,13 @@ function OverviewBody({
                 ],
                 [
                   'Selector',
-                  <span key="s" className="font-mono text-[11px]">
+                  <span key="s" className={TY.id}>
                     {selectorString(spec['selector']) ?? '—'}
                   </span>
                 ],
                 [
                   t('Images'),
-                  <span key="i" className="font-mono text-[11px]">
+                  <span key="i" className={TY.id}>
                     {a(template['containers'])
                       .map((c) => s(c['image']))
                       .join(', ')}
@@ -759,7 +759,7 @@ function OverviewBody({
           </Section>
           {a(spec['taints']).length > 0 && (
             <Section title={t('Taints')}>
-              <div className="flex flex-col gap-0.5 font-mono text-[11px] text-muted">
+              <div className={cx('flex flex-col gap-0.5 text-muted', TY.id)}>
                 {a(spec['taints']).map((x) => (
                   <span key={`${s(x['key'])}${s(x['effect'])}`}>
                     {s(x['key'])}
@@ -782,7 +782,7 @@ function OverviewBody({
                 [t('Type'), s(spec['type'])],
                 [
                   'Cluster IP',
-                  <span key="i" className="font-mono">
+                  <span key="i" className={TY.id}>
                     {s(spec['clusterIP'])}
                   </span>
                 ],
@@ -794,7 +794,7 @@ function OverviewBody({
                 ],
                 [
                   t('Ports'),
-                  <span key="p" className="font-mono">
+                  <span key="p" className={TY.id}>
                     {a(spec['ports'])
                       .map(
                         (p) =>
@@ -805,7 +805,7 @@ function OverviewBody({
                 ],
                 [
                   'Selector',
-                  <span key="s" className="font-mono text-[11px]">
+                  <span key="s" className={TY.id}>
                     {selectorString(spec['selector']) ?? '—'}
                   </span>
                 ]
@@ -818,7 +818,7 @@ function OverviewBody({
       return (
         <>
           <Section title={t('Rules')}>
-            <div className="flex flex-col gap-1 font-mono text-[11px]">
+            <div className={cx('flex flex-col gap-1', TY.id)}>
               {a(spec['rules']).flatMap((r) =>
                 a(o(r['http'])['paths']).map((p) => {
                   const svc = o(o(p['backend'])['service'])
@@ -835,7 +835,7 @@ function OverviewBody({
           </Section>
           {a(spec['tls']).length > 0 && (
             <Section title="TLS">
-              <div className="font-mono text-[11px] text-muted">
+              <div className={cx('text-muted', TY.id)}>
                 {a(spec['tls'])
                   .map(
                     (x) =>
@@ -855,7 +855,7 @@ function OverviewBody({
               items={[
                 [
                   t('Schedule'),
-                  <span key="s" className="font-mono">
+                  <span key="s" className={TY.id}>
                     {s(spec['schedule'])}
                   </span>
                 ],
@@ -1017,8 +1017,8 @@ function PodsOf({
               onOpenPod(p)
             }}
           >
-            <span className="min-w-0 flex-1 truncate text-fg">{p.metadata.name}</span>
-            <span className="text-faint">{r.cells['ready']}</span>
+            <span className={cx('min-w-0 flex-1 truncate text-fg', TY.id)}>{p.metadata.name}</span>
+            <span className="text-faint tabular-nums">{r.cells['ready']}</span>
             <Pill tone={TONE[r.tone] ?? 'muted'}>{r.cells['status']}</Pill>
           </button>
         )
@@ -1070,7 +1070,7 @@ function DataOf({
         return (
           <div key={key} className="rounded-md border border-line">
             <div className="flex items-center gap-2 border-b border-line px-2 py-1">
-              <span className="flex-1 truncate font-mono text-xs text-fg">{key}</span>
+              <span className={cx('flex-1 truncate text-fg', TY.id)}>{key}</span>
               {kindId === 'secrets' && value === undefined && (
                 <button
                   type="button"
@@ -1299,7 +1299,8 @@ function RelatedRow({
       <span className={cx('size-1.5 shrink-0 rounded-full', DOT_BG[item.tone])} />
       <span
         className={cx(
-          'min-w-0 shrink truncate font-mono',
+          'min-w-0 shrink truncate',
+          TY.id,
           item.missing ? 'text-danger' : canOpen ? 'text-fg group-hover:text-accent' : 'text-fg'
         )}
         title={item.name}

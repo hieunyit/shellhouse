@@ -866,7 +866,9 @@ export const TopoEdgeComp = memo(function TopoEdgeComp(
   const tx = props.targetX - 1
   const ty = props.targetY + e.tOff
   const forward = tx - sx > 16
-  const bx = sx + Math.min(e.bend, Math.max(8, (tx - sx) / 2))
+  // Làn dọc riêng của cạnh (bố cục đã chia, không chung đoạn dọc với cạnh khác đích); thẻ bị kéo
+  // lại gần → kẹp trong khoảng giữa hai thẻ.
+  const bx = Math.max(sx + 6, Math.min(sx + e.bend, tx - 10))
   const tree = e.tree ? treePath(props, e.tree) : null
   const path = tree
     ? tree.path

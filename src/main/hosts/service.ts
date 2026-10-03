@@ -9,11 +9,13 @@ import type {
   KeySummary
 } from '@shared/hosts'
 import { buildGroupTree, groupMoveProblem, type GroupTree } from '@shared/group-tree'
-import { GroupDefaults, HOST_COLORS, MAX_JUMPS } from '@shared/hosts'
+import { GroupDefaults, HOST_COLORS, MAX_JUMPS, Username } from '@shared/hosts'
 import { inheritedDefaults, type GroupWithDefaults, type InheritedDefaults } from '@shared/inherit'
 import type { SavedForward, SavedForwardInput } from '@shared/forwards'
 import type { SerialSettings } from '@shared/serial'
+import { DEFAULT_RDP, RdpSettings, RdpUsername } from '@shared/rdp'
 import { parseQuickConnect } from '@shared/quick-connect'
+import { HostOs, sameOs } from '@shared/host-os'
 import { generateVerifiedKey, type KeyType } from './keygen'
 import { fingerprintSha256 } from '../../node-shared/hostkey'
 import { uuidv7 } from '../../node-shared/uuid'
@@ -62,6 +64,7 @@ interface HostRow {
   last_used_at: number | null
   favorite: number
   sort: number
+  os: string | null
   username: string | null
   auth_type: 'password' | 'key' | 'agent' | null
   has_secret: number | null
@@ -82,13 +85,40 @@ interface HostOptions {
   /** Tự gắn vào tmux trên server. */
   tmux?: boolean
   /** Không có = SSH. */
-  protocol?: 'telnet' | 'serial'
+  protocol?: 'telnet' | 'serial' | 'rdp'
   serial?: SerialSettings
+  /** Chỉ có khi protocol = 'rdp'. */
+  rdp?: RdpSettings
+}
+
+/** Thứ launcher RDP cần (main/rdp) — mật khẩu đã giải mã, người gọi phải dispose(). */
+export interface ResolvedRdp {
+  label: string
+  host: string
+  port: number
+  username: string
+  settings: RdpSettings
+  password: Secret | null
+  /** SSH host làm tunnel; null = kết nối thẳng. */
+  via: { id: string; label: string } | null
+}
+
+/** Cài đặt RDP đã lưu; dữ liệu hỏng / thiếu trường (bản cũ) → giá trị mặc định. */
+function rdpSettingsOf(options: HostOptions): RdpSettings {
+  const parsed = RdpSettings.safeParse({ ...DEFAULT_RDP, ...options.rdp })
+  return parsed.success ? parsed.data : DEFAULT_RDP
 }
 
 function parseDefaults(raw: string): GroupDefaults {
   const parsed = GroupDefaults.safeParse(parseJson<unknown>(raw, {}))
   return parsed.success ? parsed.data : {}
+}
+
+/** Cột `os` (JSON) → trường `os` của HostSummary; hỏng / chưa có → bỏ trống. */
+function osOf(raw: string | null): { os?: HostOs } {
+  if (!raw) return {}
+  const parsed = HostOs.safeParse(parseJson<unknown>(raw, null))
+  return parsed.success ? { os: parsed.data } : {}
 }
 
 function parseJson<T>(raw: string, fallback: T): T {
@@ -131,7 +161,7 @@ export class HostService {
       .prepare(
         `SELECT h.id, h.group_id, h.label, h.hostname, h.port, h.identity_id, h.jump_host_ids,
                 h.mode, h.options, h.tags,
-                h.color, h.last_used_at, h.favorite, h.sort, i.username, i.auth_type,
+                h.color, h.last_used_at, h.favorite, h.sort, h.os, i.username, i.auth_type,
                 (i.secret_enc IS NOT NULL) AS has_secret, i.key_id
          FROM hosts h LEFT JOIN identities i ON i.id = h.identity_id
          WHERE h.deleted_at IS NULL
@@ -171,11 +201,13 @@ export class HostService {
           ...(options.tmux ? { tmux: true } : {}),
           protocol: options.protocol ?? 'ssh',
           serial: options.protocol === 'serial' ? (options.serial ?? null) : null,
+          ...(options.protocol === 'rdp' ? { rdp: rdpSettingsOf(options) } : {}),
           tags: parseJson<string[]>(r.tags, []),
           color: toColor(r.color),
           lastUsedAt: r.last_used_at,
           favorite: r.favorite === 1,
-          sort: r.sort
+          sort: r.sort,
+          ...osOf(r.os)
         }
       }),
       keys: keys.map((k): KeySummary => ({
@@ -198,6 +230,7 @@ export class HostService {
         : undefined
       if (input.id && !existing) throw new Error(t('Host not found'))
       if (input.auth === 'key' && !input.keyId) throw new Error(t('No key selected'))
+      this.checkProtocolFields(input)
       this.checkJumps(input.id ?? null, input.jumpHostIds)
 
       const hostId = input.id ?? uuidv7(now)
@@ -256,6 +289,10 @@ export class HostService {
       if (input.encoding && input.encoding !== 'utf-8') options.encoding = input.encoding
       if (input.tmux) options.tmux = true
       if (input.protocol === 'telnet') options.protocol = 'telnet'
+      if (input.protocol === 'rdp' && input.rdp) {
+        options.protocol = 'rdp'
+        options.rdp = input.rdp
+      }
       if (input.protocol === 'serial') {
         if (!input.serial) throw new Error(t('Choose a serial port'))
         options.protocol = 'serial'
@@ -484,6 +521,21 @@ export class HostService {
     this.db.transaction(() => {
       for (const id of ids) this.deleteHost(id)
     })()
+  }
+
+  /**
+   * Lưu hệ điều hành server vừa nhận ra lúc kết nối. Trả true nếu có thay đổi (để báo renderer);
+   * không đụng `updated_at` — không phải người dùng sửa host.
+   */
+  setOs(hostId: string, os: HostOs): boolean {
+    const parsed = HostOs.safeParse(os)
+    if (!parsed.success) return false
+    const row = this.db
+      .prepare('SELECT os FROM hosts WHERE id = ? AND deleted_at IS NULL')
+      .get(hostId) as { os: string | null } | undefined
+    if (!row || sameOs(osOf(row.os).os, parsed.data)) return false
+    this.db.prepare('UPDATE hosts SET os = ? WHERE id = ?').run(JSON.stringify(parsed.data), hostId)
+    return true
   }
 
   setFavorite(ids: readonly string[], favorite: boolean): void {
@@ -812,6 +864,10 @@ export class HostService {
       .get(hostId) as { label: string; hostname: string; port: number; options: string } | undefined
     if (!row) throw new Error(t('Host not found'))
     const options = parseJson<HostOptions>(row.options, {})
+    if (options.protocol === 'rdp')
+      throw new Error(
+        t('"{name}" is a Remote Desktop host — use Connect to open it', { name: row.label })
+      )
     if (options.protocol !== 'telnet' && options.protocol !== 'serial') return null
     this.db.prepare('UPDATE hosts SET last_used_at = ? WHERE id = ?').run(this.now(), hostId)
     if (options.protocol === 'telnet')
@@ -911,9 +967,11 @@ export class HostService {
       throw new Error(t('A host cannot be its own jump host'))
     for (const id of jumpHostIds) {
       const exists = this.db
-        .prepare('SELECT 1 FROM hosts WHERE id = ? AND deleted_at IS NULL')
-        .get(id)
+        .prepare('SELECT options FROM hosts WHERE id = ? AND deleted_at IS NULL')
+        .get(id) as { options: string } | undefined
       if (!exists) throw new Error(t('Jump host not found'))
+      if (parseJson<HostOptions>(exists.options, {}).protocol === 'rdp')
+        throw new Error(t('A Remote Desktop host cannot be a jump host'))
       if (hostId) {
         // Jump host (hoặc jump host của nó) không được dẫn ngược về host này.
         try {
@@ -924,6 +982,102 @@ export class HostService {
           }
         }
       }
+    }
+  }
+
+  /**
+   * Trường riêng theo giao thức. RDP: tên đăng nhập kiểu Windows (UPN…), không có SSH key, tunnel
+   * phải là host SSH tích hợp (ssh hệ thống không forward được cổng). Giao thức khác: username
+   * theo quy tắc SSH (HostInput nới lỏng để nhận UPN của RDP).
+   */
+  private checkProtocolFields(input: HostInput): void {
+    if (input.protocol !== 'rdp') {
+      if (input.username !== '' && !Username.safeParse(input.username).success)
+        throw new Error(t('Invalid username'))
+      return
+    }
+    if (!input.rdp) throw new Error(t('Remote Desktop settings are missing'))
+    const settings = RdpSettings.safeParse(input.rdp)
+    if (!settings.success)
+      throw new Error(t(settings.error.issues[0]?.message ?? 'Invalid Remote Desktop settings'))
+    if (input.username !== '' && !RdpUsername.safeParse(input.username).success)
+      throw new Error(t('Invalid username'))
+    if (input.auth === 'key') throw new Error(t('Remote Desktop hosts sign in with a password'))
+    if (input.jumpHostIds.length > 0) throw new Error(t('Remote Desktop hosts have no jump hosts'))
+    const via = input.rdp.viaHostId
+    if (via) {
+      if (via === input.id) throw new Error(t('A host cannot tunnel through itself'))
+      this.tunnelHost(via)
+    }
+  }
+
+  /** SSH host dùng làm tunnel cho RDP — phải còn, là SSH tích hợp. */
+  private tunnelHost(id: string): { id: string; label: string } {
+    const row = this.db
+      .prepare('SELECT label, mode, options FROM hosts WHERE id = ? AND deleted_at IS NULL')
+      .get(id) as { label: string; mode: string; options: string } | undefined
+    if (!row) throw new Error(t('The SSH host for the tunnel no longer exists'))
+    const protocol = parseJson<HostOptions>(row.options, {}).protocol
+    if (protocol !== undefined)
+      throw new Error(
+        t('“{name}” is not an SSH host — pick an SSH host for the tunnel', { name: row.label })
+      )
+    if (row.mode === 'system')
+      throw new Error(
+        t('“{name}” uses the system ssh command, which cannot forward ports for the tunnel', {
+          name: row.label
+        })
+      )
+    return { id, label: row.label }
+  }
+
+  /**
+   * Host RDP → thông tin cho launcher (giải mã mật khẩu — người gọi dispose()). `touch` = cập nhật
+   * "dùng gần nhất" (khi kết nối thật, không phải lúc kiểm tra trước).
+   */
+  resolveRdp(hostId: string, touch = true): ResolvedRdp {
+    const row = this.db
+      .prepare(
+        `SELECT h.label, h.hostname, h.port, h.options, i.id AS identity_id, i.username,
+                i.auth_type, i.secret_enc
+         FROM hosts h LEFT JOIN identities i ON i.id = h.identity_id
+         WHERE h.id = ? AND h.deleted_at IS NULL`
+      )
+      .get(hostId) as
+      | {
+          label: string
+          hostname: string
+          port: number
+          options: string
+          identity_id: string | null
+          username: string | null
+          auth_type: string | null
+          secret_enc: Buffer | null
+        }
+      | undefined
+    if (!row) throw new Error(t('Host not found'))
+    const options = parseJson<HostOptions>(row.options, {})
+    if (options.protocol !== 'rdp')
+      throw new Error(t('"{name}" is not a Remote Desktop host', { name: row.label }))
+    const settings = rdpSettingsOf(options)
+    const via = settings.viaHostId ? this.tunnelHost(settings.viaHostId) : null
+    const password =
+      row.auth_type === 'password' && row.secret_enc && row.identity_id
+        ? this.vault.decrypt(
+            { table: 'identities', id: row.identity_id, field: 'secret_enc' },
+            row.secret_enc
+          )
+        : null
+    if (touch)
+      this.db.prepare('UPDATE hosts SET last_used_at = ? WHERE id = ?').run(this.now(), hostId)
+    return {
+      label: row.label,
+      host: row.hostname,
+      port: row.port,
+      username: row.username ?? '',
+      settings,
+      password,
+      via
     }
   }
 

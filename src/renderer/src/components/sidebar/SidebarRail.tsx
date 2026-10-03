@@ -57,6 +57,7 @@ function RailButton({
 export function SidebarRail({
   favorites,
   onPeek,
+  onOpenPanel,
   onSearch,
   onNewHost,
   onModule,
@@ -65,6 +66,8 @@ export function SidebarRail({
 }: {
   favorites: readonly HostSummary[]
   onPeek: (open: boolean) => void
+  /** Mở hẳn thanh bên (bấm nút — khác rê chuột). */
+  onOpenPanel: () => void
   onSearch: () => void
   onNewHost: () => void
   onModule: (id: string) => void
@@ -130,12 +133,7 @@ export function SidebarRail({
               </button>
             ))}
             {favorites.length > shown.length && (
-              <RailButton
-                label={t('All favorites')}
-                onClick={() => {
-                  onPeek(true)
-                }}
-              >
+              <RailButton label={t('All favorites')} onClick={onOpenPanel}>
                 <Star size={15} />
               </RailButton>
             )}

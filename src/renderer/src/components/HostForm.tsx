@@ -15,7 +15,16 @@ import {
 
 type EncodingId = (typeof ENCODINGS)[number]['id']
 import { DEFAULT_SERIAL, type SerialSettings } from '@shared/serial'
+import {
+  DEFAULT_RDP,
+  RDP_DEFAULT_PORT,
+  RdpSettings,
+  RdpUsername,
+  splitDomainUser,
+  type RdpSettings as RdpSettingsValue
+} from '@shared/rdp'
 import { SerialFields } from './SerialFields'
+import { RdpFields } from './RdpFields'
 import { useHosts } from '../stores/hosts'
 import { ColorPicker, colorName } from './ColorPicker'
 import { PasswordInput } from './PasswordInput'
@@ -74,6 +83,13 @@ export function HostForm({
     host?.serial ?? { path: '', ...DEFAULT_SERIAL }
   )
   const isSsh = protocol === 'ssh'
+  const isRdp = protocol === 'rdp'
+  const [rdp, setRdp] = useState<RdpSettingsValue>(host?.rdp ?? DEFAULT_RDP)
+  const [rdpPath, setRdpPath] = useState<'direct' | 'ssh' | 'gateway'>(
+    host?.rdp?.viaHostId ? 'ssh' : host?.rdp?.gateway ? 'gateway' : 'direct'
+  )
+  /** RDP: lưu mật khẩu trong vault (mstsc / FreeRDP dùng luôn) hay hỏi mỗi lần. */
+  const [rdpSave, setRdpSave] = useState(host ? host.auth === 'password' : true)
   const [label, setLabel] = useState(host?.label ?? '')
   const [hostname, setHostname] = useState(host?.hostname ?? '')
   // '' = kế thừa từ nhóm (hoặc 22).
@@ -144,6 +160,10 @@ export function HostForm({
     }
     // password/passphrase: undefined = keep the stored value (when editing without retyping).
     const keepPassword = host?.hasPassword && password === '' && !clearPassword
+    if (isRdp) {
+      await submitRdp(Boolean(keepPassword))
+      return
+    }
     if (!isSsh) {
       const draft = {
         ...(host ? { id: host.id } : {}),
@@ -227,6 +247,75 @@ export function HostForm({
     } else setError(result.message)
   }
 
+  /** Host Remote Desktop: tên đăng nhập kiểu Windows (CORP\\john tự tách domain), mật khẩu lưu / hỏi. */
+  const submitRdp = async (keepPassword: boolean): Promise<void> => {
+    const split = splitDomainUser(username)
+    if (split.username) {
+      const checked = RdpUsername.safeParse(split.username)
+      if (!checked.success) {
+        setFieldError({
+          field: 'username',
+          message: t(checked.error.issues[0]?.message ?? 'Invalid username')
+        })
+        return
+      }
+    }
+    if (rdpPath === 'ssh' && !rdp.viaHostId) {
+      setError(t('Choose the SSH host to connect through'))
+      return
+    }
+    if (rdpPath === 'gateway' && !rdp.gateway) {
+      setError(t('Enter the RD Gateway address'))
+      return
+    }
+    const settings = RdpSettings.safeParse({
+      ...rdp,
+      domain: (split.domain ?? rdp.domain).trim(),
+      viaHostId: rdpPath === 'ssh' ? rdp.viaHostId : null,
+      gateway: rdpPath === 'gateway' ? rdp.gateway : null
+    })
+    if (!settings.success) {
+      setError(t(settings.error.issues[0]?.message ?? 'Invalid input'))
+      return
+    }
+    // Chọn lưu mà chưa từng nhập mật khẩu → coi như hỏi mỗi lần (không lưu mật khẩu rỗng).
+    const store = rdpSave && (password !== '' || keepPassword)
+    const draft = {
+      ...(host ? { id: host.id } : {}),
+      protocol: 'rdp' as const,
+      groupId,
+      label: label || hostname.trim(),
+      hostname: hostname.trim(),
+      port: port.trim() === '' ? RDP_DEFAULT_PORT : Number(port),
+      username: split.username,
+      auth: store ? ('password' as const) : ('auto' as const),
+      ...(store && !keepPassword ? { password } : {}),
+      keyId: null,
+      keyFile: null,
+      proxyJump: null,
+      jumpHostIds: [],
+      mode: 'builtin' as const,
+      rdp: settings.data,
+      tags,
+      color
+    }
+    const parsed = HostInput.safeParse(draft)
+    if (!parsed.success) {
+      setError(t(parsed.error.issues[0]?.message ?? 'Invalid input'))
+      return
+    }
+    const result = await save(parsed.data)
+    setPassword('')
+    if (!result) return
+    if (result.ok) {
+      const name = parsed.data.label
+      toast.success(host ? t('Saved {name}', { name }) : t('Added {name}', { name }), {
+        description: host ? undefined : t('Double-click it in the sidebar to connect.')
+      })
+      onClose()
+    } else setError(result.message)
+  }
+
   /** Lưu host; IPC lỗi (reject) → báo lỗi, nút Save không bị kẹt ở trạng thái "đang lưu". */
   const save = async (
     data: HostInput
@@ -286,7 +375,8 @@ export function HostForm({
           options={[
             { value: 'ssh', label: 'SSH' },
             { value: 'telnet', label: 'Telnet' },
-            { value: 'serial', label: t('Serial (COM)') }
+            { value: 'serial', label: t('Serial (COM)') },
+            { value: 'rdp', label: 'RDP' }
           ]}
         />
         {protocol === 'telnet' && (
@@ -326,12 +416,14 @@ export function HostForm({
                 placeholder={
                   protocol === 'telnet'
                     ? '23'
-                    : inherited.port
-                      ? String(inherited.port.value)
-                      : '22'
+                    : isRdp
+                      ? String(RDP_DEFAULT_PORT)
+                      : inherited.port
+                        ? String(inherited.port.value)
+                        : '22'
                 }
                 title={
-                  inherited.port
+                  inherited.port && isSsh
                     ? t('From group {group}', { group: inherited.port.groupName })
                     : undefined
                 }
@@ -346,6 +438,39 @@ export function HostForm({
                 <FieldError testId="host-port-error">{portError}</FieldError>
               </div>
             )}
+          </div>
+        )}
+        {isRdp && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t('Username')}>
+              <Input
+                mono
+                spellCheck={false}
+                className="placeholder:font-sans"
+                placeholder={t('e.g. {example}', { example: 'Administrator' })}
+                data-testid="host-username"
+                aria-invalid={fieldError?.field === 'username' || undefined}
+                value={username}
+                onChange={(e) => {
+                  setUsername(e.target.value)
+                  if (fieldError?.field === 'username') setFieldError(null)
+                }}
+              />
+              {fieldError?.field === 'username' && <FieldError>{fieldError.message}</FieldError>}
+            </Field>
+            <Field label={t('Domain')} hint={t('Optional — or type DOMAIN\\user as the username')}>
+              <Input
+                mono
+                spellCheck={false}
+                className="placeholder:font-sans"
+                placeholder={t('e.g. {example}', { example: 'CORP' })}
+                data-testid="rdp-domain"
+                value={rdp.domain}
+                onChange={(e) => {
+                  setRdp({ ...rdp, domain: e.target.value })
+                }}
+              />
+            </Field>
           </div>
         )}
         <div className={cx('grid gap-3', isSsh ? 'grid-cols-2' : 'grid-cols-1')}>
@@ -394,6 +519,52 @@ export function HostForm({
             />
           </Field>
         </div>
+
+        {isRdp && (
+          <>
+            <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
+              <span className="text-xs font-medium text-muted">{t('Password')}</span>
+              <Segmented
+                value={rdpSave ? 'save' : 'ask'}
+                onChange={(v) => {
+                  setRdpSave(v === 'save')
+                }}
+                testIdPrefix="rdp-auth"
+                options={[
+                  { value: 'save', label: t('Save in vault') },
+                  { value: 'ask', label: t('Ask each time') }
+                ]}
+              />
+              {rdpSave ? (
+                <PasswordInput
+                  data-testid="host-password"
+                  aria-label={t('Password')}
+                  placeholder={
+                    host?.hasPassword
+                      ? t('Saved — leave empty to keep it')
+                      : t('Password (stored encrypted)')
+                  }
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value)
+                  }}
+                />
+              ) : (
+                <p className="text-xs text-faint">
+                  {t('The Remote Desktop client asks for the password when you connect.')}
+                </p>
+              )}
+            </div>
+            <RdpFields
+              value={rdp}
+              onChange={setRdp}
+              hosts={hosts}
+              selfId={host?.id ?? null}
+              path={rdpPath}
+              onPathChange={setRdpPath}
+            />
+          </>
+        )}
 
         {isSsh && (
           <>
@@ -610,7 +781,7 @@ export function HostForm({
           )}
         </div>
 
-        {
+        {!isRdp && (
           <details
             className="group rounded-lg border border-line"
             open={advancedOpen}
@@ -703,7 +874,7 @@ export function HostForm({
               )}
             </div>
           </details>
-        }
+        )}
 
         {host?.keyFile && (
           <p className="text-xs text-faint">

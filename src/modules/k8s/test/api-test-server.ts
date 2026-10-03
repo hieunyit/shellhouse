@@ -50,9 +50,11 @@ export interface ApiTestServer {
   disableMetrics(): void
   /**
    * Cài Caretta giả: một pod agent (DaemonSet) xuất `caretta_links_observed` tăng theo thời gian.
-   * forbidden = có agent nhưng không được đọc metric (pods/proxy).
+   * forbidden = có agent nhưng không được đọc metric (pods/proxy). realistic = thêm cluster giống
+   * thật cho service map (console-stg gọi qua lại, ingress-nginx, kube-system, monitoring, hàng chục
+   * địa chỉ ngoài cluster, vài kết nối idle). idle = counter đứng yên (mọi kết nối idle).
    */
-  enableCaretta(options?: { forbidden?: boolean }): void
+  enableCaretta(options?: { forbidden?: boolean; realistic?: boolean; idle?: boolean }): void
   /** Cài Prometheus giả (monitoring/prometheus-operated:9090) trả lời query / query_range. */
   enablePrometheus(): void
   /**
@@ -430,10 +432,10 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
   const watchers = new Set<{ plural: string; namespace: string | undefined; res: ServerResponse }>()
   let expired = false
   let metricsDisabled = false
-  let caretta: { forbidden: boolean; start: number } | null = null
+  let caretta: { forbidden: boolean; start: number; idle: boolean } | null = null
   let prometheus = false
   /** Kết nối giả (byte / giây): Internet → Service web; web → pod tool; web → DB bên ngoài. */
-  const CARETTA_LINKS = [
+  const CARETTA_LINKS: { labels: string; rate: number; base?: number }[] = [
     {
       labels:
         'client_kind="external",client_name="203.0.113.7",client_namespace="",server_kind="Service",server_name="web",server_namespace="shop",server_port="80"',
@@ -675,14 +677,14 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         if (!caretta) return json(res, 404, statusBody(404, 'NotFound', 'no caretta'))
         if (caretta.forbidden)
           return json(res, 403, statusBody(403, 'Forbidden', 'cannot get pods/proxy'))
-        const secs = (Date.now() - caretta.start) / 1000 + 60
+        const secs = caretta.idle ? 60 : (Date.now() - caretta.start) / 1000 + 60
         const body = [
           '# HELP caretta_links_observed total bytes_sent value of links observed by caretta',
           '# TYPE caretta_links_observed gauge',
           ...CARETTA_LINKS.flatMap((l, i) => [
-            `caretta_links_observed{link_id="${String(i)}",${l.labels},role="1"} ${String(Math.round(l.rate * secs))}`,
+            `caretta_links_observed{link_id="${String(i)}",${l.labels},role="1"} ${String(Math.round((l.base ?? 0) + l.rate * secs))}`,
             // Cùng kết nối thấy từ phía server (ít hơn chút) — không được đếm hai lần.
-            `caretta_links_observed{link_id="${String(i)}",${l.labels},role="2"} ${String(Math.round(l.rate * secs * 0.98))}`
+            `caretta_links_observed{link_id="${String(i)}",${l.labels},role="2"} ${String(Math.round(((l.base ?? 0) + l.rate * secs) * 0.98))}`
           ]),
           'go_goroutines 12'
         ].join('\n')
@@ -1053,6 +1055,125 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
   })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as AddressInfo).port
+
+  /**
+   * Traffic giống cluster thật (Caretta) cho service map: ingress-nginx gọi các service của
+   * console-stg, console-stg gọi qua lại / kube-system / monitoring scrape, hàng chục địa chỉ ngoài
+   * cluster (RDS, S3, Stripe…), client Internet vào ingress, vài kết nối idle. Thêm workload /
+   * namespace tương ứng để mở được chi tiết.
+   */
+  const seedTraffic = (): void => {
+    const table = (plural: string): Map<string, Obj> => {
+      let t = store.get(plural)
+      if (!t) {
+        t = new Map()
+        store.set(plural, t)
+      }
+      return t
+    }
+    for (const n of ['console-stg', 'ingress-nginx', 'kube-system', 'monitoring'])
+      if (!table('namespaces').has(n))
+        table('namespaces').set(
+          n,
+          make('v1', 'Namespace', n, undefined, { status: { phase: 'Active' } })
+        )
+    const workload = (plural: string, kind: string, ns: string, name: string): void => {
+      if (table(plural).has(`${ns}/${name}`)) return
+      table(plural).set(
+        `${ns}/${name}`,
+        make('apps/v1', kind, name, ns, {
+          spec: {
+            replicas: 2,
+            selector: { matchLabels: { app: name } },
+            template: { metadata: { labels: { app: name } }, spec: POD_SPEC }
+          },
+          status: { replicas: 2, readyReplicas: 2, availableReplicas: 2, updatedReplicas: 2 }
+        })
+      )
+    }
+    const deps = [
+      'console-web',
+      'console-api',
+      'auth-service',
+      'user-service',
+      'billing-service',
+      'notification-service',
+      'report-worker',
+      'file-service'
+    ]
+    for (const d of deps) workload('deployments', 'Deployment', 'console-stg', d)
+    for (const s of ['redis', 'rabbitmq']) workload('statefulsets', 'StatefulSet', 'console-stg', s)
+    workload('deployments', 'Deployment', 'ingress-nginx', 'ingress-nginx-controller')
+    workload('deployments', 'Deployment', 'kube-system', 'coredns')
+    workload('statefulsets', 'StatefulSet', 'monitoring', 'prometheus')
+    const KIND: Record<string, string> = { redis: 'StatefulSet', rabbitmq: 'StatefulSet' }
+    const peer = (side: 'client' | 'server', ref: string): string => {
+      // "ns/name" = workload; còn lại = địa chỉ / tên DNS ngoài cluster.
+      const [ns, name] = ref.includes('/') ? ref.split('/') : ['', ref]
+      const kind = !ns
+        ? 'external'
+        : ns === 'monitoring'
+          ? 'StatefulSet'
+          : (KIND[name ?? ''] ?? 'Deployment')
+      return `${side}_kind="${kind}",${side}_name="${name ?? ''}",${side}_namespace="${ns ?? ''}"`
+    }
+    const link = (from: string, to: string, port: number, kbps: number): void => {
+      CARETTA_LINKS.push({
+        labels: `${peer('client', from)},${peer('server', to)},server_port="${String(port)}"`,
+        rate: Math.round(kbps * 1024),
+        base: 4_096_000
+      })
+    }
+    const C = (n: string): string => `console-stg/${n}`
+    const ING = 'ingress-nginx/ingress-nginx-controller'
+    const RDS = 'console-stg.cluster-c9x2.ap-southeast-1.rds.amazonaws.com'
+    const S3 = 's3.ap-southeast-1.amazonaws.com'
+    // Internet → ingress (không thuộc console-stg: không được làm rối service map của nó).
+    for (let i = 0; i < 60; i++)
+      link(
+        `${String(100 + (i % 7))}.${String(20 + i)}.${String(i * 3)}.${String(10 + i)}`,
+        ING,
+        443,
+        2 + (i % 9) * 6
+      )
+    link(ING, C('console-web'), 3000, 820)
+    link(ING, C('console-api'), 8080, 1650)
+    link(ING, C('auth-service'), 8080, 64)
+    link(ING, C('file-service'), 8080, 3100)
+    link(C('console-web'), C('console-api'), 8080, 210)
+    link(C('console-api'), C('auth-service'), 8080, 42)
+    link(C('console-api'), C('user-service'), 8080, 120)
+    link(C('console-api'), C('billing-service'), 8080, 31)
+    link(C('console-api'), C('notification-service'), 8080, 5)
+    link(C('console-api'), C('redis'), 6379, 410)
+    link(C('console-api'), RDS, 5432, 930)
+    link(C('auth-service'), C('redis'), 6379, 52)
+    link(C('auth-service'), C('user-service'), 8080, 18)
+    link(C('user-service'), RDS, 5432, 150)
+    link(C('user-service'), C('billing-service'), 8080, 0)
+    link(C('billing-service'), 'api.stripe.com', 443, 3)
+    link(C('billing-service'), 'hooks.stripe.com', 443, 0)
+    link(C('notification-service'), C('rabbitmq'), 5672, 8)
+    link(C('notification-service'), 'smtp.sendgrid.net', 587, 0)
+    link(C('notification-service'), 'fcm.googleapis.com', 443, 2)
+    link(C('report-worker'), C('rabbitmq'), 5672, 1)
+    link(C('report-worker'), S3, 443, 520)
+    link(C('report-worker'), RDS, 5432, 0)
+    link(C('report-worker'), C('user-service'), 8080, 0)
+    link(C('file-service'), S3, 443, 2600)
+    for (let i = 0; i < 12; i++)
+      link(C('file-service'), `52.219.${String(130 + i)}.${String(20 + i * 7)}`, 443, 40 + i * 25)
+    for (let i = 0; i < 8; i++)
+      link(C('console-api'), `13.250.${String(i * 11)}.${String(5 + i)}`, 443, 1 + i * 2)
+    // Client Internet gọi thẳng console-api qua LoadBalancer.
+    for (let i = 0; i < 6; i++)
+      link(`113.161.${String(40 + i)}.${String(9 + i)}`, C('console-api'), 8443, 12 + i * 4)
+    for (const d of [...deps, 'redis', 'rabbitmq']) {
+      link(C(d), 'kube-system/coredns', 53, d.length % 3 === 0 ? 0 : 0.3)
+      link('monitoring/prometheus', C(d), 9090, 1.5)
+    }
+    link('monitoring/prometheus', 'kube-system/coredns', 9153, 1)
+  }
 
   /** Cluster mẫu (xem `seedDemo` trong ApiTestServer). */
   const seedDemo = (): void => {
@@ -1635,7 +1756,12 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       )
     },
     enableCaretta: (options = {}) => {
-      caretta = { forbidden: options.forbidden ?? false, start: Date.now() }
+      caretta = {
+        forbidden: options.forbidden ?? false,
+        start: Date.now(),
+        idle: options.idle ?? false
+      }
+      if (options.realistic) seedTraffic()
       const pods = store.get('pods')
       if (!store.get('namespaces')?.has('caretta'))
         store

@@ -756,6 +756,18 @@ export async function startEngineTestServer(
       const id = decodeURIComponent(m[1] ?? '')
       const i = images.findIndex((x) => x.Id === id || x.RepoTags.includes(id))
       if (i < 0) return json(res, 404, { message: 'No such image' })
+      // Như Engine thật: container chạy luôn chặn; container dừng chặn trừ khi force.
+      const users = containers.filter((c) => c.ImageID === images[i]?.Id)
+      const force = url.searchParams.get('force') === 'true'
+      const short = (images[i]?.Id ?? '').replace(/^sha256:/, '').slice(0, 12)
+      if (users.some((c) => c.State === 'running'))
+        return json(res, 409, {
+          message: `conflict: unable to delete ${short} (cannot be forced) - image is being used by running container ${users[0]?.Id.slice(0, 12) ?? ''}`
+        })
+      if (users.length && !force)
+        return json(res, 409, {
+          message: `conflict: unable to delete ${short} (must be forced) - image is being used by stopped container ${users[0]?.Id.slice(0, 12) ?? ''}`
+        })
       images.splice(i, 1)
       return json(res, 200, [{ Deleted: id }])
     }
@@ -811,8 +823,13 @@ export async function startEngineTestServer(
       return json(res, 200, { VolumesDeleted: gone.map((v) => v.Name), SpaceReclaimed: 0 })
     }
     if (method === 'DELETE' && (m = /^\/volumes\/(.+)$/.exec(p))) {
-      const i = volumes.findIndex((v) => v.Name === decodeURIComponent(m?.[1] ?? ''))
+      const name = decodeURIComponent(m[1] ?? '')
+      const i = volumes.findIndex((v) => v.Name === name)
       if (i < 0) return json(res, 404, { message: 'no such volume' })
+      if (usedVolumes.has(name))
+        return json(res, 409, {
+          message: `remove ${name}: volume is in use - [${containers[1]?.Id ?? ''}]`
+        })
       volumes.splice(i, 1)
       return json(res, 204, undefined)
     }

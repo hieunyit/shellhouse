@@ -1,4 +1,7 @@
 import type { HostSummary } from '@shared/hosts'
+import { Monitor } from 'lucide-react'
+import { osTitle, type HostOs } from '@shared/host-os'
+import { OsIcon } from './OsIcon'
 import { hostTileClass } from './hostColors'
 import { cx, StatusDot, type ConnectionState } from './ui'
 
@@ -25,24 +28,34 @@ function colorFor(host: Pick<HostSummary, 'label' | 'color'>): NonNullable<HostS
   return PALETTE[h % (PALETTE.length - 1)] ?? 'gray'
 }
 
-/** Ảnh đại diện của host: chữ cái đầu trên nền màu môi trường, chấm trạng thái phiên. */
+/**
+ * Ảnh đại diện của host: icon hệ điều hành server (đã nhận ra lúc kết nối) hoặc chữ cái đầu, trên
+ * nền màu môi trường; chấm trạng thái phiên. Host có màu riêng → icon distro nằm trên nền màu đó.
+ */
 export function HostAvatar({
   host,
   size = 28,
   session,
   className
 }: {
-  host: Pick<HostSummary, 'label' | 'color'>
+  host: Pick<HostSummary, 'label' | 'color'> & {
+    os?: HostOs | null | undefined
+    /** Remote Desktop → icon màn hình thay cho chữ cái đầu. */
+    protocol?: HostSummary['protocol'] | undefined
+  }
   size?: number
   session?: ConnectionState | null
   className?: string
 }): React.JSX.Element {
+  const os = host.os ?? null
   return (
     <span
       aria-hidden
+      title={os ? osTitle(os) : undefined}
+      data-os={os?.id}
       className={cx(
         'relative flex shrink-0 items-center justify-center rounded-md font-semibold tracking-tight select-none',
-        hostTileClass[colorFor(host)],
+        os ? (host.color ? hostTileClass[host.color] : 'bg-subtle') : hostTileClass[colorFor(host)],
         className
       )}
       style={{
@@ -52,7 +65,15 @@ export function HostAvatar({
         fontSize: Math.round(size * (size < 22 ? 0.6 : 0.38))
       }}
     >
-      {size < 22 ? initials(host.label).slice(0, 1) : initials(host.label)}
+      {os ? (
+        <OsIcon os={os.id} size={Math.round(size * (size < 22 ? 0.82 : 0.72))} />
+      ) : host.protocol === 'rdp' ? (
+        <Monitor size={Math.round(size * (size < 22 ? 0.75 : 0.55))} data-testid="rdp-avatar" />
+      ) : size < 22 ? (
+        initials(host.label).slice(0, 1)
+      ) : (
+        initials(host.label)
+      )}
       {session && (
         <StatusDot
           state={session}

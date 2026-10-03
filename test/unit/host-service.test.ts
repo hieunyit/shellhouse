@@ -386,6 +386,20 @@ describe('HostService', () => {
     expect(service.listForwards(host)).toHaveLength(0)
   })
 
+  it('setOs: lưu hệ điều hành server, chỉ báo thay đổi khi khác; dữ liệu hỏng bị bỏ qua', async () => {
+    const { db, service } = await setup()
+    const id = service.saveHost(base)
+    expect(service.tree().hosts[0]?.os).toBeUndefined()
+    const ubuntu = { id: 'ubuntu', name: 'Ubuntu', version: '24.04 LTS' } as const
+    expect(service.setOs(id, ubuntu)).toBe(true)
+    expect(service.tree().hosts[0]?.os).toEqual(ubuntu)
+    expect(service.setOs(id, { ...ubuntu })).toBe(false)
+    expect(service.setOs(id, { ...ubuntu, version: '24.10' })).toBe(true)
+    expect(service.setOs('missing', ubuntu)).toBe(false)
+    db.prepare('UPDATE hosts SET os = ? WHERE id = ?').run('{"id":"beos"}', id)
+    expect(service.tree().hosts[0]?.os).toBeUndefined()
+  })
+
   it('publicKeyFromOpenSshHeader từ chối dữ liệu rác', () => {
     expect(publicKeyFromOpenSshHeader('xyz')).toBeNull()
   })

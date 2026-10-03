@@ -9,7 +9,10 @@ import {
   TOKEN,
   type ApiTestServer
 } from '../../src/modules/k8s/test/api-test-server'
-import { startEngineTestServer } from '../../src/modules/docker/test/engine-test-server'
+import {
+  startEngineTestServer,
+  type EngineTestServer
+} from '../../src/modules/docker/test/engine-test-server'
 import { startS3TestServer } from '../../src/modules/s3/test/s3-test-server'
 
 /**
@@ -51,6 +54,65 @@ function shooter(page: Page, theme: string) {
   }
 }
 
+/** Thêm vài Compose project giống thật (nhiều service, replica, project đã dừng) cho ảnh chụp. */
+function seedDockerProjects(engine: EngineTestServer): void {
+  const base = engine.containers[0]
+  if (!base) return
+  const now = Math.floor(Date.now() / 1000)
+  const add = (
+    name: string,
+    project: string,
+    service: string,
+    extra: Partial<typeof base> = {}
+  ): void => {
+    engine.containers.push({
+      ...base,
+      Id: `${name}-${'0'.repeat(40)}`.slice(0, 64),
+      Names: [`/${name}`],
+      Status: 'Up 3 days',
+      Created: now - 3 * 86_400,
+      Ports: [],
+      Labels: {
+        'com.docker.compose.project': project,
+        'com.docker.compose.service': service,
+        'com.docker.compose.project.working_dir': `/srv/${project}`,
+        'com.docker.compose.project.config_files': `/srv/${project}/compose.yaml`
+      },
+      ...extra
+    })
+  }
+  add('monitoring-prometheus-1', 'monitoring', 'prometheus', {
+    Image: 'prom/prometheus:v2.54.1',
+    Ports: [{ IP: '0.0.0.0', PrivatePort: 9090, PublicPort: 9090, Type: 'tcp' }],
+    Status: 'Up 3 days (healthy)'
+  })
+  add('monitoring-grafana-1', 'monitoring', 'grafana', {
+    Image: 'grafana/grafana:11.2.0',
+    Ports: [{ IP: '0.0.0.0', PrivatePort: 3000, PublicPort: 3000, Type: 'tcp' }],
+    Status: 'Up 3 days (unhealthy)'
+  })
+  add('monitoring-node-exporter-1', 'monitoring', 'node-exporter', {
+    Image: 'prom/node-exporter:v1.8.2'
+  })
+  add('monitoring-node-exporter-2', 'monitoring', 'node-exporter', {
+    Image: 'prom/node-exporter:v1.8.2',
+    State: 'exited',
+    Status: 'Exited (1) 2 hours ago'
+  })
+  add('blog-wordpress-1', 'blog', 'wordpress', {
+    Image: 'wordpress:6.6-apache',
+    State: 'exited',
+    Status: 'Exited (0) 5 days ago',
+    Created: now - 12 * 86_400
+  })
+  add('blog-mariadb-1', 'blog', 'mariadb', {
+    Image: 'mariadb:11.4',
+    State: 'exited',
+    Status: 'Exited (0) 5 days ago',
+    Created: now - 12 * 86_400
+  })
+}
+
 function kubeconfig(server: ApiTestServer): string {
   return `apiVersion: v1
 kind: Config
@@ -77,7 +139,7 @@ for (const theme of ['light', 'dark'] as const) {
   test(`module — Kubernetes (${theme})`, async () => {
     mkdirSync(OUT, { recursive: true })
     const server = await startApiTestServer()
-    server.enableCaretta()
+    server.enableCaretta({ realistic: true })
     server.enablePrometheus()
     // Cluster mẫu giống thật (nhiều namespace, Ingress / TLS, Service đủ loại, lỗi cấu hình…).
     server.seedDemo()
@@ -114,8 +176,11 @@ for (const theme of ['light', 'dark'] as const) {
       const detail = view.getByTestId('k8s-describe')
       await shot('k8s-10-deploy-overview', async () => {
         await nav('deployments.apps')
-        await view.getByTestId('k8s-row').first().dblclick()
+        // Deployment có đủ mục (Status, Resources, Pods, ReplicaSets) — không phải dòng đầu bị lỗi.
+        await view.locator('[data-testid="k8s-row"][data-name="shop/web"]').dblclick()
         await detail.waitFor()
+        await detail.getByTestId('k8s-detail-tab-overview').click()
+        await page.waitForTimeout(600)
       })
       for (const tab of ['metrics', 'topology', 'traffic', 'events']) {
         await shot(`k8s-11-deploy-${tab}`, async () => {
@@ -128,6 +193,8 @@ for (const theme of ['light', 'dark'] as const) {
         await nav('pods')
         await view.getByTestId('k8s-row').first().dblclick()
         await detail.waitFor()
+        await detail.getByTestId('k8s-detail-tab-overview').click()
+        await page.waitForTimeout(600)
       })
       await page.keyboard.press('Escape')
       await shot('k8s-14-secret-data', async () => {
@@ -146,6 +213,12 @@ for (const theme of ['light', 'dark'] as const) {
         await map.getByTestId('k8s-topo-canvas').waitFor()
         await page.waitForTimeout(2500)
       })
+      // Menu namespace mở trên bản đồ: nằm trên thanh công cụ Map, không bị che mục đầu.
+      await shot('k8s-19-topology-nsmenu', async () => {
+        await view.getByTestId('k8s-namespace').click()
+        await view.getByTestId('k8s-namespace-menu').waitFor()
+      })
+      await page.keyboard.press('Escape')
       await shot('k8s-19-topology-selected', async () => {
         await map.getByTestId('k8s-topo-search').fill('storefront')
         await map.getByTestId('k8s-topo-result').first().click()
@@ -228,6 +301,45 @@ for (const theme of ['light', 'dark'] as const) {
         await map.getByTestId('k8s-map-view-traffic').click()
         await page.waitForTimeout(4000)
       })
+      // Service map trên cluster giống thật: chỉ chọn console-stg (ingress-nginx, kube-system,
+      // monitoring gộp theo namespace; địa chỉ ngoài cluster gộp "External (N)").
+      await shot('k8s-24-traffic-scope', async () => {
+        await view.getByTestId('k8s-namespace').click()
+        for (const ns of ['shop', 'default', 'payments', 'monitoring'])
+          if (await view.getByTestId(`k8s-ns-${ns}`).isChecked())
+            await view.getByTestId(`k8s-ns-${ns}`).click()
+        await view.getByTestId('k8s-ns-console-stg').click()
+        await page.keyboard.press('Escape')
+        await page.waitForTimeout(1500)
+      })
+      const tmap = view.getByTestId('k8s-traffic-map')
+      await shot('k8s-25-traffic-selected', async () => {
+        await tmap.locator('[data-testid="k8s-traffic-node"][data-name="console-api"]').click()
+        await page.waitForTimeout(800)
+      })
+      await shot('k8s-26-traffic-external', async () => {
+        // Tìm → chọn + đưa vào giữa khung; mở External theo nhóm (/16, tên miền).
+        await tmap.getByTestId('k8s-traffic-search').fill('amazonaws')
+        await tmap.getByTestId('k8s-traffic-search').press('Enter')
+        await view.getByTestId('k8s-traffic-panel-expand').click()
+        await tmap.getByTestId('k8s-traffic-search').fill('')
+        await page.waitForTimeout(1200)
+      })
+      await shot('k8s-27-traffic-all-ns', async () => {
+        await tmap.getByTestId('k8s-traffic-scope-toggle').click()
+        await page.waitForTimeout(1500)
+      })
+      // Tab Traffic của Deployment: bản đồ nhỏ (bên gọi | workload | bên được gọi) trên danh sách.
+      await shot('k8s-13-deploy-traffic-map', async () => {
+        await nav('deployments.apps')
+        await view
+          .locator('[data-testid="k8s-row"][data-name="console-stg/console-api"]')
+          .dblclick()
+        await detail.getByTestId('k8s-detail-tab-traffic').click()
+        await detail.getByTestId('k8s-traffic-focus-map').waitFor()
+        await page.waitForTimeout(1500)
+      })
+      await page.keyboard.press('Escape')
       // Tạo tài nguyên.
       await shot('k8s-30-create', async () => {
         await nav('deployments.apps')
@@ -245,6 +357,7 @@ for (const theme of ['light', 'dark'] as const) {
     test.skip(isWindows, 'Engine giả dùng unix socket')
     mkdirSync(OUT, { recursive: true })
     const engine = await startEngineTestServer()
+    seedDockerProjects(engine)
     const launched = await launchApp({ DOCKER_HOST: `unix://${engine.path}` })
     const { page } = launched
     await page.setViewportSize({ width: 1440, height: 880 })
@@ -265,6 +378,35 @@ for (const theme of ['light', 'dark'] as const) {
       await shot('docker-03-overview', () => view.getByTestId('docker-nav-overview').click())
       await shot('docker-04-images', () => view.getByTestId('docker-nav-images').click())
       await shot('docker-05-compose', () => view.getByTestId('docker-nav-compose').click())
+      // Compose ở các độ rộng hay gặp (laptop 1366, màn hình 1920).
+      for (const width of [1366, 1920]) {
+        await shot(`docker-05-compose-${String(width)}`, async () => {
+          await page.setViewportSize({ width, height: 880 })
+        })
+      }
+      await page.setViewportSize({ width: 1440, height: 880 })
+      await shot('docker-05-compose-collapsed', async () => {
+        await view.getByTestId('docker-compose-expand-all').click()
+      })
+      await view.getByTestId('docker-compose-expand-all').click()
+      await shot('docker-05-compose-menu', async () => {
+        await view
+          .locator('[data-testid="docker-project"][data-name="shop"]')
+          .getByTestId('docker-compose-more')
+          .click()
+      })
+      await page.keyboard.press('Escape')
+      // Chọn nhiều dòng → thanh thao tác hàng loạt, hộp xác nhận tóm tắt mục bị bỏ qua.
+      await shot('docker-08-bulk', async () => {
+        await view.getByTestId('docker-nav-containers').click()
+        await view.getByTestId('docker-select-all').click()
+      })
+      await shot('docker-09-bulk-dialog', async () => {
+        await view.getByTestId('docker-bulk-stop').click()
+        await page.getByTestId('docker-bulk-dialog').waitFor()
+      })
+      await page.keyboard.press('Escape')
+      await view.getByTestId('docker-bulk-clear').click()
       await shot('docker-06-run', async () => {
         await view.getByTestId('docker-nav-containers').click()
         await view.getByTestId('docker-run').click()
@@ -387,6 +529,107 @@ test('module — Kubernetes map at narrow widths', async () => {
       })
       await page.keyboard.press('Escape')
     }
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})
+
+/**
+ * Topology: định tuyến cạnh giống cluster thật — 2 Ingress × 2 luật, luật của frontend trỏ chéo sang
+ * backend. Mỗi cạnh một làn dọc riêng, không chung đoạn dọc với cạnh khác đích.
+ */
+test('module — Kubernetes topology edge routing', async () => {
+  mkdirSync(OUT, { recursive: true })
+  const server = await startApiTestServer()
+  const ns = 'routing-stg'
+  server.upsert('namespaces', { metadata: { name: ns }, status: { phase: 'Active' } })
+  for (const app of ['console-backend', 'console-frontend']) {
+    server.upsert('deployments', {
+      metadata: { name: app, namespace: ns },
+      spec: {
+        replicas: 1,
+        selector: { matchLabels: { app } },
+        template: {
+          metadata: { labels: { app } },
+          spec: { containers: [{ name: app, image: `registry.example.com/${app}:1.4.2` }] }
+        }
+      },
+      status: { replicas: 1, readyReplicas: 1, availableReplicas: 1, updatedReplicas: 1 }
+    })
+    server.upsert('services', {
+      metadata: { name: `${app}-service`, namespace: ns },
+      spec: {
+        type: 'ClusterIP',
+        clusterIP: app === 'console-backend' ? '10.43.20.11' : '10.43.20.12',
+        selector: { app },
+        ports: [{ port: 80, targetPort: 8080, protocol: 'TCP' }]
+      }
+    })
+  }
+  const path = (p: string, svc: string): unknown => ({
+    path: p,
+    pathType: 'Prefix',
+    backend: { service: { name: svc, port: { number: 80 } } }
+  })
+  server.upsert('ingresses', {
+    metadata: { name: 'console-backend-ingress', namespace: ns },
+    spec: {
+      ingressClassName: 'nginx',
+      rules: [
+        { host: 'api.stg.example.com', http: { paths: [path('/', 'console-backend-service')] } },
+        {
+          host: 'api-internal.stg.example.com',
+          http: { paths: [path('/', 'console-backend-service')] }
+        }
+      ]
+    }
+  })
+  server.upsert('ingresses', {
+    metadata: { name: 'console-frontend-ingress', namespace: ns },
+    spec: {
+      ingressClassName: 'nginx',
+      rules: [
+        {
+          host: 'console.stg.example.com',
+          http: {
+            paths: [path('/', 'console-frontend-service'), path('/api', 'console-backend-service')]
+          }
+        }
+      ]
+    }
+  })
+  const dir = mkdtempSync(join(tmpdir(), 'sh-scr-kube-'))
+  writeFileSync(join(dir, 'config'), kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: join(dir, 'config') })
+  const { page } = launched
+  await page.setViewportSize({ width: 1440, height: 880 })
+  page.setDefaultTimeout(10_000)
+  const shot = shooter(page, 'light')
+  try {
+    await enableModule(page, 'k8s')
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await view.getByTestId('k8s-namespace').click()
+    await view.getByTestId(`k8s-ns-${ns}`).click()
+    await page.keyboard.press('Escape')
+    await view.getByTestId('k8s-nav-map').click()
+    const map = view.getByTestId('k8s-map')
+    await shot('k8s-19-topology-routing', async () => {
+      await map.getByTestId('k8s-topo-canvas').waitFor()
+      await page.waitForTimeout(2000)
+    })
+    // Phóng to quanh khe Entry → Services để thấy từng làn dọc.
+    await shot('k8s-19-topology-routing-zoom', async () => {
+      await page.mouse.move(770, 360)
+      await page.keyboard.down('Control')
+      for (let i = 0; i < 6; i++) {
+        await page.mouse.wheel(0, -100)
+        await page.waitForTimeout(120)
+      }
+      await page.keyboard.up('Control')
+      await page.waitForTimeout(800)
+    })
   } finally {
     await launched.close()
     await server.close()

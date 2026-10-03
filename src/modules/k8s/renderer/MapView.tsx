@@ -1130,13 +1130,7 @@ function MapInner({
             <div
               className={cx('k8s-map flex min-h-0 flex-1', options.darkCanvas && 'k8s-map-dark')}
             >
-              <TrafficMap
-                traffic={traffic}
-                scope={namespaces}
-                palette={palette.ramp}
-                particles={!reducedMotion && traffic.rates.length <= MAX_ANIMATED_EDGES}
-                onOpen={onOpen}
-              />
+              <TrafficMap traffic={traffic} scope={namespaces} onOpen={onOpen} />
             </div>
           )}
           {topologyView && (

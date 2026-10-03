@@ -52,7 +52,12 @@ export function installGlobalGuards(devServerUrl: string | undefined, appIndexHt
     })
 
     contents.session.setPermissionRequestHandler((_wc, permission, callback) => {
-      // Clipboard do main xử lý qua IPC; renderer không cần quyền nào.
+      // Toàn màn hình HTML (nút Full screen của tab Remote Desktop) — chỉ cho trang của app.
+      if (permission === 'fullscreen' && isAppUrl(_wc.getURL(), devServerUrl, appIndexHtml)) {
+        callback(true)
+        return
+      }
+      // Clipboard do main xử lý qua IPC; renderer không cần quyền nào khác.
       log.warn(`Denied permission: ${permission}`)
       callback(false)
     })

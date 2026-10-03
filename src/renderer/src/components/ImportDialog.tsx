@@ -5,7 +5,7 @@ import { t, tn } from '@shared/i18n'
 import { formatNumber } from '@shared/i18n/format'
 import { Button, Modal, Notice, Segmented } from './ui'
 
-type Source = 'ssh-config' | 'mobaxterm' | 'csv'
+type Source = 'ssh-config' | 'mobaxterm' | 'csv' | 'rdp'
 
 interface Scan {
   candidates: ImportCandidate[]
@@ -28,6 +28,10 @@ function description(source: Source): string {
     case 'csv':
       return t(
         'Termius or spreadsheet export. Columns are matched by name; passwords are never imported.'
+      )
+    case 'rdp':
+      return t(
+        'Remote Desktop (.rdp) files saved by mstsc or Windows App. Each file becomes an RDP host; saved passwords are not imported.'
       )
   }
 }
@@ -66,8 +70,8 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
 
   const load = (next: Source, pick: boolean): void => {
     setError(null)
-    // CSV: không có vị trí mặc định — chờ người dùng chọn file.
-    if (next === 'csv' && !pick) {
+    // CSV / .rdp: không có vị trí mặc định — chờ người dùng chọn file.
+    if ((next === 'csv' || next === 'rdp') && !pick) {
       setScan({ candidates: [], file: null })
       return
     }
@@ -77,7 +81,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
         ? scanSshConfig()
         : next === 'csv'
           ? window.shellhouse.scanCsv()
-          : window.shellhouse.scanMobaXterm(pick)
+          : next === 'rdp'
+            ? window.shellhouse.scanRdpFiles()
+            : window.shellhouse.scanMobaXterm(pick)
     )
   }
 
@@ -100,7 +106,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
           ? await window.shellhouse.importSshConfig(aliases)
           : source === 'csv'
             ? await window.shellhouse.importCsv(aliases)
-            : await window.shellhouse.importMobaXterm(aliases)
+            : source === 'rdp'
+              ? await window.shellhouse.importRdpFiles(aliases)
+              : await window.shellhouse.importMobaXterm(aliases)
       setResult(
         tn(imported, 'Imported {n} host.', 'Imported {n} hosts.') +
           (skipped.length ? ' ' + t('Skipped: {names}.', { names: skipped.join(', ') }) : '')
@@ -147,7 +155,8 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
             options={[
               { value: 'ssh-config', label: '~/.ssh/config' },
               { value: 'mobaxterm', label: 'MobaXterm' },
-              { value: 'csv', label: 'CSV / Termius' }
+              { value: 'csv', label: 'CSV / Termius' },
+              { value: 'rdp', label: 'Remote Desktop (.rdp)' }
             ]}
             onChange={(next) => {
               setSource(next)
@@ -171,7 +180,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                   load(source, true)
                 }}
               >
-                {t('Choose file…')}
+                {source === 'rdp' ? t('Choose files…') : t('Choose file…')}
               </Button>
             </>
           )}
@@ -189,13 +198,15 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
             ? t('No hosts found in ~/.ssh/config.')
             : scan?.file
               ? t('No SSH sessions found in this file.')
-              : source === 'csv'
-                ? t(
-                    'Choose a CSV file. In Termius: export your hosts as CSV. A header row with Hostname (or Host / IP) is required; Label, Port, Username, Group and Tags are used when present.'
-                  )
-                : t(
-                    'MobaXterm.ini was not found in the usual place. Choose the file — portable MobaXterm keeps it next to MobaXterm.exe.'
-                  )}
+              : source === 'rdp'
+                ? t('Choose one or more .rdp files.')
+                : source === 'csv'
+                  ? t(
+                      'Choose a CSV file. In Termius: export your hosts as CSV. A header row with Hostname (or Host / IP) is required; Label, Port, Username, Group and Tags are used when present.'
+                    )
+                  : t(
+                      'MobaXterm.ini was not found in the usual place. Choose the file — portable MobaXterm keeps it next to MobaXterm.exe.'
+                    )}
         </p>
       )}
       {!result && ignored.length > 0 && (
@@ -248,8 +259,13 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                     <span className="text-fg">{c.label ?? c.alias}</span>
                   </td>
                   <td className="px-3 py-2 font-mono text-xs text-muted">
-                    {c.username ?? '?'}@{c.hostname}
-                    {c.port === 22 ? '' : `:${c.port}`}
+                    {source === 'rdp'
+                      ? c.username
+                        ? `${c.username}@`
+                        : ''
+                      : `${c.username ?? '?'}@`}
+                    {c.hostname}
+                    {c.port === (source === 'rdp' ? 3389 : 22) ? '' : `:${c.port}`}
                   </td>
                   <td className="px-3 py-2 text-xs">
                     {c.problem && <span className="text-danger">{c.problem}</span>}

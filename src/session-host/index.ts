@@ -17,6 +17,7 @@ import { SessionRegistry } from './session/registry'
 import type { SessionPort } from './session/session'
 import { HostModuleRegistry } from '../modules/registry/session-host'
 import { HOST_MODULES } from '../modules/registry/all-host'
+import { createRdpService } from './rdp/service'
 
 const port = process.parentPort
 const appVersion =
@@ -85,6 +86,9 @@ const sessions = new SessionRegistry({
   log,
   appVersion,
   modules,
+  onServerOs: (sessionId, os) => {
+    post({ type: 'session:os', sessionId, os })
+  },
   ...(editRoot ? { editRoot } : {}),
   hostKeys: {
     check: (host, portNumber, key) =>
@@ -104,6 +108,31 @@ const sessions = new SessionRegistry({
     }
   }
 })
+
+// Remote Desktop trong tab: proxy RDCleanPath (WebSocket 127.0.0.1) dùng kết nối SSH của phiên làm tunnel.
+const rdp = createRdpService({
+  sshClient: (sessionId) => {
+    const session = sessions.get(sessionId)
+    return session ? (session.sshShell?.client ?? null) : undefined
+  },
+  log
+})
+
+function replyRdp(id: number, work: Promise<unknown>): void {
+  work.then(
+    (result) => {
+      post({ type: 'rdp:result', id, ok: true, result })
+    },
+    (error: unknown) => {
+      post({
+        type: 'rdp:result',
+        id,
+        ok: false,
+        error: error instanceof Error ? error.message : String(error)
+      })
+    }
+  )
+}
 
 function adaptPort(p: MessagePortMain): SessionPort {
   return {
@@ -159,7 +188,8 @@ port.on('message', (event) => {
               ...(request.ssh.legacyAlgorithms ? { legacyAlgorithms: true } : {}),
               ...(request.ssh.storedOnly ? { storedOnly: true } : {}),
               ...(request.ssh.autoForwards ? { autoForwards: request.ssh.autoForwards } : {}),
-              ...(request.ssh.tmux ? { tmux: request.ssh.tmux } : {})
+              ...(request.ssh.tmux ? { tmux: request.ssh.tmux } : {}),
+              ...(request.ssh.detectOs ? { detectOs: true } : {})
             }
           : {}),
         ...(request.log ? { log: request.log } : {})
@@ -191,6 +221,12 @@ port.on('message', (event) => {
       resolve?.(request.allowed)
       break
     }
+    case 'rdp:probe':
+      replyRdp(request.id, rdp.probe(request.target))
+      break
+    case 'rdp:open':
+      replyRdp(request.id, rdp.open(request.target, request.pin))
+      break
     case 'crash':
       log('warn', 'Received crash command (test)')
       process.exit(70)

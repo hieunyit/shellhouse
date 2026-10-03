@@ -15,6 +15,8 @@ import { ForwardManager } from '../forward/manager'
 import { SftpService } from '../sftp/service'
 import { deployPublicKey } from '../ssh/deploy-key'
 import { StatsMonitor } from '../ssh/stats-monitor'
+import { detectServerOs } from '../ssh/os-detect'
+import type { HostOs } from '@shared/host-os'
 import { LatencyMonitor } from '../ssh/latency'
 import { RemoteEdits } from '../sftp/edit'
 import { downloadFolder, uploadFolder } from '../sftp/folders'
@@ -83,6 +85,8 @@ export interface SessionDeps {
   onEnded(id: string): void
   /** Module chính thức (ADR-014). */
   modules: HostModuleRegistry
+  /** Đã nhận ra hệ điều hành của server (phiên SSH có `detectOs`) — main lưu theo host. */
+  onServerOs?: (sessionId: string, os: HostOs) => void
   /** Cho test. */
   sshOverrides?: { agent?: string | null; keyFiles?: readonly string[] }
   /**
@@ -110,6 +114,8 @@ export interface SessionExtras {
   log?: SessionLogOptions
   /** Tên phiên tmux để gắn vào (main cấp theo tab). */
   tmux?: string
+  /** Dò hệ điều hành server sau khi kết nối (host đã lưu — hiện icon distro). */
+  detectOs?: boolean
 }
 
 /** Một session terminal: nối transport (PTY/SSH) với MessagePort của renderer. */
@@ -311,6 +317,7 @@ export class Session {
         }
         this.ssh = transport
         this.dropCredentials()
+        this.detectOs(transport)
         for (const resolve of this.sshWaiters.splice(0)) resolve(transport)
         const moduleTerminal = this.spec.moduleTerminal
         if (moduleTerminal) {
@@ -710,6 +717,18 @@ export class Session {
     } catch {
       // Port đã đóng.
     }
+  }
+
+  /** Dò hệ điều hành server song song với shell (kênh exec riêng, có hạn giờ) — lỗi thì bỏ qua. */
+  private detectOs(ssh: SshShell): void {
+    const report = this.deps.onServerOs
+    if (!this.extras.detectOs || !report) return
+    void detectServerOs(ssh.client).then(
+      (os) => {
+        if (os && !this.closed) report(this.id, os)
+      },
+      () => undefined
+    )
   }
 
   /** Thanh theo dõi server: chạy khi renderer muốn (tab đang hiện) và đã có SSH tích hợp. */

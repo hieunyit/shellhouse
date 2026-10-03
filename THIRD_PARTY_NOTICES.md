@@ -12,3 +12,8 @@ listed in `node_modules/*/LICENSE`):
 - **React Flow (@xyflow/react)** — © webkid GmbH, MIT License.
 - **CodeMirror 6 (codemirror, @codemirror/\*, @lezer/\*)** — © Marijn Haverbeke and others, MIT
   License. Used for the built-in file editor.
+- **IronRDP web client (@devolutions/iron-remote-desktop-rdp)** — © Devolutions Inc. and IronRDP
+  contributors, dual-licensed MIT OR Apache License 2.0 (https://github.com/Devolutions/IronRDP).
+  The WebAssembly RDP client used by the built-in Remote Desktop viewer (`src/renderer/src/rdp/`);
+  Shellhouse uses it under the MIT License. The RDCleanPath proxy in `src/session-host/rdp/` is an
+  independent implementation of the protocol defined by the `ironrdp-rdcleanpath` crate.

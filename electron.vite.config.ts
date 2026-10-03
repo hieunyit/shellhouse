@@ -8,13 +8,15 @@ const alias = { '@shared': resolve('src/shared') }
 
 // CSP chặt chỉ áp cho bản build. Bản dev cần inline script của React Refresh.
 // xterm.js tự chèn thẻ <style> nên style-src phải có 'unsafe-inline'.
+// Remote Desktop trong tab: IronRDP là WebAssembly → 'wasm-unsafe-eval' (chỉ cho biên dịch WASM,
+// không mở eval() của JS); kết nối tới proxy RDCleanPath của Session Host ở ws://127.0.0.1:<cổng>.
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  "connect-src 'self' ws://127.0.0.1:*",
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",

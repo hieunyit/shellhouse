@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react'
 import { Heading, Meter, StatCard } from '../../../renderer/src/components/panels'
-import { Notice } from '../../../renderer/src/components/ui'
+import { cx, Notice } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
 import type { K8sOp, OverviewProblem, OverviewResult, ProblemGroup } from '../shared/ops'
 import { formatCpu, formatMemory } from '../shared/resources'
+import { TY } from './typography'
 import { formatDateTime, formatNumber, formatRelative, t, tn } from '../../registry/renderer-kit'
 
 /** Loại trong sự kiện ("Pod", "Deployment"…) → id loại để mở. */
@@ -105,7 +106,7 @@ function Problems({
           const { total, items } = problems[g]
           return (
             <section key={g} data-testid={`k8s-ov-problem-${g}`}>
-              <div className="flex items-center gap-2 bg-subtle px-3 py-1 text-[11px] font-medium tracking-wider text-muted uppercase">
+              <div className="flex items-center gap-2 bg-subtle px-3 py-1 text-xs font-medium">
                 <span className={g === 'pending' || g === 'pvcs' ? 'text-warning' : 'text-danger'}>
                   {groupTitle(g)}
                 </span>
@@ -120,7 +121,7 @@ function Problems({
                   testId="k8s-ov-problem"
                 >
                   <span className="min-w-0 truncate text-xs">
-                    <span className="font-mono text-fg">
+                    <span className={cx('text-fg', TY.id)}>
                       {it.namespace ? `${it.namespace}/` : ''}
                       {it.name}
                     </span>
@@ -253,7 +254,8 @@ export function ClusterOverview({
           <RefreshCw size={13} />
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-2 @lg:grid-cols-3 @3xl:grid-cols-5">
+      {/* auto-fit: mọi thẻ cùng một hàng khi đủ rộng — không để thẻ lẻ một mình một hàng. */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-2">
         <StatCard
           label={t('Nodes')}
           value={`${formatNumber(data.nodes.ready)}/${formatNumber(data.nodes.total)}`}
@@ -428,7 +430,7 @@ export function ClusterOverview({
                       {w.reason}
                     </span>
                     <span className="min-w-0 truncate" title={w.message}>
-                      <span className="font-mono text-muted">
+                      <span className={cx('text-muted', TY.id)}>
                         {w.namespace ? `${w.namespace}/` : ''}
                         {w.object}
                       </span>

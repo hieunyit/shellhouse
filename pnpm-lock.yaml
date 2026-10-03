@@ -266,6 +266,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@devolutions/iron-remote-desktop-rdp':
+        specifier: 0.7.0
+        version: 0.7.0
       '@electron-toolkit/tsconfig':
         specifier: ^2.0.0
         version: 2.0.0(@types/node@24.19.0)
@@ -627,6 +630,9 @@ packages:
 
   '@dabh/diagnostics@2.0.9':
     resolution: {integrity: sha512-R6siwR65Hm+3yfgP7o8DKhNvputQAwfoz9zTc3kyDudnomj2/BcLmD+uGQQPICjuFUp8ounPBU+jmKsocwVVAg==}
+
+  '@devolutions/iron-remote-desktop-rdp@0.7.0':
+    resolution: {integrity: sha512-CclAh4OS9aBoPJT0l7bih7ETOHPnB9KjT0drB0a6r5+Qh95pTEuQCx7uFN/XA2AlkFlrqx+DBAMDGYXmgsjHAQ==}
 
   '@electron-internal/extract-zip@1.0.5':
     resolution: {integrity: sha512-+bqFCP98pLI0Tt0XQo1TmlXtwjWchISndDOxCkEcIuUgXWpBnLyRI+2DU+mesvnMMX6L1XDqYNA0lXNDHd/yiA==}
@@ -4431,6 +4437,8 @@ snapshots:
       '@so-ric/colorspace': 1.1.6
       enabled: 2.0.0
       kuler: 2.0.0
+
+  '@devolutions/iron-remote-desktop-rdp@0.7.0': {}
 
   '@electron-internal/extract-zip@1.0.5': {}
 

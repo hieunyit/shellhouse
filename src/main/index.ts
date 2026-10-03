@@ -41,6 +41,9 @@ import { restoreBackup } from './store/backup'
 import { NewerSchemaError } from './store/migrate'
 import { KnownHosts } from './known-hosts'
 import { registerHostIpc } from './hosts/ipc'
+import { registerRdpIpc } from './rdp/ipc'
+import { registerRdpViewIpc } from './rdp-viewer/ipc'
+import type { RdpLauncher } from './rdp/launcher'
 import { HostService } from './hosts/service'
 import { SnippetService } from './snippets'
 import { SettingsService } from './settings'
@@ -117,10 +120,13 @@ let db: Db | null = null
 let vault: Vault | null = null
 let knownHosts: KnownHosts | null = null
 let hosts: HostService | null = null
+/** Phiên SSH của host đã lưu đang chờ báo hệ điều hành server (sessionId → hostId). */
+const osSessions = new Map<string, string>()
 let snippets: SnippetService | null = null
 let history: CommandHistory | null = null
 let modules: MainModuleRegistry | null = null
 let programGrants: ModuleProgramGrants | null = null
+let rdpLauncher: RdpLauncher | null = null
 
 function requireModules(): MainModuleRegistry {
   if (!modules) throw new Error(t('Data is not ready yet'))
@@ -435,6 +441,7 @@ function registerIpc(): void {
             spec.kind === 'host' && resolved?.tmux && !noShell && !moduleTerminal
               ? tmuxSlots.take(sessionId, spec.hostId)
               : null
+          if (spec.kind === 'host') osSessions.set(sessionId, spec.hostId)
           supervisor.openSession(
             sessionId,
             {
@@ -449,7 +456,11 @@ function registerIpc(): void {
               }
             },
             port1,
-            tmux ? { ...ssh, tmux } : ssh,
+            {
+              ...ssh,
+              ...(tmux ? { tmux } : {}),
+              ...(spec.kind === 'host' ? { detectOs: true } : {})
+            },
             // Không có shell thì không có gì để ghi log.
             noShell ? undefined : log
           )
@@ -469,6 +480,7 @@ function registerIpc(): void {
 
   handle('session:close', isTrustedSender, (sessionId) => {
     tmuxSlots.release(sessionId)
+    osSessions.delete(sessionId)
     supervisor.closeSession(sessionId)
   })
 
@@ -480,6 +492,36 @@ function registerIpc(): void {
       send('hosts:changed', null)
     }
   )
+  // Remote Desktop: mở client RDP của hệ điều hành (E2E: client giả, ghi kế hoạch ra file).
+  rdpLauncher = registerRdpIpc({
+    hosts: requireHosts,
+    isTrustedSender,
+    getWindow: () => mainWindow,
+    notifyChanged: () => {
+      send('hosts:changed', null)
+    },
+    emit: (event) => {
+      send('rdp:status', event)
+    },
+    tempDir: join(app.getPath('userData'), 'rdp-temp'),
+    home: app.getPath('home'),
+    stubRecordFile:
+      testHooks && process.env['SHELLHOUSE_TEST_RDP'] === 'stub'
+        ? join(app.getPath('userData'), 'rdp-test-launch.json')
+        : null
+  })
+
+  // Remote Desktop trong tab: IronRDP (WASM) ở renderer ↔ proxy RDCleanPath trong Session Host.
+  if (db)
+    registerRdpViewIpc({
+      db,
+      hosts: requireHosts,
+      supervisor,
+      isTrustedSender,
+      notifyChanged: () => {
+        send('hosts:changed', null)
+      }
+    })
 
   const requireSnippets = (): SnippetService => {
     if (!snippets) throw new Error(t('Data is not ready yet'))
@@ -822,6 +864,11 @@ if (!app.requestSingleInstanceLock()) {
       if (event.type === 'hostkey:check') {
         const result = hostKeys.check(event.host, event.port, Buffer.from(event.key, 'base64'))
         supervisor.send({ type: 'hostkey:result', requestId: event.requestId, result })
+      } else if (event.type === 'session:os') {
+        // Icon distro của host: chỉ ghi / báo renderer khi khác lần trước.
+        const hostId = osSessions.get(event.sessionId)
+        osSessions.delete(event.sessionId)
+        if (hostId && hosts?.setOs(hostId, event.os)) send('hosts:changed', null)
       } else if (event.type === 'hostkey:trust') {
         hostKeys.trust(event.host, event.port, Buffer.from(event.key, 'base64'))
         log.info(`Trusted a new host key for ${event.host}:${event.port}`)
@@ -926,6 +973,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   app.on('before-quit', () => {
+    rdpLauncher?.disposeAll()
     modules?.stop()
     supervisor.stop()
     vault?.lock()

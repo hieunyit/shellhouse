@@ -548,6 +548,32 @@ test('Kubernetes: Topology tĩnh — vấn đề giải thích bằng lời, tì
     )
     await expect(ingress.getByTestId('k8s-topo-row').first()).toContainText('shop.example.com/')
 
+    // Menu namespace của thanh trên nằm TRÊN thanh công cụ Map (không bị che mục đầu); bấm ra
+    // ngoài (vào bản đồ) đóng, Esc đóng, chọn checkbox thì vẫn mở (chọn nhiều).
+    const nsMenu = view.getByTestId('k8s-namespace-menu')
+    await view.getByTestId('k8s-namespace').click()
+    const allNs = nsMenu.getByRole('menuitemradio', { name: 'All namespaces' })
+    await expect(allNs).toBeVisible()
+    const onTop = await allNs.evaluate((el) => {
+      const r = el.getBoundingClientRect()
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      return !!hit && el.contains(hit)
+    })
+    expect(onTop).toBe(true)
+    await view.getByTestId('k8s-ns-default').click()
+    await expect(nsMenu).toBeVisible()
+    await map.getByTestId('k8s-topo-canvas').click({ position: { x: 600, y: 500 } })
+    await expect(nsMenu).toBeHidden()
+    await view.getByTestId('k8s-namespace').click()
+    await expect(nsMenu).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(nsMenu).toBeHidden()
+    // Trả lựa chọn namespace như cũ cho phần sau.
+    await view.getByTestId('k8s-namespace').click()
+    await view.getByTestId('k8s-ns-default').click()
+    await page.keyboard.press('Escape')
+    await expect(nsMenu).toBeHidden()
+
     // Danh sách vấn đề: lỗi cấu hình được giải thích bằng lời; bấm → chọn + bảng chi tiết.
     await map.getByTestId('k8s-topo-problems').click()
     const problem = (code: string) =>
@@ -922,6 +948,14 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await expect(traffic.locator('[data-testid="k8s-traffic-peer"][data-name="tool"]')).toHaveCount(
       1
     )
+    // Bản đồ nhỏ: bên gọi (Internet) trái, web giữa, bên được gọi (DB, tool) phải.
+    const focusMap = traffic.getByTestId('k8s-traffic-focus-map')
+    await expect(
+      focusMap.locator('[data-testid="k8s-traffic-node"][data-name="db.example.com"]')
+    ).toHaveCount(1)
+    await expect(
+      focusMap.locator('[data-testid="k8s-traffic-node"][data-name="203.0.113.7"]')
+    ).toHaveCount(1)
 
     // Topology của Deployment: thêm bên gọi tới / được gọi theo Caretta (namespace khác, ngoài cluster).
     await detail.getByTestId('k8s-detail-tab-topology').click()
@@ -942,11 +976,79 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await expect(
       tmap.locator('[data-testid="k8s-traffic-node"][data-name="db.example.com"]')
     ).toHaveCount(1)
+    // Phạm vi = namespace đang chọn ở bộ chọn namespace (shop, default).
+    await expect(view.getByTestId('k8s-traffic-scope')).toHaveAttribute('data-scope', /shop/)
     await tmap.locator('[data-testid="k8s-traffic-node"][data-name="web"]').click()
     const tpanel = view.getByTestId('k8s-traffic-panel')
     await expect(tpanel).toContainText('Calls')
     await expect(tpanel).toContainText('db.example.com')
     await expect(tpanel).toContainText('MB/s')
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})
+
+test('Kubernetes: service map — phạm vi theo namespace đang chọn, gộp External, mọi kết nối idle vẫn vẽ cấu trúc', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  server.enableCaretta({ realistic: true, idle: true })
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await setWindowSize(launched, 1366, 820)
+    // Chỉ console-stg (bỏ shop của context).
+    await view.getByTestId('k8s-namespace').click()
+    await view.getByTestId('k8s-ns-shop').click()
+    await view.getByTestId('k8s-ns-console-stg').click()
+    await page.keyboard.press('Escape')
+    await view.getByTestId('k8s-nav-map').click()
+    const map = view.getByTestId('k8s-map')
+    await map.getByTestId('k8s-map-view-traffic').click()
+    const tmap = view.getByTestId('k8s-traffic-map')
+    await expect(view.getByTestId('k8s-traffic-scope')).toHaveAttribute(
+      'data-scope',
+      'console-stg',
+      {
+        timeout: 15_000
+      }
+    )
+    // Mọi kết nối idle: không trống — báo rõ, đường vẽ mờ (đứt nét).
+    await expect(tmap.getByTestId('k8s-traffic-all-idle')).toBeVisible({ timeout: 15_000 })
+    await expect(
+      tmap.locator('[data-testid="k8s-traffic-edge"][data-idle="true"]').first()
+    ).toBeAttached()
+    // Đang giới hạn top-N → xem hết (idle: không có tốc độ để xếp hạng).
+    if (await tmap.getByTestId('k8s-traffic-more').isVisible())
+      await tmap.getByTestId('k8s-traffic-more').click()
+    // Ngoài phạm vi gộp theo namespace; 60 IP Internet → ingress không làm rối bản đồ console-stg.
+    await expect(
+      tmap.locator('[data-testid="k8s-traffic-node"][data-id="n:ingress-nginx"]')
+    ).toHaveCount(1)
+    await expect(
+      tmap.locator('[data-testid="k8s-traffic-node"][data-kind="external"]')
+    ).toHaveCount(2)
+    // Mở External (theo /16 · tên miền) từ bảng bên phải.
+    await tmap.getByTestId('k8s-traffic-search').fill('amazonaws')
+    await tmap.getByTestId('k8s-traffic-search').press('Enter')
+    await view.getByTestId('k8s-traffic-panel-expand').click()
+    await expect(
+      tmap.locator('[data-testid="k8s-traffic-node"][data-name="52.219.0.0/16"]')
+    ).toHaveCount(1)
+    await tmap.getByTestId('k8s-traffic-search').fill('')
+    // Mọi namespace: Internet → ingress hiện ra (gộp External clients).
+    await tmap.getByTestId('k8s-traffic-collapse-all').click()
+    await view.getByTestId('k8s-traffic-scope-toggle').click()
+    await expect(view.getByTestId('k8s-traffic-scope')).toHaveAttribute('data-scope', '')
+    await expect(
+      tmap.locator('[data-testid="k8s-traffic-node"][data-name="ingress-nginx-controller"]')
+    ).toHaveCount(1)
   } finally {
     await launched.close()
     await server.close()

@@ -15,7 +15,8 @@
     "test/soak/**/*",
     "test/package/**/*",
     "test/screens/**/*",
-    "test/integration/chaos-proxy.ts"
+    "test/integration/chaos-proxy.ts",
+    "test/integration/rdp-fake-server.ts"
   ],
   "compilerOptions": {
     "lib": ["ESNext", "DOM", "DOM.Iterable"]

@@ -12,6 +12,14 @@ import {
   MutationResult
 } from './hosts'
 import { SavedForward, SavedForwardInput } from './forwards'
+import { RdpCheckResult, RdpLaunchRequest, RdpLaunchResult, RdpStatusEvent } from './rdp'
+import {
+  RdpViewOpenRequest,
+  RdpViewOpenResult,
+  RdpViewPrepare,
+  RdpViewProbeRequest,
+  RdpViewProbeResult
+} from './rdp-viewer'
 import { SnippetInput, SnippetSummary } from './snippets'
 import { AppSettings, SettingsPatch } from './settings'
 import type { UpdateStatus } from './updates'
@@ -283,6 +291,29 @@ export const invokeContract = {
   /** null = người dùng huỷ hộp thoại. */
   'vault:exportBackup': { args: z.tuple([]), result: FileResult.nullable() },
   'vault:restoreBackup': { args: z.tuple([MasterPassword]), result: FileResult.nullable() },
+  /** Remote Desktop: client có trên máy chưa, cần hỏi mật khẩu không, có tunnel SSH không. */
+  'rdp:check': { args: z.tuple([z.string().max(64)]), result: RdpCheckResult },
+  /** Mở client RDP của hệ điều hành (tunnel SSH, nếu có, renderer đã mở trước). */
+  'rdp:launch': { args: z.tuple([RdpLaunchRequest]), result: RdpLaunchResult },
+  /** Disconnect: đóng client (nếu Shellhouse giữ tiến trình), dọn file tạm / mục cmdkey. */
+  'rdp:stop': { args: z.tuple([z.string().max(64)]), result: z.void() },
+  /** Import: chọn file .rdp (hộp thoại của main) và quét. */
+  'rdp:scan': { args: z.tuple([]), result: FileImportScan },
+  'rdp:import': {
+    args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
+    result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
+  },
+  /** Remote Desktop trong tab: thông tin host để vẽ màn kết nối (không có mật khẩu). */
+  'rdpView:prepare': { args: z.tuple([z.string().max(64)]), result: RdpViewPrepare },
+  /** Dò chứng chỉ TLS của server (TOFU). */
+  'rdpView:probe': { args: z.tuple([RdpViewProbeRequest]), result: RdpViewProbeResult },
+  /** Tin chứng chỉ vừa dò (hostId, dấu SHA-256). */
+  'rdpView:trust': {
+    args: z.tuple([z.string().max(64), z.string().max(128)]),
+    result: z.void()
+  },
+  /** Token proxy dùng một lần + thông tin đăng nhập cho IronRDP. */
+  'rdpView:open': { args: z.tuple([RdpViewOpenRequest]), result: RdpViewOpenResult },
   'clipboard:readText': { args: z.tuple([]), result: z.string() },
   'clipboard:writeText': { args: z.tuple([z.string().max(16 * 1024 * 1024)]), result: z.void() }
 } as const
@@ -302,7 +333,9 @@ export const eventContract = {
   /** Module bật / tắt. */
   'modules:changed': z.array(ModuleStateSchema),
   /** Sự kiện của module (`ctx.events.emit`). */
-  'modules:event': z.object({ module: z.string(), name: z.string(), data: z.unknown() })
+  'modules:event': z.object({ module: z.string(), name: z.string(), data: z.unknown() }),
+  /** Client RDP đã thoát / đã giao cho ứng dụng khác. */
+  'rdp:status': RdpStatusEvent
 } as const
 
 export type EventChannel = keyof typeof eventContract
@@ -412,4 +445,14 @@ export interface ShellhouseApi {
   onVaultState(listener: (state: VaultState) => void): () => void
   readClipboard(): Promise<string>
   writeClipboard(text: string): Promise<void>
+  rdpCheck(hostId: string): Promise<RdpCheckResult>
+  rdpLaunch(request: RdpLaunchRequest): Promise<RdpLaunchResult>
+  rdpStop(launchId: string): Promise<void>
+  onRdpStatus(listener: (event: RdpStatusEvent) => void): () => void
+  scanRdpFiles(): Promise<FileImportScan>
+  importRdpFiles(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
+  rdpViewPrepare(hostId: string): Promise<RdpViewPrepare>
+  rdpViewProbe(request: RdpViewProbeRequest): Promise<RdpViewProbeResult>
+  rdpViewTrust(hostId: string, fingerprint: string): Promise<void>
+  rdpViewOpen(request: RdpViewOpenRequest): Promise<RdpViewOpenResult>
 }

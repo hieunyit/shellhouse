@@ -39,6 +39,11 @@ export class SessionRegistry {
     this.sessions.get(sessionId)?.close()
   }
 
+  /** Session đang mở (Remote Desktop trong tab dùng kết nối SSH của nó làm tunnel). */
+  get(sessionId: string): Session | undefined {
+    return this.sessions.get(sessionId)
+  }
+
   closeAll(): void {
     for (const session of [...this.sessions.values()]) session.close()
   }

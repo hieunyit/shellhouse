@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { SerialSettings } from './serial'
+import { RdpSettings, RdpUsername } from './rdp'
+import { HostOs } from './host-os'
 
 // Không import từ file khác ngoài zod: dùng chung cho main, renderer và test.
 
@@ -67,8 +69,8 @@ export const GroupDefaults = z.object({
 export type GroupDefaults = z.infer<typeof GroupDefaults>
 
 /** Thông tin host gửi cho renderer — KHÔNG có secret. */
-/** SSH (mặc định), Telnet hoặc cổng Serial (console thiết bị mạng). */
-export const HostProtocol = z.enum(['ssh', 'telnet', 'serial'])
+/** SSH (mặc định), Telnet, cổng Serial (console thiết bị mạng) hoặc Remote Desktop (client RDP của hệ điều hành). */
+export const HostProtocol = z.enum(['ssh', 'telnet', 'serial', 'rdp'])
 export type HostProtocol = z.infer<typeof HostProtocol>
 
 export const HostSummary = z.object({
@@ -99,12 +101,16 @@ export const HostSummary = z.object({
   protocol: HostProtocol,
   /** Chỉ có khi protocol = 'serial'. */
   serial: SerialSettings.nullable(),
+  /** Chỉ có khi protocol = 'rdp'. */
+  rdp: RdpSettings.nullable().optional(),
   tags: z.array(z.string()),
   color: z.enum(HOST_COLORS).nullable(),
   lastUsedAt: z.number().nullable(),
   favorite: z.boolean(),
   /** Thứ tự thủ công trong nhóm; 0 = chưa sắp (theo tên). */
-  sort: z.number().int()
+  sort: z.number().int(),
+  /** Hệ điều hành server nhận ra ở lần kết nối SSH gần nhất (icon distro); chưa biết = không có. */
+  os: HostOs.nullable().optional()
 })
 export type HostSummary = z.infer<typeof HostSummary>
 
@@ -143,6 +149,8 @@ export const HostInput = z.object({
   protocol: HostProtocol.optional(),
   /** Bắt buộc khi protocol = 'serial' (hostname khi đó chỉ là giá trị giữ chỗ). */
   serial: SerialSettings.optional(),
+  /** Bắt buộc khi protocol = 'rdp'. */
+  rdp: RdpSettings.optional(),
   groupId: z.string().nullable(),
   label: z
     .string()
@@ -153,7 +161,8 @@ export const HostInput = z.object({
   /** null = kế thừa từ nhóm. */
   port: Port.nullable(),
   /** '' = kế thừa từ nhóm. */
-  username: Username.or(z.literal('')),
+  /** RDP nhận thêm UPN (user@corp.com) — service kiểm lại theo đúng giao thức. */
+  username: Username.or(z.literal('')).or(RdpUsername),
   auth: AuthKind,
   /** undefined = giữ mật khẩu đã lưu; '' = xoá. */
   password: z.string().max(1024).optional(),

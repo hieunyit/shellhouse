@@ -14,6 +14,7 @@ import {
   type TrafficRate
 } from '../shared/traffic'
 import { useTraffic } from './useTraffic'
+import { TrafficFocusMap } from './TrafficMap'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 
@@ -56,6 +57,15 @@ export function TrafficOf({
     in: sum(h.rates.filter((r) => isSelf(kindId, obj, r.server))),
     out: sum(h.rates.filter((r) => isSelf(kindId, obj, r.client)))
   }))
+  // Workload này dưới dạng bên Caretta (Deployment…) — tâm của bản đồ nhỏ.
+  const focus = useMemo<TrafficPeer>(
+    () => ({
+      kind: Object.keys(WORKLOAD_KIND_ID).find((k) => WORKLOAD_KIND_ID[k] === kindId) ?? '',
+      ns: obj.metadata.namespace ?? '',
+      name: obj.metadata.name
+    }),
+    [kindId, obj.metadata.namespace, obj.metadata.name]
+  )
   const totalIn = sum(mine.incoming)
   const totalOut = sum(mine.outgoing)
   const status =
@@ -135,6 +145,21 @@ export function TrafficOf({
               icon={<ArrowUpRight size={12} />}
             />
           </div>
+          {(mine.incoming.length > 0 || mine.outgoing.length > 0) && (
+            <section>
+              <Heading>
+                {t('Service map')}{' '}
+                <span className="ml-1 font-normal text-faint normal-case">
+                  {t('callers → this workload → callees')}
+                </span>
+              </Heading>
+              <TrafficFocusMap
+                rates={traffic.rates}
+                focus={focus}
+                {...(onNavigate ? { onNavigate } : {})}
+              />
+            </section>
+          )}
           <Peers
             title={t('Incoming from')}
             rates={mine.incoming}

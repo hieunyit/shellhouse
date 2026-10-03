@@ -6,6 +6,7 @@ import { cleanError } from '../../../renderer/src/lib/format'
 import { t, tn } from '../../registry/renderer-kit'
 import { UsagePanel } from './Usage'
 import { useClusterGuard } from './confirm'
+import { TY } from './typography'
 import type { K8sOp, RolloutRevision } from '../shared/ops'
 import {
   age,
@@ -126,12 +127,14 @@ function Counter({
   testId?: string
 }): React.JSX.Element {
   return (
-    <div className="min-w-0 rounded-md border border-line px-2 py-1.5">
-      <div className="truncate text-[10px] tracking-wide text-faint uppercase">{label}</div>
+    <div className="min-w-0 rounded-md border border-line px-1.5 py-1.5">
+      <div className="truncate text-[11px] text-faint" title={label}>
+        {label}
+      </div>
       <div
         data-testid={testId}
         className={cx(
-          'text-base font-semibold tabular-nums',
+          TY.stat,
           tone === 'bad'
             ? 'text-danger'
             : tone === 'warn'
@@ -307,7 +310,7 @@ export function WorkloadOverview({
           </Pill>
         }
       >
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-1.5">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(5.5rem,1fr))] gap-1">
           <Counter label={ds ? t('Scheduled') : t('Desired')} value={want} testId="k8s-replicas" />
           <Counter
             label="Ready"
@@ -336,7 +339,7 @@ export function WorkloadOverview({
             testId="k8s-replicas-meter"
           />
         </div>
-        <p className="mt-1.5 text-xs text-muted">{state.detail}</p>
+        <p className={cx('mt-1.5', TY.label)}>{state.detail}</p>
         {phases.length > 0 && (
           <div className="mt-1.5 flex flex-wrap gap-1" data-testid="k8s-pod-phases">
             {phases.map(([text, { n, tone }]) => (
@@ -404,10 +407,10 @@ function ResourcesOf({ spec, replicas }: { spec: Obj; replicas: number }): React
     <div className="overflow-x-auto">
       <table className="w-full text-xs" data-testid="k8s-resources-table">
         <thead>
-          <tr className="text-left text-[10px] tracking-wide text-faint uppercase">
-            <th className="py-1 pr-2 font-medium">Container</th>
-            <th className="py-1 pr-2 font-medium">CPU req / lim</th>
-            <th className="py-1 pr-2 font-medium">{t('Memory req / lim')}</th>
+          <tr className={cx('border-b border-line text-left', TY.caption)}>
+            <th className="py-1 pr-3 font-medium">Container</th>
+            <th className="py-1 pr-3 font-medium">CPU req / lim</th>
+            <th className="py-1 pr-3 font-medium">{t('Memory req / lim')}</th>
             <th className="py-1 font-medium" title="Liveness · Readiness · Startup">
               {t('Probes')}
             </th>
@@ -420,30 +423,31 @@ function ResourcesOf({ spec, replicas }: { spec: Obj; replicas: number }): React
             const lim = o(res['limits'])
             const probe = (k: string, letter: string): React.JSX.Element => (
               <span
-                className={c[k] ? 'text-success' : 'text-faint'}
+                className={cx('inline-block w-3 text-center', c[k] ? 'text-success' : 'text-faint')}
                 title={`${k.replace('Probe', '')}: ${c[k] ? t('yes') : t('none')}`}
               >
                 {letter}
               </span>
             )
             return (
-              <tr key={s(c['name'])}>
-                <td className="py-1 pr-2">
+              <tr key={s(c['name'])} className="align-top">
+                <td className="py-1.5 pr-3">
                   <div className="font-medium text-fg">{s(c['name'])}</div>
                   <div
-                    className="max-w-[16rem] truncate font-mono text-[10px] text-faint"
+                    className={cx('max-w-[16rem] truncate text-faint', TY.id)}
                     title={s(c['image'])}
                   >
                     {s(c['image'])}
                   </div>
                 </td>
-                <td className="py-1 pr-2 font-mono tabular-nums">
-                  {missing(req['cpu'])} / {missing(lim['cpu'])}
+                <td className="py-1.5 pr-3 whitespace-nowrap text-fg tabular-nums">
+                  {missing(req['cpu'])} <span className="text-faint">/</span> {missing(lim['cpu'])}
                 </td>
-                <td className="py-1 pr-2 font-mono tabular-nums">
-                  {missing(req['memory'])} / {missing(lim['memory'])}
+                <td className="py-1.5 pr-3 whitespace-nowrap text-fg tabular-nums">
+                  {missing(req['memory'])} <span className="text-faint">/</span>{' '}
+                  {missing(lim['memory'])}
                 </td>
-                <td className="py-1 font-mono tracking-widest">
+                <td className="py-1.5 whitespace-nowrap">
                   {probe('livenessProbe', 'L')}
                   {probe('readinessProbe', 'R')}
                   {probe('startupProbe', 'S')}
@@ -454,12 +458,14 @@ function ResourcesOf({ spec, replicas }: { spec: Obj; replicas: number }): React
         </tbody>
       </table>
       {replicas > 0 && (
-        <p className="mt-1.5 text-xs text-muted">
+        <p className={cx('mt-1.5', TY.label)}>
           {tn(replicas, 'Total for {n} replica:', 'Total for {n} replicas:')} CPU{' '}
-          <span className="font-mono text-fg">{cpuReq ? formatCpu(cpuReq * replicas) : '—'}</span>
+          <span className="text-fg tabular-nums">
+            {cpuReq ? formatCpu(cpuReq * replicas) : '—'}
+          </span>
           {cpuLim ? ` (${t('limit {value}', { value: formatCpu(cpuLim * replicas) })})` : ''},{' '}
           {t('memory')}{' '}
-          <span className="font-mono text-fg">
+          <span className="text-fg tabular-nums">
             {memReq ? formatMemory(memReq * replicas) : '—'}
           </span>
           {memLim ? ` (${t('limit {value}', { value: formatMemory(memLim * replicas) })})` : ''}
@@ -532,7 +538,7 @@ function PodGrid({
             }}
           >
             <span className={cx('size-2 shrink-0 rounded-full', DOT_BG[tone])} />
-            <span className="shrink-0 font-mono text-fg">{short}</span>
+            <span className={cx('shrink-0 text-fg', TY.id)}>{short}</span>
             {ps.text !== 'Running' && (
               <span className={cx('shrink-0', TONE_TEXT_CLS[tone])}>{ps.text}</span>
             )}
@@ -544,7 +550,10 @@ function PodGrid({
             {node ? (
               <button
                 type="button"
-                className="flex min-w-0 items-center gap-1 text-[11px] text-faint hover:text-accent"
+                className={cx(
+                  'flex min-w-0 items-center gap-1 text-faint hover:text-accent',
+                  TY.id
+                )}
                 data-testid="k8s-pod-node"
                 title={t('Open node {node}', { node })}
                 onClick={(e) => {
@@ -552,11 +561,11 @@ function PodGrid({
                   onNavigate?.('nodes', node)
                 }}
               >
-                <Server size={10} className="shrink-0" />
+                <Server size={11} className="shrink-0" />
                 <span className="truncate">{node}</span>
               </button>
             ) : (
-              <span className="text-[11px] text-warning">{t('Not scheduled')}</span>
+              <span className="text-warning">{t('Not scheduled')}</span>
             )}
             <span className="ml-auto flex shrink-0 gap-3 text-faint tabular-nums">
               <span title={t('Ready containers')}>
@@ -620,16 +629,16 @@ function ReplicaSets({
           className="flex items-center gap-2 py-1.5"
           data-testid="k8s-replicaset-row"
         >
-          <span className="w-9 shrink-0 font-mono text-faint">#{r.revision}</span>
+          <span className="w-9 shrink-0 text-faint tabular-nums">#{r.revision}</span>
           <div className="min-w-0 flex-1">
             <button
               type="button"
-              className="max-w-full truncate font-mono text-fg hover:text-accent hover:underline"
+              className={cx('block max-w-full truncate text-fg hover:text-accent', TY.id)}
               onClick={() => onNavigate?.('replicasets.apps', r.replicaSet, ns)}
             >
               {r.replicaSet}
             </button>
-            <div className="truncate font-mono text-[10px] text-faint" title={r.images.join(', ')}>
+            <div className={cx('truncate text-faint', TY.id)} title={r.images.join(', ')}>
               {r.images.join(', ')}
             </div>
           </div>

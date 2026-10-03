@@ -554,5 +554,93 @@ export const docker: Readonly<Record<string, string>> = {
   '{running}/{total} running': '{running}/{total} running',
   '{used} used · {free} reclaimable': 'Dùng {used} · dọn được {free}',
   '— (dangling)': '— (dangling)',
-  '“{name}” has no password — edit the registry': '“{name}” chưa có mật khẩu — hãy sửa registry'
+  '“{name}” has no password — edit the registry': '“{name}” chưa có mật khẩu — hãy sửa registry',
+  'Pull latest': 'Pull bản mới',
+  'Pull the newest version of every tag': 'Pull bản mới nhất của mọi tag',
+  'Applies to {n} selected container': 'Áp dụng cho {n} container đã chọn',
+  'Applies to {n} selected containers': 'Áp dụng cho {n} container đã chọn',
+  'Run docker compose up -d in a project folder — its containers are grouped here by project.':
+    'Chạy docker compose up -d trong thư mục project — các container sẽ được gom ở đây theo project.',
+  'Copy project name': 'Sao chép tên project',
+  'Copy folder path': 'Sao chép đường dẫn thư mục',
+  'Copy config file path': 'Sao chép đường dẫn file cấu hình',
+  'Copy the up command': 'Sao chép lệnh up',
+  'Restart all replicas': 'Khởi động lại mọi replica',
+  'Start all replicas': 'Khởi động mọi replica',
+  'Stop all replicas': 'Dừng mọi replica',
+  '{running}/{total} containers running': '{running}/{total} container đang chạy',
+  Config: 'Cấu hình',
+  '{path} — click to copy': '{path} — bấm để sao chép',
+  'Logs of {name}': 'Log của {name}',
+  'Services of {name}': 'Các service của {name}',
+  Service: 'Service',
+  'Logs — {name}': 'Logs — {name}',
+  'Shell — {name}': 'Shell — {name}',
+  'Restart — {name}': 'Khởi động lại — {name}',
+  '{n} project': '{n} project',
+  '{n} projects': '{n} project',
+  '{n} unhealthy': '{n} Unhealthy',
+  'Shift-click to select a range': 'Shift+bấm để chọn một khoảng',
+  'The containers start again with their existing configuration.':
+    'Các container chạy lại với cấu hình hiện có.',
+  'Each container gets SIGTERM, then SIGKILL after the timeout. What they serve is unavailable until started again.':
+    'Mỗi container nhận SIGTERM, hết thời gian chờ thì SIGKILL. Dịch vụ của chúng ngừng cho tới khi chạy lại.',
+  'Each container is stopped and started again; what it serves is briefly unavailable.':
+    'Mỗi container được dừng rồi chạy lại; dịch vụ của nó gián đoạn trong chốc lát.',
+  'Every process in the containers is frozen until they are resumed.':
+    'Mọi tiến trình trong các container bị tạm dừng cho tới khi tiếp tục.',
+  'Frozen processes continue where they stopped.':
+    'Các tiến trình đang tạm dừng chạy tiếp từ chỗ đã dừng.',
+  'The containers are stopped at once (SIGKILL) — processes get no chance to clean up.':
+    'Các container bị dừng ngay (SIGKILL) — tiến trình không kịp dọn dẹp.',
+  'The containers are deleted with their writable layer. Named volumes are kept.':
+    'Các container bị xoá cùng writable layer. Named volume được giữ lại.',
+  'The images and their unused layers are deleted from the engine.':
+    'Các image và layer không còn dùng bị xoá khỏi engine.',
+  'Force (docker rmi -f)': 'Force (docker rmi -f)',
+  'Also removes images with several tags or used by stopped containers.':
+    'Xoá cả image có nhiều tag hoặc đang được container đã dừng dùng.',
+  'Pulls the newest version of every tag from its registry. Running containers keep the old image until recreated.':
+    'Pull bản mới nhất của mọi tag từ registry. Container đang chạy vẫn dùng image cũ cho tới khi được tạo lại.',
+  'no tag': 'không có tag',
+  'The volumes are deleted with all the data in them. This cannot be undone. Volumes used by a container cannot be removed.':
+    'Các volume bị xoá cùng toàn bộ dữ liệu bên trong, không thể hoàn tác. Volume đang được container dùng thì không xoá được.',
+  'Containers can no longer reach each other over these networks.':
+    'Các container sẽ không còn liên lạc với nhau qua các network này.',
+  '{action}: {what} done': '{action}: xong {what}',
+  '{action} {what}': '{action} {what}',
+  'Nothing selected can take this action.': 'Không mục nào đã chọn áp dụng được thao tác này.',
+  '{n} image': '{n} image',
+  '{n} images': '{n} image',
+  '{n} network': '{n} network',
+  '{n} networks': '{n} network',
+  'Start {n} container?': 'Khởi động {n} container?',
+  'Start {n} containers?': 'Khởi động {n} container?',
+  'Stop {n} container?': 'Dừng {n} container?',
+  'Stop {n} containers?': 'Dừng {n} container?',
+  'Restart {n} container?': 'Khởi động lại {n} container?',
+  'Restart {n} containers?': 'Khởi động lại {n} container?',
+  'Pause {n} container?': 'Tạm dừng {n} container?',
+  'Pause {n} containers?': 'Tạm dừng {n} container?',
+  'Resume {n} container?': 'Tiếp tục {n} container?',
+  'Resume {n} containers?': 'Tiếp tục {n} container?',
+  'Kill {n} container?': 'Kill {n} container?',
+  'Remove {n} container?': 'Xoá {n} container?',
+  '{n} container is running and is force-removed.':
+    '{n} container đang chạy và sẽ bị force remove.',
+  '{n} containers are running and are force-removed.':
+    '{n} container đang chạy và sẽ bị force remove.',
+  'Remove {n} image?': 'Xoá {n} image?',
+  '{n} image is used by containers — removing it fails unless forced (running containers always block it).':
+    '{n} image đang được container dùng — xoá sẽ lỗi nếu không force (container đang chạy thì luôn chặn).',
+  '{n} images are used by containers — removing them fails unless forced (running containers always block them).':
+    '{n} image đang được container dùng — xoá sẽ lỗi nếu không force (container đang chạy thì luôn chặn).',
+  'Pull {n} image?': 'Pull {n} image?',
+  'Pull {n} images?': 'Pull {n} image?',
+  'Remove {n} volume?': 'Xoá {n} volume?',
+  'Remove {n} network?': 'Xoá {n} network?',
+  '{n} selected item is skipped — the action does not apply to it:':
+    'Bỏ qua {n} mục đã chọn — thao tác không áp dụng được:',
+  '{n} selected items are skipped — the action does not apply to them:':
+    'Bỏ qua {n} mục đã chọn — thao tác không áp dụng được:'
 }

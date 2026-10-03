@@ -4,6 +4,7 @@ import {
   buildTopology,
   layoutTopology,
   pathThrough,
+  routeChannels,
   topoStructureKey,
   MAX_ROWS_PER_NS,
   type TopoGraph,
@@ -536,5 +537,168 @@ describe('Topology tĩnh (Entry → Routes → Services → Workloads → Pods �
     // Gập hết: vài chục thẻ tóm tắt.
     const folded = buildTopology(d, { ...OPTS, collapsed: () => true })
     expect(layoutTopology(folded).nodes.length).toBe(60)
+  })
+})
+
+describe('Định tuyến cạnh trực giao (mỗi cạnh một làn dọc)', () => {
+  /** Giống cluster thật: 2 Ingress × 2 luật, luật của frontend trỏ chéo sang backend. */
+  function crossData(): MapData {
+    const ns = 'console-stg'
+    const svc = (name: string, app: string): MapData['services'][number] => ({
+      ns,
+      name,
+      type: 'ClusterIP',
+      selector: { app },
+      ports: '80/TCP',
+      portList: [{ port: 80, targetPort: '8080' }]
+    })
+    return {
+      namespaces: [{ name: ns, active: true }],
+      workloads: [
+        workload({ ns, name: 'console-backend' }),
+        workload({ ns, name: 'console-frontend' })
+      ],
+      pods: [
+        pod('console-backend-1', { kind: 'Deployment', name: 'console-backend' }, { ns }),
+        pod('console-frontend-1', { kind: 'Deployment', name: 'console-frontend' }, { ns })
+      ],
+      services: [
+        svc('console-backend-service', 'console-backend'),
+        svc('console-frontend-service', 'console-frontend')
+      ],
+      routes: [
+        {
+          kind: 'ingresses.networking.k8s.io',
+          ns,
+          name: 'console-backend-ingress',
+          hosts: ['api.stg.example.com', 'api2.stg.example.com'],
+          backends: ['console-backend-service'],
+          rules: [
+            { host: 'api.stg.example.com', path: '/', service: 'console-backend-service' },
+            { host: 'api2.stg.example.com', path: '/', service: 'console-backend-service' }
+          ]
+        },
+        {
+          kind: 'ingresses.networking.k8s.io',
+          ns,
+          name: 'console-frontend-ingress',
+          hosts: ['console.stg.example.com'],
+          backends: ['console-frontend-service', 'console-backend-service'],
+          rules: [
+            { host: 'console.stg.example.com', path: '/', service: 'console-frontend-service' },
+            { host: 'console.stg.example.com', path: '/api', service: 'console-backend-service' }
+          ]
+        }
+      ],
+      gateways: [],
+      pvcs: [],
+      hpas: [],
+      policies: [],
+      nodes: { total: 1, ready: 1 },
+      truncated: false,
+      configMaps: [],
+      secrets: []
+    }
+  }
+
+  interface Seg {
+    id: string
+    to: string
+    x: number
+    lo: number
+    hi: number
+    sy: number
+    ty: number
+    tx: number
+    sx: number
+  }
+  function verticals(l: ReturnType<typeof layoutTopology>): Seg[] {
+    const at = new Map(l.nodes.map((n) => [n.id, n]))
+    const out: Seg[] = []
+    for (const e of l.edges) {
+      const s = at.get(e.from)
+      const t = at.get(e.to)
+      if (!s || !t || e.tree) continue
+      const sy = s.y + s.h / 2 + e.sOff
+      const ty = t.y + t.h / 2 + e.tOff
+      const sx = s.x + s.w
+      out.push({
+        id: e.id,
+        to: e.to,
+        x: sx + e.bend,
+        lo: Math.min(sy, ty),
+        hi: Math.max(sy, ty),
+        sy,
+        ty,
+        sx,
+        tx: t.x
+      })
+    }
+    return out
+  }
+
+  it('2 Ingress × 2 luật chéo nhau: không hai cạnh khác đích chung một đoạn dọc, ít chỗ cắt', () => {
+    const g = buildTopology(crossData(), { ...OPTS, showDeps: false })
+    const l = layoutTopology(g)
+    const segs = verticals(l).filter((v) => v.id.startsWith('ing:'))
+    expect(segs.length).toBe(4)
+    for (const a of segs)
+      for (const b of segs) {
+        if (a === b || a.to === b.to) continue
+        const sameX = Math.abs(a.x - b.x) < 1
+        const overlap = a.lo < b.hi && b.lo < a.hi && a.hi - a.lo > 0.5 && b.hi - b.lo > 0.5
+        expect(sameX && overlap, `${a.id} | ${b.id}`).toBe(false)
+      }
+    // Mỗi cổng nguồn một điểm vào riêng ở đích (các đường chỉ gặp nhau ở thẻ).
+    const into = new Map<string, Set<number>>()
+    for (const v of segs) into.set(v.to, (into.get(v.to) ?? new Set()).add(Math.round(v.ty)))
+    for (const v of segs.filter((x) => x.to === 'svc:console-stg/console-backend-service'))
+      expect(v).toBeDefined()
+    expect(into.get('svc:console-stg/console-backend-service')?.size).toBe(3)
+    // Đoạn dọc nằm trong khe giữa hai cột (không đè lên thẻ).
+    for (const v of segs) {
+      expect(v.x).toBeGreaterThan(v.sx + 4)
+      expect(v.x).toBeLessThan(v.tx - 4)
+    }
+    // Chỗ cắt: đoạn ngang của cạnh này đi qua đoạn dọc của cạnh kia. Với bố cục này tối đa 1.
+    let crossings = 0
+    for (const a of segs)
+      for (const b of segs) {
+        if (a === b) continue
+        // Ngang đầu của a (sx → a.x, y = a.sy) cắt dọc của b?
+        if (b.x < a.x && b.lo < a.sy && a.sy < b.hi) crossings++
+        // Ngang cuối của a (a.x → tx, y = a.ty) cắt dọc của b?
+        if (b.x > a.x && b.lo < a.ty && a.ty < b.hi) crossings++
+      }
+    expect(crossings).toBeLessThanOrEqual(1)
+    // Tất định.
+    expect(layoutTopology(buildTopology(crossData(), { ...OPTS, showDeps: false })).edges).toEqual(
+      l.edges
+    )
+  })
+
+  it('routeChannels: cạnh chung cổng nguồn đi ngược chiều được chung làn; cùng chiều thì tách', () => {
+    const gaps = new Map([['entry' as const, { from: 0, to: 64 }]])
+    const w = (id: string, sy: number, ty: number, sPort = id, tPort = id) => ({
+      id,
+      gap: 'entry' as const,
+      sy,
+      ty,
+      sPort,
+      tPort
+    })
+    const fork = routeChannels([w('up', 100, 40, 'p'), w('down', 100, 160, 'p')], gaps)
+    expect(fork.get('up')).toBe(fork.get('down'))
+    const same = routeChannels([w('a', 100, 140, 'p'), w('b', 100, 180, 'p')], gaps)
+    expect(same.get('a')).not.toBe(same.get('b'))
+    // Cạnh đi xa hơn nằm bên trái (rẽ trước) → đoạn ngang của cạnh gần không cắt nó.
+    expect(same.get('b') ?? 0).toBeLessThan(same.get('a') ?? 0)
+    // Hai cạnh không chồng (hàng khác) dùng lại làn — không bị đẩy lệch.
+    const apart = routeChannels([w('a', 0, 40), w('b', 200, 240)], gaps)
+    expect(apart.get('a')).toBe(apart.get('b'))
+    for (const x of [...fork.values(), ...same.values()]) {
+      expect(x).toBeGreaterThanOrEqual(12)
+      expect(x).toBeLessThanOrEqual(50)
+    }
   })
 })
