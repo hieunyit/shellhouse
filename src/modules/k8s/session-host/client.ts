@@ -264,6 +264,11 @@ export class KubeClient {
 
   private async socketOnce(creds: Credentials): Promise<Duplex> {
     const raw = await this.connect(this.url.hostname, this.port)
+    // Tắt Nagle: kết nối giữ lại (keep-alive) gửi request nhỏ — Nagle + delayed ACK làm mỗi request
+    // chờ thêm ~40–200 ms (rõ trên macOS). http.Agent tự đặt noDelay chỉ khi nó tự mở socket; ở đây
+    // socket do mình mở (TCP thẳng hoặc kênh SSH — kênh không có hàm này thì bỏ qua).
+    const tcp = raw as Duplex & { setNoDelay?: (noDelay?: boolean) => unknown }
+    if (typeof tcp.setNoDelay === 'function') tcp.setNoDelay(true)
     if (!this.secure) return raw
     return new Promise<TLSSocket>((resolve, reject) => {
       const host = this.url.hostname.replace(/^\[|\]$/g, '')
