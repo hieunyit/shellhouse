@@ -34,6 +34,8 @@ export async function setWindowSize(
       const win = BrowserWindow.getAllWindows()[0]
       if (win?.isMaximized()) win.unmaximize()
       win?.setContentSize(size.width, size.height)
+      // macOS CI: cửa sổ test thường không phải cửa sổ đang active — kéo lên trước.
+      win?.focus()
     },
     { width, height }
   )

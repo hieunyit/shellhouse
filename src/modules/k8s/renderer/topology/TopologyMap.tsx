@@ -748,6 +748,9 @@ function TopologyInner({
             }}
             onBlur={() => {
               setTimeout(() => {
+                // Cả cửa sổ mất focus (Alt+Tab, cửa sổ khác) → giữ danh sách; chỉ đóng khi focus
+                // chuyển sang chỗ khác TRONG app.
+                if (!document.hasFocus()) return
                 setSearchOpen(false)
               }, 150)
             }}
