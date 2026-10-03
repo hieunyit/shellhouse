@@ -3,7 +3,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
-import { activeTab, expect, launchApp, test, waitForText } from '../../../../../test/e2e/fixtures'
+import {
+  activeTab,
+  expect,
+  launchApp,
+  setWindowSize,
+  test,
+  waitForText
+} from '../../../../../test/e2e/fixtures'
 import { startApiTestServer, TEST_CA, TOKEN, type ApiTestServer } from '../api-test-server'
 
 async function enableK8s(page: Page): Promise<void> {
@@ -53,7 +60,7 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await context.dblclick()
     const view = page.getByTestId('k8s-view')
     // Cửa sổ cố định: số cột hiện được tuỳ độ rộng (cửa sổ mặc định của CI macOS hẹp hơn).
-    await page.setViewportSize({ width: 1366, height: 820 })
+    await setWindowSize(launched, 1366, 820)
     const rows = view.getByTestId('k8s-row')
     await expect(rows).toHaveCount(2)
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-2"]')).toContainText(
@@ -446,7 +453,7 @@ test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi t
     await enableK8s(page)
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
-    await page.setViewportSize({ width: 1366, height: 820 })
+    await setWindowSize(launched, 1366, 820)
     await view.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
     // Mặc định là Topology — chuyển sang bản đồ workload.
@@ -528,7 +535,7 @@ test('Kubernetes: Topology tĩnh — vấn đề giải thích bằng lời, tì
     await enableK8s(page)
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
-    await page.setViewportSize({ width: 1366, height: 820 })
+    await setWindowSize(launched, 1366, 820)
     await view.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
     // Topology là mặc định: làn có tên, thẻ Ingress ghi từng luật host / path.
@@ -606,7 +613,7 @@ test('Kubernetes: bản đồ cluster lớn — gom vùng theo nhãn, lọc nhã
     await enableK8s(page)
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
-    await page.setViewportSize({ width: 1366, height: 820 })
+    await setWindowSize(launched, 1366, 820)
     await view.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
     await map.getByTestId('k8s-map-view-workloads').click()
@@ -691,7 +698,7 @@ test('Kubernetes: trang Deployment (Status / Resources / Pods / ReplicaSets), To
     await enableK8s(page)
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
-    await page.setViewportSize({ width: 1366, height: 820 })
+    await setWindowSize(launched, 1366, 820)
     // Đợi bảng pod tải xong lần đầu rồi mới đổi loại (không đua với lần tải đầu).
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toBeVisible()
     await view.getByTestId('k8s-nav-deployments.apps').click()
@@ -866,7 +873,7 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await enableK8s(page)
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
-    await page.setViewportSize({ width: 1366, height: 820 })
+    await setWindowSize(launched, 1366, 820)
     // Thêm namespace default (web ở shop gửi tới pod tool ở default).
     await view.getByTestId('k8s-namespace').click()
     await view.getByTestId('k8s-ns-default').click()
@@ -986,7 +993,7 @@ test('Kubernetes: tạo Deployment + Service bằng form (kiểu Rancher / Lens)
     await enableK8s(page)
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
-    await page.setViewportSize({ width: 1366, height: 820 })
+    await setWindowSize(launched, 1366, 820)
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toBeVisible()
     // Trang trống có hành động gợi ý: Jobs (chưa có) → "Create Job" mở đúng form.
     await view.getByTestId('k8s-nav-jobs.batch').click()

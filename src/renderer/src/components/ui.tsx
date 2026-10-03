@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useEffect,
+  useLayoutEffect,
   useRef,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
@@ -453,7 +454,9 @@ export function useEscapeToClose(onClose: () => void): void {
   useEffect(() => {
     latest.current = onClose
   })
-  useEffect(() => {
+  // useLayoutEffect: gắn TRƯỚC lần vẽ đầu — hộp thoại hiện ra là Esc đã đóng được (useEffect chạy
+  // sau khi vẽ: bấm Esc ngay khi hộp thoại vừa hiện, nhất là hộp thoại nạp lười, bị mất phím).
+  useLayoutEffect(() => {
     const id = Symbol('modal')
     stack.push(id)
     const onKey = (event: KeyboardEvent): void => {

@@ -1,4 +1,11 @@
+import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
+
+/** Esc đóng hộp thoại — chờ nó biến mất thật trước bước sau (máy CI chậm). */
+async function closeWithEscape(page: Page, testId: string): Promise<void> {
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId(testId)).toHaveCount(0)
+}
 
 test('màn chào + thẻ bắt đầu ở thanh bên: mở đúng hộp thoại, quick connect, terminal', async ({
   page
@@ -8,10 +15,10 @@ test('màn chào + thẻ bắt đầu ở thanh bên: mở đúng hộp thoại,
   await expect(card).toBeVisible()
   await card.getByTestId('empty-add-host').click()
   await expect(page.getByTestId('host-form')).toBeVisible()
-  await page.keyboard.press('Escape')
+  await closeWithEscape(page, 'host-form')
   await card.getByTestId('empty-import').click()
   await expect(page.getByTestId('import-dialog')).toBeVisible()
-  await page.keyboard.press('Escape')
+  await closeWithEscape(page, 'import-dialog')
 
   // Đóng tab cuối → màn chào.
   await page.getByTestId('tab-close').first().click()
@@ -19,10 +26,10 @@ test('màn chào + thẻ bắt đầu ở thanh bên: mở đúng hộp thoại,
   await expect(welcome).toContainText('Welcome to Shellhouse')
   await welcome.getByTestId('welcome-add-host').click()
   await expect(page.getByTestId('host-form')).toBeVisible()
-  await page.keyboard.press('Escape')
+  await closeWithEscape(page, 'host-form')
   await welcome.getByTestId('welcome-import').click()
   await expect(page.getByTestId('import-dialog')).toBeVisible()
-  await page.keyboard.press('Escape')
+  await closeWithEscape(page, 'import-dialog')
   await welcome.getByTestId('welcome-quick-connect').click()
   await expect(welcome.getByTestId('home-quick-connect')).toBeFocused()
 
@@ -31,7 +38,7 @@ test('màn chào + thẻ bắt đầu ở thanh bên: mở đúng hộp thoại,
   await expect(page.getByTestId('sidebar-get-started')).toHaveCount(0)
   await welcome.getByTestId('welcome-add-host').click()
   await expect(page.getByTestId('host-form')).toBeVisible()
-  await page.keyboard.press('Escape')
+  await closeWithEscape(page, 'host-form')
 
   await welcome.getByTestId('welcome-new-terminal').click()
   await expect(page.getByTestId('tab')).toHaveCount(1)

@@ -18,6 +18,36 @@ declare global {
 export const isWindows = process.platform === 'win32'
 export const E2E_PASSWORD = 'e2e-master-password'
 
+/**
+ * Đặt kích thước THẬT của cửa sổ (không chỉ giả lập viewport): trên macOS, `page.setViewportSize`
+ * lớn hơn cửa sổ Electron thật (mặc định 1200×800) để phần vượt ra ngoài không bấm được — chuột
+ * rơi vào <html>. Đổi cửa sổ rồi chờ renderer thấy đúng kích thước; màn hình không đủ chỗ (máy CI
+ * nhỏ) thì mới dùng viewport giả lập.
+ */
+export async function setWindowSize(
+  launched: Pick<LaunchedApp, 'app' | 'page'>,
+  width: number,
+  height: number
+): Promise<void> {
+  await launched.app.evaluate(
+    ({ BrowserWindow }, size) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      if (win?.isMaximized()) win.unmaximize()
+      win?.setContentSize(size.width, size.height)
+    },
+    { width, height }
+  )
+  const fits = await launched.page
+    .waitForFunction(
+      (size) => window.innerWidth === size.width && window.innerHeight === size.height,
+      { width, height },
+      { timeout: 3_000 }
+    )
+    .then(() => true)
+    .catch(() => false)
+  if (!fits) await launched.page.setViewportSize({ width, height })
+}
+
 export interface LaunchedApp {
   app: ElectronApplication
   page: Page
