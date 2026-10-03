@@ -1,7 +1,7 @@
 import { unwatchFile, watch, watchFile, type FSWatcher } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import { hashFile } from '../../../session-host/sftp/edit'
-import type { S3Service } from './service'
+import type { ObjectAttributes, S3Service } from './service'
 
 /** Editor thường ghi file nhiều bước (ghi tạm → đổi tên); chờ yên rồi mới tải lên. */
 const SETTLE_MS = 400
@@ -23,8 +23,11 @@ interface Edit {
   syncedHash: string
   /** ETag trên S3 sau lần đồng bộ gần nhất — để phát hiện người khác sửa. */
   etag: string | null
-  /** Giữ Content-Type gốc khi tải lên đè (không thì thành binary/octet-stream). */
-  contentType: string
+  /**
+   * Thuộc tính gốc giữ lại khi tải lên đè: Content-Type (không thì thành binary/octet-stream),
+   * header, metadata, storage class.
+   */
+  attributes: ObjectAttributes
   uploading: boolean
   /** Có thay đổi mới trong lúc đang tải lên → tải lên lần nữa khi xong. */
   again: boolean
@@ -68,7 +71,7 @@ export class S3Edits {
       timer: null,
       syncedHash: hash,
       etag: info.etag,
-      contentType: info.contentType,
+      attributes: info.attributes,
       uploading: false,
       again: false
     })
@@ -119,7 +122,7 @@ export class S3Edits {
         edit.key,
         edit.localPath,
         edit.etag,
-        edit.contentType
+        edit.attributes
       )
       edit.syncedHash = hash
     } catch {

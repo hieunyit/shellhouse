@@ -3,6 +3,7 @@
  * theo mục đích, dựng quan hệ (route → service → workload → PVC) và bố cục cố định (cùng dữ liệu →
  * cùng toạ độ: làm mới không làm bản đồ nhảy). Thuần — Session Host, renderer và test dùng chung.
  */
+import { t, tn } from '@shared/i18n'
 
 export type MapTone = 'ok' | 'warn' | 'bad' | 'muted'
 
@@ -23,6 +24,21 @@ export interface MapWorkload {
   tech?: string
   /** Cài bằng Helm (nhãn managed-by / helm.sh/chart). */
   helm?: boolean
+  /** Cổng container khai báo trong pod template (để kiểm targetPort của Service). */
+  ports?: MapContainerPort[]
+  /** ConfigMap / Secret mà pod template dùng (volume, env, envFrom; Secret gồm cả imagePullSecrets). */
+  configMaps?: string[]
+  secrets?: string[]
+  /** ServiceAccount của pod (mặc định "default"). */
+  serviceAccount?: string
+  /** Job đã thất bại (status.failed > 0 và không còn chạy). */
+  failed?: boolean
+}
+
+export interface MapContainerPort {
+  name?: string
+  port: number
+  protocol?: string
 }
 
 export interface MapPod {
@@ -43,6 +59,13 @@ export interface MapPod {
   startedAt?: number
   /** Đang dùng thật (metrics-server). */
   usage?: { cpu: number; memory: number }
+  /** Đang chạy nhưng có container chưa Ready (readiness probe hỏng) — không nhận traffic. */
+  notReady?: boolean
+  /**
+   * Nhãn pod — chỉ có với pod không thuộc workload nào trên bản đồ (pod lẻ, ReplicaSet không có
+   * Deployment…) để khớp selector của Service; pod của workload dùng nhãn pod template.
+   */
+  labels?: Record<string, string>
 }
 
 /** Node (máy) của cluster — cho chế độ xem theo node. */
@@ -73,6 +96,25 @@ export interface MapService {
   type: string
   selector: Record<string, string>
   ports: string
+  /** Chi tiết từng cổng (port → targetPort, nodePort). */
+  portList?: MapServicePort[]
+  /** "None" = headless. */
+  clusterIP?: string
+  /** type ExternalName: tên DNS bên ngoài. */
+  externalName?: string
+  /** Địa chỉ ra ngoài: status.loadBalancer.ingress (IP / hostname) + spec.externalIPs. */
+  external?: string[]
+  /** Endpoint theo EndpointSlice (không đọc được → không có — không kết luận "0 endpoint"). */
+  endpoints?: { ready: number; notReady: number }
+}
+
+export interface MapServicePort {
+  name?: string
+  port: number
+  /** Số hoặc tên cổng container ("http"); không khai báo → bằng port. */
+  targetPort: string
+  protocol?: string
+  nodePort?: number
 }
 
 export interface MapRoute {
@@ -87,6 +129,24 @@ export interface MapRoute {
   paths?: Record<string, string[]>
   /** Gateway API: Gateway cha (parentRefs). */
   parents?: { ns: string; name: string }[]
+  /** Từng luật host + path → service:port (Ingress: cả defaultBackend với host / path rỗng). */
+  rules?: MapRouteRule[]
+  /** Ingress: TLS — host và Secret chứa chứng chỉ. */
+  tls?: { hosts: string[]; secret: string }[]
+  /** Ingress: ingressClassName (hoặc annotation kubernetes.io/ingress.class cũ). */
+  className?: string
+  /** Địa chỉ đã cấp (status.loadBalancer.ingress). */
+  address?: string[]
+}
+
+export interface MapRouteRule {
+  host: string
+  path: string
+  service: string
+  /** Cổng của Service (số hoặc tên) — không ghi thì rỗng. */
+  port?: string
+  /** defaultBackend của Ingress. */
+  default?: boolean
 }
 
 export interface MapGateway {
@@ -95,6 +155,8 @@ export interface MapGateway {
   className: string
   /** "HTTPS:443, HTTP:80". */
   listeners: string
+  /** status.addresses. */
+  addresses?: string[]
 }
 
 export interface MapPvc {
@@ -103,6 +165,9 @@ export interface MapPvc {
   status: string
   capacity: string
   tone: MapTone
+  storageClass?: string
+  /** PersistentVolume đã gắn (spec.volumeName). */
+  volume?: string
 }
 
 export interface MapHpa {
@@ -119,6 +184,11 @@ export interface MapPolicy {
   name: string
   /** LabelSelector của NetworkPolicy (podSelector) — rỗng = mọi pod trong namespace. */
   selector: unknown
+  /** policyTypes (mặc định Ingress, thêm Egress khi có luật egress). */
+  types?: string[]
+  /** Số luật ingress / egress (0 luật + có loại tương ứng = chặn hết chiều đó). */
+  ingressRules?: number
+  egressRules?: number
 }
 
 export interface MapData {
@@ -138,6 +208,12 @@ export interface MapData {
   nodeList?: MapNodeInfo[]
   /** Cluster quá lớn — một số loại chỉ lấy phần đầu. */
   truncated: boolean
+  /**
+   * ConfigMap / Secret có thật trong số được workload / Ingress TLS tham chiếu ("ns/name"). Không
+   * list được (thiếu quyền) → không có trường — không kết luận "thiếu".
+   */
+  configMaps?: string[]
+  secrets?: string[]
 }
 
 // ——— Vùng theo mục đích ———
@@ -310,14 +386,14 @@ export function parseLabelSelector(text: string): ParsedSelector | null | { erro
   parts.push(cur)
   const out: ParsedSelector = { matchLabels: {}, matchExpressions: [] }
   for (const raw of parts) {
-    const t = raw.trim()
-    if (!t) continue
+    const part = raw.trim()
+    if (!part) continue
     let m: RegExpExecArray | null
-    if ((m = new RegExp(`^(${KEY})\\s*(==|=)\\s*(${VALUE})$`).exec(t)))
+    if ((m = new RegExp(`^(${KEY})\\s*(==|=)\\s*(${VALUE})$`).exec(part)))
       out.matchLabels[m[1] ?? ''] = m[3] ?? ''
-    else if ((m = new RegExp(`^(${KEY})\\s*!=\\s*(${VALUE})$`).exec(t)))
+    else if ((m = new RegExp(`^(${KEY})\\s*!=\\s*(${VALUE})$`).exec(part)))
       out.matchExpressions.push({ key: m[1] ?? '', operator: 'NotIn', values: [m[2] ?? ''] })
-    else if ((m = new RegExp(`^(${KEY})\\s+(in|notin)\\s*\\(([^)]*)\\)$`, 'i').exec(t)))
+    else if ((m = new RegExp(`^(${KEY})\\s+(in|notin)\\s*\\(([^)]*)\\)$`, 'i').exec(part)))
       out.matchExpressions.push({
         key: m[1] ?? '',
         operator: (m[2] ?? '').toLowerCase() === 'in' ? 'In' : 'NotIn',
@@ -326,12 +402,16 @@ export function parseLabelSelector(text: string): ParsedSelector | null | { erro
           .map((v) => v.trim())
           .filter(Boolean)
       })
-    else if ((m = new RegExp(`^!\\s*(${KEY})$`).exec(t)))
+    else if ((m = new RegExp(`^!\\s*(${KEY})$`).exec(part)))
       out.matchExpressions.push({ key: m[1] ?? '', operator: 'DoesNotExist', values: [] })
-    else if ((m = new RegExp(`^(${KEY})$`).exec(t)))
+    else if ((m = new RegExp(`^(${KEY})$`).exec(part)))
       out.matchExpressions.push({ key: m[1] ?? '', operator: 'Exists', values: [] })
     else
-      return { error: `Can't read "${t}" — use key=value, key!=value, key in (a,b), key or !key` }
+      return {
+        error: t('Can’t read “{part}” — use key=value, key!=value, key in (a,b), key or !key', {
+          part
+        })
+      }
   }
   return out
 }
@@ -347,8 +427,18 @@ export function filterMapData(data: MapData, selector: ParsedSelector): MapData 
   const pods = data.pods.filter(
     (p) => p.owner && wKey.has(`${p.ns}|${p.owner.kind}|${p.owner.name}`)
   )
-  const services = data.services.filter((s) =>
-    keep.some((w) => w.ns === s.ns && selectorMatches(s.selector, w.labels))
+  const keepByNs = groupBy(keep, (w) => w.ns)
+  const indexOf = new Map<string, LabelIndex<MapWorkload>>()
+  const index = (ns: string): LabelIndex<MapWorkload> => {
+    let ix = indexOf.get(ns)
+    if (!ix) {
+      ix = new LabelIndex(keepByNs.get(ns) ?? [])
+      indexOf.set(ns, ix)
+    }
+    return ix
+  }
+  const services = data.services.filter(
+    (s) => keepByNs.has(s.ns) && index(s.ns).match(s.selector).length > 0
   )
   const svcKey = new Set(services.map((s) => `${s.ns}/${s.name}`))
   const routes = data.routes.filter((r) => r.backends.some((b) => svcKey.has(`${r.ns}/${b}`)))
@@ -364,13 +454,9 @@ export function filterMapData(data: MapData, selector: ParsedSelector): MapData 
     services,
     routes,
     pvcs: data.pvcs.filter((v) => pvcKey.has(`${v.ns}/${v.name}`)),
-    hpas: data.hpas.filter((h) =>
-      keep.some(
-        (w) => w.ns === h.ns && w.name === h.target.name && KIND_LABEL[w.kind] === h.target.kind
-      )
-    ),
-    policies: data.policies.filter((p) =>
-      keep.some((w) => w.ns === p.ns && selectorMatches(p.selector, w.labels, true))
+    hpas: data.hpas.filter((h) => wKey.has(`${h.ns}|${h.target.kind}|${h.target.name}`)),
+    policies: data.policies.filter(
+      (p) => keepByNs.has(p.ns) && index(p.ns).match(p.selector, true).length > 0
     ),
     gateways: (data.gateways ?? []).filter((g) => gwKey.has(`${g.ns}/${g.name}`))
   }
@@ -567,7 +653,8 @@ export function selectorMatches(
   if (pairs.some(([k, v]) => labels[k] !== v)) return false
   return exprs.every((e) => {
     const key = e.key ?? ''
-    const has = key in labels
+    // Object.hasOwn: nhãn "constructor" / "toString" không được coi là có sẵn.
+    const has = Object.hasOwn(labels, key)
     const values = e.values ?? []
     switch (e.operator) {
       case 'In':
@@ -582,6 +669,40 @@ export function selectorMatches(
         return false
     }
   })
+}
+
+/**
+ * Tìm workload khớp selector nhanh: chỉ mục theo cặp nhãn `key=value` → chỉ so selector với
+ * workload có cặp nhãn đầu tiên của selector (cluster lớn: không so mọi service với mọi workload).
+ */
+export class LabelIndex<T extends { labels: Record<string, string> }> {
+  private readonly byPair = new Map<string, T[]>()
+
+  constructor(private readonly items: readonly T[]) {
+    for (const it of items)
+      for (const [k, v] of Object.entries(it.labels)) {
+        const key = `${k}\u0000${v}`
+        const list = this.byPair.get(key)
+        if (list) list.push(it)
+        else this.byPair.set(key, [it])
+      }
+  }
+
+  /** Như `items.filter((x) => selectorMatches(selector, x.labels, emptyMatchesAll))`, cùng thứ tự. */
+  match(selector: unknown, emptyMatchesAll = false): T[] {
+    const sel = (selector && typeof selector === 'object' ? selector : {}) as Record<
+      string,
+      unknown
+    >
+    const structured = 'matchLabels' in sel || 'matchExpressions' in sel
+    const labels = (structured ? (sel['matchLabels'] ?? {}) : sel) as Record<string, unknown>
+    const first = Object.entries(labels)[0]
+    const pool =
+      first && typeof first[1] === 'string'
+        ? (this.byPair.get(`${first[0]}\u0000${first[1]}`) ?? [])
+        : this.items
+    return pool.filter((x) => selectorMatches(selector, x.labels, emptyMatchesAll))
+  }
 }
 
 // ——— Bố cục ———
@@ -739,11 +860,27 @@ export function workloadKindLabel(kind: string): string {
   return KIND_LABEL[kind] ?? kind
 }
 
+/** So chuỗi như localeCompare (cùng thứ tự) nhưng nhanh hơn nhiều khi sắp hàng chục nghìn mục. */
+const collator = new Intl.Collator()
+const compare = collator.compare.bind(collator)
+
+/** Gom theo khoá (đẩy tại chỗ — không chép mảng mỗi lần thêm). */
+function groupBy<T>(items: readonly T[], key: (x: T) => string): Map<string, T[]> {
+  const out = new Map<string, T[]>()
+  for (const x of items) {
+    const k = key(x)
+    const list = out.get(k)
+    if (list) list.push(x)
+    else out.set(k, [x])
+  }
+  return out
+}
+
 /** Sắp theo khoá số rồi theo tên (ổn định). */
 function orderBy<T extends { name: string }>(items: T[], key: (x: T) => number): T[] {
   return items
     .map((x) => ({ x, k: key(x) }))
-    .sort((a, b) => a.k - b.k || a.x.name.localeCompare(b.x.name))
+    .sort((a, b) => a.k - b.k || compare(a.x.name, b.x.name))
     .map((e) => e.x)
 }
 
@@ -756,7 +893,7 @@ function withoutPods(card: MapNode & { pods: MapPod[] }): MapNode {
 
 /** Dữ liệu → node + cạnh + toạ độ. Cùng dữ liệu → cùng kết quả (sắp theo tên). */
 export function layoutMap(data: MapData, options: MapOptions): MapLayout {
-  const byName = (a: { name: string }, b: { name: string }): number => a.name.localeCompare(b.name)
+  const byName = (a: { name: string }, b: { name: string }): number => compare(a.name, b.name)
   const nsNames = [
     ...new Set([
       ...data.namespaces.map((n) => n.name),
@@ -771,10 +908,24 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
   const edges: MapEdge[] = []
   const policies: Record<string, string[]> = {}
 
-  const podsByOwner = new Map<string, MapPod[]>()
-  for (const p of data.pods) {
-    const key = p.owner ? `${p.ns}|${p.owner.kind}|${p.owner.name}` : `${p.ns}|standalone`
-    podsByOwner.set(key, [...(podsByOwner.get(key) ?? []), p])
+  // Pod của owner không có thẻ (ReplicaSet không có Deployment, controller lạ, pod tĩnh của
+  // node) vào nhóm pod lẻ — không biến mất khỏi bản đồ.
+  const workloadKeys = new Set(
+    data.workloads.map((w) => `${w.ns}|${KIND_LABEL[w.kind] ?? ''}|${w.name}`)
+  )
+  const podsByOwner = groupBy(data.pods, (p) => {
+    const key = p.owner ? `${p.ns}|${p.owner.kind}|${p.owner.name}` : ''
+    return key && workloadKeys.has(key) ? key : `${p.ns}|standalone`
+  })
+  // Chỉ mục theo namespace (cluster lớn: không lọc toàn bộ danh sách cho từng namespace / workload).
+  const routesByNs = groupBy(data.routes, (r) => r.ns)
+  const pvcsByNs = groupBy(data.pvcs, (v) => v.ns)
+  const gatewaysByNs = groupBy(data.gateways ?? [], (g) => g.ns)
+  const policiesByNs = groupBy(data.policies, (p) => p.ns)
+  const hpaOf = new Map<string, MapHpa>()
+  for (const h of data.hpas) {
+    const key = `${h.ns}|${h.target.kind}|${h.target.name}`
+    if (!hpaOf.has(key)) hpaOf.set(key, h)
   }
 
   interface Island {
@@ -786,18 +937,8 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
   }
   const islands: Island[] = []
 
-  const nsWorkloadsOf = new Map<string, MapWorkload[]>()
-  for (const w of data.workloads) {
-    const list = nsWorkloadsOf.get(w.ns)
-    if (list) list.push(w)
-    else nsWorkloadsOf.set(w.ns, [w])
-  }
-  const nsServicesOf = new Map<string, MapService[]>()
-  for (const s of data.services) {
-    const list = nsServicesOf.get(s.ns)
-    if (list) list.push(s)
-    else nsServicesOf.set(s.ns, [s])
-  }
+  const nsWorkloadsOf = groupBy(data.workloads, (w) => w.ns)
+  const nsServicesOf = groupBy(data.services, (s) => s.ns)
 
   for (const ns of nsNames) {
     const nsId = `n:${ns}`
@@ -807,19 +948,20 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
     // Workload có service trỏ tới đứng đầu (ngay dưới service của nó — đường nối ngắn, không
     // chạy ngầm dưới thẻ khác); còn lại theo loại rồi tên.
     const nsServices = [...(nsServicesOf.get(ns) ?? [])].sort(byName)
+    const labelIndex = new LabelIndex(nsWorkloadsOf.get(ns) ?? [])
     // Service → workload nó chọn: so selector một lần, dùng cho sắp xếp và cạnh.
     const targets = new Map<MapService, MapWorkload[]>()
     const rank = new Map<MapWorkload, number>()
     nsServices.forEach((s, i) => {
-      const hit = (nsWorkloadsOf.get(ns) ?? []).filter((w) => selectorMatches(s.selector, w.labels))
+      const hit = labelIndex.match(s.selector)
       targets.set(s, hit)
       for (const w of hit) if (!rank.has(w)) rank.set(w, i)
     })
     const workloads = [...(nsWorkloadsOf.get(ns) ?? [])].sort(
       (a, b) =>
         (rank.get(a) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b) ?? Number.MAX_SAFE_INTEGER) ||
-        a.kind.localeCompare(b.kind) ||
-        a.name.localeCompare(b.name)
+        compare(a.kind, b.kind) ||
+        compare(a.name, b.name)
     )
     // Service theo vị trí workload đích, route theo service đích, PVC theo workload dùng nó —
     // cạnh ngắn, ít cắt nhau (không có đích → cuối hàng, theo tên).
@@ -829,17 +971,37 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
     const services = orderBy(nsServices, (svc) =>
       firstIndex((targets.get(svc) ?? []).map((w) => position.get(w) ?? 0))
     )
-    const routes = orderBy(
-      data.routes.filter((r) => r.ns === ns),
-      (r) =>
-        firstIndex(
-          r.backends.map((b) => services.findIndex((x) => x.name === b)).filter((i) => i >= 0)
-        )
+    const serviceIndex = new Map<string, number>()
+    services.forEach((x, i) => {
+      if (!serviceIndex.has(x.name)) serviceIndex.set(x.name, i)
+    })
+    const routes = orderBy([...(routesByNs.get(ns) ?? [])], (r) =>
+      firstIndex(r.backends.flatMap((b) => serviceIndex.get(b) ?? []))
     )
-    const pvcs = orderBy(
-      data.pvcs.filter((v) => v.ns === ns),
-      (v) => firstIndex(workloads.flatMap((w, i) => (w.pvcs.includes(v.name) ? [i] : [])))
+    // PVC → vị trí workload đầu tiên dùng nó (một lượt qua workload).
+    const pvcFirst = new Map<string, number>()
+    workloads.forEach((w, i) => {
+      for (const v of w.pvcs) if (!pvcFirst.has(v)) pvcFirst.set(v, i)
+    })
+    const pvcs = orderBy([...(pvcsByNs.get(ns) ?? [])], (v) =>
+      firstIndex(pvcFirst.has(v.name) ? [pvcFirst.get(v.name) ?? 0] : [])
     )
+    const pvcNames = new Set(pvcs.map((v) => v.name))
+    // NetworkPolicy → workload nó áp lên: so selector một lần, dùng cho huy hiệu, thẻ và cạnh.
+    const nsPolicies = [...(policiesByNs.get(ns) ?? [])].sort(byName)
+    // Theo thứ tự `workloads` (đã sắp) — như trước khi có chỉ mục.
+    const order = new Map(workloads.map((w, i) => [w, i]))
+    const policyTargets = nsPolicies.map((p) =>
+      labelIndex.match(p.selector, true).sort((x, y) => (order.get(x) ?? 0) - (order.get(y) ?? 0))
+    )
+    const policiesOfWorkload = new Map<MapWorkload, string[]>()
+    nsPolicies.forEach((p, i) => {
+      for (const w of policyTargets[i] ?? []) {
+        const list = policiesOfWorkload.get(w)
+        if (list) list.push(p.name)
+        else policiesOfWorkload.set(w, [p.name])
+      }
+    })
     const standalone = podsByOwner.get(`${ns}|standalone`) ?? []
 
     const cards: (MapNode & { pods: MapPod[] })[] = []
@@ -849,17 +1011,14 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       )
       const g = podGrid(pods.length)
       const id = `w:${w.kind}:${ns}/${w.name}`
-      const hpa = data.hpas.find(
-        (h) => h.ns === ns && h.target.name === w.name && h.target.kind === KIND_LABEL[w.kind]
-      )
-      const pol = data.policies
-        .filter((p) => p.ns === ns && selectorMatches(p.selector, w.labels, true))
-        .map((p) => p.name)
+      const hpa = hpaOf.get(`${ns}|${KIND_LABEL[w.kind] ?? ''}|${w.name}`)
+      // Theo tên policy (cố định giữa các lần làm mới).
+      const pol = policiesOfWorkload.get(w) ?? []
       if (pol.length) policies[id] = pol
       const badges = [
         ...(w.helm ? ['Helm'] : []),
         ...(hpa ? [`HPA ${hpa.min}–${hpa.max}`] : []),
-        ...(pol.length ? [`${pol.length} polic${pol.length === 1 ? 'y' : 'ies'}`] : [])
+        ...(pol.length ? [tn(pol.length, '{n} policy', '{n} policies')] : [])
       ]
       cards.push({
         id,
@@ -890,8 +1049,8 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
         y: 0,
         w: Math.max(CARD_MIN_W, g.cols * (POD + POD_GAP) - POD_GAP + 20),
         h: CARD_HEADER + g.rows * (POD + POD_GAP) - POD_GAP + 10,
-        label: 'Standalone pods',
-        sub: `${standalone.length} pod${standalone.length === 1 ? '' : 's'}`,
+        label: t('Standalone pods'),
+        sub: tn(standalone.length, '{n} pod', '{n} pods'),
         tone: worst(standalone.map((p) => p.tone)),
         ns,
         parent: nsId,
@@ -907,8 +1066,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       ref: MapNode['ref'],
       w = PILL_W
     ): MapNode => ({ id, kind, x: 0, y: 0, w, h: PILL_H, label, sub, tone, ns, ref, parent: nsId })
-    const gatewayNodes = (data.gateways ?? [])
-      .filter((g) => g.ns === ns)
+    const gatewayNodes = [...(gatewaysByNs.get(ns) ?? [])]
       .sort(byName)
       .map((g) =>
         pill(
@@ -920,15 +1078,14 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
           { kind: 'gateways.gateway.networking.k8s.io', ns, name: g.name }
         )
       )
-    const nsPolicies = data.policies.filter((p) => p.ns === ns).sort(byName)
-    const policyNodes = nsPolicies.map((p) =>
+    const policyNodes = nsPolicies.map((p, i) =>
       pill(
         `np:${ns}/${p.name}`,
         'policy',
         p.name,
         (() => {
-          const n = workloads.filter((w) => selectorMatches(p.selector, w.labels, true)).length
-          return `NetworkPolicy · ${n} workload${n === 1 ? '' : 's'}`
+          const n = policyTargets[i]?.length ?? 0
+          return `NetworkPolicy · ${tn(n, '{n} workload', '{n} workloads')}`
         })(),
         'muted',
         { kind: 'networkpolicies.networking.k8s.io', ns, name: p.name },
@@ -936,11 +1093,18 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       )
     )
     const routeNodes = routes.map((r) =>
-      pill(`r:${r.kind}:${ns}/${r.name}`, 'route', r.name, r.hosts.join(', ') || 'any host', 'ok', {
-        kind: r.kind,
-        ns,
-        name: r.name
-      })
+      pill(
+        `r:${r.kind}:${ns}/${r.name}`,
+        'route',
+        r.name,
+        r.hosts.join(', ') || t('any host'),
+        'ok',
+        {
+          kind: r.kind,
+          ns,
+          name: r.name
+        }
+      )
     )
     const serviceNodes = services.map((s) =>
       pill(
@@ -1093,7 +1257,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       w,
       h,
       label: ns,
-      sub: `${cards.length} workload${cards.length === 1 ? '' : 's'} · ${podCount} pod${podCount === 1 ? '' : 's'}`,
+      sub: `${tn(cards.length, '{n} workload', '{n} workloads')} · ${tn(podCount, '{n} pod', '{n} pods')}`,
       tone: worst(tones),
       ns,
       ref: { kind: 'namespaces', name: ns },
@@ -1149,7 +1313,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
     // Cạnh: route → service → workload → PVC.
     for (const r of routes)
       for (const b of r.backends)
-        if (services.some((s) => s.name === b))
+        if (serviceIndex.has(b))
           edges.push({
             from: `r:${r.kind}:${ns}/${r.name}`,
             to: `s:${ns}/${b}`,
@@ -1165,16 +1329,16 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
         })
     for (const w of workloads)
       for (const v of w.pvcs)
-        if (pvcs.some((p) => p.name === v))
+        if (pvcNames.has(v))
           edges.push({ from: `w:${w.kind}:${ns}/${w.name}`, to: `v:${ns}/${v}`, kind: 'storage' })
-    for (const p of nsPolicies)
-      for (const w of workloads)
-        if (selectorMatches(p.selector, w.labels, true))
-          edges.push({
-            from: `w:${w.kind}:${ns}/${w.name}`,
-            to: `np:${ns}/${p.name}`,
-            kind: 'policy'
-          })
+    nsPolicies.forEach((p, i) => {
+      for (const w of policyTargets[i] ?? [])
+        edges.push({
+          from: `w:${w.kind}:${ns}/${w.name}`,
+          to: `np:${ns}/${p.name}`,
+          kind: 'policy'
+        })
+    })
 
     if (options.collapsed?.(ns)) {
       // Gập: chỉ thẻ tóm tắt — bỏ thẻ con và cạnh trong namespace.
@@ -1213,11 +1377,9 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
   const grouping = options.grouping ?? 'purpose'
   const groupOfNs = groupNamespaces(data, grouping)
   const groupOf = (ns: string): string => groupOfNs.get(ns) ?? OTHER_GROUP
-  for (const region of groupOrder(
-    islands.map((i) => groupOf(i.ns)),
-    grouping
-  )) {
-    const members = islands.filter((i) => groupOf(i.ns) === region)
+  const islandsByGroup = groupBy(islands, (i) => groupOf(i.ns))
+  for (const region of groupOrder(islandsByGroup.keys(), grouping)) {
+    const members = islandsByGroup.get(region) ?? []
     if (!members.length) continue
     const width = clamp(Math.sqrt(area(members)) * 1.5, 760, 4200)
     const s = shelf(members, width, 64)
@@ -1243,7 +1405,7 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
         w: s.w + 2 * REGION_PAD,
         h: s.h + REGION_HEADER + REGION_PAD,
         label: region,
-        sub: `${members.length} namespace${members.length === 1 ? '' : 's'} · ${stats.workloads} workloads · ${stats.pods} pods`,
+        sub: `${tn(members.length, '{n} namespace', '{n} namespaces')} · ${tn(stats.workloads, '{n} workload', '{n} workloads')} · ${tn(stats.pods, '{n} pod', '{n} pods')}`,
         tone: worst(members.map((m) => m.node.tone)),
         stats
       }
@@ -1264,7 +1426,12 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
       m.node.y = oy
       m.node.parent = r.node.id
       nodes.push(m.node)
-      for (const c of m.children) nodes.push({ ...c, x: c.x + ox, y: c.y + oy })
+      // Node con được tạo mới trong lượt này → dời toạ độ tại chỗ (không chép hàng chục nghìn object).
+      for (const c of m.children) {
+        c.x += ox
+        c.y += oy
+        nodes.push(c)
+      }
     })
   })
   return { nodes, edges, width: placed.w, height: placed.h, policies }
@@ -1277,25 +1444,25 @@ export function layoutMap(data: MapData, options: MapOptions): MapLayout {
  */
 export function impactOf(layout: Pick<MapLayout, 'nodes' | 'edges'>, id: string): Set<string> {
   const out = new Set<string>()
-  const children = new Map<string, string[]>()
-  for (const n of layout.nodes)
-    if (n.kind === 'pod' && n.parent)
-      children.set(n.parent, [...(children.get(n.parent) ?? []), n.id])
+  // Danh sách kề (một lượt qua cạnh): "ai bị ảnh hưởng khi X hỏng" → X → [những node đó].
+  const next = new Map<string, string[]>()
+  const add = (from: string, to: string): void => {
+    const list = next.get(from)
+    if (list) list.push(to)
+    else next.set(from, [to])
+  }
+  for (const n of layout.nodes) if (n.kind === 'pod' && n.parent) add(n.parent, n.id)
+  for (const e of layout.edges) {
+    if (e.kind === 'attach') add(e.from, e.to)
+    else add(e.to, e.from)
+  }
   const queue = [id]
-  const push = (x: string): void => {
-    if (x === id || out.has(x)) return
-    out.add(x)
-    queue.push(x)
-  }
-  while (queue.length) {
-    const cur = queue.shift() ?? ''
-    for (const c of children.get(cur) ?? []) push(c)
-    for (const e of layout.edges) {
-      if (e.kind === 'attach') {
-        if (e.from === cur) push(e.to)
-      } else if (e.to === cur) push(e.from)
+  for (let head = 0; head < queue.length; head++)
+    for (const x of next.get(queue[head] ?? '') ?? []) {
+      if (x === id || out.has(x)) continue
+      out.add(x)
+      queue.push(x)
     }
-  }
   return out
 }
 

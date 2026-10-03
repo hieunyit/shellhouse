@@ -1,5 +1,14 @@
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
+import { basename, join } from 'node:path'
 import { tempDir } from './helpers'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
@@ -286,6 +295,38 @@ describe('checkModuleSql', () => {
       checkModuleSql('my-mod', 'CREATE TABLE my_mod_items (id TEXT)')
     }).not.toThrow()
   })
+
+  it('bảng có thật không thuộc module ở bất kỳ đâu trong câu đều bị chặn', () => {
+    const known = ['hosts', 'vault_meta', 'a_x', 'other_y']
+    expect(() => {
+      checkModuleSql('a', 'SELECT * FROM a_x, hosts', known)
+    }).toThrow(/hosts/)
+    expect(() => {
+      checkModuleSql('a', 'SELECT * FROM json_each(?) j, "vault_meta" v', known)
+    }).toThrow(/vault_meta/)
+    expect(() => {
+      checkModuleSql('a', 'SELECT * FROM a_x WHERE a_x.id IN (SELECT id FROM other_y)', known)
+    }).toThrow(/other_y/)
+    expect(() => {
+      checkModuleSql('a', "SELECT * FROM a_x WHERE note = 'hosts'", known)
+    }).not.toThrow()
+  })
+
+  it('id module có tiền tố bảng lồng nhau (a / a-b) bị từ chối', async () => {
+    const db = openDatabase(':memory:')
+    await migrate(db, MIGRATIONS)
+    expect(
+      () =>
+        new MainModuleRegistry([fakeModule('a'), fakeModule('a-b')], {
+          db,
+          vault: new Vault(db, TEST_KDF),
+          settings: new SettingsService(db),
+          emit: () => undefined,
+          onStatesChanged: () => undefined,
+          log: () => undefined
+        })
+    ).toThrow(/overlapping/)
+  })
 })
 
 describe('ctx.pickFiles / readDir', () => {
@@ -334,6 +375,27 @@ describe('ctx.pickFiles / readDir', () => {
     const files = await ctx?.pickFiles({ title: 't' })
     expect(files?.map((f) => [f.name, f.content])).toEqual([['picked.yaml', 'picked']])
     await expect(files?.[0]?.readReferenced('ca.crt')).resolves.toBe('ca')
+    // File tham chiếu ở đâu cũng được (kubeadm /etc/kubernetes/pki, ~/certs, ../certs) — trừ vùng
+    // bí mật (~/.ssh…), kể cả qua symlink nằm cạnh file chọn.
+    const certs = tempDir()
+    writeFileSync(join(certs, 'ca.crt'), 'other-ca')
+    await expect(files?.[0]?.readReferenced(join(certs, 'ca.crt'))).resolves.toBe('other-ca')
+    await expect(files?.[0]?.readReferenced(join('..', basename(certs), 'ca.crt'))).resolves.toBe(
+      'other-ca'
+    )
+    await expect(files?.[0]?.readReferenced('~/.kube/config')).resolves.toBe('a')
+    mkdirSync(join(home, '.ssh'))
+    writeFileSync(join(home, '.ssh', 'id_rsa'), 'private')
+    await expect(files?.[0]?.readReferenced('~/.ssh/id_rsa')).rejects.toThrow(/protected/)
+    await expect(
+      files?.[0]?.readReferenced(join(home, '.kube', '..', '.ssh', 'id_rsa'))
+    ).rejects.toThrow(/protected/)
+    if (process.platform !== 'win32') {
+      symlinkSync(join(home, '.ssh', 'id_rsa'), join(elsewhere, 'token'))
+      symlinkSync(join(home, '.ssh'), join(elsewhere, 'keys'))
+      await expect(files?.[0]?.readReferenced('token')).rejects.toThrow(/protected/)
+      await expect(files?.[0]?.readReferenced('keys/id_rsa')).rejects.toThrow(/protected/)
+    }
     await expect(plain.ctx?.pickFiles({ title: 't' })).rejects.toThrow(/pick-file/)
     expect((await ctx?.readDir('~/.kube'))?.map((f) => f.name).sort()).toEqual([
       'config',
@@ -350,5 +412,19 @@ describe('ctx.pickFiles / readDir', () => {
     )
     await expect(ctx?.writeFile('~/.kube/../.bashrc', 'x')).rejects.toThrow(/not allowed/)
     await expect(plain.ctx?.writeFile('~/.kube/config', 'x')).rejects.toThrow(/not allowed/)
+
+    // ~/.kube/dev.yaml là symlink (đích cũng phải được phép): ghi vào file thật, symlink giữ
+    // nguyên, quyền giữ, file tạm nằm cạnh file thật rồi biến mất.
+    if (process.platform !== 'win32') {
+      const dotfiles = join(home, '.kube', 'sub')
+      writeFileSync(join(dotfiles, 'real.yaml'), 'old', { mode: 0o640 })
+      rmSync(join(home, '.kube', 'dev.yaml'))
+      symlinkSync(join(dotfiles, 'real.yaml'), join(home, '.kube', 'dev.yaml'))
+      await ctx?.writeFile('~/.kube/dev.yaml', 'new')
+      expect(lstatSync(join(home, '.kube', 'dev.yaml')).isSymbolicLink()).toBe(true)
+      expect(readFileSync(join(dotfiles, 'real.yaml'), 'utf8')).toBe('new')
+      expect(statSync(join(dotfiles, 'real.yaml')).mode & 0o777).toBe(0o640)
+      expect(readdirSync(dotfiles)).toEqual(['real.yaml'])
+    }
   })
 })

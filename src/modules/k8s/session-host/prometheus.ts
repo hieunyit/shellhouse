@@ -1,5 +1,6 @@
 import type { MetricsRange, MetricsSeries } from '../shared/ops'
 import { KubeError, type KubeClient } from './client'
+import { listPaged } from './operations'
 
 /**
  * Lịch sử CPU / RAM của pod từ Prometheus trong cluster (kube-prometheus-stack, Rancher Monitoring,
@@ -60,10 +61,7 @@ export async function findPrometheus(
 ): Promise<PromTarget | null> {
   let list: ServiceList
   try {
-    list = await client.json<ServiceList>('GET', '/api/v1/services', {
-      query: { limit: 2000 },
-      ...(signal ? { signal } : {})
-    })
+    list = await listPaged(client, '/api/v1/services', { signal, max: 20_000 })
   } catch (error) {
     if (error instanceof KubeError) return null
     throw error
@@ -82,7 +80,12 @@ export async function findPrometheus(
   return null
 }
 
-const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/**
+ * Tên → mẫu regex trong chuỗi PromQL "…": ký tự đặc biệt của regex thoát bằng gạch chéo ngược, và
+ * trong chuỗi PromQL gạch chéo đó phải viết đôi (`web-1\\.x`) — viết đơn là escape không hợp lệ,
+ * Prometheus báo lỗi cú pháp.
+ */
+export const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\\\$&')
 
 interface Matrix {
   status?: string

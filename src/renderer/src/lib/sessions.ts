@@ -1,5 +1,6 @@
 import { PORT_MESSAGE_TYPE } from '@shared/constants'
 import type { SessionSpec } from '@shared/stream-protocol'
+import { t } from '@shared/i18n'
 
 const PORT_TIMEOUT_MS = 5_000
 
@@ -31,7 +32,7 @@ function waitForPort(sessionId: string): Promise<MessagePort> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       waiting.delete(sessionId)
-      reject(new Error('Did not receive the session data channel'))
+      reject(new Error(t('Did not receive the session data channel')))
     }, PORT_TIMEOUT_MS)
     waiting.set(sessionId, (port) => {
       clearTimeout(timer)

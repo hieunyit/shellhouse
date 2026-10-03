@@ -24,6 +24,14 @@ import { bucketsToCsv, bucketsToJson, type BucketExportRow } from '../shared/syn
 import type { BucketStats } from './S3BucketTable'
 import { cleanError, formatSize } from './format'
 import { eachLimit } from './stats-job'
+import {
+  confirmAction,
+  formatDuration,
+  formatNumber,
+  formatRate,
+  t,
+  tn
+} from '../../registry/renderer-kit'
 
 type Run = (op: S3Op) => Promise<unknown>
 
@@ -78,19 +86,21 @@ export function ExportBucketsDialog({
     try {
       let counted: Record<string, BucketStats> = { ...stats }
       if (sizes && missing.length) {
-        setBusy(`Counting objects in ${missing.length} bucket${missing.length === 1 ? '' : 's'}…`)
+        setBusy(
+          tn(missing.length, 'Counting objects in {n} bucket…', 'Counting objects in {n} buckets…')
+        )
         counted = { ...counted, ...(await calculate(missing.map((b) => b.name))) }
       }
       const infos: Record<string, S3BucketInfo> = {}
       if (details) {
         let done = 0
-        setBusy(`Reading bucket settings 0/${buckets.length}…`)
+        setBusy(t('Reading bucket settings {done}/{total}…', { done: 0, total: buckets.length }))
         await eachLimit(buckets, 6, async (b) => {
           infos[b.name] = (await run({ op: 'bucketInfo', bucket: b.name }).catch(
             () => null
           )) as S3BucketInfo
           done++
-          setBusy(`Reading bucket settings ${done}/${buckets.length}…`)
+          setBusy(t('Reading bucket settings {done}/{total}…', { done, total: buckets.length }))
         })
       }
       const rows: BucketExportRow[] = buckets.map((b) => {
@@ -108,7 +118,7 @@ export function ExportBucketsDialog({
         format === 'csv'
           ? bucketsToCsv(account, rows, options)
           : bucketsToJson(account, rows, options)
-      setBusy('Saving…')
+      setBusy(t('Saving…'))
       await run({ op: 'writeFile', localPath: path, content })
       setSaved(path)
     } catch (e) {
@@ -120,8 +130,10 @@ export function ExportBucketsDialog({
 
   return (
     <Modal
-      title="Export bucket list"
-      description={`${buckets.length} bucket${buckets.length === 1 ? '' : 's'} in ${account}`}
+      title={t('Export bucket list')}
+      description={tn(buckets.length, '{n} bucket in {account}', '{n} buckets in {account}', {
+        account
+      })}
       onClose={() => {
         if (busy) stop()
         onClose()
@@ -131,14 +143,14 @@ export function ExportBucketsDialog({
       footer={
         saved ? (
           <Button variant="primary" onClick={onClose}>
-            Done
+            {t('Done')}
           </Button>
         ) : (
           <>
             {busy ? (
-              <Button onClick={stop}>Stop</Button>
+              <Button onClick={stop}>{t('Stop')}</Button>
             ) : (
-              <Button onClick={onClose}>Cancel</Button>
+              <Button onClick={onClose}>{t('Cancel')}</Button>
             )}
             <Button
               variant="primary"
@@ -147,7 +159,7 @@ export function ExportBucketsDialog({
               data-testid="s3-export-submit"
               onClick={() => void submit()}
             >
-              {busy ? 'Exporting…' : 'Export…'}
+              {busy ? t('Exporting…') : t('Export…')}
             </Button>
           </>
         )
@@ -155,12 +167,12 @@ export function ExportBucketsDialog({
     >
       {saved ? (
         <Notice tone="success" testId="s3-export-done">
-          Saved {buckets.length} bucket{buckets.length === 1 ? '' : 's'} to{' '}
+          {tn(buckets.length, 'Saved {n} bucket to', 'Saved {n} buckets to')}{' '}
           <span className="font-mono break-all">{saved}</span>
         </Notice>
       ) : (
         <div className="flex flex-col gap-4">
-          <Field label="Format">
+          <Field label={t('Format')}>
             <div className="self-start">
               <Segmented
                 value={format}
@@ -175,15 +187,19 @@ export function ExportBucketsDialog({
           </Field>
           <div className="flex flex-col gap-3">
             <p className="text-xs text-muted">
-              Always included: bucket name, region, created date.
+              {t('Always included: bucket name, region, created date.')}
             </p>
             <Checkbox
-              label="Object count and total size"
+              label={t('Object count and total size')}
               data-testid="s3-export-sizes"
               description={
                 missing.length === 0
-                  ? 'Already calculated for every bucket.'
-                  : `Counts every object in ${missing.length} bucket${missing.length === 1 ? '' : 's'} not counted yet — large buckets take a while.`
+                  ? t('Already calculated for every bucket.')
+                  : tn(
+                      missing.length,
+                      'Counts every object in {n} bucket not counted yet — large buckets take a while.',
+                      'Counts every object in {n} buckets not counted yet — large buckets take a while.'
+                    )
               }
               checked={sizes}
               onChange={(e) => {
@@ -191,9 +207,11 @@ export function ExportBucketsDialog({
               }}
             />
             <Checkbox
-              label="Versioning and encryption"
+              label={t('Versioning and encryption')}
               data-testid="s3-export-details"
-              description="One request per bucket. Shown empty where the service does not support it."
+              description={t(
+                'One request per bucket. Shown empty where the service does not support it.'
+              )}
               checked={details}
               onChange={(e) => {
                 setDetails(e.target.checked)
@@ -215,14 +233,28 @@ export function ExportBucketsDialog({
 // ---------- Đồng bộ ----------
 
 const ACTION_TONE: Record<SyncAction, Tone> = { new: 'ok', update: 'info', delete: 'bad' }
-const PHASE: Record<S3SyncProgress['phase'], string> = {
-  scanning: 'Comparing…',
-  planned: 'Preview',
-  copying: 'Copying…',
-  deleting: 'Deleting extra objects…',
-  done: 'Finished',
-  stopped: 'Stopped',
-  error: 'Failed'
+
+function actionLabel(action: SyncAction): string {
+  return action === 'new' ? t('new') : action === 'update' ? t('changed') : t('delete')
+}
+
+function phaseLabel(phase: S3SyncProgress['phase']): string {
+  switch (phase) {
+    case 'scanning':
+      return t('Comparing…')
+    case 'planned':
+      return t('Preview')
+    case 'copying':
+      return t('Copying…')
+    case 'deleting':
+      return t('Deleting extra objects…')
+    case 'done':
+      return t('Finished')
+    case 'stopped':
+      return t('Stopped')
+    case 'error':
+      return t('Failed')
+  }
 }
 
 /** Hiện ngay khi bấm (trước lần hỏi tiến độ đầu) — không nháy lại form. */
@@ -243,13 +275,11 @@ function startingProgress(dryRun: boolean, serverSide: boolean): S3SyncProgress 
   }
 }
 
-/** Thời gian còn lại theo tốc độ đã làm mượt: "3 min", "1 h 20 min"; chưa đủ dữ liệu → null. */
+/** Thời gian còn lại theo tốc độ đã làm mượt: "3m 12s", "1h 20m"; chưa đủ dữ liệu → null. */
 function eta(p: S3SyncProgress): string | null {
   if (p.bytesPerSecond <= 0 || p.plan.bytes <= p.done.bytes) return null
-  const s = Math.round((p.plan.bytes - p.done.bytes) / p.bytesPerSecond)
-  if (s < 60) return `${Math.max(1, s)} s`
-  if (s < 3600) return `${Math.round(s / 60)} min`
-  return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`
+  const ms = ((p.plan.bytes - p.done.bytes) / p.bytesPerSecond) * 1000
+  return formatDuration(Math.max(1000, ms))
 }
 
 export interface SyncSource {
@@ -295,7 +325,7 @@ export function SyncDialog({
   /** Hàm (không đọc thẳng): TS không thu hẹp kiểu ref qua các lần await. */
   const isAlive = (): boolean => alive.current
   const sameAccount = destAccount === accountId
-  const sourceName = accounts.find((a) => a.id === accountId)?.name ?? 'this account'
+  const sourceName = accounts.find((a) => a.id === accountId)?.name ?? t('this account')
 
   useEffect(() => {
     alive.current = true
@@ -321,7 +351,7 @@ export function SyncDialog({
       (e: unknown) => {
         if (!alive.current) return
         setDestBuckets([])
-        setError(`Could not list the buckets of that account: ${cleanError(e)}`)
+        setError(t('Could not list the buckets of that account: {error}', { error: cleanError(e) }))
       }
     )
   }
@@ -330,7 +360,7 @@ export function SyncDialog({
   const known = destBuckets?.some((b) => b.name === bucketName) ?? false
   const willCreate = destBuckets !== null && bucketName !== '' && !known
   const problem = !bucketName
-    ? 'Choose a destination bucket'
+    ? t('Choose a destination bucket')
     : willCreate
       ? bucketNameProblem(bucketName)
       : null
@@ -339,7 +369,8 @@ export function SyncDialog({
     progress?.phase === 'copying' ||
     progress?.phase === 'deleting'
 
-  const start = async (dryRun: boolean): Promise<void> => {
+  /** `maxDelete`: chạy thật sau khi xem trước — không cho xoá nhiều hơn số đã thấy. */
+  const start = async (dryRun: boolean, maxDelete?: number): Promise<void> => {
     setError(null)
     try {
       const id = (await run({
@@ -355,7 +386,8 @@ export function SyncDialog({
         compare,
         ...(threads ? { concurrency: threads } : {}),
         createBucket: willCreate,
-        dryRun
+        dryRun,
+        ...(maxDelete !== undefined ? { maxDelete } : {})
       })) as string
       jobId.current = id
       setProgress(startingProgress(dryRun, sameAccount))
@@ -381,8 +413,16 @@ export function SyncDialog({
     if (jobId.current) void run({ op: 'syncStop', id: jobId.current }).catch(() => undefined)
   }
 
-  const close = (): void => {
-    if (running && !window.confirm('Stop the sync? Objects copied so far stay at the destination.'))
+  const close = async (): Promise<void> => {
+    if (
+      running &&
+      !(await confirmAction({
+        title: t('Stop the sync?'),
+        message: t('Objects copied so far stay at the destination.'),
+        confirmLabel: t('Stop sync'),
+        danger: true
+      }))
+    )
       return
     onClose()
   }
@@ -402,28 +442,28 @@ export function SyncDialog({
 
   return (
     <Modal
-      title="Sync"
+      title={t('Sync')}
       description={
         <>
           <span className="font-mono">
             s3://{source.bucket}/{source.prefix}
           </span>{' '}
-          in {sourceName}
+          {t('in {account}', { account: sourceName })}
         </>
       }
-      onClose={close}
+      onClose={() => void close()}
       width="max-w-2xl"
       testId="s3-sync-dialog"
       footer={
         p === null && !running ? (
           <>
-            <Button onClick={close}>Cancel</Button>
+            <Button onClick={() => void close()}>{t('Cancel')}</Button>
             <Button
               disabled={!!problem || destBuckets === null}
               data-testid="s3-sync-preview"
               onClick={() => void start(true)}
             >
-              Preview
+              {t('Preview')}
             </Button>
             {mode === 'copy' && (
               <Button
@@ -432,13 +472,13 @@ export function SyncDialog({
                 data-testid="s3-sync-start"
                 onClick={() => void start(false)}
               >
-                Sync
+                {t('Sync')}
               </Button>
             )}
           </>
         ) : running ? (
           <Button data-testid="s3-sync-stop" onClick={stop}>
-            Stop
+            {t('Stop')}
           </Button>
         ) : planned ? (
           <>
@@ -453,13 +493,33 @@ export function SyncDialog({
               variant={p.plan.delete ? 'danger' : 'primary'}
               disabled={toCopy === 0 && p.plan.delete === 0}
               data-testid="s3-sync-run"
-              onClick={() => void start(false)}
+              onClick={() =>
+                void (async () => {
+                  // Nguồn rỗng mà vẫn xoá ở đích (chọn nhầm thư mục…) → hỏi lại một lần nữa.
+                  if (
+                    p.scanned.source === 0 &&
+                    p.plan.delete > 0 &&
+                    !(await confirmAction({
+                      title: t('Delete everything at the destination?'),
+                      message: tn(
+                        p.plan.delete,
+                        'The source is empty. {n} object at the destination will be deleted.',
+                        'The source is empty. {n} objects at the destination will be deleted.'
+                      ),
+                      confirmLabel: t('Delete all'),
+                      danger: true
+                    }))
+                  )
+                    return
+                  await start(false, p.plan.delete)
+                })()
+              }
             >
               {toCopy === 0 && p.plan.delete === 0
-                ? 'Already in sync'
+                ? t('Already in sync')
                 : p.plan.delete
-                  ? `Sync and delete ${p.plan.delete.toLocaleString('en')}`
-                  : `Sync ${toCopy.toLocaleString('en')} object${toCopy === 1 ? '' : 's'}`}
+                  ? t('Sync and delete {n}', { n: formatNumber(p.plan.delete) })
+                  : tn(toCopy, 'Sync {n} object', 'Sync {n} objects')}
             </Button>
           </>
         ) : (
@@ -483,7 +543,7 @@ export function SyncDialog({
       {p === null && !running ? (
         <div className="flex flex-col gap-4">
           <div className="grid grid-cols-[1fr_1fr] gap-3">
-            <Field label="Destination account">
+            <Field label={t('Destination account')}>
               <Select
                 data-testid="s3-sync-account"
                 value={destAccount}
@@ -494,18 +554,18 @@ export function SyncDialog({
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name}
-                    {a.id === accountId ? ' (this account)' : ''}
+                    {a.id === accountId ? ` (${t('this account')})` : ''}
                   </option>
                 ))}
               </Select>
             </Field>
             <Field
-              label="Destination bucket"
+              label={t('Destination bucket')}
               hint={
                 destBuckets === null
-                  ? 'Loading buckets…'
+                  ? t('Loading buckets…')
                   : willCreate && !problem
-                    ? 'This bucket will be created'
+                    ? t('This bucket will be created')
                     : undefined
               }
             >
@@ -513,7 +573,7 @@ export function SyncDialog({
                 mono
                 list="s3-sync-buckets"
                 data-testid="s3-sync-bucket"
-                placeholder="bucket name"
+                placeholder={t('bucket name')}
                 value={destBucket}
                 onChange={(e) => {
                   setDestBucket(e.target.value.toLowerCase())
@@ -528,7 +588,7 @@ export function SyncDialog({
               </datalist>
             </Field>
           </div>
-          <Field label="Destination folder" hint="Empty = the bucket root">
+          <Field label={t('Destination folder')} hint={t('Empty = the bucket root')}>
             <Input
               mono
               data-testid="s3-sync-prefix"
@@ -540,11 +600,15 @@ export function SyncDialog({
             />
           </Field>
           <Field
-            label="Mode"
+            label={t('Mode')}
             hint={
               mode === 'copy'
-                ? 'Copies objects that are new or changed. Nothing is deleted at the destination.'
-                : 'Makes the destination identical: also deletes objects that are not in the source. You see the list before anything is deleted.'
+                ? t(
+                    'Copies objects that are new or changed. Nothing is deleted at the destination.'
+                  )
+                : t(
+                    'Makes the destination identical: also deletes objects that are not in the source. You see the list before anything is deleted.'
+                  )
             }
           >
             <div className="self-start">
@@ -553,27 +617,29 @@ export function SyncDialog({
                 onChange={setMode}
                 testIdPrefix="s3-sync-mode"
                 options={[
-                  { value: 'copy', label: 'Copy new & changed' },
-                  { value: 'mirror', label: 'Mirror' }
+                  { value: 'copy', label: t('Copy new & changed') },
+                  { value: 'mirror', label: t('Mirror') }
                 ]}
               />
             </div>
           </Field>
           <div className="grid grid-cols-[2fr_1fr] gap-3">
-            <Field label="Changed means">
+            <Field label={t('Changed means')}>
               <Select
                 value={compare}
                 onChange={(e) => {
                   setCompare(e.target.value as 'etag' | 'size')
                 }}
               >
-                <option value="etag">Different size or checksum (ETag)</option>
-                <option value="size">Different size only (faster for very large uploads)</option>
+                <option value="etag">{t('Different size or checksum (ETag)')}</option>
+                <option value="size">
+                  {t('Different size only (faster for very large uploads)')}
+                </option>
               </Select>
             </Field>
             <Field
-              label="Parallel transfers"
-              hint={threads ? undefined : 'From Settings → Modules → S3 storage'}
+              label={t('Parallel transfers')}
+              hint={threads ? undefined : t('From Settings → Modules → S3 storage')}
             >
               <Select
                 data-testid="s3-sync-threads"
@@ -582,10 +648,10 @@ export function SyncDialog({
                   setThreads(Number(e.target.value))
                 }}
               >
-                <option value="0">Auto</option>
+                <option value="0">{t('Auto')}</option>
                 {[1, 2, 4, 8, 16, 32, 64].map((n) => (
                   <option key={n} value={n}>
-                    {n} at a time
+                    {t('{n} at a time', { n })}
                   </option>
                 ))}
               </Select>
@@ -593,8 +659,12 @@ export function SyncDialog({
           </div>
           <p className="text-xs text-faint">
             {sameAccount
-              ? 'Same account: objects are copied on the server — nothing goes through this computer.'
-              : 'Different accounts: each object is streamed from the source to the destination through this computer (nothing is written to disk).'}
+              ? t(
+                  'Same account: objects are copied on the server — nothing goes through this computer.'
+                )
+              : t(
+                  'Different accounts: each object is streamed from the source to the destination through this computer (nothing is written to disk).'
+                )}
           </p>
           {problem && bucketName && <p className="text-xs text-danger">{problem}</p>}
           {error && <Notice tone="danger">{error}</Notice>}
@@ -606,27 +676,39 @@ export function SyncDialog({
           data-phase={p?.phase ?? 'scanning'}
         >
           <div className="flex items-center gap-2 text-[13px]">
-            <span className="font-medium text-fg">{PHASE[p?.phase ?? 'scanning']}</span>
+            <span className="font-medium text-fg">{phaseLabel(p?.phase ?? 'scanning')}</span>
             <ArrowRight size={13} className="text-faint" />
             <span className="truncate font-mono text-xs text-muted" title={destLabel}>
               {destLabel}
             </span>
           </div>
+          {planned && p.plan.delete > 0 && p.scanned.source === 0 && (
+            <Notice tone="danger" testId="s3-sync-empty-source">
+              {t(
+                'The source folder is empty — this sync would delete every object ({n}) in the destination. Check that you picked the right source.',
+                { n: formatNumber(p.plan.delete) }
+              )}
+            </Notice>
+          )}
           {(p === null || p.phase === 'scanning') && (
             <p className="text-xs text-muted">
-              Listed {(p?.scanned.source ?? 0).toLocaleString('en')} objects at the source and{' '}
-              {(p?.scanned.dest ?? 0).toLocaleString('en')} at the destination…
+              {t('Listed {source} objects at the source and {dest} at the destination…', {
+                source: formatNumber(p?.scanned.source ?? 0),
+                dest: formatNumber(p?.scanned.dest ?? 0)
+              })}
             </p>
           )}
           {p && p.phase !== 'scanning' && p.phase !== 'error' && (
             <div className="flex flex-wrap gap-1.5 text-xs" data-testid="s3-sync-plan">
-              <Pill tone="ok">{`${p.plan.new.toLocaleString('en')} new`}</Pill>
-              <Pill tone="info">{`${p.plan.update.toLocaleString('en')} changed`}</Pill>
+              <Pill tone="ok">{t('{n} new', { n: formatNumber(p.plan.new) })}</Pill>
+              <Pill tone="info">{t('{n} changed', { n: formatNumber(p.plan.update) })}</Pill>
               {(mode === 'mirror' || p.plan.delete > 0) && (
-                <Pill tone="bad">{`${p.plan.delete.toLocaleString('en')} to delete`}</Pill>
+                <Pill tone="bad">{t('{n} to delete', { n: formatNumber(p.plan.delete) })}</Pill>
               )}
-              <Pill tone="muted">{`${p.plan.same.toLocaleString('en')} unchanged`}</Pill>
-              <span className="ml-auto text-muted">{formatSize(p.plan.bytes)} to copy</span>
+              <Pill tone="muted">{t('{n} unchanged', { n: formatNumber(p.plan.same) })}</Pill>
+              <span className="ml-auto text-muted">
+                {t('{size} to copy', { size: formatSize(p.plan.bytes) })}
+              </span>
             </div>
           )}
           {p && (p.phase === 'copying' || p.phase === 'deleting' || finished) && !p.dryRun && (
@@ -642,20 +724,28 @@ export function SyncDialog({
                 data-testid="s3-sync-done"
               >
                 <span>
-                  {p.done.copied.toLocaleString('en')} / {toCopy.toLocaleString('en')} copied
-                  {p.plan.delete ? ` · ${p.done.deleted.toLocaleString('en')} deleted` : ''}
-                  {p.done.failed ? ` · ${p.done.failed.toLocaleString('en')} failed` : ''}
+                  {t('{done} / {total} copied', {
+                    done: formatNumber(p.done.copied),
+                    total: formatNumber(toCopy)
+                  })}
+                  {p.plan.delete
+                    ? ` · ${t('{n} deleted', { n: formatNumber(p.done.deleted) })}`
+                    : ''}
+                  {p.done.failed ? ` · ${t('{n} failed', { n: formatNumber(p.done.failed) })}` : ''}
                 </span>
                 <span>
                   {formatSize(p.done.bytes)} / {formatSize(p.plan.bytes)}
-                  {p.bytesPerSecond ? ` · ${formatSize(p.bytesPerSecond)}/s` : ''}
-                  {p.phase === 'copying' && eta(p) ? ` · ${eta(p)} left` : ''}
+                  {p.bytesPerSecond ? ` · ${formatRate(p.bytesPerSecond)}` : ''}
+                  {p.phase === 'copying' && eta(p)
+                    ? ` · ${t('{time} left', { time: eta(p) ?? '' })}`
+                    : ''}
                 </span>
               </div>
               {p.phase === 'copying' && p.active.length > 0 && (
                 <div className="mt-1 flex flex-col gap-1" data-testid="s3-sync-active">
                   <span className="text-[11px] text-faint">
-                    {p.concurrency} at a time{p.serverSide ? ' · copied on the server' : ''}
+                    {t('{n} at a time', { n: p.concurrency })}
+                    {p.serverSide ? ` · ${t('copied on the server')}` : ''}
                   </span>
                   {p.active.map((a) => (
                     <div key={a.key} className="flex items-center gap-2 text-xs">
@@ -702,7 +792,7 @@ export function SyncDialog({
                   data-testid="s3-sync-item"
                 >
                   <span className="w-16 shrink-0">
-                    <Pill tone={ACTION_TONE[it.action]}>{it.action}</Pill>
+                    <Pill tone={ACTION_TONE[it.action]}>{actionLabel(it.action)}</Pill>
                   </span>
                   <span className="min-w-0 flex-1 truncate font-mono text-fg" title={it.key}>
                     {it.key}
@@ -712,11 +802,9 @@ export function SyncDialog({
               ))}
               {p.plan.new + p.plan.update + p.plan.delete > p.sample.length && (
                 <p className="px-2 py-1 text-xs text-faint">
-                  …and{' '}
-                  {(p.plan.new + p.plan.update + p.plan.delete - p.sample.length).toLocaleString(
-                    'en'
-                  )}{' '}
-                  more
+                  {t('…and {n} more', {
+                    n: formatNumber(p.plan.new + p.plan.update + p.plan.delete - p.sample.length)
+                  })}
                 </p>
               )}
             </div>
@@ -724,8 +812,17 @@ export function SyncDialog({
           {finished && p.phase === 'done' && !p.dryRun && (
             <Notice tone={p.done.failed ? 'danger' : 'success'} testId="s3-sync-result">
               {p.done.failed
-                ? `Finished with ${p.done.failed.toLocaleString('en')} error${p.done.failed === 1 ? '' : 's'} — run the sync again to retry them.`
-                : `In sync: ${p.done.copied.toLocaleString('en')} copied${p.plan.delete ? `, ${p.done.deleted.toLocaleString('en')} deleted` : ''}.`}
+                ? tn(
+                    p.done.failed,
+                    'Finished with {n} error — run the sync again to retry it.',
+                    'Finished with {n} errors — run the sync again to retry them.'
+                  )
+                : p.plan.delete
+                  ? t('In sync: {copied} copied, {deleted} deleted.', {
+                      copied: formatNumber(p.done.copied),
+                      deleted: formatNumber(p.done.deleted)
+                    })
+                  : t('In sync: {copied} copied.', { copied: formatNumber(p.done.copied) })}
             </Notice>
           )}
         </div>

@@ -116,6 +116,18 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
       '64Mi'
     )
 
+    // Chọn nhiều dòng (ô chọn / Ctrl+A) → thanh thao tác hàng loạt; Esc bỏ chọn.
+    // Chọn tất cả = mọi dòng đang hiện.
+    const visible = await rows.count()
+    await view.getByTestId('k8s-select-all').check()
+    await expect(view.getByTestId('k8s-bulk-count')).toContainText(`${String(visible)} selected`)
+    await view.getByTestId('k8s-bulk-delete').click()
+    await expect(page.getByTestId('k8s-bulk-targets')).toContainText('shop/web-1')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('k8s-bulk-dialog')).toHaveCount(0)
+    await view.getByTestId('k8s-bulk-clear').click()
+    await expect(view.getByTestId('k8s-bulk-bar')).toHaveCount(0)
+
     // Log pod.
     const web1 = view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')
     await web1.click({ button: 'right' })
@@ -151,6 +163,12 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await page.getByTestId('k8s-scale-apply').click()
     await expect(view.getByTestId('k8s-replicas')).toHaveText('3')
     await page.keyboard.press('Escape')
+    // Thao tác một phím (r = rollout restart) hỏi trước bằng hộp thoại của app — không chạy ngay.
+    await deploy.click()
+    await page.keyboard.press('r')
+    await expect(page.getByTestId('k8s-confirm')).toContainText('Restart web?')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('k8s-confirm')).toHaveCount(0)
     // Bấm đúp workload → chi tiết ở tab Related (kiểu Rancher): service, pod… liên quan.
     await deploy.dblclick()
     const related = view.getByTestId('k8s-related')
@@ -230,11 +248,20 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await expect(view.getByTestId('k8s-helm-detail')).toContainText('Thanks for installing')
     await view.getByTestId('k8s-helm-tab-values').click()
     await expect(view.getByTestId('k8s-helm-detail')).toContainText('database: shop')
+    // Chỉ có một revision → không rollback được; gỡ cài đặt hỏi trước (không làm ở đây).
+    await expect(view.getByTestId('k8s-helm-rollback')).toBeDisabled()
+    await view.getByTestId('k8s-helm-uninstall').click()
+    await expect(page.getByTestId('k8s-helm-uninstall-dialog')).toContainText('Uninstall shop-db?')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('k8s-helm-uninstall-dialog')).toHaveCount(0)
     await view.getByTestId('k8s-nav-group-Apps').click()
 
     // Tổng quan cluster.
     await view.getByTestId('k8s-nav-overview').click()
     await expect(view.getByTestId('k8s-ov-nodes')).toContainText('1/2')
+    // Vấn đề theo nhóm: pod crash-loop, node chưa Ready — bấm để mở.
+    await expect(view.getByTestId('k8s-ov-problem-failing')).toContainText('web-2')
+    await expect(view.getByTestId('k8s-ov-problem-nodes')).toBeVisible()
 
     // Secret: giá trị ẩn, bấm mới hiện.
     await view.getByTestId('k8s-nav-group-Storage').click()
@@ -422,6 +449,9 @@ test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi t
     await page.setViewportSize({ width: 1366, height: 820 })
     await view.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
+    // Mặc định là Topology — chuyển sang bản đồ workload.
+    await expect(map.getByTestId('k8s-map-view-topology')).toHaveAttribute('aria-checked', 'true')
+    await map.getByTestId('k8s-map-view-workloads').click()
     await expect(map.getByTestId('k8s-map-summary')).toContainText('workloads')
     await expect(map.getByTestId('k8s-map-summary')).toContainText('pods')
 
@@ -485,6 +515,85 @@ test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi t
   }
 })
 
+test('Kubernetes: Topology tĩnh — vấn đề giải thích bằng lời, tìm theo nhãn, tập trung, pod, YAML', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  server.seedDemo()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await page.setViewportSize({ width: 1366, height: 820 })
+    await view.getByTestId('k8s-nav-map').click()
+    const map = view.getByTestId('k8s-map')
+    // Topology là mặc định: làn có tên, thẻ Ingress ghi từng luật host / path.
+    await expect(map.getByTestId('k8s-topo-canvas')).toBeVisible()
+    await expect(map.locator('[data-testid="k8s-topo-lanes"] [data-lane="entry"]')).toHaveText(
+      'Entry'
+    )
+    const ingress = map.locator(
+      '[data-testid="k8s-topo-node"][data-kind="ingress"][data-name="storefront"]'
+    )
+    await expect(ingress.getByTestId('k8s-topo-row').first()).toContainText('shop.example.com/')
+
+    // Danh sách vấn đề: lỗi cấu hình được giải thích bằng lời; bấm → chọn + bảng chi tiết.
+    await map.getByTestId('k8s-topo-problems').click()
+    const problem = (code: string) =>
+      map.locator(`[data-testid="k8s-topo-problem"][data-code="${code}"]`).first()
+    await expect(problem('svc-no-match')).toContainText('app=redis')
+    await expect(problem('ing-missing-svc')).toContainText('legacy-api')
+    await problem('ing-missing-svc').click()
+    const panel = view.getByTestId('k8s-topo-panel')
+    await expect(panel).toContainText('storefront')
+    await expect(panel.getByTestId('k8s-topo-problems')).toContainText(
+      'TLS Secret admin-tls not found'
+    )
+    await expect(
+      map.locator('[data-testid="k8s-topo-edge"][data-target="svc:shop/legacy-api"]').first()
+    ).toHaveAttribute('data-broken', 'true')
+
+    // Tập trung: chỉ còn đường đi qua Ingress này.
+    await panel.getByTestId('k8s-topo-focus').click()
+    await expect(map.getByTestId('k8s-topo-focus-chip')).toContainText('storefront')
+    await expect(map.locator('[data-testid="k8s-topo-node"][data-name="media"]')).toHaveCount(0)
+    await expect(
+      map.locator('[data-testid="k8s-topo-node"][data-name="api"]').first()
+    ).toBeVisible()
+    await map.getByTestId('k8s-topo-focus-chip').getByRole('button').click()
+    await expect(map.getByTestId('k8s-topo-focus-chip')).toHaveCount(0)
+
+    // Tìm theo nhãn (key=value) → workload api; HPA ở mức tối đa được nói rõ.
+    await map.getByTestId('k8s-topo-search').fill('tier=backend')
+    await map.getByTestId('k8s-topo-result').first().click()
+    await expect(panel).toContainText('Deployment · shop')
+    await expect(panel.getByTestId('k8s-topo-problems')).toContainText('at its maximum')
+
+    // Mở danh sách pod → chọn pod → Shell / Logs / YAML.
+    await map
+      .locator(
+        '[data-testid="k8s-topo-node"][data-kind="pods"][data-name="wl:deployments.apps:shop/api"]'
+      )
+      .getByTestId('k8s-topo-pods-toggle')
+      .click()
+    await expect(map.getByTestId('k8s-topo-pod')).toHaveCount(3)
+    await map.getByTestId('k8s-topo-pod').first().click()
+    await expect(panel).toContainText('Pod · shop')
+    await expect(panel.getByTestId('k8s-topo-shell')).toBeVisible()
+    await panel.getByTestId('k8s-topo-yaml').click()
+    await expect(page.getByTestId('k8s-topo-yaml-dialog')).toContainText('apiVersion')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('k8s-topo-yaml-dialog')).toHaveCount(0)
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})
+
 test('Kubernetes: bản đồ cluster lớn — gom vùng theo nhãn, lọc nhãn, gập namespace, xem theo node', async () => {
   test.setTimeout(60_000)
   const server = await startApiTestServer()
@@ -500,10 +609,12 @@ test('Kubernetes: bản đồ cluster lớn — gom vùng theo nhãn, lọc nhã
     await page.setViewportSize({ width: 1366, height: 820 })
     await view.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
+    await map.getByTestId('k8s-map-view-workloads').click()
     const summary = map.getByTestId('k8s-map-summary')
     await expect(summary).toContainText('2 workloads')
 
-    // Gom vùng theo nhãn team của namespace (gợi ý tự có trong danh sách).
+    // Gom vùng theo nhãn team của namespace (gợi ý tự có trong danh sách) — trong menu View.
+    await map.getByTestId('k8s-map-options').click()
     await map.getByTestId('k8s-map-grouping').selectOption('label:team')
     await expect(map.locator('[data-testid="k8s-map-region"][data-name="commerce"]')).toBeVisible()
     await map.getByTestId('k8s-map-grouping').selectOption('__custom')
@@ -521,7 +632,7 @@ test('Kubernetes: bản đồ cluster lớn — gom vùng theo nhãn, lọc nhã
     await expect(filter).toHaveAttribute('aria-invalid', 'true')
     await filter.fill('app in (web, api)')
     await expect(filter).toHaveAttribute('aria-invalid', 'false')
-    await expect(summary).toContainText('1 workloads')
+    await expect(summary).toContainText('1 workload ·')
     await filter.press('Escape')
     await expect(filter).toHaveValue('')
     await expect(summary).toContainText('2 workloads')
@@ -537,9 +648,11 @@ test('Kubernetes: bản đồ cluster lớn — gom vùng theo nhãn, lọc nhã
     await map.getByTestId('k8s-map-result').filter({ hasText: '(collapsed)' }).first().click()
     await expect(summary).toContainText('2 workloads')
     await expect(panel).toContainText('Deployment')
-    // Gập hết / mở hết.
+    // Gập hết / mở hết (menu View).
+    await map.getByTestId('k8s-map-options').click()
     await map.getByTestId('k8s-map-fold-all').click()
     await expect(summary).toContainText('0 workloads')
+    await map.getByTestId('k8s-map-options').click()
     await expect(map.getByTestId('k8s-map-fold-all')).toContainText('Expand all')
     await map.getByTestId('k8s-map-fold-all').click()
     await expect(summary).toContainText('2 workloads')
@@ -766,6 +879,16 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await expect(map.getByTestId('k8s-map-traffic-status')).toHaveAttribute('data-status', 'live', {
       timeout: 15_000
     })
+    // Topology: tốc độ vào / ra ngay trên thẻ workload (lớp phủ traffic). Khung hẹp (sidebar host
+    // đầy đủ) chưa thấy làn Workloads ở zoom dễ đọc — tìm để bay tới thẻ (chỉ vẽ phần đang thấy).
+    await map.getByTestId('k8s-topo-search').fill('web')
+    await map.getByTestId('k8s-topo-result').filter({ hasText: 'Deployment' }).first().click()
+    await expect(
+      map
+        .locator('[data-testid="k8s-topo-node"][data-kind="workload"][data-name="web"]')
+        .getByTestId('k8s-topo-rate')
+    ).toContainText('MB/s')
+    await map.getByTestId('k8s-map-view-workloads').click()
     await map.getByTestId('k8s-map-search').fill('web')
     await map.getByTestId('k8s-map-result').filter({ hasText: 'Workload' }).first().click()
     await expect(
@@ -927,6 +1050,21 @@ test('Kubernetes: tạo Deployment + Service bằng form (kiểu Rancher / Lens)
     // Mở luôn đối tượng vừa tạo.
     await expect(view.getByTestId('k8s-describe')).toContainText('api')
 
+    // Tạo trùng tên → hỏi trước (server-side apply sẽ sửa đè đối tượng đang có).
+    await view.getByTestId('k8s-create').click()
+    const again = page.getByTestId('k8s-create-dialog')
+    await again.getByTestId('k8s-form-name').fill('api')
+    await again.getByTestId('k8s-form-image').fill('nginx:1.27')
+    await again.getByTestId('k8s-create-submit').click()
+    await expect(page.getByTestId('k8s-create-exists')).toContainText('Deployment shop/api')
+    await page.getByTestId('confirm-cancel').click()
+    await expect(again).toBeVisible()
+    // Đã điền mà đóng → hỏi trước khi bỏ.
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('k8s-create-discard')).toBeVisible()
+    await page.getByTestId('confirm-ok').click()
+    await expect(again).toHaveCount(0)
+
     // "Edit as YAML": chuyển sang trình sửa YAML, giữ nội dung form (không đóng mất).
     await view.getByTestId('k8s-create').click()
     await page.getByTestId('k8s-create-dialog').getByTestId('k8s-form-name').fill('worker')
@@ -934,7 +1072,23 @@ test('Kubernetes: tạo Deployment + Service bằng form (kiểu Rancher / Lens)
     await expect(page.getByTestId('k8s-create-dialog')).toHaveCount(0)
     const yamlEditor = page.getByTestId('k8s-yaml-editor')
     await expect(yamlEditor).toBeVisible()
-    await expect(yamlEditor).toContainText('name: worker')
+    // Editor CodeMirror (nạp lười): nội dung nằm trong .cm-content.
+    const code = yamlEditor.getByTestId('k8s-yaml-text').locator('.cm-content')
+    await expect(code).toContainText('name: worker')
+    // Chưa áp dụng mà đóng → hỏi trước (nội dung từ form là thay đổi chưa lưu).
+    await code.press('Escape')
+    await expect(page.getByTestId('confirm-dialog')).toContainText('Discard your changes?')
+    await page.getByTestId('confirm-cancel').click()
+    await expect(yamlEditor).toBeVisible()
+    // Xem trước (dry run) rồi mới áp dụng: đối tượng mới → "create", diff có dòng thêm.
+    await yamlEditor.getByTestId('k8s-yaml-apply').click()
+    await expect(yamlEditor.getByTestId('k8s-yaml-preview')).toBeVisible()
+    await expect(yamlEditor.getByTestId('k8s-yaml-diff')).toContainText('name: worker')
+    await yamlEditor.getByTestId('k8s-yaml-back').click()
+    await expect(code).toBeVisible()
+    await yamlEditor.getByTestId('k8s-yaml-apply').click()
+    await yamlEditor.getByTestId('k8s-yaml-apply').click()
+    await expect(yamlEditor).toHaveCount(0)
   } finally {
     await launched.close()
     await server.close()

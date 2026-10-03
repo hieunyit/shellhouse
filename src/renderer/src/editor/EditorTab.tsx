@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Extension } from '@codemirror/state'
 import { AlertTriangle, FileCode, RotateCw, Save, WrapText } from 'lucide-react'
+import { t, tn } from '@shared/i18n'
 import { cleanError } from '../lib/format'
 import { setCloseGuard, useTabs } from '../stores/tabs'
+import { confirmAction } from '../stores/confirm'
 import { toast } from '../stores/toasts'
 import { Button, cx } from '../components/ui'
 import { CodeEditor, type CodeEditorHandle, type CursorInfo } from './CodeEditor'
@@ -31,7 +33,9 @@ export function EditorTabView({
   const doc = editorDoc(docKey)
   const editor = useRef<CodeEditorHandle>(null)
   const [loaded, setLoaded] = useState<Loaded | null>(null)
-  const [error, setError] = useState<string | null>(doc ? null : 'This file is no longer open.')
+  const [error, setError] = useState<string | null>(() =>
+    doc ? null : t('This file is no longer open.')
+  )
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [conflict, setConflict] = useState(false)
@@ -63,14 +67,14 @@ export function EditorTabView({
   const apply = useCallback(({ bytes, version: v }: Awaited<ReturnType<EditorDoc['read']>>) => {
     setError(null)
     if (looksBinary(bytes)) {
-      setError('This looks like a binary file — it cannot be edited as text.')
+      setError(t('This looks like a binary file — it cannot be edited as text.'))
       return
     }
     let text: string
     try {
       text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
     } catch {
-      setError('This file is not UTF-8 text — download it and edit it locally instead.')
+      setError(t('This file is not UTF-8 text — download it and edit it locally instead.'))
       return
     }
     version.current = v
@@ -106,10 +110,17 @@ export function EditorTabView({
 
   // Đóng tab còn thay đổi chưa lưu → hỏi.
   useEffect(() => {
-    setCloseGuard(tabId, () => {
-      if (!dirtyRef.current) return true
-      return window.confirm(`Discard your unsaved changes to ${doc?.name ?? 'this file'}?`)
-    })
+    setCloseGuard(tabId, () =>
+      dirtyRef.current
+        ? {
+            title: t('Discard unsaved changes?'),
+            message: doc
+              ? t('{name} has unsaved changes.', { name: doc.name })
+              : t('This file has unsaved changes.'),
+            confirmLabel: t('Discard')
+          }
+        : null
+    )
     return () => {
       setCloseGuard(tabId, null)
     }
@@ -135,10 +146,16 @@ export function EditorTabView({
         version.current = next
         markDirty(false)
         setConflict(false)
-        toast.success(`Saved ${doc.name}`, { group: `editor-save:${docKey}`, duration: 2000 })
+        toast.success(t('Saved {name}', { name: doc.name }), {
+          group: `editor-save:${docKey}`,
+          duration: 2000
+        })
       } catch (e) {
         if (doc.isConflict(e)) setConflict(true)
-        else toast.error(`Could not save ${doc.name}`, { description: cleanError(e) })
+        else
+          toast.error(t('Could not save {name}', { name: doc.name }), {
+            description: cleanError(e)
+          })
       } finally {
         setSaving(false)
       }
@@ -147,7 +164,7 @@ export function EditorTabView({
   )
 
   if (!doc) {
-    return <EditorMessage text={error ?? 'This file is no longer open.'} />
+    return <EditorMessage text={error ?? t('This file is no longer open.')} />
   }
 
   return (
@@ -168,11 +185,17 @@ export function EditorTabView({
           className={cx('shrink-0 text-[11px]', dirty ? 'text-warning' : 'text-faint')}
           data-testid="editor-state"
         >
-          {saving ? 'Saving…' : dirty ? 'Modified' : loaded ? 'Saved' : 'Loading…'}
+          {saving
+            ? t('Saving…')
+            : dirty
+              ? t('Unsaved changes')
+              : loaded
+                ? t('Saved')
+                : t('Loading…')}
         </span>
         <div className="flex-1" />
         <select
-          aria-label="Language"
+          aria-label={t('Language')}
           data-testid="editor-language"
           className="h-7 cursor-pointer rounded-md border border-line bg-transparent px-1.5 text-xs text-muted outline-none hover:text-fg"
           value={langId ?? ''}
@@ -180,7 +203,7 @@ export function EditorTabView({
             setLangId(e.target.value || null)
           }}
         >
-          <option value="">Plain text</option>
+          <option value="">{t('Plain text')}</option>
           {allLanguages().map((l) => (
             <option key={l.id} value={l.id}>
               {l.label}
@@ -190,7 +213,8 @@ export function EditorTabView({
         <button
           type="button"
           aria-pressed={wrap}
-          title="Wrap long lines"
+          title={t('Wrap long lines')}
+          aria-label={t('Wrap long lines')}
           className={cx(
             'flex size-7 items-center justify-center rounded-md',
             wrap ? 'bg-accent-soft text-fg' : 'text-faint hover:bg-hover hover:text-fg'
@@ -208,13 +232,23 @@ export function EditorTabView({
         </button>
         <button
           type="button"
-          title="Reload from the server"
+          title={t('Reload from the server')}
+          aria-label={t('Reload from the server')}
           data-testid="editor-reload"
           className="flex size-7 items-center justify-center rounded-md text-faint hover:bg-hover hover:text-fg"
           onClick={() => {
-            if (dirtyRef.current && !window.confirm('Discard your changes and reload the file?'))
+            if (!dirtyRef.current) {
+              load()
               return
-            load()
+            }
+            void confirmAction({
+              title: t('Discard your changes?'),
+              message: t('The file is reloaded from the server; your edits are lost.'),
+              confirmLabel: t('Reload'),
+              danger: true
+            }).then((ok) => {
+              if (ok) load()
+            })
           }}
         >
           <RotateCw size={14} />
@@ -227,7 +261,7 @@ export function EditorTabView({
           disabled={!loaded || saving || !dirty}
           onClick={() => void save()}
         >
-          Save
+          {t('Save')}
         </Button>
       </div>
       {conflict && (
@@ -236,10 +270,12 @@ export function EditorTabView({
           data-testid="editor-conflict"
         >
           <AlertTriangle size={14} className="text-warning" />
-          <span className="text-fg">{doc.name} was changed on the server since you opened it.</span>
+          <span className="text-fg">
+            {t('{name} was changed on the server since you opened it.', { name: doc.name })}
+          </span>
           <div className="flex-1" />
           <Button size="sm" data-testid="editor-overwrite" onClick={() => void save(true)}>
-            Overwrite with mine
+            {t('Overwrite with mine')}
           </Button>
           <Button
             size="sm"
@@ -249,7 +285,7 @@ export function EditorTabView({
               load()
             }}
           >
-            Reload theirs
+            {t('Reload theirs')}
           </Button>
         </div>
       )}
@@ -272,18 +308,18 @@ export function EditorTabView({
             onCursor={setCursor}
           />
         ) : (
-          <EditorMessage text="Opening…" />
+          <EditorMessage text={t('Opening…')} />
         )}
       </div>
       <div className="flex h-6 shrink-0 items-center gap-4 border-t border-line bg-subtle px-3 text-[11px] text-faint tabular-nums">
         <span data-testid="editor-cursor">
-          Ln {cursor.line}, Col {cursor.col}
-          {cursor.selected ? ` (${cursor.selected} selected)` : ''}
+          {t('Ln {line}, Col {col}', { line: cursor.line, col: cursor.col })}
+          {cursor.selected ? ` ${tn(cursor.selected, '({n} selected)', '({n} selected)')}` : ''}
         </span>
         {loaded && <span>{loaded.lineSeparator === '\r\n' ? 'CRLF' : 'LF'}</span>}
         <span>UTF-8</span>
         <div className="flex-1" />
-        <span>Ctrl+S save · Ctrl+F find · Ctrl+Z undo</span>
+        <span>{t('Ctrl+S save · Ctrl+F find · Ctrl+Z undo')}</span>
       </div>
     </div>
   )

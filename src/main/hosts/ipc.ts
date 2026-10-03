@@ -1,8 +1,11 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { app, dialog, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
+import { app, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
+import { t } from '@shared/i18n'
 import type { ImportCandidate, MutationResult } from '@shared/hosts'
+import { showOpenDialog, showSaveDialog } from '../dialogs'
+import { writePrivateFile } from '../private-file'
 import { handle } from '../ipc/router'
 import { scanCsv } from './csv-import'
 import { decodeMobaIni, scanMobaXterm } from './mobaxterm-import'
@@ -43,24 +46,39 @@ function defaultMobaIni(): string | null {
 }
 
 function readMobaIni(file: string): string {
-  if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error('The file is too large')
+  if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error(t('The file is too large'))
   return decodeMobaIni(readFileSync(file))
 }
 
-/** Nhóm theo đường dẫn tên (tạo nếu chưa có, so tên không phân biệt hoa thường như service). */
-function ensureGroupPath(service: HostService, path: readonly string[]): string | null {
-  let parentId: string | null = null
-  for (const name of path) {
-    const found = service
-      .tree()
-      .groups.find(
-        (g) =>
-          g.parentId === parentId &&
-          g.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0
-      )
-    parentId = found ? found.id : service.saveGroup({ parentId, name })
+/**
+ * Nhóm theo đường dẫn tên (tạo nếu chưa có, so tên không phân biệt hoa thường như service). Đọc
+ * danh sách nhóm MỘT lần cho cả lượt nhập (trước đây mỗi cấp của mỗi host đọc lại cả cây → O(n²)).
+ */
+function groupPathResolver(service: HostService): (path: readonly string[]) => string | null {
+  const children = new Map<string | null, { id: string; name: string }[]>()
+  for (const g of service.groups()) {
+    const list = children.get(g.parentId) ?? []
+    list.push({ id: g.id, name: g.name })
+    children.set(g.parentId, list)
   }
-  return parentId
+  return (path) => {
+    let parentId: string | null = null
+    for (const name of path) {
+      const siblings: { id: string; name: string }[] = children.get(parentId) ?? []
+      const found = siblings.find(
+        (g) => g.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0
+      )
+      if (found) {
+        parentId = found.id
+        continue
+      }
+      const id = service.saveGroup({ parentId, name })
+      siblings.push({ id, name: name.trim() })
+      children.set(parentId, siblings)
+      parentId = id
+    }
+    return parentId
+  }
 }
 
 function importCandidates(
@@ -72,35 +90,39 @@ function importCandidates(
   const wanted = new Set(aliases)
   let imported = 0
   const skipped: string[] = []
-  for (const c of candidates) {
-    if (!wanted.has(c.alias)) continue
-    if (c.problem || !c.username) {
-      skipped.push(c.alias)
-      continue
+  // Một transaction cho cả lượt (mỗi host là một savepoint lồng bên trong: host lỗi chỉ bỏ host đó).
+  return service.batch(() => {
+    const ensureGroupPath = groupPathResolver(service)
+    for (const c of candidates) {
+      if (!wanted.has(c.alias)) continue
+      if (c.problem || !c.username) {
+        skipped.push(c.alias)
+        continue
+      }
+      try {
+        service.saveHost({
+          groupId: ensureGroupPath(c.group ?? []),
+          label: c.label ?? c.alias,
+          hostname: c.hostname,
+          port: c.port,
+          username: c.username,
+          auth: 'auto',
+          keyId: null,
+          keyFile: c.keyFile,
+          proxyJump: c.proxyJump,
+          jumpHostIds: [],
+          mode: 'builtin',
+          tags: [...new Set([tag, ...(c.tags ?? [])])],
+          color: null
+        })
+        imported++
+      } catch (error) {
+        log.warn(`Skipping ${c.alias}: ${errorMessage(error)}`)
+        skipped.push(c.alias)
+      }
     }
-    try {
-      service.saveHost({
-        groupId: ensureGroupPath(service, c.group ?? []),
-        label: c.label ?? c.alias,
-        hostname: c.hostname,
-        port: c.port,
-        username: c.username,
-        auth: 'auto',
-        keyId: null,
-        keyFile: c.keyFile,
-        proxyJump: c.proxyJump,
-        jumpHostIds: [],
-        mode: 'builtin',
-        tags: [...new Set([tag, ...(c.tags ?? [])])],
-        color: null
-      })
-      imported++
-    } catch (error) {
-      log.warn(`Skipping ${c.alias}: ${errorMessage(error)}`)
-      skipped.push(c.alias)
-    }
-  }
-  return { imported, skipped }
+    return { imported, skipped }
+  })
 }
 
 function currentUser(): string {
@@ -180,6 +202,14 @@ export function registerHostIpc(
   handle('hosts:duplicate', isTrustedSender, (id) =>
     changing(() => mutation(() => service.duplicateHost(id)))
   )
+  handle('hosts:setPassword', isTrustedSender, (id, password) =>
+    changing(() =>
+      mutation(() => {
+        service.setHostPassword(id, password)
+        return id
+      })
+    )
+  )
   handle('groups:reorder', isTrustedSender, (parentId, ids) =>
     changing(() =>
       done(() => {
@@ -205,19 +235,17 @@ export function registerHostIpc(
   handle('keys:importFromFile', isTrustedSender, async () => {
     const window = getWindow()
     const options = {
-      title: 'Choose a private key',
+      title: t('Choose a private key'),
       defaultPath: join(app.getPath('home'), '.ssh'),
       properties: ['openFile', 'showHiddenFiles'] as ('openFile' | 'showHiddenFiles')[]
     }
-    const picked = window
-      ? await dialog.showOpenDialog(window, options)
-      : await dialog.showOpenDialog(options)
+    const picked = await showOpenDialog(window, options)
     const file = picked.filePaths[0]
     if (picked.canceled || !file) return null
     return changing(() =>
       mutation(() => {
         if (statSync(file).size > MAX_KEY_FILE_BYTES)
-          throw new Error('The file is too large to be a private key')
+          throw new Error(t('The file is too large to be a private key'))
         const key = service.importKey(basename(file), readFileSync(file, 'utf8'))
         log.info(`Imported key ${key.name} (${key.fingerprint})`)
         return key.id
@@ -242,18 +270,17 @@ export function registerHostIpc(
   handle('keys:exportPrivate', isTrustedSender, async (id) => {
     const window = getWindow()
     const options = {
-      title: 'Save private key',
+      title: t('Save private key'),
       defaultPath: join(app.getPath('home'), '.ssh', 'id_shellhouse'),
       showsTagField: false
     }
-    const picked = window
-      ? await dialog.showSaveDialog(window, options)
-      : await dialog.showSaveDialog(options)
+    const picked = await showSaveDialog(window, options)
     if (picked.canceled || !picked.filePath) return null
     const pem = service.privateKeyPem(id)
     try {
-      // 0600: OpenSSH từ chối key có quyền rộng hơn.
-      writeFileSync(picked.filePath, pem.reveal(), { mode: 0o600 })
+      // 0600: OpenSSH từ chối key có quyền rộng hơn. `mode` chỉ áp khi TẠO file — ghi đè file có
+      // sẵn (0644…) sẽ giữ quyền cũ → ghi ra file tạm mới tạo rồi đổi tên đè lên.
+      writePrivateFile(picked.filePath, pem.reveal())
       writeFileSync(`${picked.filePath}.pub`, `${service.publicKeyLine(id)}\n`, { mode: 0o644 })
       return { ok: true, path: picked.filePath }
     } catch (error) {
@@ -302,19 +329,17 @@ export function registerHostIpc(
     if (pick) {
       const window = getWindow()
       const options = {
-        title: 'Choose MobaXterm.ini',
+        title: t('Choose MobaXterm.ini'),
         ...(process.env['APPDATA']
           ? { defaultPath: join(process.env['APPDATA'], 'MobaXterm') }
           : {}),
         filters: [
-          { name: 'MobaXterm configuration', extensions: ['ini', 'mxtsessions'] },
-          { name: 'All files', extensions: ['*'] }
+          { name: t('MobaXterm configuration'), extensions: ['ini', 'mxtsessions'] },
+          { name: t('All files'), extensions: ['*'] }
         ],
         properties: ['openFile'] as 'openFile'[]
       }
-      const picked = window
-        ? await dialog.showOpenDialog(window, options)
-        : await dialog.showOpenDialog(options)
+      const picked = await showOpenDialog(window, options)
       file = picked.canceled ? null : (picked.filePaths[0] ?? null)
     }
     mobaFile = file
@@ -322,7 +347,7 @@ export function registerHostIpc(
     return { file, ...scanMoba(file) }
   })
   handle('mobaxterm:import', isTrustedSender, (aliases) => {
-    if (!mobaFile) throw new Error('Choose a MobaXterm file first')
+    if (!mobaFile) throw new Error(t('Choose a MobaXterm file first'))
     const result = importCandidates(service, scanMoba(mobaFile).candidates, aliases, 'mobaxterm')
     notifyChanged()
     return result
@@ -331,7 +356,7 @@ export function registerHostIpc(
   // CSV (Termius…): giống MobaXterm — main giữ đường dẫn file đã chọn.
   let csvFile: string | null = null
   const scanCsvFile = (file: string) => {
-    if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error('The file is too large')
+    if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error(t('The file is too large'))
     return scanCsv(decodeMobaIni(readFileSync(file)), {
       existingLabels: service.tree().hosts.map((h) => h.label),
       defaultUser: currentUser()
@@ -340,22 +365,20 @@ export function registerHostIpc(
   handle('csv:scan', isTrustedSender, async () => {
     const window = getWindow()
     const options = {
-      title: 'Choose a CSV file with hosts',
+      title: t('Choose a CSV file with hosts'),
       filters: [
         { name: 'CSV', extensions: ['csv', 'txt'] },
-        { name: 'All files', extensions: ['*'] }
+        { name: t('All files'), extensions: ['*'] }
       ],
       properties: ['openFile'] as 'openFile'[]
     }
-    const picked = window
-      ? await dialog.showOpenDialog(window, options)
-      : await dialog.showOpenDialog(options)
+    const picked = await showOpenDialog(window, options)
     csvFile = picked.canceled ? null : (picked.filePaths[0] ?? null)
     if (!csvFile) return { file: null, candidates: [], ignored: {} }
     return { file: csvFile, ...scanCsvFile(csvFile) }
   })
   handle('csv:import', isTrustedSender, (aliases) => {
-    if (!csvFile) throw new Error('Choose a CSV file first')
+    if (!csvFile) throw new Error(t('Choose a CSV file first'))
     const result = importCandidates(service, scanCsvFile(csvFile).candidates, aliases, 'csv')
     notifyChanged()
     return result

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { cx, IconButton } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
-import { useSavedHosts } from '../../registry/renderer-kit'
+import { t, useSavedHosts } from '../../registry/renderer-kit'
 import { wslDistroOf, wslSource } from '../shared/ipc'
 import { dockerApi, openDocker, sourceLabel } from './api'
 import { useDocker } from './store'
@@ -60,13 +60,13 @@ export function DockerSection(): React.JSX.Element {
   const rowMenu = (hostId: string | null, readOnly: boolean): MenuEntry[] => [
     {
       id: 'docker-open',
-      label: 'Open',
+      label: t('Open'),
       icon: <Container size={14} />,
       onSelect: () => openDocker(hostId)
     },
     {
       id: 'docker-read-only',
-      label: readOnly ? 'Turn off read-only mode' : 'Read-only mode',
+      label: readOnly ? t('Turn off read-only mode') : t('Read-only mode'),
       icon: <Eye size={14} />,
       onSelect: () => void dockerApi.setReadOnly(hostId, !readOnly)
     },
@@ -75,7 +75,7 @@ export function DockerSection(): React.JSX.Element {
           'separator' as const,
           {
             id: 'docker-remove',
-            label: wslDistroOf(hostId) ? 'Hide from Docker' : 'Remove from Docker',
+            label: wslDistroOf(hostId) ? t('Hide from Docker') : t('Remove from Docker'),
             icon: <Trash2 size={14} />,
             danger: true,
             onSelect: () =>
@@ -104,7 +104,7 @@ export function DockerSection(): React.JSX.Element {
           <span className="flex-1 text-left">Docker</span>
         </button>
         <IconButton
-          label="Refresh (find WSL distributions again)"
+          label={t('Refresh (find WSL distributions again)')}
           size="sm"
           data-testid="docker-refresh-sources"
           onClick={() => void useDocker.getState().reload()}
@@ -112,7 +112,7 @@ export function DockerSection(): React.JSX.Element {
           <RefreshCw size={12} />
         </IconButton>
         <IconButton
-          label="Add a server"
+          label={t('Add a server')}
           size="sm"
           data-testid="docker-add-server"
           onClick={(e) => {
@@ -120,7 +120,7 @@ export function DockerSection(): React.JSX.Element {
               ...addableWsl.map((d) => ({
                 id: `docker-add-wsl-${d.name}`,
                 label: `${d.name} (WSL)`,
-                hint: d.running ? 'running' : 'stopped',
+                hint: d.running ? t('running') : t('stopped'),
                 icon: <SquareTerminal size={14} />,
                 onSelect: () => {
                   void dockerApi.add(wslSource(d.name))
@@ -131,7 +131,7 @@ export function DockerSection(): React.JSX.Element {
                 ? [
                     {
                       id: 'none',
-                      label: 'Save an SSH host first',
+                      label: t('Save an SSH host first'),
                       disabled: true,
                       onSelect: () => undefined
                     }
@@ -161,7 +161,7 @@ export function DockerSection(): React.JSX.Element {
             data-testid="docker-endpoint"
             data-name={sourceLabel(r.hostId)}
             className="group flex h-8 cursor-default items-center gap-2.5 rounded-md px-2 hover:bg-hover"
-            title="Double-click to open"
+            title={t('Double-click to open')}
             onDoubleClick={() => openDocker(r.hostId)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') openDocker(r.hostId)
@@ -182,7 +182,7 @@ export function DockerSection(): React.JSX.Element {
             </span>
             {r.readOnly && (
               <span className="rounded bg-subtle px-1 text-[10px] font-medium text-muted">
-                read-only
+                {t('read-only')}
               </span>
             )}
           </div>

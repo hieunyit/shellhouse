@@ -96,6 +96,10 @@ test('khoá khi máy khoá màn hình; "nhớ trên máy" chỉ bật được k
     await expect(remember).toBeDisabled() // ví dụ Linux không có Secret Service
   } else {
     await remember.check()
+    // Bật cần nhập lại master password.
+    await page.getByTestId('remember-password').fill(E2E_PASSWORD)
+    await page.getByTestId('remember-confirm').click()
+    await expect(page.getByTestId('remember-password')).toHaveCount(0)
     await expect(remember).toBeChecked()
   }
   await page.keyboard.press('Escape')

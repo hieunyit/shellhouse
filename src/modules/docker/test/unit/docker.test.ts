@@ -71,7 +71,8 @@ describe('Docker — chuyển đổi', () => {
       { ip: '0.0.0.0', publicPort: 8000, privatePort: 8000, type: 'tcp' },
       { ip: '', publicPort: null, privatePort: 53, type: 'udp' }
     ])
-    expect(parseLabels('a=1,b=x=y,bad')).toEqual({ a: '1', b: 'x=y' })
+    // Mảnh không có "khoá=" thuộc về giá trị trước (CLI nối nhãn bằng dấu phẩy, không thoát).
+    expect(parseLabels('a=1,b=x=y,bad')).toEqual({ a: '1', b: 'x=y,bad' })
     expect(
       cliErrorText(
         'Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?',

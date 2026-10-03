@@ -81,6 +81,11 @@ export interface MainModuleContext {
   readDir(path: string): Promise<{ name: string; path: string; size: number }[]>
   /** Windows: bản phân phối WSL (cần quyền chạy `wsl`); máy khác → []. */
   wslDistros(): Promise<{ name: string; running: boolean; version: number }[]>
+  /**
+   * Đường dẫn có phải file tạm "sửa trong editor" do main cấp (files:prepareEdit) không — để
+   * Session Host chỉ ghi / theo dõi đúng file đó, không phải đường dẫn bất kỳ renderer gửi.
+   */
+  ownsEditFile?(path: string): boolean
   /** Hộp thoại chọn file (cần quyền `pick-file`); huỷ → []. */
   pickFiles(options: {
     title: string

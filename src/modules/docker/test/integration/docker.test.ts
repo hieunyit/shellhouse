@@ -12,7 +12,7 @@ import { DockerService, eventsRetry } from '../../session-host/service'
 import { dockerHost } from '../../session-host'
 import type { DockerCli } from '../../session-host/backend'
 import type { ContainerRow, ImageRow, PruneResult } from '../../shared/ops'
-import { startEngineTestServer, type EngineTestServer } from '../engine-test-server'
+import { ANON_VOLUME, startEngineTestServer, type EngineTestServer } from '../engine-test-server'
 
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
@@ -220,7 +220,7 @@ describe('Docker qua Engine API (Engine giả trên unix socket)', () => {
       .map((e) => e.data as { progress: number | null; error?: string })
     expect(pulls.some((p) => p.progress === 0.5)).toBe(true)
     expect(pulls.at(-1)).toMatchObject({ progress: 1 })
-    expect(server.requests).toContain('POST /v1.41/images/create?fromImage=redis&tag=7')
+    expect(server.requests).toContain('POST /v1.45/images/create?fromImage=redis&tag=7')
 
     events.length = 0
     await run({ op: 'image.pull', ref: 'does-not-exist' })
@@ -238,8 +238,9 @@ describe('Docker qua Engine API (Engine giả trên unix socket)', () => {
     expect((await run<PruneResult>({ op: 'prune', what: 'networks', dryRun: true })).items).toEqual(
       ['unused']
     )
+    // Volume: mặc định chỉ volume ẩn danh (như `docker volume prune` từ Docker 23).
     expect((await run<PruneResult>({ op: 'prune', what: 'volumes', dryRun: true })).items).toEqual([
-      'orphan'
+      ANON_VOLUME
     ])
   })
 
@@ -295,14 +296,19 @@ describe('Docker — Overview, stats cả bảng, top, history, run, log Compose
     const server = await engine()
     const { run, events, until } = service(server)
     const df = await run<{
-      images: { count: number; reclaimable: number }
-      volumes: { reclaimable: number }
-      buildCache: { size: number }
+      images: { count: number; reclaimable: number; unused: { count: number } }
+      volumes: { reclaimable: number; namedUnused: { count: number; size: number } }
+      buildCache: { size: number; reclaimable: number }
     }>({ op: 'df' })
     expect(df.images.count).toBe(3)
+    // "Reclaimable" = đúng thứ Clean up mặc định xoá: image dangling; image không dùng tính riêng.
     expect(df.images.reclaimable).toBe(5_000_000)
+    expect(df.images.unused.count).toBe(1)
+    // Volume: chỉ volume ẩn danh không dùng; volume có tên không dùng ("orphan") tách riêng.
     expect(df.volumes.reclaimable).toBe(2000)
-    expect(df.buildCache.size).toBe(3000)
+    expect(df.volumes.namedUnused).toEqual({ count: 1, size: 2000 })
+    expect(df.buildCache.size).toBe(4000)
+    expect(df.buildCache.reclaimable).toBe(3000)
     await run({ op: 'statsAll.subscribe' })
     await until(() => events.some((e) => e.event === 'statsAll'))
     const samples = (
@@ -443,7 +449,9 @@ describe('Docker qua SSH (streamlocal tới socket trên server)', () => {
     cleanups.push(() => ssh.close())
     const modules = new HostModuleRegistry([dockerHost], {
       log: () => undefined,
-      requestProgramGrant: () => Promise.resolve(false)
+      requestProgramGrant: () => Promise.resolve(false),
+      // Cờ chỉ đọc main giữ: hỏi lỗi là chặn (fail-closed) → test trả "không chỉ đọc".
+      requestMain: () => Promise.resolve(false)
     })
     modules.setEnabled(['docker'])
     const port = new FakePort()

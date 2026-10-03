@@ -1,5 +1,6 @@
 import { dirname, isAbsolute, join } from 'node:path'
 import { parse, parseDocument } from 'yaml'
+import { t } from '@shared/i18n'
 import type { ContextInfo, ContextRef } from '../shared/ops'
 
 /**
@@ -26,6 +27,8 @@ export interface OidcProvider {
   issuer?: string
   clientId?: string
   clientSecret?: string
+  /** CA của IdP (PEM). */
+  idpCa?: string
 }
 
 /** Một context đã phân giải hết — mọi dữ liệu nằm trong đối tượng (không còn đường dẫn file). */
@@ -37,6 +40,8 @@ export interface ResolvedCluster {
   insecure: boolean
   tlsServerName?: string
   namespace: string
+  /** Chế độ chỉ đọc (cài đặt của context trong main — Session Host chặn thao tác thay đổi). */
+  readOnly?: boolean
   auth: {
     token?: string
     cert?: string
@@ -131,9 +136,13 @@ export async function resolveContext(
   readFile: (path: string) => Promise<string>
 ): Promise<ResolvedCluster> {
   const ctx = doc.contexts.find((c) => c.name === ref.context)
-  if (!ctx) throw new Error(`The context “${ref.context}” is not in this kubeconfig anymore`)
+  if (!ctx)
+    throw new Error(
+      t('The context “{name}” is not in this kubeconfig anymore', { name: ref.context })
+    )
   const cluster = doc.clusters.get(ctx.cluster)
-  if (!cluster) throw new Error(`The cluster “${ctx.cluster}” is missing from the kubeconfig`)
+  if (!cluster)
+    throw new Error(t('The cluster “{name}” is missing from the kubeconfig', { name: ctx.cluster }))
   const user = doc.users.get(ctx.user) ?? {}
   const base = kubeconfigPath ? dirOf(kubeconfigPath) : '.'
   const load = async (data: unknown, file: unknown): Promise<string | undefined> => {
@@ -143,12 +152,13 @@ export async function resolveContext(
     if (!f) return undefined
     if (!kubeconfigPath)
       throw new Error(
-        'An imported kubeconfig must embed certificates (…-data fields), not file paths'
+        t('An imported kubeconfig must embed certificates (…-data fields), not file paths')
       )
     return readFile(absolute(f, base))
   }
   const server = str(cluster['server'])
-  if (!server) throw new Error(`The cluster “${ctx.cluster}” has no server address`)
+  if (!server)
+    throw new Error(t('The cluster “{name}” has no server address', { name: ctx.cluster }))
   const exec = obj(user['exec'])
   const provider = obj(user['auth-provider'])
   const providerConfig = obj(provider['config'])
@@ -188,6 +198,12 @@ export async function resolveContext(
       const v = str(providerConfig[field])
       if (v) oidc[k] = v
     }
+    // CA của IdP chỉ cần khi làm mới token — đọc không được thì bỏ qua (dùng CA hệ thống).
+    const idpCa = await load(
+      providerConfig['idp-certificate-authority-data'],
+      providerConfig['idp-certificate-authority']
+    ).catch(() => undefined)
+    if (idpCa) oidc.idpCa = idpCa
     auth.oidc = oidc
   }
   const ca = await load(cluster['certificate-authority-data'], cluster['certificate-authority'])
@@ -202,6 +218,9 @@ export async function resolveContext(
     auth
   }
 }
+
+/** Lý do gốc của lỗi đọc file (ENOENT, vùng bị chặn, quá lớn…) — không nuốt mất. */
+const reason = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
 /** Trường đường dẫn → trường nhúng tương ứng. */
 const FILE_FIELDS: readonly (readonly [
@@ -225,7 +244,7 @@ export async function embedReferences(
 ): Promise<string> {
   const doc = parseDocument(text)
   const root = doc.toJS() as Obj | null
-  if (!root || typeof root !== 'object') throw new Error('This file is not a kubeconfig')
+  if (!root || typeof root !== 'object') throw new Error(t('This file is not a kubeconfig'))
   for (const [section, inner, file, data] of FILE_FIELDS) {
     const list = arr(root[section])
     for (let i = 0; i < list.length; i++) {
@@ -235,8 +254,17 @@ export async function embedReferences(
       let content: string
       try {
         content = await readReferenced(ref)
-      } catch {
-        throw new Error(`Could not read ${ref} (referenced as ${file})`)
+      } catch (error) {
+        throw new Error(
+          t('Could not read {path} (referenced as {field}): {reason}', {
+            path: ref,
+            field: file,
+            reason: reason(error)
+          }),
+          {
+            cause: error
+          }
+        )
       }
       doc.setIn([section, i, inner, data], Buffer.from(content).toString('base64'))
       doc.deleteIn([section, i, inner, file])
@@ -247,8 +275,16 @@ export async function embedReferences(
     const ref = str(obj(users[i]?.['user'])['tokenFile'])
     if (!ref) continue
     const token = (
-      await readReferenced(ref).catch(() => {
-        throw new Error(`Could not read ${ref} (referenced as tokenFile)`)
+      await readReferenced(ref).catch((error: unknown) => {
+        throw new Error(
+          t('Could not read {path} (referenced as tokenFile): {reason}', {
+            path: ref,
+            reason: reason(error)
+          }),
+          {
+            cause: error
+          }
+        )
       })
     ).trim()
     doc.setIn(['users', i, 'user', 'token'], token)
@@ -265,10 +301,11 @@ export async function embedReferences(
 export function deleteContextFromYaml(text: string, name: string): { text: string; left: number } {
   const doc = parseDocument(text)
   const root = doc.toJS() as Obj | null
-  if (!root || typeof root !== 'object') throw new Error('This file is not a kubeconfig')
+  if (!root || typeof root !== 'object') throw new Error(t('This file is not a kubeconfig'))
   const contexts = arr(root['contexts'])
   const index = contexts.findIndex((c) => str(c['name']) === name)
-  if (index < 0) throw new Error(`The context “${name}” is not in this kubeconfig anymore`)
+  if (index < 0)
+    throw new Error(t('The context “{name}” is not in this kubeconfig anymore', { name }))
   const target = obj(contexts[index]?.['context'])
   doc.deleteIn(['contexts', index])
   const rest = contexts.filter((_, i) => i !== index)
@@ -289,4 +326,30 @@ export function deleteContextFromYaml(text: string, name: string): { text: strin
     else doc.delete('current-context')
   }
   return { text: doc.toString(), left: rest.length }
+}
+
+/**
+ * Ghi token OIDC vừa làm mới vào user của context (như kubectl: id-token / refresh-token trong
+ * auth-provider.config) — IdP xoay vòng refresh token thì bản cũ trong file không dùng được nữa.
+ * null = context không dùng OIDC (không đổi gì).
+ */
+export function setOidcTokens(
+  text: string,
+  contextName: string,
+  tokens: { idToken: string; refreshToken?: string | undefined }
+): string | null {
+  const doc = parseDocument(text)
+  const root = doc.toJS() as Obj | null
+  if (!root || typeof root !== 'object') return null
+  const ctx = arr(root['contexts']).find((c) => str(c['name']) === contextName)
+  const userName = str(obj(ctx?.['context'])['user'])
+  if (!userName) return null
+  const users = arr(root['users'])
+  const i = users.findIndex((u) => str(u['name']) === userName)
+  const provider = obj(obj(users[i]?.['user'])['auth-provider'])
+  if (i < 0 || str(provider['name']) !== 'oidc') return null
+  doc.setIn(['users', i, 'user', 'auth-provider', 'config', 'id-token'], tokens.idToken)
+  if (tokens.refreshToken)
+    doc.setIn(['users', i, 'user', 'auth-provider', 'config', 'refresh-token'], tokens.refreshToken)
+  return doc.toString()
 }

@@ -5,7 +5,7 @@ import { Notice, Select } from '../../../renderer/src/components/ui'
 import { ToolButton } from '../../../renderer/src/components/files/parts'
 import { LogViewer } from '../../../renderer/src/components/LogViewer'
 import { cleanError } from '../../../renderer/src/lib/format'
-import { ConnectionPrompt } from '../../registry/renderer-kit'
+import { ConnectionPrompt, formatNumber, t } from '../../registry/renderer-kit'
 import type { ModuleTabProps } from '../../registry/renderer-types'
 import { contextKey, type K8sLogsParams } from '../shared/ops'
 import type { K8sObject } from '../shared/resources'
@@ -35,7 +35,7 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
       const d = data as { subscription: string; text: string; error?: string }
       if (d.subscription !== subscription.current) return
       if (event === 'logs') feed.push(d.text)
-      else if (event === 'logs-end') setEnded(d.error ?? 'The log stream ended.')
+      else if (event === 'logs-end') setEnded(d.error ?? t('The log stream ended.'))
     },
     [feed]
   )
@@ -129,7 +129,7 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
           <>
             {containers.length > 1 && (
               <Select
-                aria-label="Container"
+                aria-label={t('Container')}
                 data-testid="k8s-logs-container"
                 className="h-7 w-36 text-xs"
                 value={container}
@@ -137,7 +137,7 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
                   setContainer(e.target.value)
                 }}
               >
-                <option value="*">All containers</option>
+                <option value="*">{t('All containers')}</option>
                 {containers.map((c) => (
                   <option key={c} value={c}>
                     {c}
@@ -146,7 +146,7 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
               </Select>
             )}
             <Select
-              aria-label="Lines to load"
+              aria-label={t('Lines to load')}
               className="h-7 w-28 text-xs"
               value={String(tail)}
               onChange={(e) => {
@@ -155,13 +155,13 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
             >
               {[100, 500, 1000, 5000, 50_000].map((n) => (
                 <option key={n} value={n}>
-                  Last {n.toLocaleString('en')}
+                  {t('Last {n}', { n: formatNumber(n) })}
                 </option>
               ))}
             </Select>
             <ToolButton
               icon={<History size={13} />}
-              label="Previous run"
+              label={t('Previous run')}
               labelAt="3xl"
               pressed={previous}
               testId="k8s-logs-previous"
@@ -171,7 +171,7 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
             />
             <ToolButton
               icon={<Clock size={13} />}
-              label="Timestamps"
+              label={t('Timestamps')}
               labelAt="3xl"
               pressed={timestamps}
               onClick={() => {
@@ -190,7 +190,7 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
               </div>
               <ToolButton
                 icon={<RefreshCw size={13} />}
-                label="Reconnect"
+                label={t('Reconnect')}
                 labelAt="md"
                 onClick={() => {
                   setRestart((r) => r + 1)

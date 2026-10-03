@@ -21,6 +21,8 @@ import { useTabStatus } from '../../renderer/src/stores/tab-status'
 import { useSettings } from '../../renderer/src/stores/settings'
 import { useHosts } from '../../renderer/src/stores/hosts'
 import { PromptDialog } from '../../renderer/src/terminal/PromptDialog'
+import { ErrorBoundary } from '../../renderer/src/components/ErrorBoundary'
+import { toast } from '../../renderer/src/stores/toasts'
 import { SessionClient } from '../../renderer/src/terminal/session-client'
 import type { TerminalState } from '../../renderer/src/terminal/controller'
 import type { HostContext, ModuleMenuEntry, ModuleTabDef, RendererModule } from './renderer-types'
@@ -62,6 +64,39 @@ export function whenHostRunning(timeoutMs = 15_000): Promise<void> {
 
 /** Thông báo nổi (toast) của app — module dùng để báo kết quả thao tác. */
 export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
+/** Đa ngôn ngữ + định dạng ngày / số / dung lượng theo locale — xem src/shared/i18n. */
+export { t, tn, language, locale } from '@shared/i18n'
+export {
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  formatDateTimeSeconds,
+  formatDuration,
+  formatNumber,
+  formatPercent,
+  formatRate,
+  formatRelative,
+  formatTime,
+  nameCollator
+} from '@shared/i18n/format'
+/** Cột điều hướng thu gọn thành dải icon (nhường chỗ ngang cho bảng + chi tiết). */
+export {
+  CollapsibleNav,
+  NavCollapseToggle,
+  NavItem,
+  NAV_COLLAPSED_WIDTH,
+  useCollapsedNav
+} from '../../renderer/src/components/CollapsibleNav'
+/** Ô mật khẩu có nút hiện / ẩn và cảnh báo Caps Lock. */
+export { PasswordInput } from '../../renderer/src/components/PasswordInput'
+/** Hộp thoại xác nhận của app (thay window.confirm) — xem stores/confirm. */
+export {
+  confirmAction,
+  choose,
+  type Choice,
+  type ChooseOptions,
+  type ConfirmOptions
+} from '../../renderer/src/stores/confirm'
 /** Editor trong app (tab riêng): module cung cấp cách đọc / ghi file. */
 export {
   openEditorDoc,
@@ -71,6 +106,14 @@ export {
   type EditorDoc,
   type EditorVersion
 } from '../../renderer/src/editor/docs'
+/**
+ * Editor mã CodeMirror của app (theme, tìm kiếm, gập, Ctrl+S) — nạp lười: CodeMirror không vào
+ * bundle khởi động. Đặt trong `<Suspense>`; `language` là Extension bất kỳ (ngôn ngữ + lint…).
+ */
+export const LazyCodeEditor = lazy(() =>
+  import('../../renderer/src/editor/CodeEditor').then((m) => ({ default: m.CodeEditor }))
+)
+export type { CodeEditorHandle, CursorInfo } from '../../renderer/src/editor/CodeEditor'
 /** Người dùng muốn sửa file văn bản bằng editor trong app (Cài đặt → Files). */
 export function useEditInApp(): boolean {
   return useSettings((s) => s.settings.files.inApp)
@@ -243,7 +286,11 @@ export function onModuleEvent(
     eventListeners.set(key, set)
   }
   set.add(listener)
-  return () => set.delete(listener)
+  return () => {
+    set.delete(listener)
+    // Không để lại Set rỗng cho mỗi khoá đã từng đăng ký.
+    if (set.size === 0 && eventListeners.get(key) === set) eventListeners.delete(key)
+  }
 }
 
 // ——— Tab ———
@@ -265,10 +312,14 @@ export function moduleTabTitle(module: string, tab: string, params: unknown): st
 export function openModuleTab(module: string, tab: string, params: unknown): string | null {
   const def = moduleTab(module, tab)
   if (!def || !isModuleEnabled(module)) return null
-  const parsed = def.params.parse(params)
+  const parsed = def.params.safeParse(params)
+  if (!parsed.success) {
+    toast.error('Could not open the tab', { details: parsed.error.message })
+    return null
+  }
   return useTabs
     .getState()
-    .addTarget(def.title(parsed), { kind: 'module', module, tab, params: parsed })
+    .addTarget(def.title(parsed.data), { kind: 'module', module, tab, params: parsed.data })
 }
 
 /** Tab module đổi tham số (vị trí đang xem…) → cập nhật đích (nhân bản / workspace) và tiêu đề. */
@@ -277,8 +328,16 @@ export function setModuleTabParams(tabId: string, params: unknown): void {
   if (tab?.target.kind !== 'module') return
   const def = moduleTab(tab.target.module, tab.target.tab)
   if (!def) return
-  const parsed = def.params.parse(params)
-  useTabs.getState().setModuleParams(tabId, parsed, def.title(parsed))
+  const parsed = def.params.safeParse(params)
+  if (!parsed.success) {
+    // eslint-disable-next-line no-console -- lỗi lập trình của module, không phải của người dùng
+    console.error(
+      `[shellhouse] invalid params for ${tab.target.module}:${tab.target.tab}`,
+      parsed.error
+    )
+    return
+  }
+  useTabs.getState().setModuleParams(tabId, parsed.data, def.title(parsed.data))
 }
 
 /** Mở tab terminal của module (shell vào container…), trên máy này hoặc qua host SSH đã lưu. */
@@ -295,6 +354,19 @@ export function openModuleTerminal(
     ...(hostId ? { hostId } : {})
   }
   return useTabs.getState().addTarget(title, target)
+}
+
+/**
+ * Gọi `listener` một lần khi tab `tabId` bị đóng (dọn tài nguyên tạm của module — pod debug…).
+ * Trả hàm huỷ theo dõi.
+ */
+export function onTabClosed(tabId: string, listener: () => void): () => void {
+  const unsub = useTabs.subscribe((state) => {
+    if (state.tabs.some((x) => x.id === tabId)) return
+    unsub()
+    listener()
+  })
+  return unsub
 }
 
 /** Chấm trạng thái trên tab (connecting / connected / disconnected). */
@@ -420,17 +492,30 @@ export class ModuleSessionClient {
 
 /**
  * Component nạp khi cần (chunk riêng) — module tắt không tốn gì. Có Suspense riêng: khung tab /
- * thanh bên không bị ẩn trong lúc nạp.
+ * thanh bên không bị ẩn trong lúc nạp. Có ErrorBoundary riêng: module lỗi (hoặc chunk không nạp
+ * được) chỉ hỏng phần của nó, không gỡ cả app.
  */
 export function lazyModuleComponent<P extends object>(
   load: () => Promise<ComponentType<P>>
 ): ComponentType<P> {
-  const Lazy = lazy(async () => ({ default: await load() }))
+  // React.lazy nhớ cả lần nạp hỏng → tạo lazy mới để nút "Reload" thử nạp lại chunk.
+  const make = (): ComponentType<P> =>
+    lazy(async () => {
+      try {
+        return { default: await load() }
+      } catch (error) {
+        Lazy = make()
+        throw error
+      }
+    })
+  let Lazy = make()
   function ModuleComponent(props: P): React.JSX.Element {
     return (
-      <Suspense fallback={null}>
-        <Lazy {...props} />
-      </Suspense>
+      <ErrorBoundary label="module" compact>
+        <Suspense fallback={null}>
+          <Lazy {...props} />
+        </Suspense>
+      </ErrorBoundary>
     )
   }
   return ModuleComponent

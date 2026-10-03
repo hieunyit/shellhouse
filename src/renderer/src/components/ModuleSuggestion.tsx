@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { manifestOf } from '../../../modules/registry/manifests'
 import { ModuleIcon } from '../../../modules/registry/renderer-kit'
 import { markSuggested, neverSuggest, requestEnableModule, suggestable } from '../stores/module-ui'
@@ -38,7 +39,7 @@ export function ModuleSuggestion({
     const first = visible.get(where) ?? suggestable(candidates)[0] ?? null
     if (!first) return
     // Đánh dấu "đã gợi ý" cùng lúc hiện (không trước): bị huỷ giữa chừng thì lần sau vẫn gợi ý.
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       if (!visible.has(where)) {
         visible.set(where, first)
         markSuggested(first)
@@ -46,7 +47,7 @@ export function ModuleSuggestion({
       setShown(first)
     }, 0)
     return () => {
-      clearTimeout(t)
+      clearTimeout(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- chỉ khi tập dấu hiệu / cài đặt gợi ý đổi
   }, [key, loaded, enabled, where])
@@ -67,7 +68,7 @@ export function ModuleSuggestion({
     >
       <ModuleIcon name={manifest.icon} size={13} className="shrink-0 text-accent" />
       <span className="min-w-0 flex-1 truncate">
-        {manifest.name} detected {where} — enable the {manifest.name} module?
+        {t('{name} detected {where} — enable the {name} module?', { name: manifest.name, where })}
       </span>
       <button
         type="button"
@@ -78,11 +79,11 @@ export function ModuleSuggestion({
           void requestEnableModule(shown)
         }}
       >
-        Enable
+        {t('Enable')}
       </button>
       <span className="text-faint">·</span>
       <button type="button" className="text-muted hover:text-fg" onClick={close}>
-        Not now
+        {t('Not now')}
       </button>
       <span className="text-faint">·</span>
       <button
@@ -94,9 +95,14 @@ export function ModuleSuggestion({
           neverSuggest(shown)
         }}
       >
-        Don’t suggest again
+        {t('Don’t suggest again')}
       </button>
-      <button type="button" aria-label="Close" className="text-faint hover:text-fg" onClick={close}>
+      <button
+        type="button"
+        aria-label={t('Close')}
+        className="text-faint hover:text-fg"
+        onClick={close}
+      >
         <X size={13} />
       </button>
     </div>

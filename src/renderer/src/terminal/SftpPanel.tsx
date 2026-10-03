@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type RefObject } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type RefObject
+} from 'react'
 import {
   ArrowUp,
   Copy,
@@ -29,8 +37,11 @@ import {
   FOLDER_EXISTS,
   MAX_WRITE_BYTES,
   formatMode,
+  isPartFile,
   joinRemote,
+  PART_SUFFIX,
   parentRemote,
+  type LocalPartInfo,
   type SftpEntry,
   type SftpListing,
   type SftpOp,
@@ -47,17 +58,26 @@ import {
   type EditorVersion
 } from '../editor/docs'
 import { Button, cx, IconButton, Input, Modal, Notice } from '../components/ui'
-import { replaceUnsafeFileChars } from '@shared/file-names'
+import { safeFileName } from '@shared/file-names'
 import { DRAG_LOCAL, DRAG_REMOTE, joinLocal } from '@shared/local-files'
 import { useSettings } from '../stores/settings'
 import { useContextMenu, type MenuEntry } from '../components/ContextMenu'
 import { SortMenu, usePersistentSort } from '../components/SortMenu'
 import { FileTable, type FileColumn } from '../components/files/FileTable'
+import { overwriteAsker } from '../components/files/overwrite'
 import { Empty, ToolButton } from '../components/files/parts'
 import { TransferList } from '../components/files/TransferList'
 import { FilePreview, previewBytes, type PreviewData } from '../components/files/FilePreview'
-import { cleanError, dateFormat, formatSize } from '../lib/format'
-import { FILE_SORT_KEYS, FILE_SORT_OPTIONS, nameOrder, type FileSort } from './file-sort'
+import { cleanError, formatSize } from '../lib/format'
+import { t, tn } from '@shared/i18n'
+import { formatDateTime } from '@shared/i18n/format'
+import {
+  FILE_SORT_KEYS,
+  FILE_SORT_OPTIONS,
+  fileSortOptions,
+  nameOrder,
+  type FileSort
+} from './file-sort'
 
 /** Sửa file lớn hơn thế này qua editor thường là nhầm (log, file nhị phân) — gợi ý tải về. */
 const MAX_EDIT_BYTES = 50 * 1024 * 1024
@@ -74,6 +94,12 @@ export interface SftpActions {
   upload(localPaths: string[]): Promise<void>
   /** Tải các mục của thư mục remote đang mở về thư mục local đang mở. */
   downloadByNames(names: string[]): Promise<void>
+  /** File tải dở bị bỏ lại trong thư mục local `dir` (tên đích, không đuôi part). */
+  localParts(dir: string, names: string[]): Promise<LocalPartInfo[]>
+  /** Xoá file part + meta của các mục đó. */
+  discardLocalParts(dir: string, names: string[]): Promise<void>
+  /** Tiếp tục tải các file dở dang (nguồn trên server ghi trong file meta). */
+  resumeLocalParts(dir: string, sep: string, parts: LocalPartInfo[]): Promise<void>
 }
 
 /** Thư mục local đang mở ở khung bên cạnh (SFTP hai cột): tải về thẳng vào đây, không hỏi chỗ lưu. */
@@ -89,24 +115,25 @@ const [NAME_SORT, SIZE_SORT, MTIME_SORT] = FILE_SORT_OPTIONS
 const GRID =
   'grid-cols-[minmax(0,1fr)_4.5rem] @md:grid-cols-[minmax(0,1fr)_4.5rem_8.5rem] @2xl:grid-cols-[minmax(0,1fr)_4.5rem_8.5rem_5.5rem]'
 
-const COLUMNS: FileColumn<SftpEntry, FileSort>[] = [
+/** Cột phụ — hàm (không phải hằng) để nhãn dịch lúc render. */
+const columns = (): FileColumn<SftpEntry, FileSort>[] => [
   {
     id: 'size',
-    label: 'Size',
+    label: t('Size'),
     sort: SIZE_SORT,
     align: 'right',
     render: (e) => (e.isDirLike ? '' : formatSize(e.size))
   },
   {
     id: 'mtime',
-    label: 'Modified',
+    label: t('Modified'),
     sort: MTIME_SORT,
     className: 'hidden @md:block',
-    render: (e) => (e.mtime ? dateFormat.format(new Date(e.mtime)) : '')
+    render: (e) => (e.mtime ? formatDateTime(e.mtime) : '')
   },
   {
     id: 'mode',
-    label: 'Permissions',
+    label: t('Permissions'),
     className: 'hidden @2xl:block font-mono',
     render: (e) => formatMode(e.mode)
   }
@@ -152,20 +179,24 @@ export function SftpPanel({
   const lastDone = useRef(0)
   const { menu, open: openMenu } = useContextMenu()
 
+  /** Lần nạp thư mục mới nhất — kết quả của lần cũ (bấm nhanh qua nhiều thư mục) bị bỏ. */
+  const loadSeq = useRef(0)
   const load = useCallback(
     async (target: string) => {
+      const seq = ++loadSeq.current
       setLoading(true)
       setError(null)
       try {
         const result = (await run({ op: 'list', path: target })) as SftpListing
+        if (seq !== loadSeq.current) return
         setListing(result)
         setPath(result.path)
         setPathInput(result.path)
         setSelected(new Set())
       } catch (e) {
-        setError(cleanError(e))
+        if (seq === loadSeq.current) setError(cleanError(e))
       } finally {
-        setLoading(false)
+        if (seq === loadSeq.current) setLoading(false)
       }
     },
     [run]
@@ -208,10 +239,11 @@ export function SftpPanel({
   const upload = async (localPaths: string[]): Promise<void> => {
     if (!path) return
     const names = new Set(listing?.entries.map((e) => e.name))
+    const ask = overwriteAsker(localPaths.filter((l) => names.has(baseName(l))).length)
     for (const local of localPaths) {
       const name = baseName(local)
       const overwrite =
-        names.has(name) && window.confirm(`“${name}” already exists on the server. Overwrite it?`)
+        names.has(name) && (await ask(t('“{name}” already exists on the server.', { name })))
       if (names.has(name) && !overwrite) continue
       await act({ op: 'upload', localPath: local, remotePath: joinRemote(path, name), overwrite })
     }
@@ -220,7 +252,11 @@ export function SftpPanel({
   }
 
   /** Tải cả thư mục về `parent`; đích đã có thư mục cùng tên → hỏi gộp. */
-  const downloadFolder = async (entry: SftpEntry, parent: string): Promise<void> => {
+  const downloadFolder = async (
+    entry: SftpEntry,
+    parent: string,
+    ask: (message: string) => Promise<boolean> = overwriteAsker(1)
+  ): Promise<void> => {
     if (!path) return
     const remotePath = joinRemote(path, entry.name)
     try {
@@ -231,7 +267,14 @@ export function SftpPanel({
         setError(message)
         return
       }
-      if (window.confirm(`“${entry.name}” already exists there. Merge and overwrite files?`))
+      if (
+        await ask(
+          t(
+            'The folder “{name}” already exists there. Merge into it and replace files with the same name?',
+            { name: entry.name }
+          )
+        )
+      )
         await act({ op: 'downloadFolder', remotePath, localParent: parent, overwrite: true })
     }
   }
@@ -257,19 +300,24 @@ export function SftpPanel({
       return
     }
     const dir =
-      localTarget?.dir ?? (await window.shellhouse.pickFolder('Choose where to save', 'downloads'))
+      localTarget?.dir ??
+      (await window.shellhouse.pickFolder(t('Choose where to save'), 'downloads'))
     if (!dir) return
     const sep = localTarget?.sep ?? (await window.shellhouse.listLocal(dir)).sep
     const existing = localTarget?.names ?? new Set<string>()
+    // Thư mục: chỉ biết trùng sau khi thử → tính là "có thể trùng" để có "Replace all".
+    const ask = overwriteAsker(
+      list.filter((e) => e.isDirLike || existing.has(safeFileName(e.name))).length
+    )
     for (const entry of list) {
       if (entry.isDirLike) {
-        await downloadFolder(entry, dir)
+        await downloadFolder(entry, dir, ask)
         continue
       }
-      const safe = replaceUnsafeFileChars(entry.name)
+      const safe = safeFileName(entry.name)
       if (
         existing.has(safe) &&
-        !window.confirm(`“${entry.name}” already exists in ${dir}. Overwrite it?`)
+        !(await ask(t('“{name}” already exists in {dir}.', { name: entry.name, dir })))
       )
         continue
       await act({
@@ -286,7 +334,10 @@ export function SftpPanel({
     if (!path) return
     if (entry.size > MAX_EDIT_BYTES) {
       setError(
-        `“${entry.name}” is too large to edit (${formatSize(entry.size)}). Download it instead.`
+        t('“{name}” is too large to edit ({size}). Download it instead.', {
+          name: entry.name,
+          size: formatSize(entry.size)
+        })
       )
       return
     }
@@ -313,9 +364,15 @@ export function SftpPanel({
   const moveToLocal = async (list: SftpEntry[]): Promise<void> => {
     if (!path || !localTarget || list.length === 0) return
     const dir = path
-    const label = list.length === 1 ? `“${list[0]?.name ?? ''}”` : `${list.length} items`
-    const before = new Set(transfersRef.current.map((t) => t.id))
-    toast.loading(`Moving ${label} to this computer…`, { group: 'sftp-move', duration: 0 })
+    const label =
+      list.length === 1
+        ? t('“{name}”', { name: list[0]?.name ?? '' })
+        : tn(list.length, '{n} item', '{n} items')
+    const before = new Set(transfersRef.current.map((x) => x.id))
+    toast.loading(t('Moving {label} to this computer…', { label }), {
+      group: 'sftp-move',
+      duration: 0
+    })
     try {
       await download(list)
       const { moved, kept } = await settleTransfers({
@@ -328,14 +385,23 @@ export function SftpPanel({
       for (const remotePath of moved) await run({ op: 'remove', path: remotePath, recursive: true })
       void load(dir)
       if (kept.length === 0)
-        toast.success(`Moved ${label} to this computer`, { group: 'sftp-move' })
+        toast.success(t('Moved {label} to this computer', { label }), { group: 'sftp-move' })
       else
-        toast.warning(`Moved ${moved.length}, kept ${kept.length} on the server`, {
-          group: 'sftp-move',
-          description: 'Items that were not downloaded completely stay where they are.'
-        })
+        toast.warning(
+          t('Moved {moved}, kept {kept} on the server', {
+            moved: moved.length,
+            kept: kept.length
+          }),
+          {
+            group: 'sftp-move',
+            description: t('Items that were not downloaded completely stay where they are.')
+          }
+        )
     } catch (e) {
-      toast.error(`Could not move ${label}`, { group: 'sftp-move', description: cleanError(e) })
+      toast.error(t('Could not move {label}', { label }), {
+        group: 'sftp-move',
+        description: cleanError(e)
+      })
     }
   }
 
@@ -356,7 +422,10 @@ export function SftpPanel({
         })) as SftpPreview
         if (p.truncated)
           throw new Error(
-            `“${entry.name}” is too large for the editor (${formatSize(p.size)}). Use “Edit in local editor”.`
+            t('“{name}” is too large for the editor ({size}). Use “Edit in local editor”.', {
+              name: entry.name,
+              size: formatSize(p.size)
+            })
           )
         return { bytes: fromBase64(p.data), version: { mtime: p.mtime, size: p.size } }
       },
@@ -389,6 +458,21 @@ export function SftpPanel({
     downloadByNames: async (names) => {
       const wanted = new Set(names)
       await download((listing?.entries ?? []).filter((e) => wanted.has(e.name)))
+    },
+    localParts: async (dir, names) =>
+      (await run({ op: 'localParts', dir, names })) as LocalPartInfo[],
+    discardLocalParts: async (dir, names) => {
+      await run({ op: 'discardLocalParts', dir, names })
+    },
+    resumeLocalParts: async (dir, sep, parts) => {
+      for (const part of parts)
+        if (part.resumable && part.remotePath)
+          await act({
+            op: 'download',
+            remotePath: part.remotePath,
+            localPath: joinLocal(dir, part.name, sep),
+            overwrite: false
+          })
     }
   }
   useEffect(() => {
@@ -409,23 +493,45 @@ export function SftpPanel({
     void upload(paths)
   }
 
-  const entries = (listing?.entries ?? [])
-    .filter((e) => showHidden || !e.name.startsWith('.'))
-    .sort((a, b) => {
-      if (a.isDirLike !== b.isDirLike) return a.isDirLike ? -1 : 1
-      const by =
-        sort.key === 'size' && !a.isDirLike
-          ? a.size - b.size
-          : sort.key === 'mtime'
-            ? a.mtime - b.mtime
-            : 0
-      return (by || nameOrder.compare(a.name, b.name)) * (sort.dir === 'asc' ? 1 : -1)
-    })
+  // Lọc + sắp xếp chỉ khi danh sách / cách sắp đổi (thư mục hàng nghìn file: không làm lại mỗi
+  // lần render do tiến độ truyền file, kéo thả…).
+  const entries = useMemo(
+    () =>
+      (listing?.entries ?? [])
+        .filter((e) => showHidden || (!e.name.startsWith('.') && !isPartFile(e.name)))
+        .sort((a, b) => {
+          if (a.isDirLike !== b.isDirLike) return a.isDirLike ? -1 : 1
+          const by =
+            sort.key === 'size' && !a.isDirLike
+              ? a.size - b.size
+              : sort.key === 'mtime'
+                ? a.mtime - b.mtime
+                : 0
+          return (by || nameOrder.compare(a.name, b.name)) * (sort.dir === 'asc' ? 1 : -1)
+        }),
+    [listing, showHidden, sort.key, sort.dir]
+  )
   const chosen = entries.filter((e) => selected.has(e.name))
   const one = chosen.length === 1 ? chosen[0] : undefined
-  const fileCount = entries.filter((e) => !e.isDirLike).length
-  const folderCount = entries.length - fileCount
-  const filesSize = entries.reduce((n, e) => n + (e.isDirLike ? 0 : e.size), 0)
+  const sortOptions = useMemo(() => fileSortOptions(), [])
+  /** File part của lượt truyền dở dang đang bị ẩn (hiện khi bật "Show hidden files"). */
+  const hiddenParts = useMemo(
+    () =>
+      (listing?.entries ?? []).filter(
+        (e) => !e.name.startsWith('.') && e.name.endsWith(PART_SUFFIX)
+      ).length,
+    [listing]
+  )
+  const { fileCount, folderCount, filesSize } = useMemo(() => {
+    let files = 0
+    let size = 0
+    for (const e of entries)
+      if (!e.isDirLike) {
+        files++
+        size += e.size
+      }
+    return { fileCount: files, folderCount: entries.length - files, filesSize: size }
+  }, [entries])
 
   const entryMenu = (list: SftpEntry[]): MenuEntry[] => {
     const single = list.length === 1 ? list[0] : undefined
@@ -433,7 +539,7 @@ export function SftpPanel({
     if (single?.isDirLike)
       items.push({
         id: 'sftp-open',
-        label: 'Open',
+        label: t('Open'),
         icon: <FolderOpen size={14} />,
         onSelect: () => {
           open(single)
@@ -442,7 +548,7 @@ export function SftpPanel({
     if (single && !single.isDirLike)
       items.push({
         id: 'sftp-preview',
-        label: 'Preview',
+        label: t('Preview'),
         icon: <Eye size={14} />,
         hint: 'Space',
         onSelect: () => {
@@ -453,7 +559,7 @@ export function SftpPanel({
       if (single.size <= MAX_WRITE_BYTES)
         items.push({
           id: 'sftp-edit-app',
-          label: 'Edit',
+          label: t('Edit'),
           icon: <FileCode size={14} />,
           onSelect: () => {
             editInApp(single)
@@ -461,7 +567,7 @@ export function SftpPanel({
         })
       items.push({
         id: 'sftp-edit',
-        label: 'Edit in local editor',
+        label: t('Edit in local editor'),
         icon: <FilePen size={14} />,
         onSelect: () => void edit(single)
       })
@@ -471,11 +577,11 @@ export function SftpPanel({
         id: 'sftp-download',
         label: localTarget
           ? list.length > 1
-            ? `Download ${list.length} items`
-            : 'Download'
+            ? t('Download {n} items', { n: list.length })
+            : t('Download')
           : list.length > 1
-            ? `Download ${list.length} items…`
-            : 'Download…',
+            ? t('Download {n} items…', { n: list.length })
+            : t('Download…'),
         icon: <Download size={14} />,
         ...(localTarget ? { hint: 'F5' } : {}),
         onSelect: () => void download(list)
@@ -484,7 +590,7 @@ export function SftpPanel({
         ? [
             {
               id: 'sftp-move',
-              label: 'Move to this computer',
+              label: t('Move to this computer'),
               icon: <MoveLeft size={14} />,
               hint: 'F6',
               onSelect: () => void moveToLocal(list)
@@ -497,7 +603,7 @@ export function SftpPanel({
       items.push(
         {
           id: 'sftp-rename',
-          label: 'Rename…',
+          label: t('Rename…'),
           icon: <Pencil size={14} />,
           hint: 'F2',
           onSelect: () => {
@@ -506,7 +612,7 @@ export function SftpPanel({
         },
         {
           id: 'sftp-chmod',
-          label: 'Permissions…',
+          label: t('Permissions…'),
           icon: <ShieldCheck size={14} />,
           onSelect: () => {
             setDialog({ kind: 'chmod', entry: single })
@@ -514,14 +620,14 @@ export function SftpPanel({
         },
         {
           id: 'sftp-copy-path',
-          label: 'Copy path',
+          label: t('Copy path'),
           icon: <Copy size={14} />,
           onSelect: () => void window.shellhouse.writeClipboard(joinRemote(path, single.name))
         }
       )
     items.push('separator', {
       id: 'sftp-delete',
-      label: 'Delete…',
+      label: t('Delete…'),
       icon: <Trash2 size={14} />,
       hint: 'Del',
       danger: true,
@@ -541,7 +647,7 @@ export function SftpPanel({
           : 'min-w-0 flex-1'
       )}
       data-testid="sftp-panel"
-      aria-label="Remote files"
+      aria-label={t('Remote files')}
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes(DRAG_LOCAL)) {
           e.preventDefault()
@@ -556,11 +662,11 @@ export function SftpPanel({
       <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
         {layout === 'pane' && (
           <span className="flex shrink-0 items-center gap-1.5 px-1 text-xs font-medium text-muted">
-            <Server size={14} /> <span className="hidden @md:inline">Remote</span>
+            <Server size={14} /> <span className="hidden @md:inline">{t('Remote')}</span>
           </span>
         )}
         <IconButton
-          label="Parent folder (Backspace)"
+          label={t('Parent folder (Backspace)')}
           disabled={!path || path === '/'}
           onClick={() => path && void load(parentRemote(path))}
         >
@@ -576,7 +682,7 @@ export function SftpPanel({
           <Input
             mono
             className="h-7"
-            aria-label="Remote path"
+            aria-label={t('Remote path')}
             data-testid="sftp-path"
             spellCheck={false}
             value={pathInput}
@@ -586,7 +692,7 @@ export function SftpPanel({
           />
         </form>
         <IconButton
-          label={showHidden ? 'Hide hidden files' : 'Show hidden files'}
+          label={showHidden ? t('Hide hidden files') : t('Show hidden files')}
           size="sm"
           active={showHidden}
           aria-pressed={showHidden}
@@ -598,8 +704,8 @@ export function SftpPanel({
         >
           {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </IconButton>
-        <SortMenu options={FILE_SORT_OPTIONS} sort={sort} onChange={setSort} testId="sftp-sort" />
-        <IconButton label="Refresh" onClick={() => path && void load(path)}>
+        <SortMenu options={sortOptions} sort={sort} onChange={setSort} testId="sftp-sort" />
+        <IconButton label={t('Refresh')} disabled={!path} onClick={() => path && void load(path)}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </IconButton>
       </div>
@@ -607,11 +713,11 @@ export function SftpPanel({
       <div
         className="flex h-10 shrink-0 items-center gap-0.5 overflow-hidden border-b border-line px-2"
         role="toolbar"
-        aria-label="Remote actions"
+        aria-label={t('Remote actions')}
       >
         <ToolButton
           icon={<Upload size={14} />}
-          label="Upload"
+          label={t('Upload')}
           labelAt="md"
           testId="sftp-upload"
           disabled={!path}
@@ -619,19 +725,19 @@ export function SftpPanel({
         />
         <ToolButton
           icon={<FolderUp size={14} />}
-          label="Upload folder"
+          label={t('Upload folder')}
           labelAt="5xl"
           testId="sftp-upload-folder"
           disabled={!path}
           onClick={() =>
             void window.shellhouse
-              .pickFolder('Choose a folder to upload', 'downloads')
+              .pickFolder(t('Choose a folder to upload'), 'downloads')
               .then((dir) => upload(dir ? [dir] : []))
           }
         />
         <ToolButton
           icon={<FolderPlus size={14} />}
-          label="New folder"
+          label={t('New folder')}
           labelAt="xl"
           testId="sftp-mkdir"
           disabled={!path}
@@ -651,7 +757,7 @@ export function SftpPanel({
                     <FilePen size={14} />
                   )
                 }
-                label={opening ? 'Opening…' : 'Edit'}
+                label={opening ? t('Opening…') : t('Edit')}
                 labelAt="3xl"
                 testId="sftp-edit"
                 disabled={opening !== null}
@@ -660,7 +766,7 @@ export function SftpPanel({
             )}
             <ToolButton
               icon={<Download size={14} />}
-              label={chosen.length > 1 ? `Download ${chosen.length}` : 'Download'}
+              label={chosen.length > 1 ? t('Download {n}', { n: chosen.length }) : t('Download')}
               labelAt="xl"
               testId="sftp-download"
               onClick={() => void download(chosen)}
@@ -669,7 +775,7 @@ export function SftpPanel({
               <>
                 <ToolButton
                   icon={<Pencil size={14} />}
-                  label="Rename"
+                  label={t('Rename')}
                   labelAt="5xl"
                   testId="sftp-rename"
                   onClick={() => {
@@ -678,7 +784,7 @@ export function SftpPanel({
                 />
                 <ToolButton
                   icon={<ShieldCheck size={14} />}
-                  label="Permissions"
+                  label={t('Permissions')}
                   labelAt="5xl"
                   testId="sftp-chmod"
                   onClick={() => {
@@ -690,7 +796,7 @@ export function SftpPanel({
             <span className="mx-1 h-4 w-px shrink-0 bg-line" />
             <ToolButton
               icon={<Trash2 size={14} />}
-              label="Delete"
+              label={t('Delete')}
               labelAt="3xl"
               testId="sftp-delete"
               danger
@@ -710,7 +816,7 @@ export function SftpPanel({
             </Notice>
           </div>
           <IconButton
-            label="Dismiss"
+            label={t('Dismiss')}
             size="sm"
             onClick={() => {
               setError(null)
@@ -735,10 +841,14 @@ export function SftpPanel({
         }
         badge={(e) =>
           opening === e.name ? (
-            <Loader2 size={13} className="shrink-0 animate-spin text-muted" aria-label="Opening" />
+            <Loader2
+              size={13}
+              className="shrink-0 animate-spin text-muted"
+              aria-label={t('Opening…')}
+            />
           ) : null
         }
-        columns={COLUMNS}
+        columns={columns()}
         gridClass={GRID}
         nameSort={NAME_SORT}
         sort={sort}
@@ -780,19 +890,19 @@ export function SftpPanel({
               }
             : {}
         }
-        ariaLabel="Remote files"
+        ariaLabel={t('Remote files')}
         rowTestId="sftp-entry"
       >
         {!connected && (
           <Empty
             icon={<Server size={20} />}
-            title="Waiting for the connection…"
-            text="Files appear as soon as the server is connected."
+            title={t('Waiting for the connection…')}
+            text={t('Files appear as soon as the server is connected.')}
             action={null}
           />
         )}
         {connected && loading && !listing && (
-          <div aria-label="Loading" className="space-y-1 p-3">
+          <div aria-label={t('Loading…')} aria-busy className="space-y-1 p-3">
             {Array.from({ length: 8 }, (_, i) => (
               <div key={i} className="flex animate-pulse items-center gap-2.5 py-1">
                 <span className="size-4 rounded bg-subtle" />
@@ -807,15 +917,15 @@ export function SftpPanel({
         {connected && listing && entries.length === 0 && (
           <Empty
             icon={<FolderOpen size={20} />}
-            title="This folder is empty"
-            text="Drop files here, or upload from your computer."
+            title={t('This folder is empty')}
+            text={t('Drop files here, or upload from your computer.')}
             action={
               <Button
                 size="sm"
                 icon={<Upload size={13} />}
                 onClick={() => void window.shellhouse.pickFilesToUpload().then(upload)}
               >
-                Upload files
+                {t('Upload files')}
               </Button>
             }
           />
@@ -828,10 +938,17 @@ export function SftpPanel({
           data-testid="sftp-status"
         >
           <span className="min-w-0 flex-1 truncate">
-            {folderCount} folder{folderCount === 1 ? '' : 's'}, {fileCount} file
-            {fileCount === 1 ? '' : 's'} · {formatSize(filesSize)}
-            {chosen.length > 0 ? ` · ${chosen.length} selected` : ''}
+            {statusLine(folderCount, fileCount, filesSize, chosen.length)}
           </span>
+          {hiddenParts > 0 && !showHidden && (
+            <span
+              className="shrink-0"
+              title={t('Partial files of unfinished transfers are hidden.')}
+              data-testid="sftp-hidden-parts"
+            >
+              {tn(hiddenParts, '{n} partial file hidden', '{n} partial files hidden')}
+            </span>
+          )}
         </div>
       )}
 
@@ -841,7 +958,8 @@ export function SftpPanel({
         rowTestId="transfer-row"
         onCancel={(id) => void act({ op: 'cancel', transferId: id })}
         onRetry={(id) => void act({ op: 'retry', transferId: id })}
-        onClear={() => void act({ op: 'clearDone' })}
+        onDiscard={(id) => void act({ op: 'discard', transferId: id })}
+        onClear={(keepParts) => void act({ op: 'clearDone', keepParts: keepParts === true })}
       />
 
       {dragOver && (
@@ -849,11 +967,11 @@ export function SftpPanel({
           <p className="flex max-w-[90%] flex-col items-center gap-1 text-center text-sm font-medium text-fg">
             <span className="flex items-center gap-2">
               <Upload size={16} className="text-accent" />
-              Drop to upload
+              {t('Drop to upload')}
             </span>
             {path && (
               <span className="max-w-full truncate font-mono text-xs font-normal text-muted">
-                to {path}
+                {t('to {path}', { path })}
               </span>
             )}
           </p>
@@ -929,10 +1047,10 @@ function EntryDialog({
   const [value, setValue] = useState(initial)
   const [busy, setBusy] = useState(false)
   const titles = {
-    mkdir: 'New folder',
-    rename: 'Rename',
-    chmod: 'Change permissions',
-    delete: 'Delete'
+    mkdir: t('New folder'),
+    rename: t('Rename'),
+    chmod: t('Change permissions'),
+    delete: t('Delete')
   } as const
   const invalid =
     dialog.kind === 'chmod'
@@ -955,14 +1073,22 @@ function EntryDialog({
       testId="sftp-dialog"
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t('Cancel')}</Button>
           <Button
             variant={dialog.kind === 'delete' ? 'danger' : 'primary'}
             disabled={invalid || busy}
             data-testid="sftp-dialog-submit"
             onClick={submit}
           >
-            {dialog.kind === 'delete' ? (busy ? 'Deleting…' : 'Delete') : 'OK'}
+            {dialog.kind === 'delete'
+              ? busy
+                ? t('Deleting…')
+                : t('Delete')
+              : dialog.kind === 'mkdir'
+                ? t('Create')
+                : dialog.kind === 'rename'
+                  ? t('Rename')
+                  : t('Apply')}
           </Button>
         </>
       }
@@ -978,15 +1104,21 @@ function EntryDialog({
           <>
             <p className="text-[13px]">
               {dialog.entries.length === 1 ? (
-                <>
-                  Delete <strong className="break-all">{dialog.entries[0]?.name}</strong>
-                  {folders.length > 0 ? ' and everything inside it' : ''}?
-                </>
+                <span className="break-all">
+                  {folders.length > 0
+                    ? t('Delete “{name}” and everything inside it?', {
+                        name: dialog.entries[0]?.name ?? ''
+                      })
+                    : t('Delete “{name}”?', { name: dialog.entries[0]?.name ?? '' })}
+                </span>
+              ) : folders.length > 0 ? (
+                tn(
+                  dialog.entries.length,
+                  'Delete this {n} item, including everything inside the folders?',
+                  'Delete these {n} items, including everything inside the folders?'
+                )
               ) : (
-                <>
-                  Delete these {dialog.entries.length} items
-                  {folders.length > 0 ? ', including everything inside the folders' : ''}?
-                </>
+                tn(dialog.entries.length, 'Delete this {n} item?', 'Delete these {n} items?')
               )}
             </p>
             {dialog.entries.length > 1 && (
@@ -1002,11 +1134,13 @@ function EntryDialog({
                   </li>
                 ))}
                 {dialog.entries.length > 50 && (
-                  <li className="py-0.5 text-faint">…and {dialog.entries.length - 50} more</li>
+                  <li className="py-0.5 text-faint">
+                    {t('…and {n} more', { n: dialog.entries.length - 50 })}
+                  </li>
                 )}
               </ul>
             )}
-            <p className="text-xs text-danger">This cannot be undone.</p>
+            <p className="text-xs text-danger">{t('This cannot be undone.')}</p>
           </>
         ) : (
           <Input
@@ -1017,15 +1151,32 @@ function EntryDialog({
             onChange={(e) => {
               setValue(e.target.value)
             }}
-            placeholder={dialog.kind === 'chmod' ? '755' : 'name'}
+            placeholder={dialog.kind === 'chmod' ? '755' : t('Name')}
+            aria-label={dialog.kind === 'chmod' ? t('Permissions (octal)') : t('Name')}
           />
         )}
         {dialog.kind === 'chmod' && (
-          <p className="text-xs text-faint">Octal, for example 644 or 755.</p>
+          <p className="text-xs text-faint">{t('Octal, for example 644 or 755.')}</p>
         )}
       </form>
     </Modal>
   )
+}
+
+/** "3 folders, 12 files · 4.5 MB · 2 selected" (thanh trạng thái dưới danh sách file). */
+export function statusLine(
+  folders: number,
+  files: number,
+  bytes: number,
+  selected: number
+): string {
+  return [
+    `${tn(folders, '{n} folder', '{n} folders')}, ${tn(files, '{n} file', '{n} files')}`,
+    formatSize(bytes),
+    selected > 0 && tn(selected, '{n} selected', '{n} selected')
+  ]
+    .filter(Boolean)
+    .join(' · ')
 }
 
 /** Hàm tải nội dung xem trước (ổn định theo đường dẫn — dialog không tải lại khi vẽ lại). */

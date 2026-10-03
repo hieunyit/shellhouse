@@ -11,8 +11,10 @@ export const dockerManifest: ModuleManifest = {
     'server.\n\n' +
     'On Windows, Docker running inside WSL (Ubuntu, Debian…) is listed too.\n\n' +
     'Follow logs, watch CPU and memory, open a shell inside a container as a terminal tab, ' +
-    'restart or remove containers, pull and prune images. Turn on read-only mode for production ' +
-    'servers to hide every action that changes something.',
+    'restart or remove containers, browse and copy files in and out of containers, build, pull, ' +
+    'tag and push images (registry passwords are encrypted in your vault), create volumes and ' +
+    'networks, and clean up disk space. Turn on read-only mode for production servers to hide ' +
+    'every action that changes something.',
   category: 'containers',
   keywords: [
     'docker',
@@ -37,7 +39,8 @@ export const dockerManifest: ModuleManifest = {
     { kind: 'ssh-socket', path: '/run/user/*/podman/podman.sock' },
     {
       kind: 'ssh-exec',
-      detail: 'Runs `docker` on servers you open it for (when the socket is not reachable)'
+      detail:
+        'Runs `docker` on servers you open it for (Compose, image builds, private registries, and when the socket is not reachable)'
     },
     { kind: 'local-socket', path: '$DOCKER_HOST' },
     { kind: 'local-socket', path: '/var/run/docker.sock' },
@@ -48,6 +51,10 @@ export const dockerManifest: ModuleManifest = {
     { kind: 'local-socket', path: '/run/user/*/podman/podman.sock' },
     { kind: 'local-socket', path: '\\\\.\\pipe\\docker_engine' },
     { kind: 'run-program', binary: 'docker' },
+    {
+      kind: 'secrets',
+      detail: 'Stores registry passwords and access tokens encrypted in the vault'
+    },
     { kind: 'run-program', binary: 'wsl' }
   ],
   detect: [

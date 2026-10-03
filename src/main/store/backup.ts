@@ -1,4 +1,12 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync
+} from 'node:fs'
 import { join } from 'node:path'
 import type { Db } from './db'
 
@@ -63,9 +71,19 @@ export async function dailyBackupIfDue(
   return path
 }
 
-/** Thay file DB bằng bản sao lưu. DB phải đang ĐÓNG. */
+/**
+ * Thay file DB bằng bản sao lưu. DB phải đang ĐÓNG. Chép ra file tạm cạnh DB rồi đổi tên (cùng ổ
+ * đĩa → nguyên tử): lỗi giữa chừng (đĩa đầy, file sao lưu không đọc được) không để lại DB dở dang.
+ */
 export function restoreBackup(backupPath: string, dbPath: string): void {
-  for (const suffix of ['-wal', '-shm']) rmSync(dbPath + suffix, { force: true })
-  if (existsSync(dbPath)) copyFileSync(dbPath, `${dbPath}.corrupt-${stamp(Date.now())}`)
-  copyFileSync(backupPath, dbPath)
+  const temp = `${dbPath}.restore-${stamp(Date.now())}`
+  try {
+    copyFileSync(backupPath, temp)
+    // WAL / SHM thuộc DB cũ — để lại cạnh DB mới thì SQLite sẽ áp nhầm vào.
+    for (const suffix of ['-wal', '-shm']) rmSync(dbPath + suffix, { force: true })
+    if (existsSync(dbPath)) copyFileSync(dbPath, `${dbPath}.corrupt-${stamp(Date.now())}`)
+    renameSync(temp, dbPath)
+  } finally {
+    rmSync(temp, { force: true })
+  }
 }

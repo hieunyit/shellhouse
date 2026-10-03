@@ -11,6 +11,7 @@ import { migrate } from './migrate'
 import { MIGRATIONS } from './migrations'
 
 export type { Db } from './db'
+export { dailyBackupIfDue } from './backup'
 
 export class CorruptDatabaseError extends Error {
   constructor(
@@ -38,7 +39,14 @@ function isCorruptionError(error: unknown): boolean {
   return code === 'SQLITE_CORRUPT' || code === 'SQLITE_NOTADB'
 }
 
-export async function openStore(paths: StorePaths): Promise<Db> {
+/**
+ * `dailyBackup: false`: người gọi tự chạy `dailyBackupIfDue` sau (app mở cửa sổ trước rồi mới sao
+ * lưu — không bắt người dùng chờ chép cả DB lúc khởi động).
+ */
+export async function openStore(
+  paths: StorePaths,
+  options: { dailyBackup?: boolean } = {}
+): Promise<Db> {
   let db: Db
   try {
     // File hỏng có thể lỗi ngay lúc mở (đọc schema khi bật WAL / foreign keys) — trước cả
@@ -60,7 +68,7 @@ export async function openStore(paths: StorePaths): Promise<Db> {
         rotateBackups(paths.backups, 7)
       }
     })
-    await dailyBackupIfDue(db, paths.backups)
+    if (options.dailyBackup !== false) await dailyBackupIfDue(db, paths.backups)
   } catch (error) {
     db.close()
     throw error

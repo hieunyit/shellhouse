@@ -8,6 +8,7 @@ import {
   useModuleEnabled,
   useModules
 } from '../../../modules/registry/renderer-kit'
+import { t } from '@shared/i18n'
 import { manifestOf } from '../../../modules/registry/manifests'
 import type { ModuleTabTarget, TabTarget } from '../stores/tabs'
 import { Button, Notice } from './ui'
@@ -37,7 +38,9 @@ export function ModuleTabView({
       >
         <Puzzle size={28} className="text-faint" />
         <p className="text-sm text-muted">
-          {def ? `The ${name} module is turned off.` : `This tab needs the ${name} module.`}
+          {def
+            ? t('The {name} module is turned off.', { name })
+            : t('This tab needs the {name} module.', { name })}
         </p>
         {def && (
           <Button
@@ -47,7 +50,7 @@ export function ModuleTabView({
               void setModuleEnabled(target.module, true)
             }}
           >
-            Enable {name}
+            {t('Enable {name}', { name })}
           </Button>
         )}
       </div>
@@ -57,7 +60,7 @@ export function ModuleTabView({
     return (
       <div className="p-6">
         <Notice tone="danger">
-          This tab can no longer be opened (its saved location is invalid).
+          {t('This tab can no longer be opened (its saved location is invalid).')}
         </Notice>
       </div>
     )

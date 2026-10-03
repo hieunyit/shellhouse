@@ -9,6 +9,8 @@
     "test/integration/telnet-test-server.ts",
     "src/modules/*/test/e2e/**/*",
     "src/modules/*/test/*-server.ts",
+    "src/modules/*/shared/**/*",
+    "src/modules/docker/session-host/tar.ts",
     "src/node-shared/**/*",
     "test/soak/**/*",
     "test/package/**/*",

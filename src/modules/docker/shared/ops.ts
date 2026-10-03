@@ -5,11 +5,12 @@ import { z } from 'zod'
  * thao tác validate bằng schema ở đây trước khi chạy.
  */
 
+/** Ký tự đầu là chữ / số: id không bao giờ bị CLI hiểu nhầm thành tuỳ chọn ("-f", "--rm"…). */
 const Id = z
   .string()
   .min(1)
   .max(256)
-  .regex(/^[A-Za-z0-9_.:/@-]+$/, 'Invalid id')
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_.:/@-]*$/, 'Invalid id')
 const Subscription = z.string().min(1).max(64)
 
 export const ContainerAction = z.enum([
@@ -23,14 +24,119 @@ export const ContainerAction = z.enum([
 ])
 export type ContainerAction = z.infer<typeof ContainerAction>
 
-export const PruneTarget = z.enum(['images', 'volumes', 'networks', 'containers'])
+export const PruneTarget = z.enum(['images', 'volumes', 'networks', 'containers', 'buildCache'])
 export type PruneTarget = z.infer<typeof PruneTarget>
 
 export const ComposeAction = z.enum(['start', 'stop', 'restart', 'up', 'down', 'pull'])
 export type ComposeAction = z.infer<typeof ComposeAction>
 
+/** Ảnh: "nginx:1.27", "ghcr.io/org/app:tag", "reg.local:5000/app@sha256:…". */
+const ImageRef = z
+  .string()
+  .min(1)
+  .max(512)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_.:/@-]*$/, 'Looks like nginx:1.27 or ghcr.io/org/app:tag')
+
+/** Tên volume / network do người dùng đặt (như Docker cho phép). */
+const ObjectName = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$/, 'Letters, digits, "_", "." and "-" only')
+
+/** Khoá nhãn / tuỳ chọn driver: không rỗng, không có "=" hay khoảng trắng. */
+const KeyValues = z.record(z.string().regex(/^[^=\s]{1,256}$/), z.string().max(4096))
+
+/** Id registry đã lưu (vault) — null = không đăng nhập (ảnh công khai). */
+const RegistryId = z.string().min(1).max(64).nullable()
+
+/** Đường dẫn trong container: tuyệt đối, không có ký tự NUL / xuống dòng. */
+export const ContainerPath = z
+  .string()
+  .min(1)
+  .max(4096)
+  .regex(/^\/[^\0\n]*$/, 'Must be an absolute path in the container')
+
+/** Đường dẫn trên máy này (thư mục lưu / file tải lên) — người dùng chọn trong hộp thoại. */
+const LocalPath = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((p) => !p.includes('\0'))
+
+export const VolumeSpec = z.object({
+  /** Rỗng = Docker tự đặt tên (volume ẩn danh). */
+  name: ObjectName.optional(),
+  driver: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9][\w.:/-]*$/),
+  driverOpts: KeyValues,
+  labels: KeyValues
+})
+export type VolumeSpec = z.infer<typeof VolumeSpec>
+
+const Cidr = z
+  .string()
+  .max(64)
+  .regex(/^[0-9A-Fa-f:.]+\/\d{1,3}$/, 'Use CIDR notation, like 172.28.0.0/16')
+const Ip = z
+  .string()
+  .max(64)
+  .regex(/^[0-9A-Fa-f:.]+$/, 'Use an IP address, like 172.28.0.1')
+
+export const NetworkSpec = z.object({
+  name: ObjectName,
+  driver: z
+    .string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9][\w.:/-]*$/),
+  subnet: Cidr.optional(),
+  gateway: Ip.optional(),
+  ipRange: Cidr.optional(),
+  internal: z.boolean(),
+  attachable: z.boolean(),
+  labels: KeyValues,
+  /** Tuỳ chọn driver (macvlan: parent=eth0). */
+  options: KeyValues
+})
+export type NetworkSpec = z.infer<typeof NetworkSpec>
+
+/** Build image bằng `docker build` (BuildKit) trên máy chạy Docker. */
+export const BuildSpec = z.object({
+  /** Thư mục build context trên máy chạy Docker (server với SSH, máy này với local). */
+  context: z
+    .string()
+    .min(1)
+    .max(4096)
+    .regex(/^[^-\0\n][^\0\n]*$/, 'Enter the folder of the build context'),
+  /** Tương đối với context hoặc tuyệt đối; rỗng = Dockerfile trong context. */
+  dockerfile: z
+    .string()
+    .max(4096)
+    .regex(/^[^-\0\n][^\0\n]*$/)
+    .optional(),
+  tags: z.array(ImageRef).max(16),
+  buildArgs: z
+    .array(
+      z
+        .string()
+        .max(4096)
+        .regex(/^[^=\s]+=/, 'Use NAME=value')
+    )
+    .max(100),
+  target: z
+    .string()
+    .max(128)
+    .regex(/^[A-Za-z0-9][\w.-]*$/)
+    .optional(),
+  noCache: z.boolean(),
+  pull: z.boolean()
+})
+export type BuildSpec = z.infer<typeof BuildSpec>
+
 /** Container mới (hộp thoại Run). */
-export const RunSpec = z.object({
+const RunSpecObject = z.object({
   image: z
     .string()
     .min(1)
@@ -72,11 +178,24 @@ export const RunSpec = z.object({
   /** Image chưa có trên máy → kéo về trước. */
   pull: z.boolean()
 })
+/** Docker từ chối --rm cùng chính sách restart (container tự xoá thì không khởi động lại được). */
+export const RUN_RESTART_CONFLICT = 'Auto-remove (--rm) only works with the restart policy "Never"'
+export const RunSpec = RunSpecObject.refine((s) => !s.autoRemove || s.restart === 'no', {
+  message: RUN_RESTART_CONFLICT,
+  path: ['restart']
+})
 export type RunSpec = z.infer<typeof RunSpec>
 
 export const DockerOp = z.discriminatedUnion('op', [
-  /** Chế độ chỉ đọc cho phiên này: thao tác thay đổi bị từ chối ở Session Host. */
-  z.object({ op: z.literal('configure'), readOnly: z.boolean() }),
+  /**
+   * Chế độ chỉ đọc cho phiên này: thao tác thay đổi bị từ chối ở Session Host. `hostId` = host SSH
+   * của phiên (Session Host hỏi lại main cờ chỉ đọc đã lưu — không chỉ tin cờ renderer gửi).
+   */
+  z.object({
+    op: z.literal('configure'),
+    readOnly: z.boolean(),
+    hostId: z.string().min(1).max(64).optional()
+  }),
   z.object({ op: z.literal('info') }),
   z.object({ op: z.literal('containers'), all: z.boolean() }),
   z.object({
@@ -110,7 +229,9 @@ export const DockerOp = z.discriminatedUnion('op', [
     op: z.literal('action'),
     id: Id,
     action: ContainerAction,
-    force: z.boolean().optional()
+    force: z.boolean().optional(),
+    /** remove: xoá cả volume ẩn danh của container (`docker rm -v`). */
+    volumes: z.boolean().optional()
   }),
   z.object({
     op: z.literal('rename'),
@@ -130,23 +251,73 @@ export const DockerOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('unsubscribe'), subscription: Subscription }),
   z.object({ op: z.literal('images') }),
   z.object({ op: z.literal('image.remove'), id: Id, force: z.boolean().optional() }),
-  z.object({
-    op: z.literal('image.pull'),
-    ref: z
-      .string()
-      .min(1)
-      .max(512)
-      .regex(/^[A-Za-z0-9][A-Za-z0-9_.:/@-]*$/, 'Looks like nginx:1.27 or ghcr.io/org/app:tag')
-  }),
+  /**
+   * Kéo image. `registry` = id thông tin đăng nhập đã lưu (Session Host hỏi main lấy mật khẩu,
+   * renderer không bao giờ thấy); null / thiếu = không đăng nhập.
+   */
+  z.object({ op: z.literal('image.pull'), ref: ImageRef, registry: RegistryId.optional() }),
+  /** Đẩy image lên registry (luồng tiến độ như pull). */
+  z.object({ op: z.literal('image.push'), ref: ImageRef, registry: RegistryId.optional() }),
+  /** Gắn thêm tag (`docker tag <id> <repo>:<tag>`). */
+  z.object({ op: z.literal('image.tag'), id: Id, target: ImageRef }),
+  /** Thử đăng nhập registry đã lưu (POST /auth / `docker login`). */
+  z.object({ op: z.literal('registry.check'), registry: z.string().min(1).max(64) }),
+  /** Build image (CLI `docker build`, BuildKit) → luồng sự kiện 'build'. */
+  z.object({ op: z.literal('build'), spec: BuildSpec }),
   z.object({ op: z.literal('volumes') }),
   z.object({ op: z.literal('volume.remove'), name: Id }),
+  z.object({ op: z.literal('volume.create'), spec: VolumeSpec }),
   z.object({ op: z.literal('networks') }),
   z.object({ op: z.literal('network.remove'), id: Id }),
-  /** dryRun = chỉ liệt kê những gì sẽ bị xoá. */
-  z.object({ op: z.literal('prune'), what: PruneTarget, dryRun: z.boolean() }),
+  z.object({ op: z.literal('network.create'), spec: NetworkSpec }),
+  /** Nối container vào network (alias, IPv4 cố định tuỳ chọn). */
+  z.object({
+    op: z.literal('network.connect'),
+    network: Id,
+    container: Id,
+    aliases: z.array(ObjectName).max(16),
+    ipv4: Ip.optional()
+  }),
+  z.object({
+    op: z.literal('network.disconnect'),
+    network: Id,
+    container: Id,
+    force: z.boolean()
+  }),
+  /** Liệt kê một thư mục trong container (exec `sh`; không có shell → đọc archive). */
+  z.object({ op: z.literal('files.list'), id: Id, path: ContainerPath }),
+  /** Tải file / thư mục trong container về thư mục `localDir` trên máy này. */
+  z.object({
+    op: z.literal('files.download'),
+    id: Id,
+    paths: z.array(ContainerPath).min(1).max(1000),
+    localDir: LocalPath
+  }),
+  /** Tải file / thư mục trên máy này vào thư mục `dir` của container. */
+  z.object({
+    op: z.literal('files.upload'),
+    id: Id,
+    dir: ContainerPath,
+    localPaths: z.array(LocalPath).min(1).max(1000)
+  }),
+  /**
+   * dryRun = chỉ liệt kê những gì sẽ bị xoá. Volume: mặc định chỉ volume ẩn danh (như `docker
+   * volume prune` từ Docker 23); `all` = cả volume có tên. Image: mặc định chỉ image dangling;
+   * `all` = mọi image không container nào dùng (`docker image prune -a`).
+   */
+  z.object({
+    op: z.literal('prune'),
+    what: PruneTarget,
+    dryRun: z.boolean(),
+    all: z.boolean().optional()
+  }),
   z.object({
     op: z.literal('compose'),
-    project: z.string().min(1).max(128),
+    project: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/, 'Invalid project name'),
     action: ComposeAction
   })
 ])
@@ -160,8 +331,16 @@ export function isMutating(op: DockerOp): boolean {
     case 'run':
     case 'image.remove':
     case 'image.pull':
+    case 'image.push':
+    case 'image.tag':
+    case 'build':
     case 'volume.remove':
+    case 'volume.create':
     case 'network.remove':
+    case 'network.create':
+    case 'network.connect':
+    case 'network.disconnect':
+    case 'files.upload':
     case 'compose':
       return true
     case 'prune':
@@ -194,6 +373,17 @@ export interface PortMapping {
   type: string
 }
 
+/** Trạng thái healthcheck (HEALTHCHECK của image / compose); null = không có healthcheck. */
+export type Health = 'healthy' | 'unhealthy' | 'starting' | null
+
+/** "Up 2 hours (healthy)", "Up 5 seconds (health: starting)" → trạng thái healthcheck. */
+export function healthOf(status: string): Health {
+  const m = /\((healthy|unhealthy|health: starting)\)/i.exec(status)
+  if (!m) return null
+  const v = (m[1] ?? '').toLowerCase()
+  return v === 'healthy' ? 'healthy' : v === 'unhealthy' ? 'unhealthy' : 'starting'
+}
+
 export interface ContainerRow {
   id: string
   name: string
@@ -201,6 +391,7 @@ export interface ContainerRow {
   /** created | running | paused | restarting | exited | removing | dead */
   state: string
   status: string
+  health: Health
   created: number
   ports: PortMapping[]
   /** Nhãn `com.docker.compose.project` (nếu có). */
@@ -238,11 +429,26 @@ export interface NetworkRow {
   builtin: boolean
 }
 
+export interface DiskUsageEntry {
+  count: number
+  size: number
+  /** Phần "Clean up" mặc định xoá được (khớp đúng thao tác dọn mặc định). */
+  reclaimable: number
+}
+
 export interface DiskUsage {
-  images: { count: number; size: number; reclaimable: number }
-  containers: { count: number; size: number; reclaimable: number }
-  volumes: { count: number; size: number; reclaimable: number }
-  buildCache: { count: number; size: number; reclaimable: number }
+  /**
+   * reclaimable = image dangling (không tag) — thứ "Clean up" mặc định xoá. `unused` = mọi image
+   * không container nào dùng (`docker image prune -a`, kể cả dangling).
+   */
+  images: DiskUsageEntry & { unused: { count: number; size: number } }
+  containers: DiskUsageEntry
+  /**
+   * reclaimable = volume ẩn danh không dùng (khớp mặc định của Clean up). Volume CÓ TÊN không dùng
+   * tính riêng (`namedUnused`) — thường giữ dữ liệu cần giữ. null = không biết (CLI cũ).
+   */
+  volumes: DiskUsageEntry & { namedUnused: { count: number; size: number } | null }
+  buildCache: DiskUsageEntry
 }
 
 export interface ProcessList {
@@ -262,6 +468,52 @@ export interface PruneResult {
   /** Tên / id những gì bị xoá (hoặc sẽ bị xoá khi dryRun). */
   items: string[]
   reclaimed: number
+  /** Số mục khi không liệt kê được từng cái (build cache qua CLI). */
+  count?: number
+}
+
+/** Một mục trong thư mục của container (tab Files). */
+export interface ContainerFileEntry {
+  name: string
+  /** link = liên kết tượng trưng; `linkDir` = trỏ tới thư mục (mở được). */
+  type: 'file' | 'dir' | 'link' | 'other'
+  linkDir?: boolean
+  size: number | null
+  /** ms; null = không biết. */
+  mtime: number | null
+  /** "-rwxr-xr-x" (null = không biết). */
+  mode: string | null
+}
+
+export interface ContainerFileList {
+  path: string
+  entries: ContainerFileEntry[]
+  /** exec = `sh` trong container; archive = đọc tar (container không có shell / đang dừng). */
+  via: 'exec' | 'archive'
+  /** Thư mục quá lớn để đọc hết qua archive — danh sách thiếu. */
+  truncated: boolean
+}
+
+export interface CopyResult {
+  files: number
+  bytes: number
+  /** Liên kết / file đặc biệt bỏ qua (không tạo symlink trên máy này). */
+  skipped: number
+  /** Đường dẫn đã lưu trên máy này (download). */
+  saved: string[]
+}
+
+/** Thông tin đăng nhập registry (chỉ Session Host thấy mật khẩu). */
+export interface RegistryAuth {
+  server: string
+  username: string
+  password: string
+}
+
+/** Sự kiện 'build': một mảnh output của `docker build`. */
+export interface BuildEvent {
+  subscription: string
+  text: string
 }
 
 /** Mẫu CPU / RAM / mạng từ /containers/{id}/stats. */
@@ -320,6 +572,8 @@ export const WSL_DISTRO = /^[\w.-]{1,64}$/
 
 export const DockerTerminalParams = z.object({
   container: Id,
+  /** Host SSH (để Session Host hỏi main cờ chỉ đọc). */
+  hostId: z.string().min(1).max(64).optional(),
   /** Lệnh thay cho shell mặc định (bash nếu có, không thì sh). */
   command: z.array(z.string().max(1024)).max(32).optional(),
   user: z

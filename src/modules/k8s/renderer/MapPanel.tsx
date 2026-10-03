@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { Heading, Pill } from '../../../renderer/src/components/panels'
-import { ago } from '../../../renderer/src/lib/format'
+import { formatRelative, t, tn } from '../../registry/renderer-kit'
 import { formatCpu, formatMemory } from '../shared/resources'
 import {
   TECH,
@@ -22,10 +22,33 @@ import {
   type MapLayout,
   type MapNode
 } from '../shared/map'
-import { formatRate, type TrafficPeer, type TrafficRate } from '../shared/traffic'
+import { type TrafficPeer, type TrafficRate } from '../shared/traffic'
+import { trafficText as formatRate } from './topology/text'
 import { TechIcon } from './icons'
 import { type TrafficState } from './useTraffic'
-import { type MapRef, KIND_TITLE, routeTitle, titleOf, peerLabel, DOT } from './mapModel'
+import { type MapRef, kindTitle, routeTitle, titleOf, peerLabel, DOT } from './mapModel'
+
+/** "2 pods", "1 service"… — số mục bị ảnh hưởng theo loại. */
+function impactText(kind: MapNode['kind'], n: number): string {
+  switch (kind) {
+    case 'pod':
+      return tn(n, '{n} pod', '{n} pods')
+    case 'service':
+      return tn(n, '{n} service', '{n} services')
+    case 'route':
+      return tn(n, '{n} route', '{n} routes')
+    case 'workload':
+      return tn(n, '{n} workload', '{n} workloads')
+    case 'pvc':
+      return tn(n, '{n} volume', '{n} volumes')
+    case 'gateway':
+      return tn(n, '{n} gateway', '{n} gateways')
+    case 'policy':
+      return tn(n, '{n} policy', '{n} policies')
+    default:
+      return `${String(n)} ${kind}`
+  }
+}
 
 /** Traffic của workload đang chọn (bảng bên phải). */
 function TrafficSection({
@@ -52,25 +75,29 @@ function TrafficSection({
   )
   return (
     <section data-testid="k8s-map-node-traffic">
-      <Heading>Live traffic</Heading>
+      <Heading>{t('Live traffic')}</Heading>
       {traffic.status === 'unavailable' && (
-        <p className="text-xs text-faint">Unavailable — {traffic.reason ?? 'no Caretta'}.</p>
+        <p className="text-xs text-faint">
+          {t('Unavailable — {reason}.', {
+            reason: traffic.reason ?? t('Caretta is not installed')
+          })}
+        </p>
       )}
       {traffic.status === 'connecting' && (
-        <p className="text-xs text-faint">Connecting to Caretta…</p>
+        <p className="text-xs text-faint">{t('Measuring traffic from Caretta…')}</p>
       )}
       {traffic.status === 'live' && !traffic.incoming.length && !traffic.outgoing.length && (
-        <p className="text-xs text-faint">No traffic observed in the last interval.</p>
+        <p className="text-xs text-faint">{t('No traffic observed in the last minute.')}</p>
       )}
       {traffic.incoming.length > 0 && (
         <>
-          <div className="mt-1 text-[11px] text-faint">In</div>
+          <div className="mt-1 text-[11px] text-faint">{t('Called by')}</div>
           {traffic.incoming.map((r) => row(r, r.client))}
         </>
       )}
       {traffic.outgoing.length > 0 && (
         <>
-          <div className="mt-1 text-[11px] text-faint">Out</div>
+          <div className="mt-1 text-[11px] text-faint">{t('Calls')}</div>
           {traffic.outgoing.map((r) => row(r, r.server))}
         </>
       )}
@@ -101,7 +128,8 @@ export function MapPanel({
   onGo: (n: MapNode) => void
   onOpen: (ref: MapRef) => void
   onLogs: (ref: MapRef) => void
-  onShell: (ref: MapRef) => void
+  /** Không có (chỉ đọc) → ẩn nút Shell. */
+  onShell?: ((ref: MapRef) => void) | undefined
   /** Namespace: đang gập không (null = không phải namespace). */
   folded: boolean | null
   onToggleNs: (ns: string) => void
@@ -121,18 +149,17 @@ export function MapPanel({
     for (const id of affected ?? []) {
       const n = index.byId.get(id)
       if (!n) continue
-      const label = n.kind === 'route' ? 'route' : n.kind === 'pvc' ? 'volume' : n.kind
-      counts.set(label, (counts.get(label) ?? 0) + 1)
+      counts.set(n.kind, (counts.get(n.kind) ?? 0) + 1)
     }
-    return [...counts.entries()].map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`)
+    return [...counts.entries()].map(([k, n]) => impactText(k as MapNode['kind'], n))
   })()
   const tech = node.tech ? TECH[node.tech] : undefined
-  const kindTitle =
+  const typeTitle =
     node.kind === 'route'
       ? routeTitle(node.ref?.kind ?? '')
       : node.kind === 'workload' && node.ref
         ? workloadKindLabel(node.ref.kind)
-        : KIND_TITLE[node.kind]
+        : kindTitle(node.kind)
   const edges = index.edgesOf.get(node.id) ?? []
   const linked = (dir: 'in' | 'out'): MapNode[] =>
     edges
@@ -175,7 +202,7 @@ export function MapPanel({
                   ? routeTitle(n.ref?.kind ?? '')
                   : n.kind === 'workload' && n.ref
                     ? workloadKindLabel(n.ref.kind)
-                    : KIND_TITLE[n.kind]}
+                    : kindTitle(n.kind)}
               </span>
             </button>
           ))}
@@ -194,23 +221,23 @@ export function MapPanel({
             {node.kind !== 'region' && node.kind !== 'namespace' && (
               <Pill tone={node.tone}>
                 {node.tone === 'ok'
-                  ? 'healthy'
+                  ? t('healthy')
                   : node.tone === 'bad'
-                    ? 'failing'
+                    ? t('failing')
                     : node.tone === 'warn'
-                      ? 'degraded'
+                      ? t('degraded')
                       : '—'}
               </Pill>
             )}
           </div>
           <div className="truncate text-xs text-faint">
-            {kindTitle}
+            {typeTitle}
             {node.ns && node.kind !== 'namespace' ? ` · ${node.ns}` : ''}
           </div>
         </div>
         <button
           type="button"
-          aria-label="Close"
+          aria-label={t('Close')}
           className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
           onClick={onClose}
         >
@@ -221,7 +248,7 @@ export function MapPanel({
         {node.ref && (
           <PanelAction
             icon={<ExternalLink size={13} />}
-            label={node.kind === 'namespace' ? 'Show resources' : 'Open details'}
+            label={node.kind === 'namespace' ? t('Show resources') : t('Open details')}
             testId="k8s-map-open"
             onClick={() => {
               if (node.ref) onOpen(node.ref)
@@ -231,16 +258,16 @@ export function MapPanel({
         {(isWorkload || node.kind === 'pod') && node.ref?.kind !== 'cronjobs.batch' && (
           <PanelAction
             icon={<FileText size={13} />}
-            label="Logs"
+            label={t('Logs')}
             onClick={() => {
               if (node.ref) onLogs(node.ref)
             }}
           />
         )}
-        {node.kind === 'pod' && (
+        {node.kind === 'pod' && onShell && (
           <PanelAction
             icon={<SquareTerminal size={13} />}
-            label="Shell"
+            label={t('Shell')}
             onClick={() => {
               if (node.ref) onShell(node.ref)
             }}
@@ -249,7 +276,7 @@ export function MapPanel({
         {folded !== null && (
           <PanelAction
             icon={folded ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
-            label={folded ? 'Expand' : 'Collapse'}
+            label={folded ? t('Expand') : t('Collapse')}
             testId="k8s-map-panel-fold"
             onClick={() => {
               if (node.ns) onToggleNs(node.ns)
@@ -258,7 +285,7 @@ export function MapPanel({
         )}
         <PanelAction
           icon={<Locate size={13} />}
-          label="Center"
+          label={t('Center')}
           onClick={() => {
             onGo(node)
           }}
@@ -270,31 +297,31 @@ export function MapPanel({
       >
         {isWorkload && (
           <div
-            className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line"
+            className="grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line"
             data-testid="k8s-map-stats"
           >
             {(
               [
                 [
-                  'Ready',
+                  t('Ready'),
                   node.replicas
                     ? `${String(node.replicas.ready)}/${String(node.replicas.desired)}`
                     : String(podTones.length),
                   node.tone === 'bad' ? 'text-danger' : node.tone === 'warn' ? 'text-warning' : ''
                 ],
                 [
-                  'Restarts',
+                  t('Restarts'),
                   String(podTones.reduce((n, p) => n + (p.pod?.restarts ?? 0), 0)),
                   podTones.some((p) => (p.pod?.restarts ?? 0) > 0) ? 'text-warning' : ''
                 ],
                 [
-                  'In / out',
+                  t('In / out'),
                   traffic?.status === 'live'
                     ? `${formatRate(traffic.incoming.reduce((n, r) => n + r.rate, 0))} / ${formatRate(traffic.outgoing.reduce((n, r) => n + r.rate, 0))}`
                     : '—',
                   ''
                 ],
-                ['Affected', affected ? String(affected.size) : '—', '']
+                [t('Affected'), affected ? String(affected.size) : '—', '']
               ] as const
             ).map(([k, v, tone]) => (
               <div key={k} className="flex flex-col gap-0.5 bg-surface px-2.5 py-1.5">
@@ -336,7 +363,7 @@ export function MapPanel({
                     onImpact(!impact)
                   }}
                 >
-                  {impact ? 'Showing' : 'Show on map'}
+                  {impact ? t('Showing') : t('Show on map')}
                 </button>
               }
             >
@@ -344,8 +371,8 @@ export function MapPanel({
             </Heading>
             <p className="text-xs text-muted" data-testid="k8s-map-impact-summary">
               {affected.size === 0
-                ? 'Nothing else on the map depends on it.'
-                : `If it changes or fails: ${affectedCounts.join(' · ')}.`}
+                ? t('Nothing else on the map depends on it.')
+                : t('If it changes or fails: {list}.', { list: affectedCounts.join(' · ') })}
             </p>
           </section>
         )}
@@ -360,15 +387,15 @@ export function MapPanel({
         )}
         {node.stats && (
           <div className="grid grid-cols-2 gap-2 text-xs">
-            <Stat label="Workloads" value={node.stats.workloads} />
-            <Stat label="Pods" value={node.stats.pods} />
+            <Stat label={t('Workloads')} value={node.stats.workloads} />
+            <Stat label={t('Pods')} value={node.stats.pods} />
             <Stat
-              label="Degraded"
+              label={t('Degraded')}
               value={node.stats.warn}
               tone={node.stats.warn ? 'text-warning' : undefined}
             />
             <Stat
-              label="Failing"
+              label={t('Failing')}
               value={node.stats.bad}
               tone={node.stats.bad ? 'text-danger' : undefined}
             />
@@ -400,27 +427,27 @@ export function MapPanel({
         )}
         {section(
           node.kind === 'workload'
-            ? 'Traffic from'
+            ? t('Receives traffic from')
             : node.kind === 'policy'
-              ? 'Applies to'
+              ? t('Applies to')
               : node.kind === 'route'
-                ? 'Gateways'
-                : 'Linked from',
+                ? t('Gateways')
+                : t('Linked from'),
           incoming
         )}
         {section(
           node.kind === 'service'
-            ? 'Sends traffic to'
+            ? t('Sends traffic to')
             : node.kind === 'route'
-              ? 'Routes to'
+              ? t('Routes to')
               : node.kind === 'gateway'
-                ? 'Routes attached'
-                : 'Uses',
+                ? t('Routes attached')
+                : t('Uses'),
           outgoing
         )}
         {policies.length > 0 && (
           <section>
-            <Heading>Network policies</Heading>
+            <Heading>{t('Network policies')}</Heading>
             <div className="flex flex-col gap-0.5 text-xs">
               {policies.map((p) => (
                 <span key={p} className="flex items-center gap-1.5 font-mono text-fg">
@@ -433,12 +460,12 @@ export function MapPanel({
         {node.kind !== 'workload' &&
           node.kind !== 'pod' &&
           section(
-            node.kind === 'region' ? 'Namespaces' : 'Inside',
+            node.kind === 'region' ? t('Namespaces') : t('Inside'),
             children.filter((c) => c.kind !== 'pod')
           )}
         {parent && parent.kind !== 'region' && (
           <section>
-            <Heading>In</Heading>
+            <Heading>{t('In')}</Heading>
             <button
               type="button"
               className="flex h-7 items-center gap-2 rounded px-1 text-left text-xs hover:bg-hover"
@@ -448,7 +475,7 @@ export function MapPanel({
             >
               <span className={cx('size-1.5 shrink-0 rounded-full', DOT[parent.tone])} />
               <span className="font-mono text-fg">{parent.label}</span>
-              <span className="text-faint">{KIND_TITLE[parent.kind]}</span>
+              <span className="text-faint">{kindTitle(parent.kind)}</span>
             </button>
           </section>
         )}
@@ -513,11 +540,16 @@ function UsageBar({
   const ratio = request ? used / request : 0
   return (
     <div className="flex flex-col gap-0.5">
-      <div className="flex justify-between gap-3 text-[10.5px]">
+      <div className="flex justify-between gap-3 text-[11px]">
         <span className="text-faint">{label}</span>
         <span className="text-fg tabular-nums">
           {format(used)}
-          {request ? <span className="text-faint"> / {format(request)} req</span> : null}
+          {request ? (
+            <span className="text-faint">
+              {' '}
+              / {format(request)} {t('requested')}
+            </span>
+          ) : null}
         </span>
       </div>
       {request ? (
@@ -567,40 +599,40 @@ export function HoverCard({
       <div className="flex items-center gap-2">
         <span className={cx('size-2 shrink-0 rounded-full', DOT[node.tone])} />
         <span className="min-w-0 flex-1 truncate font-semibold text-fg">{node.label}</span>
-        <span className="shrink-0 text-[10.5px] text-faint">{titleOf(node)}</span>
+        <span className="shrink-0 text-[11px] text-faint">{titleOf(node)}</span>
       </div>
       {pod ? (
         <>
           <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
-            {row('Status', pod.status, node.tone === 'bad' ? '!text-danger' : undefined)}
-            {row('Restarts', pod.restarts, pod.restarts > 0 ? '!text-warning' : undefined)}
-            {pod.node && row('Node', pod.node)}
+            {row(t('Status'), pod.status, node.tone === 'bad' ? '!text-danger' : undefined)}
+            {row(t('Restarts'), pod.restarts, pod.restarts > 0 ? '!text-warning' : undefined)}
+            {pod.node && row(t('Node'), pod.node)}
             {pod.ip && row('IP', pod.ip)}
-            {pod.startedAt ? row('Up', ago(pod.startedAt)) : null}
+            {pod.startedAt ? row(t('Up'), formatRelative(pod.startedAt)) : null}
           </div>
           {pod.usage ? (
             <div className="mt-2 flex flex-col gap-1.5 border-t border-line pt-2">
               <UsageBar label="CPU" used={pod.usage.cpu} request={pod.cpu} format={formatCpu} />
               <UsageBar
-                label="Memory"
+                label={t('Memory')}
                 used={pod.usage.memory}
                 request={pod.memory}
                 format={formatMemory}
               />
             </div>
           ) : (
-            <p className="mt-2 border-t border-line pt-1.5 text-[10.5px] text-faint">
-              No live CPU / memory (metrics-server not available).
+            <p className="mt-2 border-t border-line pt-1.5 text-[11px] text-faint">
+              {t('No live CPU / memory (metrics-server not available).')}
             </p>
           )}
         </>
       ) : node.kind === 'workload' ? (
         <div className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
           {node.replicas &&
-            row('Ready', `${String(node.replicas.ready)} / ${String(node.replicas.desired)}`)}
-          {row('Pods', pods.length)}
-          {row('Restarts', restarts, restarts > 0 ? '!text-warning' : undefined)}
-          {node.status && !node.replicas && row('Status', node.status)}
+            row(t('Ready'), `${String(node.replicas.ready)} / ${String(node.replicas.desired)}`)}
+          {row(t('Pods'), pods.length)}
+          {row(t('Restarts'), restarts, restarts > 0 ? '!text-warning' : undefined)}
+          {node.status && !node.replicas && row(t('Status'), node.status)}
           {node.badges && node.badges.length > 0 && row('', node.badges.join(' · '))}
         </div>
       ) : (

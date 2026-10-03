@@ -1,7 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto'
 import {
+  chmodSync,
   existsSync,
   linkSync,
+  lstatSync,
+  readdirSync,
   mkdirSync,
   readFileSync,
   statSync,
@@ -14,7 +17,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { FILE_CHANGED, FOLDER_EXISTS, type TransferStatus } from '@shared/sftp'
 import { downloadFolder, uploadFolder } from '../../src/session-host/sftp/folders'
 import { SftpService } from '../../src/session-host/sftp/service'
-import { PART_SUFFIX, TransferQueue } from '../../src/session-host/sftp/transfers'
+import {
+  PART_META_SUFFIX,
+  PART_SUFFIX,
+  partMetaText,
+  TransferQueue
+} from '../../src/session-host/sftp/transfers'
 import { openSshShell } from '../../src/session-host/ssh/connect'
 import { tempDir } from '../unit/helpers'
 import { findSftpServer, startTestSshServer } from './ssh-test-server'
@@ -72,7 +80,7 @@ async function setup() {
       await new Promise((r) => setTimeout(r, 20))
     }
   }
-  return { remoteRoot, localRoot, sftp, queue, waitFor }
+  return { remoteRoot, localRoot, sftp, queue, waitFor, updates }
 }
 
 describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
@@ -124,6 +132,53 @@ describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
     await sftp.write(file, Buffer.from('mine\n'))
     expect(readFileSync(file, 'utf8')).toBe('mine\n')
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'editor trong app: lưu qua file tạm + đổi tên (giữ quyền, ghi vào đích của symlink, không để rác)',
+    async () => {
+      const { remoteRoot, sftp } = await setup()
+      const file = join(remoteRoot, 'app.env')
+      writeFileSync(file, 'A=1\n', { mode: 0o640 })
+      chmodSync(file, 0o640)
+      symlinkSync(file, join(remoteRoot, 'link.env'))
+      const saved = await sftp.write(join(remoteRoot, 'link.env'), Buffer.from('A=2\n'))
+      expect(readFileSync(file, 'utf8')).toBe('A=2\n')
+      expect(lstatSync(join(remoteRoot, 'link.env')).isSymbolicLink()).toBe(true)
+      expect(statSync(file).mode & 0o777).toBe(0o640)
+      expect(saved.size).toBe(4)
+      // File mới (chưa có) cũng lưu được.
+      await sftp.write(join(remoteRoot, 'new.txt'), Buffer.alloc(200 * 1024, 'x'))
+      expect(statSync(join(remoteRoot, 'new.txt')).size).toBe(200 * 1024)
+      expect(readdirSync(remoteRoot).filter((n) => n.includes('shellhouse'))).toEqual([])
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'editor trong app: file thường → thay inode; file chỉ-đọc (0444) → ghi tại chỗ, server từ chối như cũ',
+    async () => {
+      const { remoteRoot, sftp } = await setup()
+      const file = join(remoteRoot, 'plain.txt')
+      writeFileSync(file, 'a\n')
+      const before = statSync(file).ino
+      await sftp.write(file, Buffer.from('b\n'))
+      expect(readFileSync(file, 'utf8')).toBe('b\n')
+      expect(statSync(file).ino).not.toBe(before)
+
+      const locked = join(remoteRoot, 'locked.txt')
+      writeFileSync(locked, 'keep\n')
+      chmodSync(locked, 0o444)
+      const lockedIno = statSync(locked).ino
+      // root ghi được mọi file → chỉ kiểm "không thay inode".
+      if (process.getuid?.() === 0) await sftp.write(locked, Buffer.from('x\n'))
+      else {
+        await expect(sftp.write(locked, Buffer.from('x\n'))).rejects.toThrow()
+        expect(readFileSync(locked, 'utf8')).toBe('keep\n')
+      }
+      expect(statSync(locked).ino).toBe(lockedIno)
+      expect(statSync(locked).mode & 0o777).toBe(0o444)
+      expect(readdirSync(remoteRoot).filter((n) => n.includes('shellhouse'))).toEqual([])
+    }
+  )
 
   it('mkdir, rename, chmod, xoá đệ quy (không đi theo symlink ra ngoài)', async () => {
     const { remoteRoot, sftp } = await setup()
@@ -238,6 +293,12 @@ describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
     const data = randomBytes(1024 * 1024)
     writeFileSync(join(remoteRoot, 'partial.bin'), data)
     writeFileSync(join(localRoot, 'partial.bin' + PART_SUFFIX), data.subarray(0, 700 * 1024))
+    // File meta: nguồn lúc bắt đầu tải (kích thước + mtime giây) — như một lượt tải bị dừng giữa chừng.
+    const remoteStat = statSync(join(remoteRoot, 'partial.bin'))
+    writeFileSync(
+      join(localRoot, 'partial.bin' + PART_META_SUFFIX),
+      partMetaText(data.length, Math.floor(remoteStat.mtimeMs / 1000))
+    )
     const id = queue.enqueue(
       'download',
       join(localRoot, 'partial.bin'),
@@ -254,10 +315,129 @@ describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
     const data = randomBytes(1024 * 1024)
     writeFileSync(join(localRoot, 'up.bin'), data)
     writeFileSync(join(remoteRoot, 'up.bin' + PART_SUFFIX), data.subarray(0, 512 * 1024))
+    writeFileSync(
+      join(remoteRoot, 'up.bin' + PART_META_SUFFIX),
+      partMetaText(data.length, Math.floor(statSync(join(localRoot, 'up.bin')).mtimeMs))
+    )
     const id = queue.enqueue('upload', join(localRoot, 'up.bin'), join(remoteRoot, 'up.bin'), false)
     const done = await waitFor(id, ['done', 'error'])
     expect(done).toMatchObject({ state: 'done', resumedFrom: 512 * 1024 })
     expect(sha(readFileSync(join(remoteRoot, 'up.bin')))).toBe(sha(data))
+    expect(existsSync(join(remoteRoot, 'up.bin' + PART_META_SUFFIX))).toBe(false)
+  })
+
+  it('nguồn đổi nội dung mà giữ nguyên độ dài (đuôi part vẫn khớp) → làm lại từ đầu, không ghép sai', async () => {
+    const { remoteRoot, localRoot, queue, waitFor } = await setup()
+    const old = randomBytes(1024 * 1024)
+    // Bản mới: 300 KB đầu khác, phần còn lại giống hệt → 4 KB cuối của part (700 KB) vẫn khớp.
+    const data = Buffer.concat([randomBytes(300 * 1024), old.subarray(300 * 1024)])
+    writeFileSync(join(remoteRoot, 'same-len.bin'), data)
+    utimesSync(join(remoteRoot, 'same-len.bin'), new Date(), new Date(Date.now() + 10_000))
+    writeFileSync(join(localRoot, 'same-len.bin' + PART_SUFFIX), old.subarray(0, 700 * 1024))
+    // Meta của lượt tải cũ: cùng kích thước nhưng mtime cũ.
+    writeFileSync(
+      join(localRoot, 'same-len.bin' + PART_META_SUFFIX),
+      partMetaText(old.length, Math.floor(Date.now() / 1000) - 3600)
+    )
+    const id = queue.enqueue(
+      'download',
+      join(localRoot, 'same-len.bin'),
+      join(remoteRoot, 'same-len.bin'),
+      false
+    )
+    expect(await waitFor(id, ['done', 'error'])).toMatchObject({ state: 'done', resumedFrom: 0 })
+    expect(sha(readFileSync(join(localRoot, 'same-len.bin')))).toBe(sha(data))
+    expect(existsSync(join(localRoot, 'same-len.bin' + PART_META_SUFFIX))).toBe(false)
+  })
+
+  it('upload file nhỏ (không resume) → xoá file meta mồ côi của lượt trước', async () => {
+    const { remoteRoot, localRoot, queue, waitFor } = await setup()
+    writeFileSync(join(localRoot, 'small.txt'), 'hi')
+    writeFileSync(join(remoteRoot, 'small.txt' + PART_META_SUFFIX), partMetaText(999_999, 1))
+    const id = queue.enqueue(
+      'upload',
+      join(localRoot, 'small.txt'),
+      join(remoteRoot, 'small.txt'),
+      false
+    )
+    expect(await waitFor(id, ['done', 'error'])).toMatchObject({ state: 'done' })
+    expect(readFileSync(join(remoteRoot, 'small.txt'), 'utf8')).toBe('hi')
+    expect(existsSync(join(remoteRoot, 'small.txt' + PART_META_SUFFIX))).toBe(false)
+  })
+
+  it('dispose ngay sau enqueue → vẫn gửi trạng thái cuối (không mất lần báo đang gom)', async () => {
+    const { remoteRoot, localRoot, queue, updates } = await setup()
+    for (const n of ['q1', 'q2', 'q3', 'q4', 'q5']) writeFileSync(join(localRoot, n), n)
+    const ids = ['q1', 'q2', 'q3', 'q4', 'q5'].map((n) =>
+      queue.enqueue('upload', join(localRoot, n), join(remoteRoot, n), false)
+    )
+    expect(updates).toEqual([])
+    queue.dispose()
+    const last = updates[updates.length - 1] ?? []
+    expect(last.map((t) => t.id)).toEqual(ids)
+    expect(last.some((t) => t.state === 'cancelled')).toBe(true)
+  })
+
+  it('part không có file meta (bản cũ / không rõ nguồn) → không resume', async () => {
+    const { remoteRoot, localRoot, queue, waitFor } = await setup()
+    const data = randomBytes(1024 * 1024)
+    writeFileSync(join(localRoot, 'up2.bin'), data)
+    writeFileSync(join(remoteRoot, 'up2.bin' + PART_SUFFIX), data.subarray(0, 512 * 1024))
+    const id = queue.enqueue(
+      'upload',
+      join(localRoot, 'up2.bin'),
+      join(remoteRoot, 'up2.bin'),
+      false
+    )
+    expect(await waitFor(id, ['done', 'error'])).toMatchObject({ state: 'done', resumedFrom: 0 })
+    expect(sha(readFileSync(join(remoteRoot, 'up2.bin')))).toBe(sha(data))
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'file tải về: part tạo 0600, xong theo quyền gốc nhưng không bao giờ cho người khác ghi',
+    async () => {
+      const { remoteRoot, localRoot, queue, waitFor } = await setup()
+      writeFileSync(join(remoteRoot, 'id_rsa'), 'secret', { mode: 0o600 })
+      writeFileSync(join(remoteRoot, 'run.sh'), '#!/bin/sh\n', { mode: 0o777 })
+      chmodSync(join(remoteRoot, 'run.sh'), 0o777)
+      const a = queue.enqueue(
+        'download',
+        join(localRoot, 'id_rsa'),
+        join(remoteRoot, 'id_rsa'),
+        false
+      )
+      const b = queue.enqueue(
+        'download',
+        join(localRoot, 'run.sh'),
+        join(remoteRoot, 'run.sh'),
+        false
+      )
+      await waitFor(a, ['done'])
+      await waitFor(b, ['done'])
+      expect(statSync(join(localRoot, 'id_rsa')).mode & 0o777).toBe(0o600)
+      expect(statSync(join(localRoot, 'run.sh')).mode & 0o777).toBe(0o755)
+    }
+  )
+
+  it('xoá khỏi danh sách: gồm cả lượt lỗi / huỷ, và bỏ file part của chúng', async () => {
+    const { remoteRoot, localRoot, queue, waitFor } = await setup()
+    writeFileSync(join(remoteRoot, 'ok.txt'), 'ok')
+    const ok = queue.enqueue(
+      'download',
+      join(localRoot, 'ok.txt'),
+      join(remoteRoot, 'ok.txt'),
+      false
+    )
+    const bad = queue.enqueue('download', join(localRoot, 'x'), join(remoteRoot, 'khong-co'), false)
+    await waitFor(ok, ['done'])
+    await waitFor(bad, ['error'])
+    writeFileSync(join(localRoot, 'x' + PART_SUFFIX), 'dở dang')
+    queue.clearDone()
+    expect(queue.list()).toEqual([])
+    const deadline = Date.now() + 2000
+    while (existsSync(join(localRoot, 'x' + PART_SUFFIX)) && Date.now() < deadline)
+      await new Promise((r) => setTimeout(r, 10))
+    expect(existsSync(join(localRoot, 'x' + PART_SUFFIX))).toBe(false)
   })
 
   it('đường dẫn cục bộ tương đối bị từ chối; file không tồn tại → lỗi dễ hiểu', async () => {
@@ -320,6 +500,21 @@ describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
       expect(readFileSync(join(remoteRoot, 'backup', 'site', 'index.html'), 'utf8')).toBe(
         '<h1>v2</h1>'
       )
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'tải thư mục: hai tên ra cùng tên an toàn ("r:1.txt" / "r_1.txt") không ghi chung một file',
+    async () => {
+      const { remoteRoot, localRoot, sftp, queue } = await setup()
+      mkdirSync(join(remoteRoot, 'same'))
+      writeFileSync(join(remoteRoot, 'same', 'r:1.txt'), 'colon')
+      writeFileSync(join(remoteRoot, 'same', 'r_1.txt'), 'under')
+      expect(await downloadFolder(sftp, queue, join(remoteRoot, 'same'), localRoot, false)).toBe(2)
+      await settledAll(queue)
+      // Tên không phải đổi gì giữ đúng tên; tên bị đổi thêm " (2)".
+      expect(readFileSync(join(localRoot, 'same', 'r_1.txt'), 'utf8')).toBe('under')
+      expect(readFileSync(join(localRoot, 'same', 'r_1 (2).txt'), 'utf8')).toBe('colon')
     }
   )
 

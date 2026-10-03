@@ -1,11 +1,18 @@
-import { app, BrowserWindow, dialog, shell, type WebContents, type WebPreferences } from 'electron'
+import { app, BrowserWindow, shell, type WebContents, type WebPreferences } from 'electron'
 import log from 'electron-log/main'
+import { showMessageBox } from './dialogs'
 import { isAppUrl, isSafeExternalUrl } from './security-policy'
+import { t } from '@shared/i18n'
 
 /** Cấu hình bắt buộc cho mọi BrowserWindow. Không được nới lỏng. */
-export function secureWebPreferences(preload: string): WebPreferences {
+export function secureWebPreferences(
+  preload: string,
+  additionalArguments: string[] = []
+): WebPreferences {
   return {
     preload,
+    // Đọc đồng bộ ở preload (process.argv) — ví dụ ngôn ngữ giao diện.
+    additionalArguments,
     sandbox: true,
     contextIsolation: true,
     nodeIntegration: false,
@@ -22,7 +29,7 @@ export function secureWebPreferences(preload: string): WebPreferences {
 }
 
 /** Áp các chặn toàn cục: không mở cửa sổ mới, không điều hướng, không cấp quyền. */
-export function installGlobalGuards(devServerUrl: string | undefined): void {
+export function installGlobalGuards(devServerUrl: string | undefined, appIndexHtml: string): void {
   app.on('web-contents-created', (_event, contents: WebContents) => {
     contents.setWindowOpenHandler(({ url }) => {
       if (isSafeExternalUrl(url)) {
@@ -34,7 +41,7 @@ export function installGlobalGuards(devServerUrl: string | undefined): void {
     })
 
     contents.on('will-navigate', (event, url) => {
-      if (!isAppUrl(url, devServerUrl)) {
+      if (!isAppUrl(url, devServerUrl, appIndexHtml)) {
         log.warn(`Blocked navigation: ${url}`)
         event.preventDefault()
       }
@@ -60,15 +67,12 @@ export function installGlobalGuards(devServerUrl: string | undefined): void {
 async function confirmOpenExternal(contents: WebContents, url: string): Promise<void> {
   const options = {
     type: 'question' as const,
-    buttons: ['Cancel', 'Open Link'],
+    buttons: [t('Cancel'), t('Open Link')],
     defaultId: 0,
     cancelId: 0,
-    message: 'Open this link in your browser?',
+    message: t('Open this link in your browser?'),
     detail: url.length > 500 ? `${url.slice(0, 500)}…` : url
   }
-  const window = BrowserWindow.fromWebContents(contents)
-  const { response } = window
-    ? await dialog.showMessageBox(window, options)
-    : await dialog.showMessageBox(options)
+  const { response } = await showMessageBox(BrowserWindow.fromWebContents(contents), options)
   if (response === 1) await shell.openExternal(url)
 }

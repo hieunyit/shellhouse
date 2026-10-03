@@ -10,7 +10,8 @@ import {
 import { openWorkspace } from './WorkspacesDialog'
 import { COMMANDS, keybindingFor } from '@shared/commands'
 import { bestScore } from '@shared/fuzzy'
-import { displayKeybinding, isMac } from '../lib/keybindings'
+import { t, tn } from '@shared/i18n'
+import { commandTitle, displayKeybinding, isMac } from '../lib/keybindings'
 import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
 import { useShells } from '../stores/shells'
@@ -27,6 +28,8 @@ interface Item {
   hint: string
   group: 'Commands' | 'Hosts'
   icon: ReactNode
+  /** Chữ phụ để tìm (tên lệnh tiếng Anh — gõ tiếng Anh khi giao diện tiếng Việt vẫn ra). */
+  alias?: string
   /** Phím tắt (hiện dạng phím) thay vì chữ gợi ý thường. */
   shortcut: boolean
   run: () => void
@@ -55,7 +58,8 @@ export function CommandPalette({
   const items = useMemo<Item[]>(() => {
     const commands: Item[] = COMMANDS.filter((c) => c.id !== 'palette.open').map((c) => ({
       id: c.id,
-      title: c.title,
+      title: commandTitle(c.id),
+      alias: c.title,
       // Lệnh không có phím tắt: không hiện gì (thay vì "—").
       hint: ((key) => (key ? displayKeybinding(key) : ''))(keybindingFor(c.id, overrides, isMac)),
       group: 'Commands' as const,
@@ -67,7 +71,7 @@ export function CommandPalette({
     }))
     const connect: Item[] = hosts.map((h) => ({
       id: `host:${h.id}`,
-      title: `Connect: ${h.label}`,
+      title: t('Connect: {name}', { name: h.label }),
       hint: `${h.username}@${h.hostname}`,
       group: 'Hosts' as const,
       icon: <Server size={14} />,
@@ -78,7 +82,7 @@ export function CommandPalette({
     }))
     const terminals: Item[] = shells.map((sh) => ({
       id: `shell:${sh.id}`,
-      title: `New terminal: ${sh.name}`,
+      title: t('New terminal: {name}', { name: sh.name }),
       hint: '',
       group: 'Commands' as const,
       icon: <SquareTerminal size={14} />,
@@ -89,8 +93,8 @@ export function CommandPalette({
     }))
     const layouts: Item[] = workspaces.map((w) => ({
       id: `workspace:${w.id}`,
-      title: `Open workspace: ${w.name}`,
-      hint: `${w.items.length} tab${w.items.length === 1 ? '' : 's'}`,
+      title: t('Open workspace: {name}', { name: w.name }),
+      hint: tn(w.items.length, '{n} tab', '{n} tabs'),
       group: 'Commands' as const,
       icon: <LayoutGrid size={14} />,
       shortcut: false,
@@ -119,8 +123,8 @@ export function CommandPalette({
     }
     const enableItem = (m: (typeof MANIFESTS)[number]): Item => ({
       id: `module-enable:${m.id}`,
-      title: `Modules: Enable ${m.name}`,
-      hint: m.summary,
+      title: t('Modules: Enable {name}', { name: m.name }),
+      hint: t(m.summary),
       group: 'Commands' as const,
       icon: <ModuleIcon name={m.icon} size={14} />,
       shortcut: false,
@@ -140,7 +144,10 @@ export function CommandPalette({
       ...moduleItems,
       ...all
         .filter((item) => !seen.has(item.id))
-        .map((item) => ({ item, score: bestScore(query, [item.title, item.hint]) }))
+        .map((item) => ({
+          item,
+          score: bestScore(query, [item.title, item.hint, ...(item.alias ? [item.alias] : [])])
+        }))
         .filter((r): r is { item: Item; score: number } => r.score !== null)
         .sort((a, b) => b.score - a.score)
         .map((r) => r.item)
@@ -167,7 +174,7 @@ export function CommandPalette({
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Command palette"
+        aria-label={t('Command palette')}
         data-testid="command-palette"
         className="shadow-elevated animate-dialog-in w-full max-w-xl overflow-hidden rounded-xl border border-line bg-elevated"
         onMouseDown={(e) => {
@@ -179,7 +186,7 @@ export function CommandPalette({
           <input
             autoFocus
             className="min-w-0 flex-1 bg-transparent py-3 text-sm text-fg outline-none placeholder:text-faint"
-            placeholder="Type a command or host name…"
+            placeholder={t('Type a command or host name…')}
             data-testid="palette-input"
             role="combobox"
             aria-expanded="true"
@@ -211,7 +218,7 @@ export function CommandPalette({
             <div key={item.id}>
               {!query.trim() && item.group !== items[i - 1]?.group && (
                 <div className="px-2.5 pt-2 pb-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
-                  {item.group}
+                  {item.group === 'Hosts' ? t('Hosts') : t('Commands')}
                 </div>
               )}
               <button
@@ -248,16 +255,16 @@ export function CommandPalette({
           ))}
           {items.length === 0 && (
             <p className="px-3 py-6 text-center text-sm text-faint">
-              No matching commands or hosts.
+              {t('No matching commands or hosts.')}
             </p>
           )}
         </div>
         <div className="flex items-center gap-4 border-t border-line bg-subtle/50 px-4 py-2 text-xs text-faint">
-          <span>↑↓ to navigate</span>
+          <span>{t('↑↓ to navigate')}</span>
           <span className="inline-flex items-center gap-1">
-            <CornerDownLeft size={11} /> to run
+            <CornerDownLeft size={11} /> {t('to run')}
           </span>
-          <span>Esc to close</span>
+          <span>{t('Esc to close')}</span>
         </div>
       </div>
     </div>

@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import { Maximize2, Radio, Server, SquareTerminal, X } from 'lucide-react'
+import { t, tn } from '@shared/i18n'
+import { formatNumber } from '@shared/i18n/format'
 import { hostColorClass } from '../components/hostColors'
 import { Button, connectionLabel, cx, StatusDot } from '../components/ui'
 import { useHosts } from '../stores/hosts'
@@ -36,7 +38,14 @@ export function MultiExecView(): React.JSX.Element {
         <Radio size={14} className="text-warning" />
         <span className="font-semibold text-fg">MultiExec</span>
         <span className="text-muted" data-testid="multiexec-summary">
-          Typing goes to {included.length} of {n} terminal{n === 1 ? '' : 's'}
+          {tn(
+            n,
+            'Typing goes to {count} of {n} terminal',
+            'Typing goes to {count} of {n} terminals',
+            {
+              count: formatNumber(included.length)
+            }
+          )}
         </span>
         <div className="flex-1" />
         <Button
@@ -47,7 +56,7 @@ export function MultiExecView(): React.JSX.Element {
             useBroadcast.getState().setTabs(tabs.map((t) => t.id))
           }}
         >
-          Select all
+          {t('Select all')}
         </Button>
         <Button
           size="sm"
@@ -57,7 +66,7 @@ export function MultiExecView(): React.JSX.Element {
             useBroadcast.getState().setTabs([])
           }}
         >
-          None
+          {t('Select none')}
         </Button>
         <Button
           size="sm"
@@ -67,7 +76,7 @@ export function MultiExecView(): React.JSX.Element {
             useBroadcast.getState().stop()
           }}
         >
-          Exit MultiExec
+          {t('Exit MultiExec')}
         </Button>
       </div>
       <div
@@ -152,7 +161,9 @@ function Cell({ tabId, included }: { tabId: string; included: boolean }): React.
             included ? 'bg-warning-soft text-warning' : 'text-muted hover:text-fg'
           )}
           title={
-            included ? 'This terminal receives typed input' : 'Typing here stays in this terminal'
+            included
+              ? t('This terminal receives typed input')
+              : t('Typing here stays in this terminal')
           }
         >
           <input
@@ -164,12 +175,12 @@ function Cell({ tabId, included }: { tabId: string; included: boolean }): React.
               useBroadcast.getState().toggleTab(tabId)
             }}
           />
-          Send input
+          {t('Send input')}
         </label>
         <button
           type="button"
-          aria-label="Open as a tab"
-          title="Exit MultiExec and show this terminal"
+          aria-label={t('Open as a tab')}
+          title={t('Exit MultiExec and show this terminal')}
           className="flex size-5 shrink-0 items-center justify-center rounded text-faint hover:bg-hover hover:text-fg"
           onClick={() => {
             useBroadcast.getState().stop()

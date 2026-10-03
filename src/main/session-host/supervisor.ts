@@ -3,6 +3,7 @@ import { HostEvent, type HostRequest, type NativeModuleStatus } from '@shared/se
 import type { SessionHostStatus } from '@shared/ipc'
 import type { ResolvedSessionSpec } from '@shared/stream-protocol'
 import type { HostRequest as HostRequestType } from '@shared/session-host-protocol'
+import { t } from '@shared/i18n'
 
 /** Phần tối thiểu của một child process mà supervisor cần — tách ra để test không cần Electron. */
 export interface HostProcess {
@@ -103,7 +104,7 @@ export class SessionHostSupervisor {
     this.clearTimers()
     if (this.restartTimer) clearTimeout(this.restartTimer)
     this.restartTimer = null
-    this.rejectAllPending(new Error('The session host stopped'))
+    this.rejectAllPending(new Error(t('The session host stopped')))
     if (this.child) {
       this.child.kill()
     } else {
@@ -127,7 +128,7 @@ export class SessionHostSupervisor {
     const child = this.child
     if (!child || this.status.state !== 'running') {
       port.close()
-      throw new Error(`The session host is not ready (${this.status.state})`)
+      throw new Error(t('The session host is not ready ({state})', { state: this.status.state }))
     }
     child.postMessage(
       { type: 'session:open', sessionId, spec, ...(ssh ? { ssh } : {}), ...(log ? { log } : {}) },
@@ -155,12 +156,14 @@ export class SessionHostSupervisor {
   private request(message: HostRequest, id: number): Promise<HostEvent> {
     const child = this.child
     if (!child || this.status.state !== 'running') {
-      return Promise.reject(new Error(`The session host is not ready (${this.status.state})`))
+      return Promise.reject(
+        new Error(t('The session host is not ready ({state})', { state: this.status.state }))
+      )
     }
     return new Promise<HostEvent>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error('The session host did not respond in time'))
+        reject(new Error(t('The session host did not respond in time')))
       }, this.opts.requestTimeoutMs)
       this.pending.set(id, { resolve, reject, timer })
       child.postMessage(message)
@@ -257,7 +260,7 @@ export class SessionHostSupervisor {
 
   private handleExit(code: number | null, reason: string): void {
     this.clearTimers()
-    this.rejectAllPending(new Error(`The session host exited (${reason})`))
+    this.rejectAllPending(new Error(t('The session host exited ({reason})', { reason })))
 
     if (this.stopping) {
       this.setStatus({ state: 'stopped', pid: null })

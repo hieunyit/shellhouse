@@ -52,6 +52,8 @@ export interface HostRegistryDeps {
   findProgram?(name: string): string | null
   home?: string
   env?: NodeJS.ProcessEnv
+  /** userData của app — không module nào đọc được qua symlink trỏ vào đó. */
+  appData?: string
 }
 
 /** Nơi phiên module gửi sự kiện / danh sách truyền file (port của tab). */
@@ -161,7 +163,8 @@ export class HostModuleRegistry {
     const paths = {
       home,
       env: this.deps.env ?? process.env,
-      platform: process.platform
+      platform: process.platform,
+      ...(this.deps.appData ? { appData: this.deps.appData } : {})
     }
     const pathAllowed = (kind: 'local-socket' | 'read-file', path: string): boolean =>
       localPathAllowed(manifest, kind, path, paths)

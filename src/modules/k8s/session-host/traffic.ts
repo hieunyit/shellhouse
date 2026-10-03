@@ -1,13 +1,14 @@
 import { selectorMatches } from '../shared/map'
 import type { K8sObject } from '../shared/resources'
 import {
-  mergeLinks,
+  linkKey,
   parseCaretta,
   type TrafficLink,
   type TrafficPeer,
   type TrafficSample
 } from '../shared/traffic'
 import { KubeError, type KubeClient } from './client'
+import { pool } from './operations'
 import { podTemplate } from './related'
 
 /**
@@ -31,16 +32,88 @@ const CACHE_MS = 60_000
 /** Bộ nhớ đệm theo client (mỗi cluster một client). */
 export interface TrafficCache {
   agents?: { at: number; value: { pods: K8sObject[] } | { reason: string } }
-  services?: { at: number; byNs: Map<string, Map<string, TrafficPeer[]>> }
+  /** Service → workload theo namespace (promise: nhiều lượt cùng lúc chỉ đọc một lần). */
+  services?: { at: number; byNs: Map<string, Promise<Map<string, TrafficPeer[]>>> }
+  /** Bộ đếm tích luỹ (xem `accumulate`). */
+  counters?: TrafficCounters
 }
 
-async function readText(client: KubeClient, path: string, signal?: AbortSignal): Promise<string> {
-  const res = await client.open('GET', path, signal ? { signal } : {})
-  const chunks: Buffer[] = []
-  for await (const c of res as AsyncIterable<Buffer>) chunks.push(c)
-  const body = Buffer.concat(chunks).toString('utf8')
-  if ((res.statusCode ?? 0) >= 400) throw new KubeError(res.statusCode ?? 500, body.slice(0, 200))
-  return body
+/**
+ * Bộ đếm theo agent → tổng đơn điệu: mỗi lượt cộng phần TĂNG của từng agent (agent khởi động lại →
+ * cộng giá trị mới). Agent không trả lời lượt này chỉ không cộng gì — tổng không bao giờ tụt rồi
+ * vọt lên (tốc độ ảo), dù tập agent đọc được đổi giữa các lượt.
+ */
+export interface TrafficCounters {
+  /** agent (ns/pod) → giá trị thô lần trước theo `${role}|${linkKey}`. */
+  agents: Map<string, { at: number; raw: Map<string, number> }>
+  /** `${role}|${linkKey}` → link + tổng tích luỹ. */
+  acc: Map<string, { link: TrafficLink; role: string; bytes: number; at: number }>
+}
+
+/** Agent không thấy chừng này → quên mốc của nó; link không đổi chừng này → bỏ khỏi tổng. */
+const AGENT_TTL_MS = 30 * 60_000
+const LINK_TTL_MS = 60 * 60_000
+
+/**
+ * Cộng một lượt đọc vào bộ đếm; trả link đã gộp: cùng kết nối thấy ở nhiều agent → cộng theo vai
+ * trò; thấy từ cả phía client lẫn server → lấy phía lớn hơn (không đếm hai lần).
+ */
+export function accumulate(
+  counters: TrafficCounters,
+  reads: readonly { agent: string; rows: ReturnType<typeof parseCaretta> }[],
+  at: number
+): TrafficLink[] {
+  // Lượt đầu: tổng = giá trị thô (byte từ khi agent chạy, như Caretta báo). Về sau agent mới chỉ
+  // lấy mốc — agent quay lại sau thời gian dài không cộng cả lịch sử của nó một lần.
+  const first = counters.agents.size === 0 && counters.acc.size === 0
+  for (const { agent, rows } of reads) {
+    // Cùng agent có thể có nhiều dòng cho một cặp (nhiều kết nối) → cộng trong agent trước.
+    const raw = new Map<string, number>()
+    const links = new Map<string, { link: TrafficLink; role: string }>()
+    for (const r of rows) {
+      if (!r.client.name || !r.server.name) continue
+      const key = `${r.role}|${linkKey(r)}`
+      raw.set(key, (raw.get(key) ?? 0) + r.bytes)
+      if (!links.has(key))
+        links.set(key, {
+          link: { client: r.client, server: r.server, port: r.port, bytes: 0 },
+          role: r.role
+        })
+    }
+    const prev = counters.agents.get(agent)
+    for (const [key, value] of raw) {
+      const before = prev?.raw.get(key)
+      // Agent mới: chỉ lấy mốc (trừ lượt đầu). Link mới của agent đã biết: cả giá trị là phần tăng.
+      const delta = !prev
+        ? first
+          ? value
+          : 0
+        : before === undefined
+          ? value
+          : value >= before
+            ? value - before
+            : value
+      const entry = counters.acc.get(key)
+      if (entry) {
+        entry.bytes += delta
+        entry.at = at
+      } else {
+        const l = links.get(key)
+        if (l) counters.acc.set(key, { link: l.link, role: l.role, bytes: delta, at })
+      }
+    }
+    counters.agents.set(agent, { at, raw })
+  }
+  for (const [agent, x] of counters.agents)
+    if (at - x.at > AGENT_TTL_MS) counters.agents.delete(agent)
+  for (const [key, e] of counters.acc) if (at - e.at > LINK_TTL_MS) counters.acc.delete(key)
+  const out = new Map<string, TrafficLink>()
+  for (const e of counters.acc.values()) {
+    const key = linkKey(e.link)
+    const prev = out.get(key)
+    if (!prev || e.bytes > prev.bytes) out.set(key, { ...e.link, bytes: e.bytes })
+  }
+  return [...out.values()]
 }
 
 function metricsPort(pod: K8sObject): number {
@@ -95,47 +168,48 @@ async function resolveServices(
   if (!cache.services || Date.now() - cache.services.at > CACHE_MS)
     cache.services = { at: Date.now(), byNs: new Map() }
   const byNs = cache.services.byNs
+  const load = async (ns: string): Promise<Map<string, TrafficPeer[]>> => {
+    const found = new Map<string, TrafficPeer[]>()
+    const base = `/namespaces/${encodeURIComponent(ns)}`
+    const get = (path: string): Promise<K8sObject[]> =>
+      client.json<{ items: K8sObject[] }>('GET', path, opts).then((r) => r.items)
+    const [services, deps, sts, ds] = await Promise.all([
+      get(`/api/v1${base}/services`),
+      get(`/apis/apps/v1${base}/deployments`).catch(() => []),
+      get(`/apis/apps/v1${base}/statefulsets`).catch(() => []),
+      get(`/apis/apps/v1${base}/daemonsets`).catch(() => [])
+    ])
+    const workloads = [
+      ...deps.map((w) => ({ w, kind: 'Deployment', id: 'deployments.apps' })),
+      ...sts.map((w) => ({ w, kind: 'StatefulSet', id: 'statefulsets.apps' })),
+      ...ds.map((w) => ({ w, kind: 'DaemonSet', id: 'daemonsets.apps' }))
+    ].map((x) => ({ ...x, labels: podTemplate(x.id, x.w)?.labels }))
+    for (const svc of services) {
+      const selector = o(o(svc.spec)['selector'])
+      if (!Object.keys(selector).length) continue
+      const peers = workloads
+        .filter(({ labels }) => (labels ? selectorMatches(selector, labels) : false))
+        .map(({ w, kind }) => ({ ns, name: w.metadata.name, kind }))
+      if (peers.length) found.set(svc.metadata.name, peers)
+    }
+    return found
+  }
   const behind = new Map<string, TrafficPeer[]>()
-  for (const ns of namespaces)
-    for (const [svc, peers] of byNs.get(ns) ?? []) behind.set(`${ns}/${svc}`, peers)
   await Promise.all(
-    namespaces
-      .filter((ns) => !byNs.has(ns))
-      .map(async (ns) => {
-        const found = new Map<string, TrafficPeer[]>()
-        byNs.set(ns, found)
-        const base = `/namespaces/${encodeURIComponent(ns)}`
-        const get = (path: string): Promise<K8sObject[]> =>
-          client
-            .json<{ items: K8sObject[] }>('GET', path, opts)
-            .then((r) => r.items)
-            .catch(() => [])
-        const [services, deps, sts, ds] = await Promise.all([
-          get(`/api/v1${base}/services`),
-          get(`/apis/apps/v1${base}/deployments`),
-          get(`/apis/apps/v1${base}/statefulsets`),
-          get(`/apis/apps/v1${base}/daemonsets`)
-        ])
-        const workloads = [
-          ...deps.map((w) => ({ w, kind: 'Deployment', id: 'deployments.apps' })),
-          ...sts.map((w) => ({ w, kind: 'StatefulSet', id: 'statefulsets.apps' })),
-          ...ds.map((w) => ({ w, kind: 'DaemonSet', id: 'daemonsets.apps' }))
-        ]
-        for (const svc of services) {
-          const selector = o(o(svc.spec)['selector'])
-          if (!Object.keys(selector).length) continue
-          const peers = workloads
-            .filter(({ w, id }) => {
-              const tpl = podTemplate(id, w)
-              return tpl ? selectorMatches(selector, tpl.labels) : false
-            })
-            .map(({ w, kind }) => ({ ns, name: w.metadata.name, kind }))
-          if (peers.length) {
-            behind.set(`${ns}/${svc.metadata.name}`, peers)
-            found.set(svc.metadata.name, peers)
-          }
-        }
-      })
+    namespaces.map(async (ns) => {
+      let p = byNs.get(ns)
+      if (!p) {
+        // Lưu promise ngay (lượt khác cùng lúc dùng chung); lỗi → không nhớ, lượt sau đọc lại.
+        const loading = load(ns)
+        p = loading
+        byNs.set(ns, loading)
+        loading.catch(() => {
+          if (byNs.get(ns) === loading) byNs.delete(ns)
+        })
+      }
+      const found = await p.catch(() => new Map<string, TrafficPeer[]>())
+      for (const [svc, peers] of found) behind.set(`${ns}/${svc}`, peers)
+    })
   )
   const out: TrafficLink[] = []
   for (const l of links) {
@@ -176,25 +250,29 @@ export async function trafficSample(
   }
   if ('reason' in found)
     return { status: 'unavailable', reason: found.reason, at, agents: 0, links: [] }
-  const pods = found.pods.slice(0, MAX_AGENTS)
-  const rows: ReturnType<typeof parseCaretta> = []
+  // Cùng tập agent mỗi lượt (sắp theo tên) khi phải cắt bớt.
+  const pods = [...found.pods]
+    .sort((x, y) =>
+      `${x.metadata.namespace ?? ''}/${x.metadata.name}`.localeCompare(
+        `${y.metadata.namespace ?? ''}/${y.metadata.name}`
+      )
+    )
+    .slice(0, MAX_AGENTS)
+  const reads: { agent: string; rows: ReturnType<typeof parseCaretta> }[] = []
   const seen = { ok: 0, forbidden: false }
-  let next = 0
-  await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, pods.length) }, async () => {
-      while (next < pods.length) {
-        const p = pods[next++]
-        if (!p) continue
-        const path = `/api/v1/namespaces/${encodeURIComponent(p.metadata.namespace ?? '')}/pods/${encodeURIComponent(p.metadata.name)}:${String(metricsPort(p))}/proxy/metrics`
-        try {
-          rows.push(...parseCaretta(await readText(client, path, signal)))
-          seen.ok++
-        } catch (error) {
-          if (error instanceof KubeError && error.status === 403) seen.forbidden = true
-        }
-      }
-    })
-  )
+  await pool(pods, CONCURRENCY, async (p) => {
+    const path = `/api/v1/namespaces/${encodeURIComponent(p.metadata.namespace ?? '')}/pods/${encodeURIComponent(p.metadata.name)}:${String(metricsPort(p))}/proxy/metrics`
+    try {
+      const text = await client.text('GET', path, signal ? { signal } : {})
+      reads.push({
+        agent: `${p.metadata.namespace ?? ''}/${p.metadata.name}`,
+        rows: parseCaretta(text)
+      })
+      seen.ok++
+    } catch (error) {
+      if (error instanceof KubeError && error.status === 403) seen.forbidden = true
+    }
+  })
   if (!seen.ok) {
     // Agent có thể vừa đổi (rollout) → lần sau dò lại.
     delete cache.agents
@@ -208,6 +286,7 @@ export async function trafficSample(
       links: []
     }
   }
-  const links = await resolveServices(client, mergeLinks(rows), cache, signal)
+  cache.counters ??= { agents: new Map(), acc: new Map() }
+  const links = await resolveServices(client, accumulate(cache.counters, reads, at), cache, signal)
   return { status: 'ok', at, agents: seen.ok, links }
 }

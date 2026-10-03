@@ -536,7 +536,9 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
         name: 'api',
         hosts: ['api.example.com'],
         backends: ['api'],
-        paths: { api: ['api.example.com/'] }
+        paths: { api: ['api.example.com/'] },
+        // Từng luật host + path → service (Topology: mỗi luật một dòng có đường nối riêng).
+        rules: [{ host: 'api.example.com', path: '/', service: 'api' }]
       },
       {
         kind: 'httproutes.gateway.networking.k8s.io',
@@ -544,7 +546,8 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
         name: 'web',
         hosts: ['shop.example.com'],
         backends: ['web'],
-        parents: [{ ns: 'shop', name: 'public' }]
+        parents: [{ ns: 'shop', name: 'public' }],
+        rules: [{ host: 'shop.example.com', path: '/', service: 'web', port: '80' }]
       }
     ])
     expect(d.gateways).toEqual([

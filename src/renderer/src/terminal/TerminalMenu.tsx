@@ -1,5 +1,6 @@
 import { Clipboard, Columns2, Copy, Eraser, Rows2, TextSelect } from 'lucide-react'
 import { create } from 'zustand'
+import { t } from '@shared/i18n'
 import { ContextMenu } from '../components/ContextMenu'
 import { isMac } from '../lib/keybindings'
 import { useTabs } from '../stores/tabs'
@@ -42,7 +43,7 @@ export function TerminalMenu(): React.JSX.Element | null {
       entries={[
         {
           id: 'term-copy',
-          label: 'Copy',
+          label: t('Copy'),
           icon: <Copy size={14} />,
           hint: COPY_HINT,
           disabled: !controller?.hasSelection(),
@@ -50,28 +51,28 @@ export function TerminalMenu(): React.JSX.Element | null {
         },
         {
           id: 'term-paste',
-          label: 'Paste',
+          label: t('Paste'),
           icon: <Clipboard size={14} />,
           hint: PASTE_HINT,
           onSelect: () => controller?.pasteFromClipboard()
         },
         {
           id: 'term-select-all',
-          label: 'Select all',
+          label: t('Select all'),
           icon: <TextSelect size={14} />,
           onSelect: () => controller?.selectAll()
         },
         'separator',
         {
           id: 'term-clear',
-          label: 'Clear terminal',
+          label: t('Clear terminal'),
           icon: <Eraser size={14} />,
           onSelect: () => controller?.clear()
         },
         'separator',
         {
           id: 'term-split-right',
-          label: 'Split right',
+          label: t('Split right'),
           icon: <Columns2 size={14} />,
           onSelect: () => {
             split('right')
@@ -79,7 +80,7 @@ export function TerminalMenu(): React.JSX.Element | null {
         },
         {
           id: 'term-split-down',
-          label: 'Split down',
+          label: t('Split down'),
           icon: <Rows2 size={14} />,
           onSelect: () => {
             split('below')

@@ -12,6 +12,7 @@ import {
   seal,
   type KdfParams
 } from './crypto'
+import { t } from '@shared/i18n'
 
 export type VaultState = 'uninitialized' | 'locked' | 'unlocked'
 
@@ -23,28 +24,28 @@ const CHECK_PLAINTEXT = Buffer.from('shellhouse-dek-check')
 
 export class WrongPasswordError extends Error {
   constructor() {
-    super('Sai master password')
+    super(t('Wrong master password.'))
     this.name = 'WrongPasswordError'
   }
 }
 
 export class PasswordTooShortError extends Error {
   constructor() {
-    super(`Master password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+    super(t('Master password must be at least {n} characters', { n: MIN_PASSWORD_LENGTH }))
     this.name = 'PasswordTooShortError'
   }
 }
 
 export class VaultExistsError extends Error {
   constructor() {
-    super('The vault already exists')
+    super(t('The vault already exists'))
     this.name = 'VaultExistsError'
   }
 }
 
 export class VaultBusyError extends Error {
   constructor() {
-    super('The vault is busy')
+    super(t('The vault is busy'))
     this.name = 'VaultBusyError'
   }
 }
@@ -74,7 +75,7 @@ interface MetaRow {
 
 export class InvalidDeviceKeyError extends Error {
   constructor() {
-    super('The key stored on this device is no longer valid')
+    super(t('The key stored on this device is no longer valid'))
     this.name = 'InvalidDeviceKeyError'
   }
 }
@@ -86,12 +87,34 @@ function fieldAd(ref: FieldRef): string {
   return `${ref.table}|${ref.id}|${ref.field}|v${FORMAT_VERSION}`
 }
 
-function parseKdfParams(raw: string): KdfParams {
+/** Giới hạn tham số KDF đọc từ file — file sao lưu lạ không bắt Argon2 ngốn hết RAM / CPU. */
+const MAX_KDF_OPS = 16
+const MIN_KDF_MEM = 8 * 1024
+const MAX_KDF_MEM = 1024 * 1024 * 1024
+
+export function parseKdfParams(raw: string): KdfParams {
   const parsed = JSON.parse(raw) as Partial<KdfParams>
-  if (typeof parsed.ops !== 'number' || typeof parsed.mem !== 'number') {
+  const { ops, mem } = parsed
+  if (
+    typeof ops !== 'number' ||
+    typeof mem !== 'number' ||
+    !Number.isInteger(ops) ||
+    !Number.isInteger(mem) ||
+    ops < 1 ||
+    ops > MAX_KDF_OPS ||
+    mem < MIN_KDF_MEM ||
+    mem > MAX_KDF_MEM
+  ) {
     throw new Error('Corrupted kdf_params')
   }
-  return { ops: parsed.ops, mem: parsed.mem }
+  return { ops, mem }
+}
+
+export class VaultLockedDuringUnlockError extends Error {
+  constructor() {
+    super('The vault was locked while it was being unlocked — try again')
+    this.name = 'VaultLockedDuringUnlockError'
+  }
 }
 
 /**
@@ -101,6 +124,11 @@ function parseKdfParams(raw: string): KdfParams {
 export class Vault {
   private dek: Buffer | null = null
   private busy = false
+  /**
+   * Tăng mỗi lần lock(). Argon2 chạy nền vài trăm ms: lock() (máy ngủ, khoá màn hình) đến giữa
+   * chừng thì kết quả mở khoá phải bỏ, không được mở lại vault sau khi đã khoá.
+   */
+  private generation = 0
   private readonly listeners = new Set<(state: VaultState) => void>()
 
   constructor(
@@ -122,6 +150,7 @@ export class Vault {
     if (password.length < MIN_PASSWORD_LENGTH) throw new PasswordTooShortError()
     await this.exclusive(async () => {
       if (this.readMeta()) throw new VaultExistsError()
+      const generation = this.generation
       const salt = randomBytes(SALT_BYTES)
       const dek = randomBytes(KEY_BYTES)
       const kek = await deriveKey(password.reveal(), salt, this.kdf)
@@ -142,7 +171,9 @@ export class Vault {
       } finally {
         memzero(kek)
       }
-      this.dek = dek
+      // Bị khoá trong lúc tạo: vault đã có, để ở trạng thái khoá.
+      if (generation !== this.generation) memzero(dek)
+      else this.dek = dek
     })
     this.emit()
   }
@@ -150,7 +181,12 @@ export class Vault {
   async unlock(password: Secret): Promise<void> {
     if (this.dek) return
     await this.exclusive(async () => {
+      const generation = this.generation
       const dek = await this.unwrap(password)
+      if (generation !== this.generation) {
+        memzero(dek)
+        throw new VaultLockedDuringUnlockError()
+      }
       this.ensureCheck(dek)
       this.dek = dek
     })
@@ -197,13 +233,14 @@ export class Vault {
   }
 
   lock(): void {
+    this.generation++
     if (!this.dek) return
     memzero(this.dek)
     this.dek = null
     this.emit()
   }
 
-  /** Chỉ bọc lại DEK — không phải mã hoá lại từng secret. */
+  /** Chỉ bọc lại DEK — không phải mã hoá lại từng secret. Không đổi trạng thái khoá / mở. */
   async changePassword(current: Secret, next: Secret): Promise<void> {
     if (next.length < MIN_PASSWORD_LENGTH) throw new PasswordTooShortError()
     await this.exclusive(async () => {
@@ -224,11 +261,10 @@ export class Vault {
           )
       } finally {
         memzero(kek)
+        // DEK không đổi: vault đang mở giữ bản đang có; đang khoá thì vẫn khoá.
+        memzero(dek)
       }
-      if (this.dek) memzero(this.dek)
-      this.dek = dek
     })
-    this.emit()
   }
 
   encrypt(ref: FieldRef, plaintext: Buffer): Buffer {
@@ -250,7 +286,7 @@ export class Vault {
 
   private async unwrap(password: Secret): Promise<Buffer> {
     const meta = this.readMeta()
-    if (!meta) throw new Error('The vault has not been created')
+    if (!meta) throw new Error(t('The vault has not been created'))
     if (meta.format_version !== FORMAT_VERSION || meta.kdf !== 'argon2id') {
       throw new Error(`Unsupported vault format: v${meta.format_version}/${meta.kdf}`)
     }

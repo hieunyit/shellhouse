@@ -3,7 +3,9 @@ import { RotateCcw, Server } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { Heading, Meter, Pill, type Tone } from '../../../renderer/src/components/panels'
 import { cleanError } from '../../../renderer/src/lib/format'
+import { t, tn } from '../../registry/renderer-kit'
 import { UsagePanel } from './Usage'
+import { useClusterGuard } from './confirm'
 import type { K8sOp, RolloutRevision } from '../shared/ops'
 import {
   age,
@@ -154,49 +156,50 @@ function rolloutState(
   const st = o(obj.status)
   const conds = a(st['conditions'])
   const cond = (type: string): Obj | undefined => conds.find((c) => c['type'] === type)
-  if (spec['paused'] === true) return { text: 'Paused', tone: 'warn', detail: 'Rollout is paused' }
+  if (spec['paused'] === true)
+    return { text: t('Paused'), tone: 'warn', detail: t('Rollout is paused') }
   if (
     Number(st['observedGeneration'] ?? 0) <
     ((obj.metadata as { generation?: number }).generation ?? 0)
   )
     return {
-      text: 'Updating',
+      text: t('Updating'),
       tone: 'warn',
-      detail: 'Waiting for the controller to see the change'
+      detail: t('Waiting for the controller to see the change')
     }
   if (kindId === 'deployments.apps') {
     const progressing = cond('Progressing')
     const available = cond('Available')
     if (s(progressing?.['reason']) === 'ProgressDeadlineExceeded')
-      return { text: 'Stalled', tone: 'bad', detail: s(progressing?.['message']) }
+      return { text: t('Stalled'), tone: 'bad', detail: s(progressing?.['message']) }
     const want = Number(spec['replicas'] ?? 1)
     const updated = Number(st['updatedReplicas'] ?? 0)
     const avail = Number(st['availableReplicas'] ?? 0)
     const total = Number(st['replicas'] ?? 0)
     if (updated < want)
       return {
-        text: 'Rolling out',
+        text: t('Rolling out'),
         tone: 'warn',
-        detail: `${updated} of ${want} new replicas updated`
+        detail: t('{updated} of {want} new replicas updated', { updated, want })
       }
     if (total > updated)
       return {
-        text: 'Rolling out',
+        text: t('Rolling out'),
         tone: 'warn',
-        detail: `${total - updated} old replicas pending termination`
+        detail: t('{n} old replicas pending termination', { n: total - updated })
       }
     if (avail < updated)
       return {
-        text: 'Rolling out',
+        text: t('Rolling out'),
         tone: 'warn',
-        detail: `${avail} of ${updated} updated replicas available`
+        detail: t('{avail} of {updated} updated replicas available', { avail, updated })
       }
     if (s(available?.['status']) === 'False')
-      return { text: 'Unavailable', tone: 'bad', detail: s(available?.['message']) }
+      return { text: t('Unavailable'), tone: 'bad', detail: s(available?.['message']) }
     return {
-      text: want === 0 ? 'Scaled to zero' : 'Available',
+      text: want === 0 ? t('Scaled to zero') : t('Available'),
       tone: want === 0 ? 'muted' : 'ok',
-      detail: 'Rollout complete'
+      detail: t('Rollout complete')
     }
   }
   if (kindId === 'statefulsets.apps') {
@@ -204,26 +207,45 @@ function rolloutState(
     const ready = Number(st['readyReplicas'] ?? 0)
     if (st['updateRevision'] && st['currentRevision'] !== st['updateRevision'])
       return {
-        text: 'Rolling out',
+        text: t('Rolling out'),
         tone: 'warn',
-        detail: `${s(st['updatedReplicas']) || 0} of ${want} pods on the new revision`
+        detail: t('{updated} of {want} pods on the new revision', {
+          updated: s(st['updatedReplicas']) || 0,
+          want
+        })
       }
     return ready >= want
       ? {
-          text: want === 0 ? 'Scaled to zero' : 'Available',
+          text: want === 0 ? t('Scaled to zero') : t('Available'),
           tone: want === 0 ? 'muted' : 'ok',
-          detail: 'All pods ready'
+          detail: t('All pods ready')
         }
-      : { text: 'Degraded', tone: ready ? 'warn' : 'bad', detail: `${ready} of ${want} pods ready` }
+      : {
+          text: t('Degraded'),
+          tone: ready ? 'warn' : 'bad',
+          detail: t('{ready} of {want} pods ready', { ready, want })
+        }
   }
   const want = Number(st['desiredNumberScheduled'] ?? 0)
   const ready = Number(st['numberReady'] ?? 0)
   const updated = Number(st['updatedNumberScheduled'] ?? 0)
   if (updated < want)
-    return { text: 'Rolling out', tone: 'warn', detail: `${updated} of ${want} nodes updated` }
+    return {
+      text: t('Rolling out'),
+      tone: 'warn',
+      detail: t('{updated} of {want} nodes updated', { updated, want })
+    }
   return ready >= want
-    ? { text: 'Available', tone: 'ok', detail: `Running on ${want} node${want === 1 ? '' : 's'}` }
-    : { text: 'Degraded', tone: ready ? 'warn' : 'bad', detail: `${ready} of ${want} nodes ready` }
+    ? {
+        text: t('Available'),
+        tone: 'ok',
+        detail: tn(want, 'Running on {n} node', 'Running on {n} nodes')
+      }
+    : {
+        text: t('Degraded'),
+        tone: ready ? 'warn' : 'bad',
+        detail: t('{ready} of {want} nodes ready', { ready, want })
+      }
 }
 
 /**
@@ -277,7 +299,7 @@ export function WorkloadOverview({
   return (
     <>
       <Section
-        title="Status"
+        title={t('Status')}
         testId="k8s-workload-status"
         action={
           <Pill tone={state.tone}>
@@ -286,15 +308,23 @@ export function WorkloadOverview({
         }
       >
         <div className="grid grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-1.5">
-          <Counter label={ds ? 'Scheduled' : 'Desired'} value={want} testId="k8s-replicas" />
+          <Counter label={ds ? t('Scheduled') : t('Desired')} value={want} testId="k8s-replicas" />
           <Counter
             label="Ready"
             value={ready}
             tone={ready >= want ? 'ok' : ready ? 'warn' : 'bad'}
           />
-          <Counter label="Up to date" value={updated} tone={updated < want ? 'warn' : undefined} />
-          <Counter label="Available" value={available} />
-          <Counter label="Unavailable" value={unavailable} tone={unavailable ? 'bad' : undefined} />
+          <Counter
+            label={t('Up to date')}
+            value={updated}
+            tone={updated < want ? 'warn' : undefined}
+          />
+          <Counter label={t('Available')} value={available} />
+          <Counter
+            label={t('Unavailable')}
+            value={unavailable}
+            tone={unavailable ? 'bad' : undefined}
+          />
         </div>
         <div className="mt-2">
           <Meter
@@ -318,21 +348,21 @@ export function WorkloadOverview({
         )}
       </Section>
 
-      <Section title="Resources and limits" testId="k8s-workload-resources">
+      <Section title={t('Resources and limits')} testId="k8s-workload-resources">
         <ResourcesOf spec={templateSpec(kindId, obj)} replicas={want} />
       </Section>
 
       <Section
         title={
           <>
-            Pods{' '}
+            {t('Pods')}{' '}
             <span className="ml-1 font-normal text-faint tabular-nums">{pods?.length ?? ''}</span>
           </>
         }
       >
         {error && <p className="text-xs text-danger">{error}</p>}
-        {!pods && !error && <p className="text-xs text-faint">Loading…</p>}
-        {pods && pods.length === 0 && <p className="text-xs text-faint">No pods.</p>}
+        {!pods && !error && <p className="text-xs text-faint">{t('Loading…')}</p>}
+        {pods && pods.length === 0 && <p className="text-xs text-faint">{t('No pods.')}</p>}
         {pods && pods.length > 0 && (
           <PodGrid
             pods={pods}
@@ -377,9 +407,9 @@ function ResourcesOf({ spec, replicas }: { spec: Obj; replicas: number }): React
           <tr className="text-left text-[10px] tracking-wide text-faint uppercase">
             <th className="py-1 pr-2 font-medium">Container</th>
             <th className="py-1 pr-2 font-medium">CPU req / lim</th>
-            <th className="py-1 pr-2 font-medium">Memory req / lim</th>
+            <th className="py-1 pr-2 font-medium">{t('Memory req / lim')}</th>
             <th className="py-1 font-medium" title="Liveness · Readiness · Startup">
-              Probes
+              {t('Probes')}
             </th>
           </tr>
         </thead>
@@ -391,7 +421,7 @@ function ResourcesOf({ spec, replicas }: { spec: Obj; replicas: number }): React
             const probe = (k: string, letter: string): React.JSX.Element => (
               <span
                 className={c[k] ? 'text-success' : 'text-faint'}
-                title={`${k.replace('Probe', '')}: ${c[k] ? 'yes' : 'none'}`}
+                title={`${k.replace('Probe', '')}: ${c[k] ? t('yes') : t('none')}`}
               >
                 {letter}
               </span>
@@ -425,13 +455,14 @@ function ResourcesOf({ spec, replicas }: { spec: Obj; replicas: number }): React
       </table>
       {replicas > 0 && (
         <p className="mt-1.5 text-xs text-muted">
-          Total for {replicas} replica{replicas === 1 ? '' : 's'}: CPU{' '}
+          {tn(replicas, 'Total for {n} replica:', 'Total for {n} replicas:')} CPU{' '}
           <span className="font-mono text-fg">{cpuReq ? formatCpu(cpuReq * replicas) : '—'}</span>
-          {cpuLim ? ` (limit ${formatCpu(cpuLim * replicas)})` : ''}, memory{' '}
+          {cpuLim ? ` (${t('limit {value}', { value: formatCpu(cpuLim * replicas) })})` : ''},{' '}
+          {t('memory')}{' '}
           <span className="font-mono text-fg">
             {memReq ? formatMemory(memReq * replicas) : '—'}
           </span>
-          {memLim ? ` (limit ${formatMemory(memLim * replicas)})` : ''}
+          {memLim ? ` (${t('limit {value}', { value: formatMemory(memLim * replicas) })})` : ''}
         </p>
       )}
     </div>
@@ -507,7 +538,7 @@ function PodGrid({
             )}
             {restarts > 0 && (
               <span className={cx('shrink-0', restarts > 5 ? 'text-danger' : 'text-warning')}>
-                {restarts} restart{restarts === 1 ? '' : 's'}
+                {tn(restarts, '{n} restart', '{n} restarts')}
               </span>
             )}
             {node ? (
@@ -515,7 +546,7 @@ function PodGrid({
                 type="button"
                 className="flex min-w-0 items-center gap-1 text-[11px] text-faint hover:text-accent"
                 data-testid="k8s-pod-node"
-                title={`Open node ${node}`}
+                title={t('Open node {node}', { node })}
                 onClick={(e) => {
                   e.stopPropagation()
                   onNavigate?.('nodes', node)
@@ -525,10 +556,10 @@ function PodGrid({
                 <span className="truncate">{node}</span>
               </button>
             ) : (
-              <span className="text-[11px] text-warning">Not scheduled</span>
+              <span className="text-[11px] text-warning">{t('Not scheduled')}</span>
             )}
             <span className="ml-auto flex shrink-0 gap-3 text-faint tabular-nums">
-              <span title="Ready containers">
+              <span title={t('Ready containers')}>
                 {readyN}/{total}
               </span>
               <span className="w-8 text-right">
@@ -559,6 +590,7 @@ function ReplicaSets({
   const [list, setList] = useState<RolloutRevision[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
+  const { guard } = useClusterGuard()
   const ns = obj.metadata.namespace ?? ''
   const name = obj.metadata.name
   const revision = obj.metadata.annotations?.['deployment.kubernetes.io/revision']
@@ -578,8 +610,8 @@ function ReplicaSets({
     // Revision đổi (rollout / rollback) → tải lại.
   }, [request, ns, name, revision])
   if (error) return <p className="text-xs text-danger">{error}</p>
-  if (!list) return <p className="text-xs text-faint">Loading…</p>
-  if (!list.length) return <p className="text-xs text-faint">No ReplicaSets.</p>
+  if (!list) return <p className="text-xs text-faint">{t('Loading…')}</p>
+  if (!list.length) return <p className="text-xs text-faint">{t('No ReplicaSets.')}</p>
   return (
     <div className="flex flex-col divide-y divide-line text-xs">
       {list.map((r) => (
@@ -602,10 +634,10 @@ function ReplicaSets({
             </div>
           </div>
           <span className="shrink-0 text-faint tabular-nums">
-            {r.replicas} pod{r.replicas === 1 ? '' : 's'} · {age(Date.parse(r.created))}
+            {tn(r.replicas, '{n} pod', '{n} pods')} · {age(Date.parse(r.created))}
           </span>
           {r.current ? (
-            <Pill tone="ok">current</Pill>
+            <Pill tone="ok">{t('current')}</Pill>
           ) : (
             !readOnly && (
               <button
@@ -614,21 +646,39 @@ function ReplicaSets({
                 data-testid="k8s-replicaset-rollback"
                 className="inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-muted hover:bg-hover hover:text-fg disabled:opacity-50"
                 onClick={() => {
-                  if (!window.confirm(`Roll ${name} back to revision ${r.revision}?`)) return
-                  setBusy(r.revision)
-                  request({ op: 'rollback', namespace: ns, name, revision: r.revision }).then(
-                    () => {
-                      setBusy(null)
-                      onNotify?.(`Rolled ${name} back to revision ${r.revision}`)
-                    },
-                    (e: unknown) => {
-                      setBusy(null)
-                      onNotify?.(cleanError(e), 'danger')
-                    }
-                  )
+                  void guard({
+                    title: t('Roll {name} back to revision {revision}?', {
+                      name,
+                      revision: r.revision
+                    }),
+                    message: t(
+                      'Pods are replaced with the template of revision {revision} ({images}).',
+                      { revision: r.revision, images: r.images.join(', ') }
+                    ),
+                    confirmLabel: t('Roll back'),
+                    name
+                  }).then((ok) => {
+                    if (!ok) return
+                    setBusy(r.revision)
+                    request({ op: 'rollback', namespace: ns, name, revision: r.revision }).then(
+                      () => {
+                        setBusy(null)
+                        onNotify?.(
+                          t('Rolled {name} back to revision {revision}', {
+                            name,
+                            revision: r.revision
+                          })
+                        )
+                      },
+                      (e: unknown) => {
+                        setBusy(null)
+                        onNotify?.(cleanError(e), 'danger')
+                      }
+                    )
+                  })
                 }}
               >
-                <RotateCcw size={11} /> {busy === r.revision ? 'Rolling back…' : 'Roll back'}
+                <RotateCcw size={11} /> {busy === r.revision ? t('Rolling back…') : t('Roll back')}
               </button>
             )
           )}
@@ -658,21 +708,21 @@ export function MetricsOf({
     cpuLim: number
     memLim: number
   }>(
-    (t, c) => {
+    (acc, c) => {
       const res = o(c['resources'])
       return {
-        cpuReq: t.cpuReq + parseCpu(o(res['requests'])['cpu']),
-        memReq: t.memReq + parseMemory(o(res['requests'])['memory']),
-        cpuLim: t.cpuLim + parseCpu(o(res['limits'])['cpu']),
-        memLim: t.memLim + parseMemory(o(res['limits'])['memory'])
+        cpuReq: acc.cpuReq + parseCpu(o(res['requests'])['cpu']),
+        memReq: acc.memReq + parseMemory(o(res['requests'])['memory']),
+        cpuLim: acc.cpuLim + parseCpu(o(res['limits'])['cpu']),
+        memLim: acc.memLim + parseMemory(o(res['limits'])['memory'])
       }
     },
     { cpuReq: 0, memReq: 0, cpuLim: 0, memLim: 0 }
   )
   if (error) return <p className="text-xs text-danger">{error}</p>
-  if (!pods) return <p className="text-xs text-faint">Loading…</p>
+  if (!pods) return <p className="text-xs text-faint">{t('Loading…')}</p>
   const names = pods.map((p) => p.metadata.name).sort()
-  if (!names.length) return <p className="text-xs text-faint">No pods are running.</p>
+  if (!names.length) return <p className="text-xs text-faint">{t('No pods are running.')}</p>
   const n = names.length
   return (
     <UsagePanel

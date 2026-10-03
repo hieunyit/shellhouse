@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { t } from '@shared/i18n'
 import { uuidv7 } from '../../../node-shared/uuid'
 import type { ModuleDb, ModuleSecrets } from '../../registry/main-types'
 import { MAX_S3_PINS, S3Pin, type S3AccountInput, type S3AccountSummary } from '../shared/ops'
@@ -55,11 +56,12 @@ export class S3Accounts {
     const row = this.db
       .prepare('SELECT pins FROM s3_accounts WHERE id = ? AND deleted_at IS NULL')
       .get(id) as { pins: string } | undefined
-    if (!row) throw new Error('The S3 account no longer exists')
+    if (!row) throw new Error(t('The S3 account no longer exists'))
     const same = (p: S3Pin): boolean => p.bucket === pin.bucket && p.prefix === pin.prefix
     const pins = parsePins(row.pins).filter((p) => !same(p))
     if (pinned) {
-      if (pins.length >= MAX_S3_PINS) throw new Error(`You can pin up to ${MAX_S3_PINS} locations`)
+      if (pins.length >= MAX_S3_PINS)
+        throw new Error(t('You can pin up to {n} locations', { n: MAX_S3_PINS }))
       pins.push(pin)
     }
     this.db
@@ -92,10 +94,10 @@ export class S3Accounts {
            WHERE id = ? AND deleted_at IS NULL`
         )
         .run(...values, ...(secret === undefined ? [] : [secret]), id)
-      if (result.changes === 0) throw new Error('The S3 account no longer exists')
+      if (result.changes === 0) throw new Error(t('The S3 account no longer exists'))
       return id
     }
-    if (!secret) throw new Error('Enter the secret access key')
+    if (!secret) throw new Error(t('Enter the secret access key'))
     this.db
       .prepare(
         `INSERT INTO s3_accounts (name, endpoint, region, access_key_id, path_style, updated_at,
@@ -129,8 +131,9 @@ export class S3Accounts {
          WHERE id = ? AND deleted_at IS NULL`
       )
       .get(id) as Row | undefined
-    if (!row) throw new Error('The S3 account no longer exists')
-    if (!row.secret_enc) throw new Error(`"${row.name}" has no secret key — edit the account`)
+    if (!row) throw new Error(t('The S3 account no longer exists'))
+    if (!row.secret_enc)
+      throw new Error(t('“{name}” has no secret key — edit the account', { name: row.name }))
     return {
       name: row.name,
       endpoint: row.endpoint,

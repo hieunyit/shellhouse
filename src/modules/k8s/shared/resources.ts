@@ -1,3 +1,5 @@
+import { t } from '@shared/i18n'
+
 /**
  * Loại tài nguyên Kubernetes có bảng riêng (ADR-014 mục 7.4) và cách chuyển đối tượng → dòng bảng.
  * Thuần (không phụ thuộc tiến trình) — Session Host, renderer và test dùng chung.
@@ -513,7 +515,7 @@ export function toRow(kindId: string, o: K8sObject): ResourceRow {
     }
     case 'cronjobs.batch':
       cells['schedule'] = str(spec['schedule'])
-      cells['suspend'] = spec['suspend'] === true ? 'Yes' : 'No'
+      cells['suspend'] = spec['suspend'] === true ? t('Yes') : t('No')
       cells['last'] = status['lastScheduleTime']
         ? age(Date.parse(str(status['lastScheduleTime'])))
         : '—'
@@ -610,7 +612,7 @@ export function toRow(kindId: string, o: K8sObject): ResourceRow {
       cells['default'] =
         anns['ingressclass.kubernetes.io/is-default-class'] === 'true' ||
         anns['storageclass.kubernetes.io/is-default-class'] === 'true'
-          ? 'Yes'
+          ? t('Yes')
           : ''
       break
     }
@@ -619,7 +621,7 @@ export function toRow(kindId: string, o: K8sObject): ResourceRow {
       cells['podSelector'] =
         Object.entries(sel)
           .map(([k, v]) => `${k}=${str(v)}`)
-          .join(', ') || 'all pods'
+          .join(', ') || t('all pods')
       cells['policyTypes'] = (Array.isArray(spec['policyTypes']) ? spec['policyTypes'] : [])
         .map(str)
         .join(', ')
@@ -666,7 +668,7 @@ export function toRow(kindId: string, o: K8sObject): ResourceRow {
       break
     case 'priorityclasses.scheduling.k8s.io':
       cells['value'] = str(o['value'])
-      cells['default'] = o['globalDefault'] === true ? 'Yes' : ''
+      cells['default'] = o['globalDefault'] === true ? t('Yes') : ''
       break
     case 'validatingadmissionpolicies.admissionregistration.k8s.io':
       cells['validations'] = String(arr(spec['validations']).length)
@@ -771,6 +773,27 @@ export function hideSecretValues(o: K8sObject): K8sObject {
   const rest: K8sObject = { ...o }
   delete rest['stringData']
   return { ...rest, data: Object.fromEntries(keys.map((key) => [key, ''])) }
+}
+
+/**
+ * Annotation đánh dấu YAML Secret lấy từ Shellhouse có giá trị bị ẩn: liệt kê khoá bị ẩn ("a,b" —
+ * tên khoá Secret không chứa dấu phẩy). Chỉ các khoá này, nếu còn rỗng khi lưu, mới được giữ giá trị
+ * đang có trên cluster; annotation luôn bị bỏ trước khi gửi. Không có annotation → "" là "" thật.
+ */
+export const MASKED_KEYS_ANNOTATION = 'shellhouse.io/masked-keys'
+
+/** Secret để sửa dạng YAML: ẩn giá trị + ghi lại khoá nào bị ẩn (xem MASKED_KEYS_ANNOTATION). */
+export function hideSecretValuesForEdit(o: K8sObject): K8sObject {
+  const hidden = hideSecretValues(o)
+  const keys = Object.keys(hidden.data ?? {})
+  if (!keys.length) return hidden
+  return {
+    ...hidden,
+    metadata: {
+      ...hidden.metadata,
+      annotations: { ...hidden.metadata.annotations, [MASKED_KEYS_ANNOTATION]: keys.join(',') }
+    }
+  }
 }
 
 // ——— Quantity (CPU / bộ nhớ) ———

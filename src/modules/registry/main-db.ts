@@ -46,7 +46,26 @@ export function referencedTables(sql: string): string[] {
   return names
 }
 
-export function checkModuleSql(moduleId: string, sql: string): void {
+/** Mọi định danh (trần hoặc trong "…", `…`, […]) trong câu SQL — chữ thường. */
+function identifiers(text: string): Set<string> {
+  const out = new Set<string>()
+  for (const m of text.matchAll(/"([^"]+)"|\x60([^\x60]+)\x60|\[([^\]]+)\]|([A-Za-z_][\w$]*)/g)) {
+    const name = m[1] ?? m[2] ?? m[3] ?? m[4]
+    if (name) out.add(name.toLowerCase())
+  }
+  return out
+}
+
+/**
+ * `knownTables`: bảng đang có trong DB. Câu SQL nhắc tới tên một bảng không thuộc module ở BẤT KỲ
+ * chỗ nào cũng bị chặn — bắt cả dạng phân tích tên sau FROM bỏ sót ("FROM a_x, hosts",
+ * "FROM json_each(?) j, hosts").
+ */
+export function checkModuleSql(
+  moduleId: string,
+  sql: string,
+  knownTables: Iterable<string> = []
+): void {
   const text = stripLiterals(sql)
   if (FORBIDDEN.test(text)) throw new ModuleSqlError(moduleId, 'this SQL statement is not allowed')
   const prefix = tablePrefix(moduleId)
@@ -55,6 +74,11 @@ export function checkModuleSql(moduleId: string, sql: string): void {
   const foreign = referencedTables(sql).filter(
     (t) => !t.toLowerCase().startsWith(prefix) && !SQL_WORDS.has(t.toLowerCase())
   )
+  const used = identifiers(text)
+  for (const table of knownTables) {
+    const name = table.toLowerCase()
+    if (!name.startsWith(prefix) && used.has(name)) foreign.push(table)
+  }
   if (foreign.length > 0)
     throw new ModuleSqlError(
       moduleId,
@@ -62,10 +86,19 @@ export function checkModuleSql(moduleId: string, sql: string): void {
     )
 }
 
+/** Tên mọi bảng / view trong DB (kể cả bảng của module khác). */
+function tableNames(db: Db): string[] {
+  return (
+    db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')").all() as {
+      name: string
+    }[]
+  ).map((r) => r.name)
+}
+
 export function createModuleDb(moduleId: string, db: Db): ModuleDb {
   return {
     prepare: (sql) => {
-      checkModuleSql(moduleId, sql)
+      checkModuleSql(moduleId, sql, tableNames(db))
       const statement = db.prepare(sql)
       return {
         run: (...params) => {
@@ -99,10 +132,11 @@ export function migrateModule(
   now: () => number = Date.now
 ): { from: number; to: number } {
   const sorted = [...migrations].sort((a, b) => a.version - b.version)
+  const known = tableNames(db)
   sorted.forEach((m, i) => {
     if (m.version !== i + 1)
       throw new ModuleSqlError(moduleId, `migrations are not contiguous at v${m.version}`)
-    checkModuleSql(moduleId, m.sql)
+    checkModuleSql(moduleId, m.sql, known)
   })
   const from = moduleSchemaVersion(db, moduleId)
   const latest = sorted.at(-1)?.version ?? 0

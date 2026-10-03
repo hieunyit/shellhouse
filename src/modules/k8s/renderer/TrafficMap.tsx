@@ -15,7 +15,6 @@ import { cx } from '../../../renderer/src/components/ui'
 import {
   WORKLOAD_KIND_ID,
   bandOf,
-  formatRate,
   peerKey,
   trafficGraph,
   type TrafficGraphNode
@@ -23,6 +22,9 @@ import {
 import { EDGE_TYPES, MapContext, sides, type MapCtx, type MapFlowEdge } from './MapFlow'
 import type { MapRef } from './mapModel'
 import { KindIcon } from './icons'
+import { formatRelative, t, tn } from '../../registry/renderer-kit'
+import { CARETTA_INSTALL } from './MapControls'
+import { trafficText } from './topology/text'
 import type { TrafficState } from './useTraffic'
 
 /**
@@ -45,7 +47,7 @@ const PeerNode = memo(function PeerNode({ data }: NodeProps<TNode>): React.JSX.E
       )}
       data-testid="k8s-traffic-node"
       data-name={p.name}
-      title={`${p.ns ? `${p.ns}/` : ''}${p.name} (${p.kind || 'external'})`}
+      title={`${p.ns ? `${p.ns}/` : ''}${p.name} (${p.kind && p.kind !== 'external' ? p.kind : t('external')})`}
     >
       {external ? (
         <svg width="20" height="20" viewBox="0 0 24 24" className="shrink-0 text-muted" aria-hidden>
@@ -65,12 +67,12 @@ const PeerNode = memo(function PeerNode({ data }: NodeProps<TNode>): React.JSX.E
         <div className="truncate font-mono text-[13px] font-medium text-fg">{p.name}</div>
         <div className="flex items-center gap-2 text-[11px] text-faint">
           <span className="min-w-0 flex-1 truncate">
-            {external ? 'external' : `${p.ns} · ${p.kind}`}
+            {external ? t('outside the cluster') : `${p.ns} · ${p.kind}`}
           </span>
           <span className="shrink-0 tabular-nums">
-            {n.inRate >= 1 && <span title="Received">↓ {formatRate(n.inRate)}</span>}
+            {n.inRate >= 1 && <span title={t('Received')}>↓ {trafficText(n.inRate)}</span>}
             {n.inRate >= 1 && n.outRate >= 1 && ' '}
-            {n.outRate >= 1 && <span title="Sent">↑ {formatRate(n.outRate)}</span>}
+            {n.outRate >= 1 && <span title={t('Sent')}>↑ {trafficText(n.outRate)}</span>}
           </span>
         </div>
       </div>
@@ -229,21 +231,35 @@ function TrafficMapInner({
   if (traffic.status === 'unavailable')
     return (
       <Empty>
-        No live traffic — {traffic.reason ?? 'Caretta is not available'}. Install{' '}
-        <span className="font-mono">groundcover-com/caretta</span> to draw the service map.
+        <span className="block text-[13px] font-medium text-fg">{t('No live traffic data')}</span>
+        <span className="mt-1 block">
+          {t(
+            '{reason}. The service map is drawn from Caretta (eBPF) — no Prometheus or sidecars needed. The Topology view works without it.',
+            {
+              reason: traffic.reason ?? t('Caretta is not installed')
+            }
+          )}
+        </span>
+        <code className="mt-3 block rounded-md bg-subtle px-2 py-1.5 text-left font-mono text-[11px] break-all text-fg select-all">
+          {CARETTA_INSTALL}
+        </code>
       </Empty>
     )
-  if (traffic.status !== 'live') return <Empty>Measuring traffic from Caretta…</Empty>
+  if (traffic.status !== 'live') return <Empty>{t('Measuring traffic from Caretta…')}</Empty>
   if (!graph.nodes.length)
-    return <Empty>Caretta is running but saw no connections in the last minute.</Empty>
+    return <Empty>{t('Caretta is running but saw no connections in the last minute.')}</Empty>
 
   return (
     <div className="flex min-h-0 flex-1" data-testid="k8s-traffic-map">
       <div className="relative min-w-0 flex-1">
         <div className="absolute top-2 left-2 z-10 flex items-center gap-2 rounded-md border border-line bg-surface/90 px-2 py-1 text-[11px] text-faint">
           <span>
-            {graph.nodes.length} services · {graph.edges.length} connections · from {traffic.agents}{' '}
-            Caretta agent{traffic.agents === 1 ? '' : 's'}, last minute
+            {[
+              tn(graph.nodes.length, '{n} service', '{n} services'),
+              tn(graph.edges.length, '{n} connection', '{n} connections'),
+              tn(traffic.agents, '{n} Caretta agent', '{n} Caretta agents'),
+              t('updated {when}', { when: formatRelative(traffic.updated) })
+            ].join(' · ')}
           </span>
           <button
             type="button"
@@ -257,7 +273,7 @@ function TrafficMapInner({
               setHideIdle(!hideIdle)
             }}
           >
-            Hide idle
+            {t('Hide idle')}
           </button>
         </div>
         <MapContext.Provider value={ctx}>
@@ -297,16 +313,16 @@ function TrafficMapInner({
         >
           <div className="font-mono text-[13px] font-semibold text-fg">{sel.peer.name}</div>
           <div className="mb-3 text-faint">
-            {sel.peer.ns ? `${sel.peer.ns} · ${sel.peer.kind}` : 'external'}
+            {sel.peer.ns ? `${sel.peer.ns} · ${sel.peer.kind}` : t('outside the cluster')}
           </div>
           {(['in', 'out'] as const).map((dir) => {
             const list = flows.filter((e) => (dir === 'in' ? e.to : e.from) === sel.id)
             return (
               <section key={dir} className="mb-3">
                 <h4 className="mb-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
-                  {dir === 'in' ? 'Called by' : 'Calls'} {list.length}
+                  {dir === 'in' ? t('Called by') : t('Calls')} {list.length}
                 </h4>
-                {list.length === 0 && <p className="text-faint">None</p>}
+                {list.length === 0 && <p className="text-faint">{t('None')}</p>}
                 {list.map((e) => {
                   const other = byId.get(dir === 'in' ? e.from : e.to)?.peer
                   if (!other) return null
@@ -323,7 +339,9 @@ function TrafficMapInner({
                         {other.ns ? `${other.ns}/` : ''}
                         {other.name}
                       </span>
-                      <span className="shrink-0 text-faint tabular-nums">{formatRate(e.rate)}</span>
+                      <span className="shrink-0 text-faint tabular-nums">
+                        {trafficText(e.rate)}
+                      </span>
                     </button>
                   )
                 })}
@@ -339,7 +357,7 @@ function TrafficMapInner({
                 if (kind) onOpen({ kind, ns: sel.peer.ns, name: sel.peer.name })
               }}
             >
-              Open {sel.peer.kind}
+              {t('Open {kind}', { kind: sel.peer.kind })}
             </button>
           )}
         </aside>
@@ -354,7 +372,7 @@ function Empty({ children }: { children: React.ReactNode }): React.JSX.Element {
       className="flex flex-1 items-center justify-center p-6 text-center text-xs text-faint"
       data-testid="k8s-traffic-map-empty"
     >
-      <p className="max-w-md">{children}</p>
+      <div className="max-w-md">{children}</div>
     </div>
   )
 }

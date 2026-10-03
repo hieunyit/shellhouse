@@ -108,6 +108,7 @@ test('nhóm: tạo nhóm, kéo host vào nhóm; xoá host', async ({ page }) => 
   await host.hover()
   await host.getByTestId('host-edit').click()
   await page.getByRole('button', { name: 'Delete host' }).click()
+  await page.getByTestId('confirm-dialog').getByTestId('confirm-ok').click()
   await expect(page.getByTestId('host-row')).toHaveCount(0)
   await expect(group).toContainText('0')
 })

@@ -77,6 +77,16 @@ describe('themes', () => {
     expect(() => importItermColors('<plist></plist>')).toThrow(/Missing color/)
   })
 
+  it('thiếu màu vùng chọn: mặc định theo độ sáng nền (không dùng màu tối cho theme sáng)', () => {
+    expect(importItermColors(itermFile()).colors.selectionBackground).toBe('#cde2ff')
+    const dark = importWindowsTerminal(JSON.stringify({ ...wt, selectionBackground: undefined }))
+    expect(dark.colors.selectionBackground).toBe('#44475a')
+    const light = importWindowsTerminal(
+      JSON.stringify({ ...wt, background: '#FAFAFA', selectionBackground: undefined })
+    )
+    expect(light.colors.selectionBackground).toBe('#cde2ff')
+  })
+
   it('chọn theme theo hệ thống và theo id; id lạ rơi về mặc định', () => {
     const base = { themeId: 'system', darkThemeId: 'dracula', lightThemeId: 'solarized-light' }
     expect(resolveTheme(base, [], true).id).toBe('dracula')

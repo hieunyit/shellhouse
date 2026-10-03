@@ -1,7 +1,23 @@
 import { useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { BAUD_RATES, type SerialPortInfo, type SerialSettings } from '@shared/serial'
+import { t } from '@shared/i18n'
 import { Field, IconButton, Input, Select } from './ui'
+
+function parityLabel(p: SerialSettings['parity']): string {
+  switch (p) {
+    case 'none':
+      return t('None')
+    case 'even':
+      return t('Even')
+    case 'odd':
+      return t('Odd')
+    case 'mark':
+      return t('Mark')
+    case 'space':
+      return t('Space')
+  }
+}
 
 /** Cấu hình cổng serial trong form host: cổng (dò được hoặc gõ tay), tốc độ, 8N1, flow control. */
 export function SerialFields({
@@ -38,10 +54,12 @@ export function SerialFields({
   return (
     <div className="flex flex-col gap-3" data-testid="serial-fields">
       <Field
-        label="Serial port"
+        label={t('Serial port')}
         hint={
           ports?.length === 0
-            ? 'No serial ports found. Plug in the USB-serial cable, then refresh — or type the name.'
+            ? t(
+                'No serial ports found. Plug in the USB-serial cable, then refresh — or type the name.'
+              )
             : 'Windows: COM3 · Linux: /dev/ttyUSB0 · macOS: /dev/cu.usbserial-…'
         }
       >
@@ -65,13 +83,13 @@ export function SerialFields({
               </option>
             ))}
           </datalist>
-          <IconButton label="Find serial ports" onClick={refresh}>
+          <IconButton label={t('Find serial ports')} onClick={refresh}>
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
           </IconButton>
         </div>
       </Field>
       <div className="grid grid-cols-5 gap-2">
-        <Field label="Speed (baud)" className="col-span-2">
+        <Field label={t('Speed (baud)')} className="col-span-2">
           <Select
             data-testid="serial-baud"
             value={String(value.baudRate)}
@@ -86,7 +104,7 @@ export function SerialFields({
             ))}
           </Select>
         </Field>
-        <Field label="Data bits">
+        <Field label={t('Data bits')}>
           <Select
             value={String(value.dataBits)}
             onChange={(e) => {
@@ -100,7 +118,7 @@ export function SerialFields({
             ))}
           </Select>
         </Field>
-        <Field label="Parity">
+        <Field label={t('Parity')}>
           <Select
             value={value.parity}
             onChange={(e) => {
@@ -109,13 +127,12 @@ export function SerialFields({
           >
             {(['none', 'even', 'odd', 'mark', 'space'] as const).map((p) => (
               <option key={p} value={p}>
-                {p[0]?.toUpperCase()}
-                {p.slice(1)}
+                {parityLabel(p)}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="Stop bits">
+        <Field label={t('Stop bits')}>
           <Select
             value={String(value.stopBits)}
             onChange={(e) => {
@@ -130,16 +147,16 @@ export function SerialFields({
           </Select>
         </Field>
       </div>
-      <Field label="Flow control">
+      <Field label={t('Flow control')}>
         <Select
           value={value.flowControl}
           onChange={(e) => {
             set('flowControl', e.target.value as SerialSettings['flowControl'])
           }}
         >
-          <option value="none">None</option>
-          <option value="hardware">Hardware (RTS/CTS)</option>
-          <option value="software">Software (XON/XOFF)</option>
+          <option value="none">{t('None')}</option>
+          <option value="hardware">{t('Hardware (RTS/CTS)')}</option>
+          <option value="software">{t('Software (XON/XOFF)')}</option>
         </Select>
       </Field>
     </div>

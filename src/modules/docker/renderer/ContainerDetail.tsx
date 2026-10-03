@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Copy, ExternalLink, Eye, MoreHorizontal, RefreshCw, X } from 'lucide-react'
-import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
+import { Copy, ExternalLink, Eye, MoreHorizontal, Plug, RefreshCw, Unplug, X } from 'lucide-react'
+import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
 import {
   DefList,
   Heading,
@@ -11,25 +11,35 @@ import {
   SidePanel,
   type Tone
 } from '../../../renderer/src/components/panels'
-import { cleanError, formatSize } from '../../../renderer/src/lib/format'
-import type { ContainerRow, DockerOp, ImageLayer, ProcessList, StatsSample } from '../shared/ops'
+import { cleanError } from '../../../renderer/src/lib/format'
+import {
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  formatDateTimeSeconds,
+  formatPercent,
+  formatRelative,
+  t,
+  tn
+} from '../../registry/renderer-kit'
+import type {
+  ContainerRow,
+  DockerOp,
+  Health,
+  ImageLayer,
+  ProcessList,
+  StatsSample
+} from '../shared/ops'
+import { actionTitle, openMenuBelow, toMenu, type DetailAction } from './actions'
+import { FilesPanel } from './FilesPanel'
 
-type Request = <T>(op: DockerOp) => Promise<T>
+export type { DetailAction } from './actions'
+
+type Request = <T>(op: DockerOp, signal?: AbortSignal) => Promise<T>
 type Obj = Record<string, unknown>
 const o = (v: unknown): Obj =>
   typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Obj) : {}
 const s = (v: unknown): string => (typeof v === 'string' || typeof v === 'number' ? String(v) : '')
-
-export interface DetailAction {
-  id: string
-  label: string
-  icon: React.ReactNode
-  key?: string
-  danger?: boolean
-  /** Chỉ trong menu "…" (Copy name…), không thành nút chính. */
-  secondary?: boolean
-  run(): void
-}
 
 export function stateTone(state: string): Tone {
   if (state === 'running') return 'ok'
@@ -38,26 +48,55 @@ export function stateTone(state: string): Tone {
   return 'muted'
 }
 
-function toMenu(actions: readonly DetailAction[]): MenuEntry[] {
-  const out: MenuEntry[] = []
-  let danger = false
-  for (const a of actions) {
-    if (a.danger && !danger && out.length) {
-      out.push('separator')
-      danger = true
-    }
-    out.push({
-      id: a.id,
-      label: a.label,
-      icon: a.icon,
-      ...(a.key ? { hint: a.key } : {}),
-      ...(a.danger ? { danger: true } : {}),
-      onSelect: () => {
-        a.run()
-      }
-    })
+/** Tông màu của trạng thái healthcheck. */
+export function healthTone(health: Health): Tone {
+  return health === 'healthy' ? 'ok' : health === 'unhealthy' ? 'bad' : 'warn'
+}
+
+/** Nhãn trạng thái container / healthcheck (dữ liệu từ Docker → chữ dịch được). */
+export function stateLabel(state: string): string {
+  switch (state) {
+    case 'running':
+      return t('running')
+    case 'exited':
+      return t('exited')
+    case 'paused':
+      return t('paused')
+    case 'restarting':
+      return t('restarting')
+    case 'created':
+      return t('created')
+    case 'dead':
+      return t('dead')
+    case 'removing':
+      return t('removing')
+    default:
+      return state
   }
-  return out
+}
+
+export function healthLabel(health: Health): string {
+  return health === 'healthy'
+    ? t('healthy')
+    : health === 'unhealthy'
+      ? t('unhealthy')
+      : health === 'starting'
+        ? t('starting')
+        : ''
+}
+
+/** Chip trạng thái healthcheck (bảng + chi tiết). */
+export function HealthPill({ health }: { health: Health }): React.JSX.Element | null {
+  if (!health) return null
+  return (
+    <span
+      data-testid="docker-health"
+      data-health={health}
+      title={t('Health check: {state}', { state: healthLabel(health) })}
+    >
+      <Pill tone={healthTone(health)}>{healthLabel(health)}</Pill>
+    </span>
+  )
 }
 
 /** Thanh tiêu đề + thao tác dùng chung cho các trang chi tiết Docker. */
@@ -91,10 +130,13 @@ function DetailHeader({
         {actions.length > 0 && (
           <button
             type="button"
-            aria-label="More actions"
+            aria-label={t('More actions')}
+            title={t('More actions')}
+            aria-haspopup="menu"
+            data-testid="docker-detail-more"
             className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
             onClick={(e) => {
-              open(e, toMenu(actions))
+              openMenuBelow(e.currentTarget, open, toMenu(actions))
             }}
           >
             <MoreHorizontal size={15} />
@@ -102,7 +144,8 @@ function DetailHeader({
         )}
         <button
           type="button"
-          aria-label="Close"
+          aria-label={t('Close')}
+          title={t('Close (Esc)')}
           className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
           onClick={onClose}
         >
@@ -116,7 +159,7 @@ function DetailHeader({
               key={a.id}
               type="button"
               data-testid={`docker-action-${a.id}`}
-              title={a.key ? `${a.label} (${a.key})` : a.label}
+              title={actionTitle(a)}
               className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted hover:bg-hover hover:text-fg"
               onClick={() => {
                 a.run()
@@ -133,7 +176,7 @@ function DetailHeader({
   )
 }
 
-type Tab = 'overview' | 'stats' | 'env' | 'processes' | 'inspect'
+export type DetailTab = 'overview' | 'stats' | 'files' | 'env' | 'processes' | 'inspect'
 
 /** Chi tiết container (kiểu Docker Desktop / Portainer). */
 export function ContainerDetail({
@@ -142,6 +185,11 @@ export function ContainerDetail({
   host,
   stats,
   actions,
+  tab,
+  onTabChange,
+  readOnly,
+  onConnect,
+  onDisconnect,
   onClose
 }: {
   container: ContainerRow
@@ -150,9 +198,15 @@ export function ContainerDetail({
   host: string
   stats: StatsSample[]
   actions: readonly DetailAction[]
+  tab: DetailTab
+  onTabChange: (tab: DetailTab) => void
+  readOnly: boolean
+  /** Nối container vào network khác. */
+  onConnect: () => void
+  onDisconnect: (network: string) => void
   onClose: () => void
 }): React.JSX.Element {
-  const [tab, setTab] = useState<Tab>('overview')
+  const setTab = onTabChange
   const [inspect, setInspect] = useState<Obj | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
@@ -168,45 +222,65 @@ export function ContainerDetail({
     return () => {
       cancelled = true
     }
-    // Trạng thái đổi (start / stop) → đọc lại.
-  }, [request, c.id, c.state])
+    // Trạng thái / health đổi (start / stop, healthcheck) → đọc lại.
+  }, [request, c.id, c.state, c.status])
   const running = c.state === 'running'
   return (
     <SidePanel storageKey="docker-detail" testId="docker-detail">
       <DetailHeader
         title={c.name}
         subtitle={`${c.image} · ${c.status}`}
-        pill={<Pill tone={stateTone(c.state)}>{c.state}</Pill>}
+        pill={
+          <>
+            <Pill tone={stateTone(c.state)}>{stateLabel(c.state)}</Pill>
+            <HealthPill health={c.health} />
+          </>
+        }
         actions={actions}
         onClose={onClose}
       />
-      <TabStrip<Tab>
+      <TabStrip<DetailTab>
         value={tab}
         onChange={setTab}
         testIdPrefix="docker-detail-tab"
         tabs={[
-          { id: 'overview', label: 'Overview' },
-          { id: 'stats', label: 'Stats' },
-          { id: 'env', label: 'Environment' },
-          { id: 'processes', label: 'Processes' },
-          { id: 'inspect', label: 'Inspect' }
+          { id: 'overview', label: t('Overview') },
+          { id: 'stats', label: t('Stats') },
+          { id: 'files', label: t('Files') },
+          { id: 'env', label: t('Environment') },
+          { id: 'processes', label: t('Processes') },
+          { id: 'inspect', label: t('Inspect') }
         ]}
       />
-      <div className="min-h-0 flex-1 overflow-auto p-3 text-xs">
-        {error && <p className="text-danger">{error}</p>}
-        {tab === 'overview' && <Overview c={c} inspect={inspect} host={host} stats={stats} />}
-        {tab === 'stats' && <Stats running={running} stats={stats} />}
-        {tab === 'env' && <Env id={c.id} request={request} inspect={inspect} />}
-        {tab === 'processes' && <Processes id={c.id} running={running} request={request} />}
-        {tab === 'inspect' && (
-          <pre
-            className="font-mono text-[11px] leading-relaxed text-fg select-text"
-            data-testid="docker-detail-inspect"
-          >
-            {inspect ? JSON.stringify(inspect, null, 2) : 'Loading…'}
-          </pre>
-        )}
-      </div>
+      {tab === 'files' ? (
+        <FilesPanel key={c.id} container={c} request={request} readOnly={readOnly} />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto p-3 text-xs">
+          {error && <p className="text-danger">{error}</p>}
+          {tab === 'overview' && (
+            <Overview
+              c={c}
+              inspect={inspect}
+              host={host}
+              stats={stats}
+              readOnly={readOnly}
+              onConnect={onConnect}
+              onDisconnect={onDisconnect}
+            />
+          )}
+          {tab === 'stats' && <Stats running={running} stats={stats} />}
+          {tab === 'env' && <Env id={c.id} request={request} inspect={inspect} />}
+          {tab === 'processes' && <Processes id={c.id} running={running} request={request} />}
+          {tab === 'inspect' && (
+            <pre
+              className="font-mono text-[11px] leading-relaxed text-fg select-text"
+              data-testid="docker-detail-inspect"
+            >
+              {inspect ? JSON.stringify(inspect, null, 2) : t('Loading…')}
+            </pre>
+          )}
+        </div>
+      )}
     </SidePanel>
   )
 }
@@ -215,12 +289,18 @@ function Overview({
   c,
   inspect,
   host,
-  stats
+  stats,
+  readOnly,
+  onConnect,
+  onDisconnect
 }: {
   c: ContainerRow
   inspect: Obj | null
   host: string
   stats: StatsSample[]
+  readOnly: boolean
+  onConnect: () => void
+  onDisconnect: (network: string) => void
 }): React.JSX.Element {
   const state = o(inspect?.['State'])
   const config = o(inspect?.['Config'])
@@ -233,13 +313,48 @@ function Overview({
     ...((config['Cmd'] as string[] | null) ?? [])
   ].join(' ')
   const published = c.ports.filter((p) => p.publicPort)
+  const health = o(state['Health'])
+  const healthLog = ((health['Log'] as Obj[] | null | undefined) ?? []).slice(-3).reverse()
   return (
     <div className="flex flex-col gap-4" data-testid="docker-detail-overview">
+      {c.health && (
+        <section data-testid="docker-detail-health">
+          <Heading>{t('Health check')}</Heading>
+          <DefList
+            items={[
+              [t('Status'), <HealthPill key="h" health={c.health} />],
+              Number(health['FailingStreak'] ?? 0) > 0 && [
+                t('Failing streak'),
+                tn(Number(health['FailingStreak']), '{n} check', '{n} checks')
+              ]
+            ]}
+          />
+          {healthLog.length > 0 && (
+            <div className="mt-2 flex flex-col gap-1">
+              {healthLog.map((l, i) => (
+                <div key={i} className="rounded-md bg-subtle px-2 py-1">
+                  <div className="flex justify-between gap-2 text-faint">
+                    <span>{formatDateTimeSeconds(s(l['Start']))}</span>
+                    <span className={Number(l['ExitCode']) === 0 ? 'text-success' : 'text-danger'}>
+                      {t('exit {code}', { code: s(l['ExitCode']) })}
+                    </span>
+                  </div>
+                  {s(l['Output']).trim() && (
+                    <pre className="mt-0.5 max-h-16 overflow-auto font-mono text-[11px] break-all whitespace-pre-wrap text-fg">
+                      {s(l['Output']).trim()}
+                    </pre>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
       {last && c.state === 'running' && (
         <div className="grid grid-cols-2 gap-3" data-testid="docker-stats">
           <div>
             <div className="flex justify-between">
-              <span className="text-muted">CPU</span>
+              <span className="text-muted">{t('CPU')}</span>
               <span className="text-fg tabular-nums">{cpuText(last.cpuPercent)}</span>
             </div>
             <Sparkline
@@ -249,8 +364,8 @@ function Overview({
           </div>
           <div>
             <div className="flex justify-between">
-              <span className="text-muted">Memory</span>
-              <span className="text-fg tabular-nums">{formatSize(last.memUsage)}</span>
+              <span className="text-muted">{t('Memory')}</span>
+              <span className="text-fg tabular-nums">{formatBytes(last.memUsage)}</span>
             </div>
             <Sparkline
               values={stats.map((x) => x.memUsage)}
@@ -260,16 +375,17 @@ function Overview({
         </div>
       )}
       <section>
-        <Heading>Container</Heading>
+        <Heading>{t('Container')}</Heading>
         <DefList
           items={[
             [
-              'ID',
+              t('ID'),
               <span key="id" className="inline-flex items-center gap-1 font-mono">
                 {c.id.slice(0, 12)}
                 <button
                   type="button"
-                  aria-label="Copy ID"
+                  aria-label={t('Copy ID')}
+                  title={t('Copy ID')}
                   className="text-faint hover:text-fg"
                   onClick={() => void window.shellhouse.writeClipboard(c.id)}
                 >
@@ -278,39 +394,46 @@ function Overview({
               </span>
             ],
             [
-              'Image',
+              t('Image'),
               <span key="i" className="font-mono">
                 {c.image}
               </span>
             ],
-            ['Created', new Date(c.created).toLocaleString()],
+            [
+              t('Created'),
+              <span key="cr" title={formatDateTime(c.created)}>
+                {formatRelative(c.created)}
+              </span>
+            ],
             state['StartedAt'] !== undefined &&
               c.state === 'running' && [
-                'Started',
-                new Date(s(state['StartedAt'])).toLocaleString()
+                t('Started'),
+                <span key="st" title={formatDateTime(s(state['StartedAt']))}>
+                  {formatRelative(s(state['StartedAt']))}
+                </span>
               ],
             state['ExitCode'] !== undefined &&
-              c.state === 'exited' && ['Exit code', s(state['ExitCode'])],
+              c.state === 'exited' && [t('Exit code'), s(state['ExitCode'])],
             !!cmd && [
-              'Command',
+              t('Command'),
               <span key="c" className="font-mono break-all">
                 {cmd}
               </span>
             ],
             !!s(config['WorkingDir']) && [
-              'Working dir',
+              t('Working dir'),
               <span key="w" className="font-mono">
                 {s(config['WorkingDir'])}
               </span>
             ],
-            ['Restart', s(o(hostConfig['RestartPolicy'])['Name']) || 'no'],
-            !!c.project && ['Compose', `${c.project}${c.service ? ` / ${c.service}` : ''}`]
+            [t('Restart'), s(o(hostConfig['RestartPolicy'])['Name']) || 'no'],
+            !!c.project && [t('Compose'), `${c.project}${c.service ? ` / ${c.service}` : ''}`]
           ]}
         />
       </section>
       {c.ports.length > 0 && (
         <section>
-          <Heading>Ports</Heading>
+          <Heading>{t('Ports')}</Heading>
           <div className="flex flex-col gap-1">
             {c.ports.map((p) => (
               <div
@@ -329,36 +452,73 @@ function Overview({
                     className="inline-flex items-center gap-0.5 font-sans text-accent hover:underline"
                     data-testid="docker-port-open"
                   >
-                    open <ExternalLink size={11} />
+                    {t('open')} <ExternalLink size={11} />
                   </a>
                 )}
               </div>
             ))}
             {published.length === 0 && (
-              <span className="text-faint">Not published to the host</span>
+              <span className="text-faint">{t('Not published to the host')}</span>
             )}
           </div>
         </section>
       )}
-      {Object.keys(networks).length > 0 && (
-        <section>
-          <Heading>Networks</Heading>
-          <DefList
-            items={Object.entries(networks).map(
-              ([name, n]) =>
-                [
-                  name,
-                  <span key={name} className="font-mono">
-                    {s(o(n)['IPAddress']) || '—'}
+      <section data-testid="docker-detail-networks">
+        <div className="flex items-center justify-between">
+          <Heading>{t('Networks')}</Heading>
+          {!readOnly && (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-accent hover:underline"
+              data-testid="docker-detail-connect"
+              onClick={onConnect}
+            >
+              <Plug size={11} /> {t('Connect…')}
+            </button>
+          )}
+        </div>
+        {Object.keys(networks).length === 0 ? (
+          <span className="text-faint">{t('Not connected to any network')}</span>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {Object.entries(networks).map(([name, n]) => {
+              const aliases = ((o(n)['Aliases'] as string[] | null | undefined) ?? []).filter(
+                (a) => !c.id.startsWith(a)
+              )
+              return (
+                <div key={name} className="group flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-fg" title={name}>
+                    {name}
                   </span>
-                ] as const
-            )}
-          />
-        </section>
-      )}
+                  <span className="font-mono text-muted">{s(o(n)['IPAddress']) || '—'}</span>
+                  {aliases.length > 0 && (
+                    <span className="truncate text-faint" title={aliases.join(', ')}>
+                      {aliases.join(', ')}
+                    </span>
+                  )}
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      title={t('Disconnect from {network}', { network: name })}
+                      aria-label={t('Disconnect from {network}', { network: name })}
+                      data-testid="docker-detail-disconnect"
+                      className="rounded p-0.5 text-faint opacity-0 group-hover:opacity-100 hover:text-danger focus-visible:opacity-100"
+                      onClick={() => {
+                        onDisconnect(name)
+                      }}
+                    >
+                      <Unplug size={12} />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
       {mounts.length > 0 && (
         <section>
-          <Heading>Mounts</Heading>
+          <Heading>{t('Mounts')}</Heading>
           <div className="flex flex-col gap-1 font-mono text-[11px]">
             {mounts.map((m) => (
               <div key={s(m['Destination'])} className="break-all">
@@ -372,7 +532,7 @@ function Overview({
       )}
       {config['Labels'] !== undefined && Object.keys(o(config['Labels'])).length > 0 && (
         <section>
-          <Heading>Labels</Heading>
+          <Heading>{t('Labels')}</Heading>
           <LabelChips labels={o(config['Labels']) as Record<string, string>} />
         </section>
       )}
@@ -382,8 +542,8 @@ function Overview({
 
 function Stats({ running, stats }: { running: boolean; stats: StatsSample[] }): React.JSX.Element {
   const last = stats.at(-1)
-  if (!running) return <p className="text-faint">The container is not running.</p>
-  if (!last) return <p className="text-faint">Collecting…</p>
+  if (!running) return <p className="text-faint">{t('The container is not running.')}</p>
+  if (!last) return <p className="text-faint">{t('Collecting…')}</p>
   const chart = (
     label: string,
     value: string,
@@ -401,21 +561,21 @@ function Stats({ running, stats }: { running: boolean; stats: StatsSample[] }): 
   return (
     <div className="flex flex-col gap-2" data-testid="docker-detail-stats">
       {chart(
-        'CPU',
+        t('CPU'),
         cpuText(last.cpuPercent),
         stats.map((x) => Math.max(0, x.cpuPercent)),
         Math.max(100, ...stats.map((x) => Math.max(0, x.cpuPercent)))
       )}
       {chart(
-        'Memory',
-        `${formatSize(last.memUsage)}${last.memLimit ? ` / ${formatSize(last.memLimit)}` : ''}`,
+        t('Memory'),
+        `${formatBytes(last.memUsage)}${last.memLimit ? ` / ${formatBytes(last.memLimit)}` : ''}`,
         stats.map((x) => x.memUsage),
         last.memLimit || Math.max(...stats.map((x) => x.memUsage), 1)
       )}
       <DefList
         items={[
-          ['Network in', formatSize(last.netRx)],
-          ['Network out', formatSize(last.netTx)]
+          [t('Network in'), formatBytes(last.netRx)],
+          [t('Network out'), formatBytes(last.netTx)]
         ]}
       />
     </div>
@@ -446,7 +606,7 @@ function Env({
             })
           }}
         >
-          <Eye size={12} /> Show hidden values
+          <Eye size={12} /> {t('Show hidden values')}
         </button>
       )}
       <div className="flex flex-col gap-0.5 font-mono text-[11px]">
@@ -482,7 +642,9 @@ function Processes({
     let cancelled = false
     request<ProcessList>({ op: 'top', id }).then(
       (r) => {
-        if (!cancelled) setList(r)
+        if (cancelled) return
+        setList(r)
+        setError(null)
       },
       (e: unknown) => {
         if (!cancelled) setError(cleanError(e))
@@ -492,20 +654,31 @@ function Processes({
       cancelled = true
     }
   }, [request, id, running, tick])
-  if (!running) return <p className="text-faint">The container is not running.</p>
-  if (error) return <p className="text-danger">{error}</p>
-  if (!list) return <p className="text-faint">Loading…</p>
+  if (!running) return <p className="text-faint">{t('The container is not running.')}</p>
+  const refresh = (
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 self-end text-faint hover:text-fg"
+      data-testid="docker-processes-refresh"
+      onClick={() => {
+        setTick((n) => n + 1)
+      }}
+    >
+      <RefreshCw size={12} /> {t('Refresh')}
+    </button>
+  )
+  // Lỗi vẫn có nút Refresh (lỗi thoáng qua không kẹt tới khi đóng bảng).
+  if (error)
+    return (
+      <div className="flex flex-col gap-2">
+        {refresh}
+        <p className="text-danger">{error}</p>
+      </div>
+    )
+  if (!list) return <p className="text-faint">{t('Loading…')}</p>
   return (
     <div className="flex flex-col gap-2" data-testid="docker-detail-processes">
-      <button
-        type="button"
-        className="inline-flex items-center gap-1 self-end text-faint hover:text-fg"
-        onClick={() => {
-          setTick((n) => n + 1)
-        }}
-      >
-        <RefreshCw size={12} /> Refresh
-      </button>
+      {refresh}
       <table className="w-full font-mono text-[11px]">
         <thead>
           <tr className="text-left text-faint">
@@ -572,35 +745,41 @@ export function ImageDetail({
     <SidePanel storageKey="docker-detail" testId="docker-image-detail">
       <DetailHeader
         title={title}
-        subtitle={`${formatSize(size)} · ${new Date(created).toLocaleDateString()}`}
+        subtitle={`${formatBytes(size)} · ${formatDate(created)}`}
         actions={actions}
         onClose={onClose}
       />
       <div className="min-h-0 flex-1 overflow-auto p-3 text-xs">
         <section className="mb-4">
-          <Heading>Image</Heading>
+          <Heading>{t('Image')}</Heading>
           <DefList
             items={[
               [
-                'ID',
+                t('ID'),
                 <span key="id" className="font-mono">
                   {id.replace(/^sha256:/, '').slice(0, 12)}
                 </span>
               ],
-              ['Tags', tags.length ? tags.join(', ') : '— (dangling)'],
-              ['Size', formatSize(size)]
+              [t('Tags'), tags.length ? tags.join(', ') : t('— (dangling)')],
+              [t('Size'), formatBytes(size)],
+              [
+                t('Created'),
+                <span key="c" title={formatDateTime(created)}>
+                  {formatRelative(created)}
+                </span>
+              ]
             ]}
           />
         </section>
-        <Heading>Layers</Heading>
+        <Heading>{t('Layers')}</Heading>
         {error && <p className="text-danger">{error}</p>}
-        {!layers && !error && <p className="text-faint">Loading…</p>}
+        {!layers && !error && <p className="text-faint">{t('Loading…')}</p>}
         {layers && (
           <div className="flex flex-col divide-y divide-line" data-testid="docker-image-layers">
             {layers.map((l, i) => (
               <div key={`${l.id}${i}`} className="flex gap-2 py-1.5">
                 <span className="w-16 shrink-0 text-right text-faint tabular-nums">
-                  {formatSize(l.size)}
+                  {formatBytes(l.size)}
                 </span>
                 <span className="min-w-0 font-mono text-[11px] break-all text-fg">
                   {l.createdBy.replace(/^\/bin\/sh -c (#\(nop\) )?/, '').trim()}
@@ -616,5 +795,5 @@ export function ImageDetail({
 
 /** % CPU; -1 = chưa có mẫu để so (lần lấy đầu tiên). */
 function cpuText(v: number): string {
-  return v >= 0 ? `${v.toFixed(1)}%` : '—'
+  return v >= 0 ? formatPercent(v / 100, 1) : '—'
 }

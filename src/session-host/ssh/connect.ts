@@ -2,6 +2,7 @@ import { getCiphers } from 'node:crypto'
 import { connect as netConnect, type Socket } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { Client, type ClientChannel } from 'ssh2'
+import { t } from '@shared/i18n'
 import type { Transport, TransportCallbacks, TransportContext } from '../transport/types'
 import { createAuthHandler, defaultAgent, defaultKeyFiles, type StoredCredentials } from './auth'
 
@@ -75,6 +76,7 @@ function hasCommand(client: Client, name: string, timeoutMs: number): Promise<bo
   return new Promise((resolve) => {
     let out = ''
     let done = false
+    let open: ClientChannel | null = null
     const finish = (ok: boolean): void => {
       if (done) return
       done = true
@@ -83,6 +85,8 @@ function hasCommand(client: Client, name: string, timeoutMs: number): Promise<bo
     }
     const timer = setTimeout(() => {
       finish(false)
+      // Quá hạn: đóng kênh, không để nó chiếm một trong MaxSessions của server.
+      open?.close()
     }, timeoutMs)
     try {
       client.exec(`command -v ${name} >/dev/null 2>&1 && echo found`, (error, channel) => {
@@ -90,6 +94,11 @@ function hasCommand(client: Client, name: string, timeoutMs: number): Promise<bo
           finish(false)
           return
         }
+        if (done) {
+          channel.close()
+          return
+        }
+        open = channel
         channel.on('data', (d: Buffer) => {
           out += d.toString()
         })
@@ -151,6 +160,14 @@ export interface SshOpenOptions {
   timeouts?: Partial<typeof TIMEOUTS>
 }
 
+/**
+ * Lỗi mạng có `code` (như lỗi của Node): `classifyConnectError` phân loại theo mã, không phụ thuộc
+ * câu chữ (câu đã dịch theo ngôn ngữ giao diện).
+ */
+function networkError(message: string, code: 'ETIMEDOUT' | 'ECONNRESET'): Error {
+  return Object.assign(new Error(message), { code })
+}
+
 function openTcp(host: string, port: number, timeoutMs: number): Promise<Socket> {
   return new Promise((resolve, reject) => {
     // TCP_NODELAY như OpenSSH cho phiên tương tác: gói nhỏ (phím gõ, yêu cầu SFTP) đi ngay, không
@@ -158,7 +175,7 @@ function openTcp(host: string, port: number, timeoutMs: number): Promise<Socket>
     const socket = netConnect({ host, port, noDelay: true })
     const timer = setTimeout(() => {
       socket.destroy()
-      reject(new Error(`Timed out connecting to ${host}:${port}`))
+      reject(networkError(t('Timed out connecting to {host}:{port}', { host, port }), 'ETIMEDOUT'))
     }, timeoutMs)
     socket.once('connect', () => {
       clearTimeout(timer)
@@ -178,15 +195,34 @@ function forwardThrough(
   timeoutMs: number
 ): Promise<ClientChannel> {
   return new Promise((resolve, reject) => {
+    let timedOut = false
     const timer = setTimeout(() => {
-      reject(new Error(`Timed out opening a channel to ${target.host}:${target.port}`))
+      timedOut = true
+      reject(
+        networkError(
+          t('Timed out opening a channel to {host}:{port}', {
+            host: target.host,
+            port: target.port
+          }),
+          'ETIMEDOUT'
+        )
+      )
     }, timeoutMs)
     client.forwardOut('127.0.0.1', 0, target.host, target.port, (error, stream) => {
       clearTimeout(timer)
+      if (timedOut) {
+        // Kênh tới muộn sau khi đã báo lỗi → đóng, không để treo trên jump host.
+        if (!error) stream.close()
+        return
+      }
       if (error)
         reject(
           new Error(
-            `The jump host could not open a channel to ${target.host}:${target.port}: ${error.message}`
+            t('The jump host could not open a channel to {host}:{port}: {error}', {
+              host: target.host,
+              port: target.port,
+              error: error.message
+            })
           )
         )
       else resolve(stream)
@@ -219,12 +255,22 @@ function connectHop(options: HopOptions): Promise<Client> {
       reject(error)
     }
     const handshakeTimer = setTimeout(() => {
-      fail(new Error(`Server ${host} did not respond to the SSH handshake`))
+      fail(
+        networkError(t('Server {host} did not respond to the SSH handshake', { host }), 'ETIMEDOUT')
+      )
     }, timeouts.handshakeMs)
 
     // ssh2 báo lỗi agent (không có agent chạy, Pageant đóng…) qua 'error' nhưng VẪN tự thử cách
     // xác thực tiếp theo — không được coi là lỗi kết nối (như OpenSSH: agent hỏng thì bỏ qua).
+    // Listener này KHÔNG BAO GIỜ bị gỡ: sau 'ready' còn cả quãng (mở kênh qua jump host, dò tmux,
+    // mở shell, chờ người dùng nhập password của chặng sau…) trước khi SshShell gắn listener riêng.
+    // 'error' không có listener = uncaughtException → cả Session Host thoát, mọi tab cùng chết.
     const onError = (error: Error & { level?: string }): void => {
+      if (settled) {
+        // Đã xong bắt tay: 'close' theo sau sẽ làm các thao tác đang chờ thất bại.
+        ctx.log('warn', `SSH ${host}: ${error.message}`)
+        return
+      }
       if (error.level === 'agent') {
         ctx.log('info', `SSH agent unavailable, trying other methods: ${error.message}`)
         return
@@ -233,13 +279,12 @@ function connectHop(options: HopOptions): Promise<Client> {
     }
     client.on('error', onError)
     client.once('close', () => {
-      fail(new Error(`Server ${host} closed the connection`))
+      fail(networkError(t('Server {host} closed the connection', { host }), 'ECONNRESET'))
     })
     client.once('ready', () => {
       if (settled) return
       settled = true
       clearTimeout(handshakeTimer)
-      client.removeListener('error', onError)
       resolve(client)
     })
 
@@ -256,7 +301,11 @@ function connectHop(options: HopOptions): Promise<Client> {
         ctx
           .verifyHostKey(host, port, key)
           .then((ok) => {
-            if (ok) ctx.status('authenticating', `Authenticating ${username}@${host}…`)
+            if (ok)
+              ctx.status(
+                'authenticating',
+                t('Authenticating {user}@{host}…', { user: username, host })
+              )
             verify(ok)
           })
           .catch(() => {
@@ -315,7 +364,7 @@ export class SshShell implements Transport {
         finish(error.message)
       })
       c.on('close', () => {
-        finish(exitCode === null ? 'Connection lost' : undefined)
+        finish(exitCode === null ? t('Connection lost') : undefined)
       })
     }
   }
@@ -329,11 +378,14 @@ export class SshShell implements Transport {
   }
 
   pause(): void {
+    // stderr là stream riêng (PTY gộp vào stdout, nhưng exec/subsystem vẫn có thể ghi stderr).
     this.stream?.pause()
+    this.stream?.stderr.pause()
   }
 
   resume(): void {
     this.stream?.resume()
+    this.stream?.stderr.resume()
   }
 
   close(): void {
@@ -359,7 +411,10 @@ export async function openSshShell(options: SshOpenOptions): Promise<SshShell> {
 
   try {
     const first = hops[0] ?? options.destination
-    ctx.status('connecting', `Connecting to ${first.target.host}:${first.target.port}…`)
+    ctx.status(
+      'connecting',
+      t('Connecting to {host}:{port}…', { host: first.target.host, port: first.target.port })
+    )
     let sock: Duplex = await openTcp(first.target.host, first.target.port, timeouts.tcpMs)
 
     for (let i = 0; i < hops.length; i++) {
@@ -370,7 +425,11 @@ export async function openSshShell(options: SshOpenOptions): Promise<SshShell> {
       if (next) {
         ctx.status(
           'connecting',
-          `Via ${hop.target.host} → ${next.target.host}:${next.target.port}…`
+          t('Via {jump} → {host}:{port}…', {
+            jump: hop.target.host,
+            host: next.target.host,
+            port: next.target.port
+          })
         )
         sock = await forwardThrough(client, next.target, timeouts.tcpMs)
       }
@@ -382,14 +441,14 @@ export async function openSshShell(options: SshOpenOptions): Promise<SshShell> {
       // .bashrc / motd).
       ctx.status(
         'connected',
-        options.noShellStatus ?? 'Authenticated — file transfer only (no shell opened)'
+        options.noShellStatus ?? t('Authenticated — file transfer only (no shell opened)')
       )
       return new SshShell(last, clients, null, options.callbacks)
     }
     const pty = { term: 'xterm-256color', cols: options.cols, rows: options.rows }
     const tmux = options.tmux && /^[A-Za-z0-9_-]+$/.test(options.tmux) ? options.tmux : null
     if (tmux && (await hasCommand(last, 'tmux', timeouts.probeMs))) {
-      ctx.status('connected', `Authenticated, attaching to tmux session ${tmux}…`)
+      ctx.status('connected', t('Authenticated, attaching to tmux session {name}…', { name: tmux }))
       const stream = await new Promise<ClientChannel>((resolve, reject) => {
         last.exec(`tmux new-session -A -s ${tmux}`, { pty }, (error, s) => {
           if (error) reject(error)
@@ -401,8 +460,8 @@ export async function openSshShell(options: SshOpenOptions): Promise<SshShell> {
     ctx.status(
       'connected',
       tmux
-        ? 'Authenticated — tmux is not installed on the server, opening a plain shell…'
-        : 'Authenticated, opening shell…'
+        ? t('Authenticated — tmux is not installed on the server, opening a plain shell…')
+        : t('Authenticated, opening shell…')
     )
     const stream = await new Promise<ClientChannel>((resolve, reject) => {
       last.shell(pty, (error, s) => {

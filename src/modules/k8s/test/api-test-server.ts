@@ -55,6 +55,13 @@ export interface ApiTestServer {
   enableCaretta(options?: { forbidden?: boolean }): void
   /** Cài Prometheus giả (monitoring/prometheus-operated:9090) trả lời query / query_range. */
   enablePrometheus(): void
+  /**
+   * Cluster mẫu giống thật cho ảnh chụp (Topology / Map): nhiều namespace, Ingress nhiều host / path /
+   * TLS, Service đủ loại (ClusterIP, headless, NodePort, LoadBalancer, ExternalName, không endpoint),
+   * Deployment / StatefulSet / DaemonSet / Job khoẻ / suy giảm / hỏng, HPA, NetworkPolicy, PVC,
+   * ConfigMap / Secret, EndpointSlice; có cả lỗi cấu hình (Service đích không có, thiếu Secret TLS…).
+   */
+  seedDemo(): void
   get(plural: string, namespace: string | undefined, name: string): Obj | undefined
   list(plural: string): Obj[]
   /** Làm các watch sau nhận 410 Gone. */
@@ -65,6 +72,14 @@ export interface ApiTestServer {
   cutWatches(): void
   /** Cắt ngang các luồng log đang follow. */
   cutLogs(): void
+  /** Số kết nối TCP đã nhận (đo keep-alive). */
+  connections(): number
+  /** Request tới đường dẫn khớp → không bao giờ trả lời (API server / proxy treo). */
+  stall(path: RegExp | null): void
+  /** `n` lần evict tiếp theo bị PodDisruptionBudget chặn (429). */
+  blockEvictions(n: number): void
+  /** Header Accept của các request (kiểm list chỉ metadata). */
+  accepts: string[]
   close(): Promise<void>
 }
 
@@ -407,6 +422,9 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       ]
   }
   const requests: string[] = []
+  const accepts: string[] = []
+  let stalled: RegExp | null = null
+  let blockedEvictions = 0
   let failingWatches = 0
   const logStreams = new Set<ServerResponse>()
   const watchers = new Set<{ plural: string; namespace: string | undefined; res: ServerResponse }>()
@@ -487,7 +505,14 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       kind: 'HTTPRoute',
       namespaced: true
     },
-    widgets: { apiVersion: 'example.com/v1', kind: 'Widget', namespaced: true }
+    widgets: { apiVersion: 'example.com/v1', kind: 'Widget', namespaced: true },
+    statefulsets: { apiVersion: 'apps/v1', kind: 'StatefulSet', namespaced: true },
+    daemonsets: { apiVersion: 'apps/v1', kind: 'DaemonSet', namespaced: true },
+    endpointslices: {
+      apiVersion: 'discovery.k8s.io/v1',
+      kind: 'EndpointSlice',
+      namespaced: true
+    }
   }
 
   /** Trả `true` để các nhánh viết gọn `return json(...)`. */
@@ -523,6 +548,8 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     void (async (): Promise<true> => {
       const url = new URL(req.url ?? '/', 'http://x')
       requests.push(`${req.method ?? ''} ${url.pathname}${url.search}`)
+      accepts.push(`${url.pathname} ${req.headers.accept ?? ''}`)
+      if (stalled?.test(url.pathname)) return true
       if (req.headers.authorization !== `Bearer ${TOKEN}`) {
         json(res, 401, statusBody(401, 'Unauthorized', 'Unauthorized'))
         return true
@@ -704,6 +731,14 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
             creationTimestamp: new Date().toISOString()
           }
         }
+        // Pod debug (Shellhouse tạo): chạy ngay như kubelet đã kéo image xong.
+        if (plural === 'pods' && body.metadata.labels?.['shellhouse.dev/debug'] && !created.status)
+          created.status = {
+            phase: 'Running',
+            containerStatuses: (
+              (body.spec?.['containers'] as { name: string }[] | undefined) ?? []
+            ).map((c) => ({ name: c.name, ready: true, restartCount: 0, state: { running: {} } }))
+          }
         table.set(key(namespace, body.metadata.name), created)
         notify(plural, 'ADDED', created)
         return json(res, 201, created)
@@ -756,7 +791,17 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
           }
         const limit = Number(url.searchParams.get('limit') ?? '0') || items.length
         const start = Number(url.searchParams.get('continue') ?? '0')
-        const page = items.slice(start, start + limit)
+        // Accept: …;as=PartialObjectMetadataList → chỉ metadata (như API server thật).
+        const metaOnly = /as=PartialObjectMetadataList/.test(req.headers.accept ?? '')
+        const page = items.slice(start, start + limit).map((o) =>
+          metaOnly
+            ? {
+                apiVersion: 'meta.k8s.io/v1',
+                kind: 'PartialObjectMetadata',
+                metadata: o.metadata
+              }
+            : o
+        )
         return json(res, 200, {
           kind: `${meta.kind}List`,
           apiVersion: meta.apiVersion,
@@ -803,8 +848,51 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         notify(plural, 'MODIFIED', current)
         return json(res, 200, { spec: { replicas: body.spec.replicas } })
       }
+      // Container debug tạm thời: image có "missing" → kéo image hỏng (ErrImagePull).
+      if (sub === 'ephemeralcontainers' && req.method === 'PATCH') {
+        if (!current) return json(res, 404, statusBody(404, 'NotFound', 'not found'))
+        const body = (await readBody(req)) as {
+          spec: { ephemeralContainers: { name: string; image: string }[] }
+        }
+        const spec = (current.spec ?? {}) as { ephemeralContainers?: unknown[] }
+        const status = (current.status ?? {}) as { ephemeralContainerStatuses?: unknown[] }
+        current.spec = {
+          ...spec,
+          ephemeralContainers: [
+            ...(spec.ephemeralContainers ?? []),
+            ...body.spec.ephemeralContainers
+          ]
+        }
+        current.status = {
+          ...status,
+          ephemeralContainerStatuses: [
+            ...(status.ephemeralContainerStatuses ?? []),
+            ...body.spec.ephemeralContainers.map((c) => ({
+              name: c.name,
+              state: c.image.includes('missing')
+                ? { waiting: { reason: 'ErrImagePull', message: `pull ${c.image}: not found` } }
+                : { running: { startedAt: new Date().toISOString() } }
+            }))
+          ]
+        }
+        current.metadata.resourceVersion = nextRv()
+        notify(plural, 'MODIFIED', current)
+        return json(res, 200, current)
+      }
       if (sub === 'eviction' && req.method === 'POST') {
         if (!current) return json(res, 404, statusBody(404, 'NotFound', 'not found'))
+        if (blockedEvictions > 0) {
+          blockedEvictions--
+          return json(
+            res,
+            429,
+            statusBody(
+              429,
+              'TooManyRequests',
+              "Cannot evict pod as it would violate the pod's disruption budget."
+            )
+          )
+        }
         table.delete(k)
         notify(plural, 'DELETED', current)
         return json(res, 201, { kind: 'Status', status: 'Success' })
@@ -827,6 +915,8 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
             resourceVersion: nextRv()
           }
         }
+        // dryRun=All: trả kết quả, không lưu (xem trước thay đổi).
+        if (url.searchParams.get('dryRun') === 'All') return json(res, current ? 200 : 201, next)
         table.set(k, next)
         notify(plural, current ? 'MODIFIED' : 'ADDED', next)
         return json(res, current ? 200 : 201, next)
@@ -852,6 +942,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
             )
           )
         const next = { ...body, metadata: { ...body.metadata, resourceVersion: nextRv() } }
+        if (url.searchParams.get('dryRun') === 'All') return json(res, 200, next)
         table.set(k, next)
         notify(plural, 'MODIFIED', next)
         return json(res, 200, next)
@@ -904,6 +995,19 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       return
     }
     wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
+      if (url.pathname.endsWith('/attach')) {
+        // Gắn vào container (debug): báo container, dội stdin.
+        ws.send(
+          Buffer.concat([
+            Buffer.from([1]),
+            Buffer.from(`attached: ${url.searchParams.get('container') ?? '-'}\r\n`)
+          ])
+        )
+        ws.on('message', (data: Buffer) => {
+          if (data[0] === 0) ws.send(Buffer.concat([Buffer.from([1]), data.subarray(1)]))
+        })
+        return
+      }
       if (url.pathname.endsWith('/exec')) {
         // "Shell" giả: in lệnh đã chạy, dội stdin, báo kích thước terminal; "exit" → kết thúc.
         ws.send(
@@ -943,12 +1047,547 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       })
     })
   })
+  let connections = 0
+  server.on('connection', () => {
+    connections++
+  })
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   const port = (server.address() as AddressInfo).port
+
+  /** Cluster mẫu (xem `seedDemo` trong ApiTestServer). */
+  const seedDemo = (): void => {
+    const put = (plural: string, obj: Obj): void => {
+      let table = store.get(plural)
+      if (!table) {
+        table = new Map()
+        store.set(plural, table)
+      }
+      const ns = obj.metadata.namespace
+      table.set(ns ? `${ns}/${obj.metadata.name}` : obj.metadata.name, obj)
+    }
+    const meta = (o: Obj, extra: Record<string, unknown>): Obj => {
+      Object.assign(o.metadata, extra)
+      return o
+    }
+    for (const n of ['payments', 'monitoring'])
+      put(
+        'namespaces',
+        meta(make('v1', 'Namespace', n, undefined, { status: { phase: 'Active' } }), {
+          labels: {
+            'kubernetes.io/metadata.name': n,
+            team: n === 'payments' ? 'commerce' : 'platform'
+          }
+        })
+      )
+    let ip = 10
+    const running = (restarts = 0): Record<string, unknown> => ({
+      phase: 'Running',
+      podIP: `10.42.0.${String(++ip)}`,
+      startTime: new Date(Date.now() - 5_400_000).toISOString(),
+      containerStatuses: [
+        { name: 'app', ready: true, restartCount: restarts, state: { running: {} } }
+      ]
+    })
+    const waiting = (reason: string, restarts = 0): Record<string, unknown> => ({
+      phase: reason === 'Pending' ? 'Pending' : 'Running',
+      ...(reason === 'Pending'
+        ? {
+            conditions: [
+              {
+                type: 'PodScheduled',
+                status: 'False',
+                reason: 'Unschedulable',
+                message:
+                  '0/2 nodes are available: pod has unbound immediate PersistentVolumeClaims.'
+              }
+            ]
+          }
+        : {}),
+      containerStatuses:
+        reason === 'Pending'
+          ? []
+          : [{ name: 'app', ready: false, restartCount: restarts, state: { waiting: { reason } } }]
+    })
+    const container = (
+      image: string,
+      ports: { name?: string; containerPort: number }[],
+      extra: Record<string, unknown> = {}
+    ): Record<string, unknown> => ({
+      name: 'app',
+      image,
+      ports,
+      resources: { requests: { cpu: '100m', memory: '128Mi' } },
+      ...extra
+    })
+    /** Deployment + ReplicaSet + pod (trạng thái từng pod). */
+    const deployment = (
+      ns: string,
+      name: string,
+      spec: {
+        replicas: number
+        ready: number
+        containers: Record<string, unknown>[]
+        volumes?: unknown[]
+        pods: Record<string, unknown>[]
+        labels?: Record<string, string>
+      }
+    ): void => {
+      const labels = { app: name, ...spec.labels }
+      put(
+        'deployments',
+        make('apps/v1', 'Deployment', name, ns, {
+          spec: {
+            replicas: spec.replicas,
+            selector: { matchLabels: { app: name } },
+            template: {
+              metadata: { labels },
+              spec: {
+                containers: spec.containers,
+                ...(spec.volumes ? { volumes: spec.volumes } : {})
+              }
+            }
+          },
+          status: {
+            replicas: spec.pods.length,
+            readyReplicas: spec.ready,
+            availableReplicas: spec.ready,
+            updatedReplicas: spec.pods.length
+          }
+        })
+      )
+      const rs = `${name}-6f9c7`
+      put(
+        'replicasets',
+        meta(
+          make('apps/v1', 'ReplicaSet', rs, ns, {
+            spec: { replicas: spec.replicas, template: { metadata: { labels } } },
+            status: { replicas: spec.pods.length, readyReplicas: spec.ready }
+          }),
+          {
+            labels: { ...labels, 'pod-template-hash': '6f9c7' },
+            ownerReferences: [{ kind: 'Deployment', name, controller: true }]
+          }
+        )
+      )
+      spec.pods.forEach((status, i) => {
+        const pod = make(
+          'v1',
+          'Pod',
+          `${rs}-${['x2k4p', 'b8n1q', 'm3v7d', 'r5t9w'][i] ?? String(i)}`,
+          ns,
+          {
+            spec: { containers: spec.containers, nodeName: i % 2 ? 'node-2' : 'node-1' },
+            status
+          }
+        )
+        put(
+          'pods',
+          meta(pod, {
+            labels: { ...labels, 'pod-template-hash': '6f9c7' },
+            ownerReferences: [{ kind: 'ReplicaSet', name: rs, controller: true }]
+          })
+        )
+      })
+    }
+    const service = (
+      ns: string,
+      name: string,
+      spec: Record<string, unknown>,
+      status?: Record<string, unknown>
+    ): void => {
+      put('services', make('v1', 'Service', name, ns, { spec, ...(status ? { status } : {}) }))
+    }
+    const slice = (ns: string, svc: string, pods: { name: string; ready: boolean }[]): void => {
+      put(
+        'endpointslices',
+        meta(
+          make('discovery.k8s.io/v1', 'EndpointSlice', `${svc}-abcde`, ns, {
+            addressType: 'IPv4',
+            endpoints: pods.map((p, i) => ({
+              addresses: [`10.42.0.${String(20 + i)}`],
+              conditions: { ready: p.ready },
+              targetRef: { kind: 'Pod', name: p.name, namespace: ns }
+            }))
+          }),
+          { labels: { 'kubernetes.io/service-name': svc } }
+        )
+      )
+    }
+    const ingress = (
+      ns: string,
+      name: string,
+      spec: Record<string, unknown>,
+      address?: string
+    ): void => {
+      put(
+        'ingresses',
+        make('networking.k8s.io/v1', 'Ingress', name, ns, {
+          spec,
+          ...(address ? { status: { loadBalancer: { ingress: [{ ip: address }] } } } : {})
+        })
+      )
+    }
+    const rule = (host: string, paths: [string, string, number | string][]): unknown => ({
+      host,
+      http: {
+        paths: paths.map(([path, svc, port]) => ({
+          path,
+          pathType: 'Prefix',
+          backend: {
+            service: {
+              name: svc,
+              port: typeof port === 'number' ? { number: port } : { name: port }
+            }
+          }
+        }))
+      }
+    })
+
+    // Deployment web của fixture: khai báo cổng "http" như pod của nó (Service trỏ targetPort: http).
+    const webTpl = (
+      store.get('deployments')?.get('shop/web')?.spec as
+        { template?: { spec?: { containers?: Record<string, unknown>[] } } } | undefined
+    )?.template?.spec?.containers?.[0]
+    if (webTpl) webTpl['ports'] = [{ name: 'http', containerPort: 8080 }]
+    // Prometheus (nếu đã bật): Service không selector, endpoint do operator quản lý.
+    if (store.get('services')?.has('monitoring/prometheus-operated'))
+      slice('monitoring', 'prometheus-operated', [{ name: 'prometheus-0', ready: true }])
+    // ServiceAccount "default" có sẵn ở mọi namespace (như cluster thật).
+    for (const n of ['shop', 'payments', 'monitoring'])
+      put('serviceaccounts', make('v1', 'ServiceAccount', 'default', n))
+    // ——— shop: cửa hàng — Ingress nhiều host / path / TLS ———
+    // Pod web thật của fixture: endpoint web-1 sẵn sàng, web-2 CrashLoop.
+    slice('shop', 'web', [
+      { name: 'web-1', ready: true },
+      { name: 'web-2', ready: false }
+    ])
+    ingress(
+      'shop',
+      'storefront',
+      {
+        ingressClassName: 'nginx',
+        tls: [
+          { hosts: ['shop.example.com'], secretName: 'shop-tls' },
+          { hosts: ['admin.example.com'], secretName: 'admin-tls' }
+        ],
+        rules: [
+          rule('shop.example.com', [
+            ['/', 'web', 80],
+            ['/api', 'api', 'http'],
+            ['/legacy', 'legacy-api', 80]
+          ]),
+          rule('admin.example.com', [['/', 'admin', 80]])
+        ]
+      },
+      '203.0.113.10'
+    )
+    put(
+      'secrets',
+      make('v1', 'Secret', 'shop-tls', 'shop', { type: 'kubernetes.io/tls', data: {} })
+    )
+    put('secrets', make('v1', 'Secret', 'db-credentials', 'shop', { type: 'Opaque', data: {} }))
+    put(
+      'configmaps',
+      make('v1', 'ConfigMap', 'api-config', 'shop', { data: { LOG_LEVEL: 'info' } })
+    )
+    deployment('shop', 'api', {
+      replicas: 3,
+      ready: 3,
+      labels: { tier: 'backend' },
+      containers: [
+        container('ghcr.io/example/shop-api:2.4.1', [{ name: 'http', containerPort: 8080 }], {
+          envFrom: [
+            { configMapRef: { name: 'api-config' } },
+            { secretRef: { name: 'db-credentials' } }
+          ]
+        })
+      ],
+      pods: [running(), running(1), running()]
+    })
+    service('shop', 'api', {
+      type: 'ClusterIP',
+      clusterIP: '10.43.12.7',
+      selector: { app: 'api' },
+      ports: [{ name: 'http', port: 80, targetPort: 'http', protocol: 'TCP' }]
+    })
+    slice('shop', 'api', [
+      { name: 'api-6f9c7-x2k4p', ready: true },
+      { name: 'api-6f9c7-b8n1q', ready: true },
+      { name: 'api-6f9c7-m3v7d', ready: true }
+    ])
+    put(
+      'horizontalpodautoscalers',
+      make('autoscaling/v2', 'HorizontalPodAutoscaler', 'api', 'shop', {
+        spec: {
+          minReplicas: 2,
+          maxReplicas: 3,
+          scaleTargetRef: { kind: 'Deployment', name: 'api' }
+        },
+        status: { currentReplicas: 3, desiredReplicas: 3 }
+      })
+    )
+    deployment('shop', 'admin', {
+      replicas: 1,
+      ready: 0,
+      containers: [
+        container('ghcr.io/example/shop-admin:1.9.0-rc1', [{ name: 'http', containerPort: 3000 }])
+      ],
+      pods: [waiting('ImagePullBackOff')]
+    })
+    service('shop', 'admin', {
+      type: 'ClusterIP',
+      clusterIP: '10.43.12.9',
+      selector: { app: 'admin' },
+      ports: [{ port: 80, targetPort: 8080, protocol: 'TCP' }]
+    })
+    slice('shop', 'admin', [{ name: 'admin-6f9c7-x2k4p', ready: false }])
+    service(
+      'shop',
+      'web-public',
+      {
+        type: 'LoadBalancer',
+        clusterIP: '10.43.12.20',
+        selector: { app: 'web' },
+        ports: [{ name: 'https', port: 443, targetPort: 'http', nodePort: 31443, protocol: 'TCP' }]
+      },
+      { loadBalancer: { ingress: [{ ip: '198.51.100.20' }] } }
+    )
+    slice('shop', 'web-public', [
+      { name: 'web-1', ready: true },
+      { name: 'web-2', ready: false }
+    ])
+    put(
+      'statefulsets',
+      make('apps/v1', 'StatefulSet', 'postgres', 'shop', {
+        spec: {
+          replicas: 1,
+          serviceName: 'postgres',
+          selector: { matchLabels: { app: 'postgres' } },
+          template: {
+            metadata: { labels: { app: 'postgres', tier: 'data' } },
+            spec: {
+              containers: [
+                container('postgres:16.4', [{ name: 'pg', containerPort: 5432 }], {
+                  env: [
+                    {
+                      name: 'POSTGRES_PASSWORD',
+                      valueFrom: { secretKeyRef: { name: 'db-credentials', key: 'password' } }
+                    }
+                  ]
+                })
+              ]
+            }
+          },
+          volumeClaimTemplates: [{ metadata: { name: 'data' } }]
+        },
+        status: { replicas: 1, readyReplicas: 1 }
+      })
+    )
+    put(
+      'pods',
+      meta(
+        make('v1', 'Pod', 'postgres-0', 'shop', {
+          spec: {
+            containers: [container('postgres:16.4', [{ name: 'pg', containerPort: 5432 }])],
+            nodeName: 'node-1'
+          },
+          status: running()
+        }),
+        {
+          labels: { app: 'postgres', tier: 'data' },
+          ownerReferences: [{ kind: 'StatefulSet', name: 'postgres', controller: true }]
+        }
+      )
+    )
+    put(
+      'persistentvolumeclaims',
+      make('v1', 'PersistentVolumeClaim', 'data-postgres-0', 'shop', {
+        spec: { storageClassName: 'standard', volumeName: 'pv-7c1e' },
+        status: { phase: 'Bound', capacity: { storage: '20Gi' } }
+      })
+    )
+    service('shop', 'postgres', {
+      type: 'ClusterIP',
+      clusterIP: 'None',
+      selector: { app: 'postgres' },
+      ports: [{ name: 'pg', port: 5432, targetPort: 'pg', protocol: 'TCP' }]
+    })
+    slice('shop', 'postgres', [{ name: 'postgres-0', ready: true }])
+    // Service trỏ tới workload đã xoá: selector không khớp pod nào.
+    service('shop', 'redis', {
+      type: 'ClusterIP',
+      clusterIP: '10.43.12.30',
+      selector: { app: 'redis' },
+      ports: [{ port: 6379, targetPort: 6379, protocol: 'TCP' }]
+    })
+    slice('shop', 'redis', [])
+    service('shop', 'stripe', { type: 'ExternalName', externalName: 'api.stripe.com' })
+    // Upload: PVC chưa cấp được (Pending) → pod Pending.
+    put(
+      'persistentvolumeclaims',
+      make('v1', 'PersistentVolumeClaim', 'uploads', 'shop', {
+        spec: { storageClassName: 'fast-ssd' },
+        status: { phase: 'Pending' }
+      })
+    )
+    deployment('shop', 'media', {
+      replicas: 1,
+      ready: 0,
+      containers: [
+        container('ghcr.io/example/media:0.8.2', [{ name: 'http', containerPort: 8080 }])
+      ],
+      volumes: [{ name: 'uploads', persistentVolumeClaim: { claimName: 'uploads' } }],
+      pods: [waiting('Pending')]
+    })
+    put(
+      'jobs',
+      meta(
+        make('batch/v1', 'Job', 'db-migrate-42', 'shop', {
+          spec: {
+            completions: 1,
+            template: { spec: { containers: [container('ghcr.io/example/shop-api:2.4.1', [])] } }
+          },
+          status: { succeeded: 1, completionTime: new Date().toISOString() }
+        }),
+        {}
+      )
+    )
+    put(
+      'networkpolicies',
+      make('networking.k8s.io/v1', 'NetworkPolicy', 'allow-same-namespace', 'shop', {
+        spec: {
+          podSelector: {},
+          policyTypes: ['Ingress'],
+          ingress: [
+            {
+              from: [
+                { podSelector: {} },
+                {
+                  namespaceSelector: {
+                    matchLabels: { 'kubernetes.io/metadata.name': 'ingress-nginx' }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      })
+    )
+
+    // ——— payments: NodePort, Ingress, worker chạy nền ———
+    deployment('payments', 'checkout', {
+      replicas: 2,
+      ready: 2,
+      labels: { tier: 'frontend' },
+      containers: [
+        container('ghcr.io/example/checkout:5.2.0', [{ name: 'http', containerPort: 8080 }])
+      ],
+      pods: [running(), running()]
+    })
+    service('payments', 'checkout', {
+      type: 'NodePort',
+      clusterIP: '10.43.40.2',
+      selector: { app: 'checkout' },
+      ports: [{ name: 'http', port: 8080, targetPort: 'http', nodePort: 30080, protocol: 'TCP' }]
+    })
+    slice('payments', 'checkout', [
+      { name: 'checkout-6f9c7-x2k4p', ready: true },
+      { name: 'checkout-6f9c7-b8n1q', ready: true }
+    ])
+    ingress('payments', 'pay', {
+      ingressClassName: 'nginx',
+      tls: [{ hosts: ['pay.example.com'], secretName: 'pay-tls' }],
+      rules: [rule('pay.example.com', [['/', 'checkout', 8080]])]
+    })
+    put(
+      'secrets',
+      make('v1', 'Secret', 'pay-tls', 'payments', { type: 'kubernetes.io/tls', data: {} })
+    )
+    deployment('payments', 'fraud-worker', {
+      replicas: 2,
+      ready: 1,
+      containers: [container('ghcr.io/example/fraud:3.0.1', [])],
+      pods: [running(), waiting('CrashLoopBackOff', 12)]
+    })
+    put(
+      'networkpolicies',
+      make('networking.k8s.io/v1', 'NetworkPolicy', 'deny-all', 'payments', {
+        spec: {
+          podSelector: { matchLabels: { app: 'fraud-worker' } },
+          policyTypes: ['Ingress', 'Egress']
+        }
+      })
+    )
+
+    // ——— monitoring: DaemonSet, Grafana ———
+    put(
+      'daemonsets',
+      make('apps/v1', 'DaemonSet', 'node-exporter', 'monitoring', {
+        spec: {
+          selector: { matchLabels: { app: 'node-exporter' } },
+          template: {
+            metadata: { labels: { app: 'node-exporter' } },
+            spec: {
+              containers: [
+                container('quay.io/prometheus/node-exporter:v1.8.2', [
+                  { name: 'metrics', containerPort: 9100 }
+                ])
+              ]
+            }
+          }
+        },
+        status: { desiredNumberScheduled: 2, numberReady: 1 }
+      })
+    )
+    ;['node-1', 'node-2'].forEach((node, i) => {
+      put(
+        'pods',
+        meta(
+          make('v1', 'Pod', `node-exporter-${node}`, 'monitoring', {
+            spec: {
+              containers: [container('quay.io/prometheus/node-exporter:v1.8.2', [])],
+              nodeName: node
+            },
+            status: i ? waiting('Pending') : running()
+          }),
+          {
+            labels: { app: 'node-exporter' },
+            ownerReferences: [{ kind: 'DaemonSet', name: 'node-exporter', controller: true }]
+          }
+        )
+      )
+    })
+    deployment('monitoring', 'grafana', {
+      replicas: 1,
+      ready: 1,
+      containers: [container('grafana/grafana:11.2.0', [{ name: 'http', containerPort: 3000 }])],
+      pods: [running()]
+    })
+    service('monitoring', 'grafana', {
+      type: 'ClusterIP',
+      clusterIP: '10.43.50.3',
+      selector: { app: 'grafana' },
+      ports: [{ name: 'http', port: 80, targetPort: 'http', protocol: 'TCP' }]
+    })
+    slice('monitoring', 'grafana', [{ name: 'grafana-6f9c7-x2k4p', ready: true }])
+    ingress('monitoring', 'grafana', {
+      ingressClassName: 'nginx',
+      rules: [rule('grafana.example.com', [['/', 'grafana', 80]])]
+    })
+  }
+
   return {
     url: `${options.tls === false ? 'http' : 'https'}://127.0.0.1:${port}`,
     port,
     requests,
+    accepts,
+    connections: () => connections,
+    stall: (path) => {
+      stalled = path
+    },
+    blockEvictions: (n) => {
+      blockedEvictions = n
+    },
     upsert: (plural, partial) => {
       const table = store.get(plural)
       const meta = kindOf[plural]
@@ -979,6 +1618,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       table?.delete(key)
       notify(plural, 'DELETED', obj)
     },
+    seedDemo,
     enablePrometheus: () => {
       prometheus = true
       store

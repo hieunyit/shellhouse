@@ -9,7 +9,7 @@ import type {
   KeySummary
 } from '@shared/hosts'
 import { buildGroupTree, groupMoveProblem, type GroupTree } from '@shared/group-tree'
-import { GroupDefaults, HOST_COLORS } from '@shared/hosts'
+import { GroupDefaults, HOST_COLORS, MAX_JUMPS } from '@shared/hosts'
 import { inheritedDefaults, type GroupWithDefaults, type InheritedDefaults } from '@shared/inherit'
 import type { SavedForward, SavedForwardInput } from '@shared/forwards'
 import type { SerialSettings } from '@shared/serial'
@@ -20,6 +20,7 @@ import { uuidv7 } from '../../node-shared/uuid'
 import type { Db } from '../store/db'
 import type { Vault } from '../vault/vault'
 import type { Secret } from '../../node-shared/secret'
+import { t, tn } from '@shared/i18n'
 
 export interface ResolvedHop {
   label: string
@@ -195,8 +196,8 @@ export class HostService {
             .prepare('SELECT identity_id FROM hosts WHERE id = ? AND deleted_at IS NULL')
             .get(input.id) as { identity_id: string | null } | undefined)
         : undefined
-      if (input.id && !existing) throw new Error('Host not found')
-      if (input.auth === 'key' && !input.keyId) throw new Error('No key selected')
+      if (input.id && !existing) throw new Error(t('Host not found'))
+      if (input.auth === 'key' && !input.keyId) throw new Error(t('No key selected'))
       this.checkJumps(input.id ?? null, input.jumpHostIds)
 
       const hostId = input.id ?? uuidv7(now)
@@ -256,7 +257,7 @@ export class HostService {
       if (input.tmux) options.tmux = true
       if (input.protocol === 'telnet') options.protocol = 'telnet'
       if (input.protocol === 'serial') {
-        if (!input.serial) throw new Error('Choose a serial port')
+        if (!input.serial) throw new Error(t('Choose a serial port'))
         options.protocol = 'serial'
         options.serial = input.serial
       }
@@ -314,6 +315,16 @@ export class HostService {
     })()
   }
 
+  /** Chạy nhiều thao tác trong một transaction (nhập hàng loạt: một lần ghi đĩa, nguyên tử). */
+  batch<T>(fn: () => T): T {
+    return this.db.transaction(fn)()
+  }
+
+  /** Danh sách nhóm (nhẹ hơn tree(): không đọc host / key). */
+  groups(): GroupSummary[] {
+    return this.groupRows()
+  }
+
   private groupRows(): GroupSummary[] {
     const rows = this.db
       .prepare(
@@ -360,20 +371,20 @@ export class HostService {
       const key = this.db
         .prepare('SELECT 1 FROM keys WHERE id = ? AND deleted_at IS NULL')
         .get(defaults.keyId)
-      if (!key) throw new Error('The selected key no longer exists')
+      if (!key) throw new Error(t('The selected key no longer exists'))
     }
     for (const id of defaults.jumpHostIds ?? []) {
       const host = this.db
         .prepare('SELECT 1 FROM hosts WHERE id = ? AND deleted_at IS NULL')
         .get(id)
-      if (!host) throw new Error('A selected jump host no longer exists')
+      if (!host) throw new Error(t('A selected jump host no longer exists'))
     }
   }
 
   /** Kiểm tra vị trí mới của nhóm: không tạo vòng, không quá sâu, không trùng tên cùng cấp. */
   private checkGroupPlacement(id: string | null, parentId: string | null, name: string): void {
     const tree = this.groupTree()
-    if (id !== null && !tree.byId.has(id)) throw new Error('The group no longer exists')
+    if (id !== null && !tree.byId.has(id)) throw new Error(t('The group no longer exists'))
     const problem = groupMoveProblem(tree, id, parentId)
     if (problem) throw new Error(problem)
     const clash = tree
@@ -381,7 +392,7 @@ export class HostService {
       .some(
         (g) => g.id !== id && g.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0
       )
-    if (clash) throw new Error(`There is already a group named "${name}" here`)
+    if (clash) throw new Error(t('There is already a group named "{name}" here', { name }))
   }
 
   saveGroup(input: GroupInput): string {
@@ -412,7 +423,7 @@ export class HostService {
   moveGroup(id: string, parentId: string | null): void {
     const row = this.db.prepare('SELECT name FROM groups WHERE id = ?').get(id) as
       { name: string } | undefined
-    if (!row) throw new Error('The group no longer exists')
+    if (!row) throw new Error(t('The group no longer exists'))
     this.checkGroupPlacement(id, parentId, row.name)
     this.db
       .prepare('UPDATE groups SET parent_id = ?, updated_at = ? WHERE id = ?')
@@ -459,7 +470,7 @@ export class HostService {
   /** Chuyển nhiều host vào một nhóm; thêm vào cuối nếu nhóm đích đã được sắp xếp thủ công. */
   moveHosts(ids: readonly string[], groupId: string | null): void {
     if (groupId !== null && !this.groupTree().byId.has(groupId))
-      throw new Error('The group no longer exists')
+      throw new Error(t('The group no longer exists'))
     const now = this.now()
     this.db.transaction(() => {
       const move = this.db.prepare(
@@ -483,19 +494,69 @@ export class HostService {
     })()
   }
 
+  /**
+   * Lưu mật khẩu người dùng vừa gõ ở hộp hỏi mật khẩu (sau khi đăng nhập thành công). Host đang
+   * "Automatic" chuyển sang "Password"; host dùng SSH key thì không đụng tới (secret của nó là
+   * passphrase của key).
+   */
+  setHostPassword(hostId: string, password: string): void {
+    if (!password) throw new Error(t('Password is empty'))
+    const now = this.now()
+    this.db.transaction(() => {
+      const row = this.db
+        .prepare(
+          `SELECT h.label, h.identity_id, i.auth_type, i.id AS existing
+           FROM hosts h LEFT JOIN identities i ON i.id = h.identity_id
+           WHERE h.id = ? AND h.deleted_at IS NULL`
+        )
+        .get(hostId) as
+        | {
+            label: string
+            identity_id: string | null
+            auth_type: string | null
+            existing: string | null
+          }
+        | undefined
+      if (!row) throw new Error(t('Host not found'))
+      if (row.auth_type === 'key') throw new Error(t('This host signs in with an SSH key'))
+      if (row.existing) {
+        const ref = { table: 'identities', id: row.existing, field: 'secret_enc' }
+        this.db
+          .prepare(
+            `UPDATE identities SET auth_type = 'password', secret_enc = ?, key_id = NULL,
+                    updated_at = ? WHERE id = ?`
+          )
+          .run(this.vault.encryptString(ref, password), now, row.existing)
+      } else {
+        // Host chưa có identity (dữ liệu cũ): tạo mới, username trống = kế thừa từ nhóm.
+        const identityId = uuidv7(now)
+        const ref = { table: 'identities', id: identityId, field: 'secret_enc' }
+        this.db
+          .prepare(
+            `INSERT INTO identities (id, name, username, auth_type, secret_enc, key_id, updated_at)
+             VALUES (?, ?, '', 'password', ?, NULL, ?)`
+          )
+          .run(identityId, row.label, this.vault.encryptString(ref, password), now)
+        this.db
+          .prepare('UPDATE hosts SET identity_id = ?, updated_at = ? WHERE id = ?')
+          .run(identityId, now, hostId)
+      }
+    })()
+  }
+
   /** Thêm / bỏ tag trên nhiều host (giữ nguyên các tag khác). */
   tagHosts(ids: readonly string[], add: readonly string[], remove: readonly string[]): void {
     const now = this.now()
-    const drop = new Set(remove.map((t) => t.toLowerCase()))
+    const drop = new Set(remove.map((tag) => tag.toLowerCase()))
     this.db.transaction(() => {
       for (const id of ids) {
         const row = this.db.prepare('SELECT tags FROM hosts WHERE id = ?').get(id) as
           { tags: string } | undefined
         if (!row) continue
-        const tags = parseJson<string[]>(row.tags, []).filter((t) => !drop.has(t.toLowerCase()))
-        for (const t of add)
-          if (!tags.some((x) => x.toLowerCase() === t.toLowerCase())) tags.push(t)
-        if (tags.length > 20) throw new Error('A host can have at most 20 tags')
+        const tags = parseJson<string[]>(row.tags, []).filter((tag) => !drop.has(tag.toLowerCase()))
+        for (const tag of add)
+          if (!tags.some((x) => x.toLowerCase() === tag.toLowerCase())) tags.push(tag)
+        if (tags.length > 20) throw new Error(t('A host can have at most 20 tags'))
         this.db
           .prepare('UPDATE hosts SET tags = ?, updated_at = ? WHERE id = ?')
           .run(JSON.stringify(tags), now, id)
@@ -534,7 +595,7 @@ export class HostService {
       for (const id of orderedIds) {
         const row = this.db.prepare('SELECT name, parent_id FROM groups WHERE id = ?').get(id) as
           { name: string; parent_id: string | null } | undefined
-        if (!row) throw new Error('The group no longer exists')
+        if (!row) throw new Error(t('The group no longer exists'))
         if (row.parent_id !== parentId) this.moveGroup(id, parentId)
       }
       const rest = this.groupTree()
@@ -553,7 +614,7 @@ export class HostService {
       const host = this.db
         .prepare('SELECT * FROM hosts WHERE id = ? AND deleted_at IS NULL')
         .get(id) as Record<string, unknown> | undefined
-      if (!host) throw new Error('Host not found')
+      if (!host) throw new Error(t('Host not found'))
       const newId = uuidv7(now)
       let identityId: string | null = null
       if (typeof host['identity_id'] === 'string') {
@@ -648,13 +709,13 @@ export class HostService {
     let encrypted = false
     if ('key' in outcome) publicKey = { type: outcome.key.type, blob: outcome.key.getPublicSSH() }
     else if ('encrypted' in outcome) encrypted = true
-    else throw new Error(`Could not read the key: ${outcome.error}`)
+    else throw new Error(t('Could not read the key: {error}', { error: outcome.error }))
 
     if (!publicKey) {
       // Key có passphrase: lấy public key từ phần header (OpenSSH lưu public key không mã hoá).
       publicKey = publicKeyFromOpenSshHeader(pem)
       if (!publicKey)
-        throw new Error('Could not read the public key from the passphrase-protected file')
+        throw new Error(t('Could not read the public key from the passphrase-protected file'))
     }
 
     const id = uuidv7(this.now())
@@ -707,7 +768,7 @@ export class HostService {
     const row = this.db
       .prepare('SELECT name, public_key FROM keys WHERE id = ? AND deleted_at IS NULL')
       .get(id) as { name: string; public_key: string } | undefined
-    if (!row) throw new Error('Key not found')
+    if (!row) throw new Error(t('Key not found'))
     const comment = row.name.replace(/[^\w.@+-]+/g, '-').slice(0, 64)
     return `${row.public_key} ${comment}`
   }
@@ -717,7 +778,7 @@ export class HostService {
     const row = this.db
       .prepare('SELECT private_key_enc FROM keys WHERE id = ? AND deleted_at IS NULL')
       .get(id) as { private_key_enc: Buffer } | undefined
-    if (!row) throw new Error('Key not found')
+    if (!row) throw new Error(t('Key not found'))
     return this.vault.decrypt({ table: 'keys', id, field: 'private_key_enc' }, row.private_key_enc)
   }
 
@@ -726,7 +787,7 @@ export class HostService {
       .prepare('SELECT COUNT(*) AS n FROM identities WHERE key_id = ? AND deleted_at IS NULL')
       .get(id) as { n: number }
     if (inUse.n > 0)
-      throw new Error(`The key is used by ${inUse.n} host${inUse.n === 1 ? '' : 's'}`)
+      throw new Error(tn(inUse.n, 'The key is used by {n} host', 'The key is used by {n} hosts'))
     this.db.transaction(() => {
       this.db.prepare('UPDATE identities SET key_id = NULL WHERE key_id = ?').run(id)
       this.db.prepare('DELETE FROM keys WHERE id = ?').run(id)
@@ -749,13 +810,14 @@ export class HostService {
         'SELECT label, hostname, port, options FROM hosts WHERE id = ? AND deleted_at IS NULL'
       )
       .get(hostId) as { label: string; hostname: string; port: number; options: string } | undefined
-    if (!row) throw new Error('Host not found')
+    if (!row) throw new Error(t('Host not found'))
     const options = parseJson<HostOptions>(row.options, {})
     if (options.protocol !== 'telnet' && options.protocol !== 'serial') return null
     this.db.prepare('UPDATE hosts SET last_used_at = ? WHERE id = ?').run(this.now(), hostId)
     if (options.protocol === 'telnet')
       return { protocol: 'telnet', label: row.label, host: row.hostname, port: row.port }
-    if (!options.serial) throw new Error(`"${row.label}" has no serial port configured`)
+    if (!options.serial)
+      throw new Error(t('"{name}" has no serial port configured', { name: row.label }))
     return { protocol: 'serial', label: row.label, serial: options.serial }
   }
 
@@ -766,7 +828,6 @@ export class HostService {
       .get(hostId) as { jump_host_ids: string; mode: string; options: string }
     const options = parseJson<HostOptions>(row.options, {})
     const jumps = this.resolveJumps(hostId, defaultUser, new Set([hostId]))
-    if (jumps.length > 8) throw new Error('The jump host chain is too long (maximum 8)')
     this.db.prepare('UPDATE hosts SET last_used_at = ? WHERE id = ?').run(this.now(), hostId)
     return {
       ...host,
@@ -776,20 +837,34 @@ export class HostService {
     }
   }
 
-  /** Jump host của một host: jumpHostIds (host đã lưu) hoặc chuỗi ProxyJump từ ~/.ssh/config. */
-  private resolveJumps(hostId: string, defaultUser: string, visiting: Set<string>): ResolvedHop[] {
+  /**
+   * Jump host của một host: jumpHostIds (host đã lưu) hoặc chuỗi ProxyJump từ ~/.ssh/config.
+   * `budget` đếm chặng trên CẢ cây (dùng chung giữa các nhánh): dừng ngay khi quá MAX_JUMPS thay
+   * vì đi hết rồi mới đếm — đồ thị hình thoi lồng nhau không làm bùng nổ số lần đệ quy / giải mã.
+   */
+  private resolveJumps(
+    hostId: string,
+    defaultUser: string,
+    visiting: Set<string>,
+    budget = { hops: 0 }
+  ): ResolvedHop[] {
+    const spend = (): void => {
+      if (++budget.hops > MAX_JUMPS)
+        throw new Error(t('The jump host chain is too long (maximum {n})', { n: MAX_JUMPS }))
+    }
     const row = this.db
       .prepare('SELECT jump_host_ids, options FROM hosts WHERE id = ? AND deleted_at IS NULL')
       .get(hostId) as { jump_host_ids: string; options: string } | undefined
-    if (!row) throw new Error('Jump host not found')
+    if (!row) throw new Error(t('Jump host not found'))
     const ids = parseJson<string[]>(row.jump_host_ids, [])
     const chain: ResolvedHop[] = []
 
     const addSaved = (id: string): void => {
-      if (visiting.has(id)) throw new Error('The jump host chain contains a loop')
+      if (visiting.has(id)) throw new Error(t('The jump host chain contains a loop'))
+      spend()
       const next = new Set(visiting).add(id)
       // Jump host cũng có thể có jump host riêng → đi qua chúng trước (như ProxyJump lồng nhau).
-      chain.push(...this.resolveJumps(id, defaultUser, next), this.resolveHop(id))
+      chain.push(...this.resolveJumps(id, defaultUser, next, budget), this.resolveHop(id))
     }
 
     if (ids.length > 0) {
@@ -824,7 +899,8 @@ export class HostService {
         continue
       }
       const target = parseQuickConnect(entry, defaultUser)
-      if (!target) throw new Error(`Invalid ProxyJump: ${entry}`)
+      if (!target) throw new Error(t('Invalid ProxyJump: {value}', { value: entry }))
+      spend()
       chain.push({ label: entry, target, credentials: {} })
     }
     return chain
@@ -832,19 +908,19 @@ export class HostService {
 
   private checkJumps(hostId: string | null, jumpHostIds: readonly string[]): void {
     if (hostId && jumpHostIds.includes(hostId))
-      throw new Error('A host cannot be its own jump host')
+      throw new Error(t('A host cannot be its own jump host'))
     for (const id of jumpHostIds) {
       const exists = this.db
         .prepare('SELECT 1 FROM hosts WHERE id = ? AND deleted_at IS NULL')
         .get(id)
-      if (!exists) throw new Error('Jump host not found')
+      if (!exists) throw new Error(t('Jump host not found'))
       if (hostId) {
         // Jump host (hoặc jump host của nó) không được dẫn ngược về host này.
         try {
           this.resolveJumps(id, 'x', new Set([hostId, id]))
         } catch (error) {
           if (error instanceof Error && /contains a loop/.test(error.message)) {
-            throw new Error('The jump host chain contains a loop', { cause: error })
+            throw new Error(t('The jump host chain contains a loop'), { cause: error })
           }
         }
       }
@@ -884,7 +960,7 @@ export class HostService {
     const host = this.db
       .prepare('SELECT 1 FROM hosts WHERE id = ? AND deleted_at IS NULL')
       .get(input.hostId)
-    if (!host) throw new Error('Host not found')
+    if (!host) throw new Error(t('Host not found'))
     const destHost = input.kind === 'D' ? null : input.destHost
     const destPort = input.kind === 'D' ? null : input.destPort
     if (input.id) {
@@ -904,7 +980,7 @@ export class HostService {
           input.id,
           input.hostId
         )
-      if (result.changes === 0) throw new Error('Forward not found')
+      if (result.changes === 0) throw new Error(t('Forward not found'))
       return input.id
     }
     const id = uuidv7(now)
@@ -956,12 +1032,14 @@ export class HostService {
           key_id: string | null
         }
       | undefined
-    if (!row) throw new Error('Host not found')
+    if (!row) throw new Error(t('Host not found'))
     const options = parseJson<HostOptions>(row.options, {})
     const inherited = this.inheritedFor(hostId)
     const username = row.username || inherited.username?.value
     if (!username)
-      throw new Error(`"${row.label}" has no username — set one on the host or on its group`)
+      throw new Error(
+        t('"{name}" has no username — set one on the host or on its group', { name: row.label })
+      )
     const port = options.inheritPort ? (inherited.port?.value ?? 22) : row.port
 
     const credentials: ResolvedHost['credentials'] = {}
@@ -995,7 +1073,7 @@ export class HostService {
         const key = this.db
           .prepare('SELECT name, private_key_enc FROM keys WHERE id = ?')
           .get(row.key_id) as { name: string; private_key_enc: Buffer } | undefined
-        if (!key) throw new Error('The key of this host has been deleted')
+        if (!key) throw new Error(t('The key of this host has been deleted'))
         const pem = this.vault.decrypt(
           { table: 'keys', id: row.key_id, field: 'private_key_enc' },
           key.private_key_enc

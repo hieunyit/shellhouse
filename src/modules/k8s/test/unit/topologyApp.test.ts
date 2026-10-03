@@ -1,0 +1,540 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import { setLanguage } from '@shared/i18n'
+import {
+  buildTopology,
+  layoutTopology,
+  pathThrough,
+  topoStructureKey,
+  MAX_ROWS_PER_NS,
+  type TopoGraph,
+  type TopoNode,
+  type TopoOptions
+} from '../../shared/appTopology'
+import type { MapData, MapPod, MapWorkload } from '../../shared/map'
+
+afterEach(() => {
+  setLanguage('en')
+})
+
+const pod = (name: string, owner: MapPod['owner'], over: Partial<MapPod> = {}): MapPod => ({
+  ns: 'shop',
+  name,
+  owner,
+  status: 'Running',
+  tone: 'ok',
+  restarts: 0,
+  node: 'n1',
+  ...over
+})
+
+const workload = (over: Partial<MapWorkload> & { name: string }): MapWorkload => ({
+  kind: 'deployments.apps',
+  ns: 'shop',
+  labels: { app: over.name },
+  ready: 1,
+  desired: 1,
+  status: '1/1 ready',
+  tone: 'ok',
+  pvcs: [],
+  ...over
+})
+
+function data(): MapData {
+  return {
+    namespaces: [
+      { name: 'shop', active: true },
+      { name: 'kube-system', active: true }
+    ],
+    workloads: [
+      workload({
+        name: 'web',
+        ready: 1,
+        desired: 2,
+        tone: 'warn',
+        ports: [{ name: 'http', port: 8080 }],
+        configMaps: ['web-config'],
+        secrets: ['db-password']
+      }),
+      workload({ name: 'api', ready: 2, desired: 2, ports: [{ name: 'grpc', port: 8080 }] }),
+      workload({
+        kind: 'statefulsets.apps',
+        name: 'db',
+        pvcs: ['data-db-0'],
+        ports: [{ name: 'pg', port: 5432 }]
+      }),
+      workload({ name: 'worker' }),
+      workload({ kind: 'deployments.apps', ns: 'kube-system', name: 'coredns' })
+    ],
+    pods: [
+      pod('web-1', { kind: 'Deployment', name: 'web' }),
+      pod(
+        'web-2',
+        { kind: 'Deployment', name: 'web' },
+        { status: 'CrashLoopBackOff', tone: 'bad', restarts: 7 }
+      ),
+      pod('api-1', { kind: 'Deployment', name: 'api' }),
+      pod('api-2', { kind: 'Deployment', name: 'api' }, { tone: 'warn', notReady: true }),
+      pod('db-0', { kind: 'StatefulSet', name: 'db' }, { status: 'Pending', tone: 'warn' }),
+      pod('worker-1', { kind: 'Deployment', name: 'worker' }),
+      // Pod lẻ và pod của ReplicaSet không có Deployment: vào nhóm "Standalone pods".
+      pod('debug', null, { labels: { app: 'debug' } }),
+      pod('lonely-x', { kind: 'ReplicaSet', name: 'lonely' }, { labels: { app: 'lonely' } }),
+      pod('coredns-1', { kind: 'Deployment', name: 'coredns' }, { ns: 'kube-system' })
+    ],
+    services: [
+      {
+        ns: 'shop',
+        name: 'web',
+        type: 'ClusterIP',
+        selector: { app: 'web' },
+        ports: '80/TCP',
+        portList: [{ port: 80, targetPort: 'http' }],
+        endpoints: { ready: 1, notReady: 1 }
+      },
+      {
+        ns: 'shop',
+        name: 'api',
+        type: 'ClusterIP',
+        selector: { app: 'api' },
+        ports: '80/TCP',
+        portList: [
+          { port: 80, targetPort: '9090' },
+          { port: 81, targetPort: 'metrics' }
+        ]
+      },
+      {
+        ns: 'shop',
+        name: 'db',
+        type: 'ClusterIP',
+        clusterIP: 'None',
+        selector: { app: 'db' },
+        ports: '5432/TCP',
+        portList: [{ port: 5432, targetPort: '5432' }],
+        endpoints: { ready: 0, notReady: 1 }
+      },
+      {
+        ns: 'shop',
+        name: 'orphan',
+        type: 'ClusterIP',
+        selector: { app: 'nothing' },
+        ports: '80/TCP',
+        portList: [{ port: 80, targetPort: '80' }]
+      },
+      {
+        ns: 'shop',
+        name: 'payments',
+        type: 'ExternalName',
+        externalName: 'pay.example.com',
+        selector: {},
+        ports: ''
+      },
+      {
+        ns: 'shop',
+        name: 'edge',
+        type: 'LoadBalancer',
+        selector: { app: 'web' },
+        ports: '443/TCP',
+        portList: [{ port: 443, targetPort: 'http', nodePort: 30443 }]
+      },
+      {
+        ns: 'shop',
+        name: 'debug',
+        type: 'ClusterIP',
+        selector: { app: 'debug' },
+        ports: '80/TCP',
+        portList: [{ port: 80, targetPort: '80' }]
+      }
+    ],
+    routes: [
+      {
+        kind: 'ingresses.networking.k8s.io',
+        ns: 'shop',
+        name: 'shop',
+        hosts: ['shop.example.com'],
+        backends: ['web', 'api', 'legacy'],
+        className: 'nginx',
+        rules: [
+          { host: 'shop.example.com', path: '/', service: 'web', port: '80' },
+          { host: 'shop.example.com', path: '/api', service: 'api', port: '8443' },
+          { host: 'shop.example.com', path: '/old', service: 'legacy', port: '80' },
+          { host: '', path: '', service: 'web', default: true }
+        ],
+        tls: [
+          { hosts: ['shop.example.com'], secret: 'shop-tls' },
+          { hosts: ['admin.example.com'], secret: 'admin-tls' }
+        ]
+      },
+      {
+        kind: 'httproutes.gateway.networking.k8s.io',
+        ns: 'shop',
+        name: 'api',
+        hosts: ['api.example.com'],
+        backends: ['api'],
+        parents: [
+          { ns: 'shop', name: 'public' },
+          { ns: 'shop', name: 'gone' }
+        ],
+        rules: [{ host: 'api.example.com', path: '/v1', service: 'api' }]
+      }
+    ],
+    gateways: [{ ns: 'shop', name: 'public', className: 'nginx', listeners: 'HTTP:80, HTTPS:443' }],
+    pvcs: [{ ns: 'shop', name: 'data-db-0', status: 'Pending', capacity: '', tone: 'warn' }],
+    hpas: [
+      {
+        ns: 'shop',
+        name: 'api',
+        target: { kind: 'Deployment', name: 'api' },
+        min: 1,
+        max: 2,
+        current: 2
+      }
+    ],
+    policies: [
+      {
+        ns: 'shop',
+        name: 'db-deny',
+        selector: { matchLabels: { app: 'db' } },
+        types: ['Ingress'],
+        ingressRules: 0,
+        egressRules: 0
+      },
+      {
+        ns: 'shop',
+        name: 'web-allow',
+        selector: { matchLabels: { app: 'web' } },
+        types: ['Ingress'],
+        ingressRules: 1,
+        egressRules: 0
+      }
+    ],
+    nodes: { total: 1, ready: 1 },
+    truncated: false,
+    configMaps: ['shop/web-config'],
+    secrets: ['shop/shop-tls']
+  }
+}
+
+const OPTS: TopoOptions = {
+  hideSystem: true,
+  showDeps: true,
+  expanded: new Set(),
+  collapsed: () => false,
+  showAll: new Set()
+}
+
+const byId = (g: TopoGraph): Map<string, TopoNode> => new Map(g.nodes.map((n) => [n.id, n]))
+const codes = (n: TopoNode | undefined): string[] => (n?.problems ?? []).map((p) => p.code)
+
+describe('Topology tĩnh (Entry → Routes → Services → Workloads → Pods → Config)', () => {
+  it('dựng làn và cạnh: luật Ingress từng dòng, LoadBalancer là lối vào, pod gộp theo workload', () => {
+    const g = buildTopology(data(), OPTS)
+    const n = byId(g)
+    expect(n.get('ing:shop/shop')?.lane).toBe('entry')
+    expect(n.get('rt:httproutes.gateway.networking.k8s.io:shop/api')?.lane).toBe('route')
+    expect(n.get('gw:shop/public')?.lane).toBe('entry')
+    expect(n.get('lb:shop/edge')).toMatchObject({ lane: 'entry', title: 'LoadBalancer' })
+    // Namespace hệ thống ẩn.
+    expect([...n.keys()].some((id) => id.includes('kube-system'))).toBe(false)
+    const ids = g.edges.map((e) => e.id)
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        'ing:shop/shop#0>svc:shop/web',
+        'ing:shop/shop#1>svc:shop/api',
+        'ing:shop/shop#2>svc:shop/legacy',
+        'ing:shop/shop#3>svc:shop/web',
+        'gw:shop/public>rt:httproutes.gateway.networking.k8s.io:shop/api',
+        'lb:shop/edge>svc:shop/edge',
+        'svc:shop/edge>wl:deployments.apps:shop/web',
+        'svc:shop/web>wl:deployments.apps:shop/web',
+        'wl:deployments.apps:shop/web>pods:wl:deployments.apps:shop/web',
+        'pods:wl:deployments.apps:shop/web>cm:shop/web-config',
+        'pods:wl:deployments.apps:shop/web>sec:shop/db-password',
+        'pods:wl:statefulsets.apps:shop/db>pvc:shop/data-db-0',
+        'svc:shop/debug>wl:pods:shop/standalone'
+      ])
+    )
+    // Dòng luật: host + path, mặc định ghi rõ.
+    expect(n.get('ing:shop/shop')?.rows?.map((r) => r.text)).toEqual([
+      'shop.example.com/',
+      'shop.example.com/api',
+      'shop.example.com/old',
+      'default backend'
+    ])
+    // Pod lẻ + pod của ReplicaSet không có Deployment: không mất.
+    const loose = n.get('pods:wl:pods:shop/standalone')
+    expect(loose?.pods?.map((p) => p.name).sort()).toEqual(['debug', 'lonely-x'])
+    // Pod lỗi đứng đầu nhóm.
+    expect(n.get('pods:wl:deployments.apps:shop/web')?.pods?.[0]?.name).toBe('web-2')
+  })
+
+  it('chỉ ra lỗi cấu hình bằng lời', () => {
+    const g = buildTopology(data(), OPTS)
+    const n = byId(g)
+    const ing = n.get('ing:shop/shop')
+    expect(codes(ing)).toEqual(
+      expect.arrayContaining(['ing-missing-svc', 'ing-missing-tls', 'ing-bad-port'])
+    )
+    expect(ing?.problems.find((p) => p.code === 'ing-missing-svc')?.text).toContain('legacy')
+    expect(ing?.problems.find((p) => p.code === 'ing-missing-tls')?.text).toContain('admin-tls')
+    expect(ing?.badges?.find((b) => b.text === 'TLS')?.tone).toBe('bad')
+    // Service đích không tồn tại → thẻ "missing", cạnh đứt.
+    expect(n.get('svc:shop/legacy')).toMatchObject({ missing: true, tone: 'bad' })
+    expect(g.edges.find((e) => e.id === 'ing:shop/shop#2>svc:shop/legacy')?.broken).toBe(true)
+    expect(codes(n.get('svc:shop/orphan'))).toEqual(['svc-no-match'])
+    expect(n.get('svc:shop/orphan')?.problems[0]?.text).toContain('app=nothing')
+    // targetPort tên không có trong workload → đỏ; số không khai báo → vàng.
+    const api = n.get('svc:shop/api')
+    expect(api?.problems.map((p) => [p.code, p.severity])).toEqual([
+      ['svc-target-port', 'warn'],
+      ['svc-target-port', 'bad']
+    ])
+    expect(api?.rows?.map((r) => r.tone)).toEqual(['warn', 'bad'])
+    // Tên cổng → số thật.
+    expect(n.get('svc:shop/web')?.rows?.[0]?.hint).toBe('→ http · 8080')
+    expect(codes(n.get('svc:shop/web'))).toEqual([])
+    // Có pod nhưng không endpoint nào sẵn sàng → đỏ.
+    expect(codes(n.get('svc:shop/db'))).toEqual(['svc-no-ready'])
+    expect(n.get('svc:shop/db')?.sub).toBe('Headless')
+    expect(codes(n.get('svc:shop/payments'))).toEqual([])
+    expect(codes(n.get('svc:shop/edge'))).toEqual(['svc-lb-pending'])
+    // Workload: pod CrashLoop, chưa đủ ready, thiếu Secret; HPA ở mức tối đa; PVC Pending; bị cô lập.
+    const web = n.get('wl:deployments.apps:shop/web')
+    expect(codes(web)).toEqual(
+      expect.arrayContaining(['wl-degraded', 'pod-crash', 'secret-missing'])
+    )
+    expect(web?.status).toBe('Only 1 of 2 pods ready')
+    expect(web?.badges?.map((b) => b.text)).toContain('1 policy')
+    expect(codes(n.get('wl:deployments.apps:shop/api'))).toEqual(
+      expect.arrayContaining(['hpa-max', 'pod-not-ready'])
+    )
+    const db = n.get('wl:statefulsets.apps:shop/db')
+    expect(codes(db)).toEqual(expect.arrayContaining(['pvc-unbound', 'pod-pending', 'np-isolated']))
+    expect(db?.problems.find((p) => p.code === 'np-isolated')?.severity).toBe('warn')
+    expect(db?.badges?.map((b) => b.text)).toContain('Isolated')
+    // Route gắn vào Gateway không có.
+    expect(codes(n.get('rt:httproutes.gateway.networking.k8s.io:shop/api'))).toEqual([
+      'route-missing-gw'
+    ])
+    // Danh sách vấn đề: xấu trước.
+    expect(g.problems[0]?.problem.severity).toBe('bad')
+    expect(g.problems.some((p) => p.problem.code === 'secret-missing')).toBe(true)
+  })
+
+  it('không đủ quyền đọc Secret / ConfigMap → không kết luận "thiếu"', () => {
+    const d = data()
+    delete d.secrets
+    delete d.configMaps
+    const n = byId(buildTopology(d, OPTS))
+    expect(codes(n.get('wl:deployments.apps:shop/web'))).not.toContain('secret-missing')
+    expect(codes(n.get('ing:shop/shop'))).not.toContain('ing-missing-tls')
+    expect(n.get('sec:shop/db-password')?.missing).toBeUndefined()
+  })
+
+  it('tiếng Việt: câu giải thích được dịch', () => {
+    setLanguage('vi')
+    const n = byId(buildTopology(data(), OPTS))
+    expect(n.get('svc:shop/legacy')?.problems[0]?.text).not.toBe('This Service does not exist')
+  })
+
+  it('hàng: workload có lối vào trước, chạy nền sau; cùng dữ liệu → cùng bố cục, không chồng nhau', () => {
+    const g = buildTopology(data(), OPTS)
+    const n = byId(g)
+    const row = (id: string): number => n.get(id)?.row ?? -1
+    expect(row('wl:deployments.apps:shop/web')).toBeLessThan(row('wl:deployments.apps:shop/worker'))
+    expect(row('wl:deployments.apps:shop/api')).toBeLessThan(row('wl:deployments.apps:shop/worker'))
+    const a = layoutTopology(g)
+    const b = layoutTopology(buildTopology(data(), OPTS))
+    expect(b.nodes.map((x) => [x.id, x.x, x.y])).toEqual(a.nodes.map((x) => [x.id, x.x, x.y]))
+    // Cột theo thứ tự làn — Route không có cột riêng (xếp dưới Gateway trong làn Entry).
+    expect(a.columns.map((c) => c.lane)).toEqual(['entry', 'service', 'workload', 'pods', 'deps'])
+    for (let i = 1; i < a.columns.length; i++)
+      expect(a.columns[i]?.x ?? 0).toBeGreaterThan(
+        (a.columns[i - 1]?.x ?? 0) + (a.columns[i - 1]?.w ?? 0)
+      )
+    // Không thẻ nào đè thẻ nào.
+    for (const p of a.nodes)
+      for (const q of a.nodes) {
+        if (p === q) continue
+        const overlap = p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h
+        expect(overlap, `${p.id} ∩ ${q.id}`).toBe(false)
+      }
+    // Mỗi thẻ nằm trong dải namespace của nó.
+    for (const p of a.nodes) {
+      const band = a.bands.find((x) => x.ns === p.ns)
+      expect(band && p.y >= band.y && p.y + p.h <= band.y + band.h).toBe(true)
+    }
+    // Ingress một luật → Service → Deployment cùng hàng: đường thẳng (điểm nối cùng độ cao).
+    const simple = data()
+    simple.routes = [
+      {
+        kind: 'ingresses.networking.k8s.io',
+        ns: 'shop',
+        name: 'solo',
+        hosts: ['a.example.com'],
+        backends: ['web'],
+        rules: [{ host: 'a.example.com', path: '/', service: 'web' }]
+      }
+    ]
+    simple.services = simple.services.filter((x) => x.name === 'web')
+    const sl = layoutTopology(buildTopology(simple, { ...OPTS, showDeps: false }))
+    const at = (id: string) => {
+      const x = sl.nodes.find((q) => q.id === id)
+      if (!x) throw new Error(id)
+      return x
+    }
+    const y = (id: string, off: number): number => at(id).y + at(id).h / 2 + off
+    const e1 = sl.edges.find((x) => x.id === 'ing:shop/solo#0>svc:shop/web')
+    const e2 = sl.edges.find((x) => x.id === 'svc:shop/web>wl:deployments.apps:shop/web')
+    if (!e1 || !e2) throw new Error('edges')
+    expect(Math.abs(y('ing:shop/solo', e1.sOff) - y('svc:shop/web', e1.tOff))).toBeLessThan(1)
+    expect(
+      Math.abs(y('svc:shop/web', e2.sOff) - y('wl:deployments.apps:shop/web', e2.tOff))
+    ).toBeLessThan(1)
+    // Khoá cấu trúc: đổi trạng thái pod (không đổi cấu trúc) → cùng khoá.
+    const d = data()
+    const p0 = d.pods[0]
+    if (p0) p0.restarts = 99
+    expect(topoStructureKey(buildTopology(d, OPTS))).toBe(topoStructureKey(g))
+  })
+
+  it('Route nằm ngay dưới Gateway của nó, thụt vào, nối kiểu cây; Entry → Pods gọn bề ngang', () => {
+    const l = layoutTopology(buildTopology(data(), { ...OPTS, showDeps: false }))
+    const at = (id: string) => {
+      const x = l.nodes.find((q) => q.id === id)
+      if (!x) throw new Error(id)
+      return x
+    }
+    const gw = at('gw:shop/public')
+    const rt = at('rt:httproutes.gateway.networking.k8s.io:shop/api')
+    const entry = l.columns.find((c) => c.lane === 'entry')
+    expect(gw.x).toBe(entry?.x)
+    expect(rt.x).toBeGreaterThan(gw.x)
+    expect(rt.x + rt.w).toBe(gw.x + gw.w)
+    // Ngay dưới Gateway (không thẻ nào chen giữa).
+    const between = l.nodes.filter(
+      (q) => q.x <= gw.x + gw.w && q.x + q.w >= gw.x && q.y > gw.y && q.y < rt.y
+    )
+    expect(between).toEqual([])
+    const attach = l.edges.find((e) => e.kind === 'attach' && e.to === rt.id)
+    expect(attach?.tree).toEqual({ sw: gw.w, sh: gw.h, th: rt.h })
+    // Cạnh sang làn khác không phải kiểu cây.
+    expect(l.edges.filter((e) => e.kind !== 'attach').every((e) => !e.tree)).toBe(true)
+    // Entry → Pods (không làn Config): lọt ~1150 px — zoom 0,8 trên khung ~950 px thấy trọn chuỗi.
+    expect(l.width).toBeLessThanOrEqual(1160)
+  })
+
+  it('mở danh sách pod / ẩn làn Config & storage đổi cấu trúc', () => {
+    const open = buildTopology(data(), {
+      ...OPTS,
+      showDeps: false,
+      expanded: new Set(['wl:deployments.apps:shop/web'])
+    })
+    expect(open.nodes.some((x) => x.lane === 'deps')).toBe(false)
+    const pods = open.nodes.find((x) => x.id === 'pods:wl:deployments.apps:shop/web')
+    expect(pods?.expanded).toBe(true)
+    const l = layoutTopology(open)
+    expect(l.columns.map((c) => c.lane)).not.toContain('deps')
+    expect(l.nodes.find((x) => x.id === pods?.id)?.h).toBeGreaterThan(86)
+  })
+
+  it('tập trung: chỉ đường đi qua mục chọn (lên tới lối vào, xuống tới pod / config)', () => {
+    const g = buildTopology(data(), { ...OPTS, focus: 'svc:shop/web' })
+    const ids = new Set(g.nodes.map((x) => x.id))
+    expect(ids).toEqual(
+      new Set([
+        'svc:shop/web',
+        'ing:shop/shop',
+        'wl:deployments.apps:shop/web',
+        'pods:wl:deployments.apps:shop/web',
+        'cm:shop/web-config',
+        'sec:shop/db-password'
+      ])
+    )
+    // Không quay đầu: Ingress không kéo theo Service khác của nó.
+    expect(
+      pathThrough(
+        [
+          { from: 'a', to: 'b' },
+          { from: 'a', to: 'c' }
+        ],
+        'b'
+      )
+    ).toEqual(new Set(['a', 'b']))
+  })
+
+  it('namespace gập → một thẻ tóm tắt; namespace quá nhiều workload → cắt + "+N"', () => {
+    const folded = buildTopology(data(), { ...OPTS, collapsed: () => true })
+    expect(folded.nodes.map((x) => x.id)).toEqual(['ns:shop'])
+    expect(folded.nodes[0]?.stats).toMatchObject({ workloads: 4, entries: 3 })
+    expect(folded.namespaces[0]?.collapsed).toBe(true)
+    expect(layoutTopology(folded).nodes[0]?.h).toBeGreaterThan(0)
+
+    const d = data()
+    for (let i = 0; i < 50; i++)
+      d.workloads.push(workload({ name: `w${String(i).padStart(2, '0')}` }))
+    const g = buildTopology(d, OPTS)
+    const wl = g.nodes.filter((x) => x.kind === 'workload')
+    expect(wl.length).toBe(MAX_ROWS_PER_NS)
+    expect(g.nodes.find((x) => x.kind === 'more')?.more).toBe(55 - MAX_ROWS_PER_NS)
+    // Workload công khai (có Ingress) không bị cắt.
+    expect(wl.some((x) => x.name === 'web')).toBe(true)
+    const all = buildTopology(d, { ...OPTS, showAll: new Set(['shop']) })
+    expect(all.nodes.filter((x) => x.kind === 'workload').length).toBe(55)
+    expect(all.nodes.some((x) => x.kind === 'more')).toBe(false)
+  })
+
+  it('cluster lớn: 3000 workload / 15000 pod dựng + xếp nhanh', () => {
+    const d: MapData = {
+      namespaces: [],
+      workloads: [],
+      pods: [],
+      services: [],
+      routes: [],
+      pvcs: [],
+      hpas: [],
+      policies: [],
+      nodes: { total: 0, ready: 0 },
+      truncated: false
+    }
+    for (let n = 0; n < 60; n++) {
+      const ns = `team-${String(n)}`
+      d.namespaces.push({ name: ns, active: true })
+      for (let i = 0; i < 50; i++) {
+        const name = `svc-${String(i)}`
+        d.workloads.push(workload({ ns, name, ready: 5, desired: 5 }))
+        d.services.push({
+          ns,
+          name,
+          type: 'ClusterIP',
+          selector: { app: name },
+          ports: '80/TCP',
+          portList: [{ port: 80, targetPort: '8080' }]
+        })
+        for (let k = 0; k < 5; k++)
+          d.pods.push(pod(`${name}-${String(k)}`, { kind: 'Deployment', name }, { ns }))
+      }
+      d.routes.push({
+        kind: 'ingresses.networking.k8s.io',
+        ns,
+        name: 'edge',
+        hosts: ['x.example.com'],
+        backends: ['svc-0', 'svc-1'],
+        rules: [
+          { host: 'x.example.com', path: '/', service: 'svc-0' },
+          { host: 'x.example.com', path: '/b', service: 'svc-1' }
+        ]
+      })
+    }
+    const t0 = performance.now()
+    const g = buildTopology(d, OPTS)
+    const l = layoutTopology(g)
+    const ms = performance.now() - t0
+    expect(l.nodes.length).toBeGreaterThan(1000)
+    // Mỗi namespace cắt còn MAX_ROWS_PER_NS workload.
+    expect(g.nodes.filter((x) => x.kind === 'workload').length).toBe(60 * MAX_ROWS_PER_NS)
+    expect(ms).toBeLessThan(4000)
+    // Gập hết: vài chục thẻ tóm tắt.
+    const folded = buildTopology(d, { ...OPTS, collapsed: () => true })
+    expect(layoutTopology(folded).nodes.length).toBe(60)
+  })
+})

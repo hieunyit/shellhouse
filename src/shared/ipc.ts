@@ -72,7 +72,12 @@ export const AppInfo = z.object({
   packaged: z.boolean(),
   testHooks: z.boolean(),
   /** Số build Windows (ví dụ 26200) — cho xterm.js biết cách ConPTY hoạt động. null ngoài Windows. */
-  windowsBuild: z.number().int().nullable()
+  windowsBuild: z.number().int().nullable(),
+  /** Ngôn ngữ giao diện đang dùng (đã giải 'system') và locale định dạng ngày / số. */
+  language: z.enum(['en', 'vi']),
+  locale: z.string(),
+  /** Ngôn ngữ hệ điều hành sẽ chọn khi cài đặt là 'system' — để ghi "Theo hệ thống (…)". */
+  systemLanguage: z.enum(['en', 'vi'])
 })
 export type AppInfo = z.infer<typeof AppInfo>
 
@@ -86,6 +91,8 @@ export type ModuleStateInfo = z.infer<typeof ModuleStateSchema>
  */
 export const invokeContract = {
   'app:getInfo': { args: z.tuple([]), result: AppInfo },
+  /** Khởi động lại app (đổi ngôn ngữ giao diện). */
+  'app:relaunch': { args: z.tuple([]), result: z.void() },
   'sessionHost:getStatus': { args: z.tuple([]), result: SessionHostStatus },
   'diagnostics:nativeModules': { args: z.tuple([]), result: z.array(NativeModuleStatus) },
   'test:crashSessionHost': { args: z.tuple([]), result: z.void() },
@@ -123,6 +130,11 @@ export const invokeContract = {
     result: MutationResult
   },
   'hosts:duplicate': { args: z.tuple([z.string().max(64)]), result: MutationResult },
+  /** Lưu mật khẩu vừa đăng nhập thành công ở hộp hỏi mật khẩu ("Save password in vault"). */
+  'hosts:setPassword': {
+    args: z.tuple([z.string().max(64), z.string().min(1).max(4096)]),
+    result: MutationResult
+  },
   'groups:reorder': {
     args: z.tuple([z.string().max(64).nullable(), z.array(z.string().max(64)).max(1000)]),
     result: MutationResult
@@ -215,8 +227,13 @@ export const invokeContract = {
     args: z.tuple([z.array(z.string().min(1).max(4096)).max(1000)]),
     result: z.void()
   },
-  /** Chọn chương trình (editor) trên máy; null = huỷ. */
-  'dialog:pickProgram': { args: z.tuple([]), result: z.string().nullable() },
+  /**
+   * Chọn editor ngoài bằng hộp thoại của main và lưu luôn vào cài đặt (renderer không bao giờ tự
+   * đặt đường dẫn chương trình main sẽ chạy). null = huỷ.
+   */
+  'files:chooseEditor': { args: z.tuple([]), result: AppSettings.nullable() },
+  /** Bỏ editor đã chọn → ứng dụng mặc định của hệ điều hành. */
+  'files:resetEditor': { args: z.tuple([]), result: AppSettings },
   /** Chọn thư mục (mở sẵn ở thư mục log hoặc Downloads); null = huỷ. */
   'dialog:pickFolder': {
     args: z.tuple([z.string().max(100), z.enum(['logs', 'downloads'])]),
@@ -238,7 +255,8 @@ export const invokeContract = {
       z.object({
         name: z.string().trim().min(1).max(100),
         type: z.enum(['ed25519', 'rsa', 'ecdsa']),
-        bits: z.number().int().optional(),
+        /** Kiểm chi tiết theo loại key trong keygen.ts (KEY_BITS). */
+        bits: z.number().int().min(256).max(4096).optional(),
         passphrase: z.string().max(1024).optional()
       })
     ]),
@@ -257,7 +275,11 @@ export const invokeContract = {
   'vault:lock': { args: z.tuple([]), result: z.void() },
   'vault:security': { args: z.tuple([]), result: VaultSecurity },
   'vault:changePassword': { args: z.tuple([MasterPassword, MasterPassword]), result: VaultResult },
-  'vault:setRemember': { args: z.tuple([z.boolean()]), result: VaultResult },
+  /** Bật cần master password (null khi tắt). */
+  'vault:setRemember': {
+    args: z.tuple([z.boolean(), MasterPassword.nullable()]),
+    result: VaultResult
+  },
   /** null = người dùng huỷ hộp thoại. */
   'vault:exportBackup': { args: z.tuple([]), result: FileResult.nullable() },
   'vault:restoreBackup': { args: z.tuple([MasterPassword]), result: FileResult.nullable() },
@@ -288,7 +310,11 @@ export type EventPayload<C extends EventChannel> = z.infer<(typeof eventContract
 
 /** API mà preload phơi ra `window.shellhouse`. */
 export interface ShellhouseApi {
+  /** Ngôn ngữ / locale giao diện — có sẵn đồng bộ trước lần vẽ đầu (main truyền qua argv). */
+  language: 'en' | 'vi'
+  locale: string
   getInfo(): Promise<AppInfo>
+  relaunch(): Promise<void>
   getSessionHostStatus(): Promise<SessionHostStatus>
   checkNativeModules(): Promise<NativeModuleStatus[]>
   crashSessionHostForTest(): Promise<void>
@@ -313,6 +339,7 @@ export interface ShellhouseApi {
   tagHosts(ids: string[], add: string[], remove: string[]): Promise<MutationResult>
   reorderHosts(groupId: string | null, orderedIds: string[]): Promise<MutationResult>
   duplicateHost(id: string): Promise<MutationResult>
+  setHostPassword(id: string, password: string): Promise<MutationResult>
   reorderGroups(parentId: string | null, orderedIds: string[]): Promise<MutationResult>
   importKeyFromFile(): Promise<MutationResult | null>
   deleteKey(id: string): Promise<MutationResult>
@@ -328,7 +355,9 @@ export interface ShellhouseApi {
   deleteForward(id: string): Promise<void>
   pickFilesToUpload(): Promise<string[]>
   pickSaveLocation(defaultName: string): Promise<string | null>
-  pickProgram(): Promise<string | null>
+  /** Chọn editor ngoài (hộp thoại của main, lưu luôn); null = huỷ. */
+  chooseEditor(): Promise<AppSettings | null>
+  resetEditor(): Promise<AppSettings>
   listLocal(path: string | null): Promise<LocalListing>
   trashLocal(paths: string[]): Promise<void>
   listSerialPorts(): Promise<SerialPortInfo[]>
@@ -376,7 +405,8 @@ export interface ShellhouseApi {
   lockVault(): Promise<void>
   vaultSecurity(): Promise<VaultSecurity>
   changeMasterPassword(current: string, next: string): Promise<VaultResult>
-  setRememberOnDevice(enabled: boolean): Promise<VaultResult>
+  /** Bật cần nhập lại master password; tắt thì `password` = null. */
+  setRememberOnDevice(enabled: boolean, password: string | null): Promise<VaultResult>
   exportBackup(): Promise<FileResult | null>
   restoreBackup(password: string): Promise<FileResult | null>
   onVaultState(listener: (state: VaultState) => void): () => void

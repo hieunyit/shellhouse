@@ -24,7 +24,7 @@ import {
   TextArea
 } from '../../../renderer/src/components/ui'
 import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
-import { useSavedHosts } from '../../registry/renderer-kit'
+import { confirmAction, t, tn, useSavedHosts } from '../../registry/renderer-kit'
 import type { ContextColor, ContextEntry, ImportResult } from '../shared/ipc'
 import { k8sApi, openCluster } from './api'
 import { useK8s } from './store'
@@ -41,7 +41,10 @@ export function importSummary(r: ImportResult): string | null {
   if (r.imported.length === 0 && r.errors.length === 0) return null
   const contexts = r.imported.reduce((n, i) => n + i.contexts, 0)
   const ok = r.imported.length
-    ? `Imported ${r.imported.length} file${r.imported.length > 1 ? 's' : ''} (${contexts} context${contexts === 1 ? '' : 's'}).`
+    ? t('Imported {files} ({contexts}).', {
+        files: tn(r.imported.length, '{n} file', '{n} files'),
+        contexts: tn(contexts, '{n} context', '{n} contexts')
+      })
     : ''
   return [ok, ...r.errors].filter(Boolean).join(' ')
 }
@@ -99,7 +102,7 @@ export function K8sSection(): React.JSX.Element {
           <span className="flex-1 text-left">Kubernetes</span>
         </button>
         <IconButton
-          label="Refresh (read ~/.kube again)"
+          label={t('Refresh (read ~/.kube again)')}
           size="sm"
           data-testid="k8s-refresh"
           onClick={refresh}
@@ -107,14 +110,14 @@ export function K8sSection(): React.JSX.Element {
           <RefreshCw size={12} className={cx(refreshing && 'animate-spin')} />
         </IconButton>
         <IconButton
-          label="Add clusters"
+          label={t('Add clusters')}
           size="sm"
           data-testid="k8s-import"
           onClick={(e) => {
             openMenu(e, [
               {
                 id: 'k8s-import-files',
-                label: 'Import kubeconfig files…',
+                label: t('Import kubeconfig files…'),
                 icon: <FileInput size={14} />,
                 onSelect: () => {
                   setImportNote(null)
@@ -130,7 +133,7 @@ export function K8sSection(): React.JSX.Element {
               },
               {
                 id: 'k8s-import-paste',
-                label: 'Paste a kubeconfig…',
+                label: t('Paste a kubeconfig…'),
                 icon: <ClipboardPaste size={14} />,
                 onSelect: () => {
                   setImporting(true)
@@ -150,7 +153,7 @@ export function K8sSection(): React.JSX.Element {
           <span className="flex-1">{importNote}</span>
           <button
             type="button"
-            aria-label="Dismiss"
+            aria-label={t('Dismiss')}
             className="text-faint hover:text-fg"
             onClick={() => {
               setImportNote(null)
@@ -163,13 +166,13 @@ export function K8sSection(): React.JSX.Element {
       {open && contexts.length === 0 && (
         <p className="px-2 py-1 text-xs text-faint">
           {hidden
-            ? 'All contexts are hidden.'
-            : 'No contexts in ~/.kube. Use + to import kubeconfig files.'}
+            ? t('All contexts are hidden.')
+            : t('No contexts in ~/.kube. Use + to import kubeconfig files.')}
         </p>
       )}
       {open && errors.length > 0 && (
         <p className="px-2 py-1 text-xs text-danger" title={errors.join('\n')}>
-          Could not read {errors.length} kubeconfig{errors.length > 1 ? 's' : ''}
+          {tn(errors.length, 'Could not read {n} kubeconfig', 'Could not read {n} kubeconfigs')}
         </p>
       )}
       {open &&
@@ -181,7 +184,7 @@ export function K8sSection(): React.JSX.Element {
             data-testid="k8s-context"
             data-name={c.name}
             className="group flex h-8 cursor-default items-center gap-2 rounded-md px-2 hover:bg-hover"
-            title={`${c.server}\n${c.sourceLabel}${c.settings.bastionHostId ? '\nThrough an SSH host' : ''}`}
+            title={`${c.server}\n${c.sourceLabel}${c.settings.bastionHostId ? `\n${t('Through an SSH host')}` : ''}`}
             onDoubleClick={() => openCluster(c)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') openCluster(c)
@@ -190,25 +193,25 @@ export function K8sSection(): React.JSX.Element {
               openMenu(e, [
                 {
                   id: 'open',
-                  label: 'Open',
+                  label: t('Open'),
                   icon: <Ship size={14} />,
                   onSelect: () => openCluster(c)
                 },
                 {
                   id: 'ro',
-                  label: c.settings.readOnly ? 'Turn off read-only mode' : 'Read-only mode',
+                  label: c.settings.readOnly ? t('Turn off read-only mode') : t('Read-only mode'),
                   icon: <Eye size={14} />,
                   onSelect: () => void k8sApi.setContext(c.ref, { readOnly: !c.settings.readOnly })
                 },
                 {
                   id: 'hide',
-                  label: 'Hide from sidebar',
+                  label: t('Hide from sidebar'),
                   icon: <EyeOff size={14} />,
                   onSelect: () => void k8sApi.setContext(c.ref, { hidden: true })
                 },
                 {
                   id: 'settings',
-                  label: 'Context settings…',
+                  label: t('Context settings…'),
                   icon: <Settings2 size={14} />,
                   onSelect: () => {
                     setEditing(c)
@@ -217,7 +220,7 @@ export function K8sSection(): React.JSX.Element {
                 'separator',
                 {
                   id: 'delete',
-                  label: 'Delete context…',
+                  label: t('Delete context…'),
                   icon: <FileX size={14} />,
                   danger: true,
                   onSelect: () => {
@@ -228,18 +231,22 @@ export function K8sSection(): React.JSX.Element {
                   ? [
                       {
                         id: 'remove',
-                        label: 'Remove imported kubeconfig',
+                        label: t('Remove imported kubeconfig'),
                         icon: <Trash2 size={14} />,
                         danger: true,
                         onSelect: () => {
                           const id = c.ref.source.slice('imported:'.length)
                           const name = imported.find((i) => i.id === id)?.name ?? c.sourceLabel
-                          if (
-                            window.confirm(
-                              `Remove the imported kubeconfig “${name}” and all its contexts?`
-                            )
-                          )
-                            void k8sApi.removeImported(id)
+                          void confirmAction({
+                            title: t('Remove “{name}”?', { name }),
+                            message: t(
+                              'The imported kubeconfig and all its contexts are removed from Shellhouse.'
+                            ),
+                            confirmLabel: t('Remove'),
+                            danger: true
+                          }).then((ok) => {
+                            if (ok) void k8sApi.removeImported(id)
+                          })
                         }
                       }
                     ]
@@ -259,7 +266,7 @@ export function K8sSection(): React.JSX.Element {
             )}
             {c.settings.readOnly && (
               <span className="rounded bg-subtle px-1 text-[10px] font-medium text-muted">
-                read-only
+                {t('read-only')}
               </span>
             )}
           </div>
@@ -297,21 +304,23 @@ function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
   const [yaml, setYaml] = useState('')
   const [error, setError] = useState<string | null>(null)
   const submit = async (): Promise<void> => {
-    const r = await k8sApi.importKubeconfig(name.trim() || 'Imported', yaml)
+    const r = await k8sApi.importKubeconfig(name.trim() || t('Imported'), yaml)
     if (r.ok) onClose()
     else setError(r.message)
   }
   return (
     <Modal
-      title="Import a kubeconfig"
-      description="Paste a kubeconfig. It is stored encrypted in your vault; certificates must be embedded (…-data fields)."
+      title={t('Import a kubeconfig')}
+      description={t(
+        'Paste a kubeconfig. It is stored encrypted in your vault; certificates must be embedded (…-data fields).'
+      )}
       width="max-w-2xl"
       onClose={onClose}
       testId="k8s-import-dialog"
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t('Cancel')}
           </Button>
           <Button
             variant="primary"
@@ -319,13 +328,13 @@ function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
             disabled={!yaml.trim()}
             onClick={() => void submit()}
           >
-            Import
+            {t('Import')}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="Name">
+        <Field label={t('Name')}>
           <Input
             autoFocus
             placeholder="prod-eks"
@@ -378,25 +387,27 @@ function ContextDialog({
   }
   return (
     <Modal
-      title={`Context ${c.name}`}
+      title={t('Context {name}', { name: c.name })}
       description={`${c.server} · ${c.sourceLabel}`}
       onClose={onClose}
       testId="k8s-context-dialog"
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            Cancel
+            {t('Cancel')}
           </Button>
           <Button variant="primary" data-testid="k8s-context-save" onClick={save}>
-            Save
+            {t('Save')}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3">
         <Field
-          label="Reach the API server through"
-          hint="Pick an SSH host when the cluster is only reachable from inside a network. TLS is still checked against the kubeconfig."
+          label={t('Reach the API server through')}
+          hint={t(
+            'Pick an SSH host when the cluster is only reachable from inside a network. TLS is still checked against the kubeconfig.'
+          )}
         >
           <Select
             data-testid="k8s-context-bastion"
@@ -405,7 +416,7 @@ function ContextDialog({
               setBastion(e.target.value)
             }}
           >
-            <option value="">Direct connection</option>
+            <option value="">{t('Direct connection')}</option>
             {hosts.map((h) => (
               <option key={h.id} value={h.id}>
                 {h.label} ({h.address})
@@ -414,8 +425,10 @@ function ContextDialog({
           </Select>
         </Field>
         <Field
-          label="Default namespace"
-          hint={`Empty = ${c.namespace ?? 'default'} (from the kubeconfig)`}
+          label={t('Default namespace')}
+          hint={t('Empty = {namespace} (from the kubeconfig)', {
+            namespace: c.namespace ?? 'default'
+          })}
         >
           <Input
             mono
@@ -427,15 +440,15 @@ function ContextDialog({
           />
         </Field>
         <Field
-          label="Color"
-          hint="Red marks production: deleting or scaling asks you to type the resource name."
+          label={t('Color')}
+          hint={t('Red marks production: deleting or scaling asks you to type the resource name.')}
         >
           <div className="flex gap-2">
             {([null, 'red', 'orange', 'green', 'blue'] as const).map((k) => (
               <button
                 key={k ?? 'none'}
                 type="button"
-                aria-label={k ?? 'No color'}
+                aria-label={k ? t(k) : t('No color')}
                 aria-pressed={color === k}
                 data-testid={`k8s-color-${k ?? 'none'}`}
                 className={cx(
@@ -454,8 +467,10 @@ function ContextDialog({
           </div>
         </Field>
         <Checkbox
-          label="Read-only mode"
-          description="Hide every action that changes something (delete, scale, restart, edit, apply)."
+          label={t('Read-only mode')}
+          description={t(
+            'Hide every action that changes something (delete, scale, restart, edit, apply).'
+          )}
           checked={readOnly}
           data-testid="k8s-context-read-only"
           onChange={(e) => {
@@ -499,20 +514,20 @@ function DeleteContextDialog({
   }
   return (
     <Modal
-      title={`Delete context “${context.name}”?`}
+      title={t('Delete context “{name}”?', { name: context.name })}
       onClose={onClose}
       width="max-w-md"
       testId="k8s-delete-context"
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t('Cancel')}</Button>
           <Button
             variant="danger"
             disabled={busy}
             data-testid="k8s-delete-context-confirm"
             onClick={submit}
           >
-            {busy ? 'Deleting…' : 'Delete'}
+            {busy ? t('Deleting…') : t('Delete')}
           </Button>
         </>
       }
@@ -520,24 +535,26 @@ function DeleteContextDialog({
       <div className="flex flex-col gap-2 text-[13px]">
         {imported ? (
           <p>
-            Removes it from <strong>{context.sourceLabel}</strong> (stored in your vault). Its
-            cluster and user entries go too if nothing else uses them.
+            {t('Removes it from')} <strong>{context.sourceLabel}</strong>{' '}
+            {t(
+              '(stored in your vault). Its cluster and user entries go too if nothing else uses them.'
+            )}
           </p>
         ) : (
           <>
             <p>
-              Removes it from <span className="font-mono text-xs break-all">{file}</span>, like{' '}
-              <code className="text-xs">kubectl config delete-context</code>. Its cluster and user
-              entries go too if no other context uses them.
+              {t('Removes it from')} <span className="font-mono text-xs break-all">{file}</span>
+              {t(', like')} <code className="text-xs">kubectl config delete-context</code>
+              {t('. Its cluster and user entries go too if no other context uses them.')}
             </p>
             <p className="text-xs text-muted">
-              The file before the change is saved next to it as{' '}
-              <span className="font-mono">.bak</span> (when it lives in ~/.kube).
+              {t('The file before the change is saved next to it as')}{' '}
+              <span className="font-mono">.bak</span> {t('(when it lives in ~/.kube).')}
             </p>
           </>
         )}
         <p className="text-xs text-muted">
-          Nothing changes on the cluster itself — only this computer forgets how to reach it.
+          {t('Nothing changes on the cluster itself — only this computer forgets how to reach it.')}
         </p>
         {error && <Notice tone="danger">{error}</Notice>}
       </div>

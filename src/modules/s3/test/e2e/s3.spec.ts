@@ -72,10 +72,12 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
     const file = view.locator('[data-testid="s3-entry"][data-name="bao-cao.txt"]')
     await expect(file).toBeVisible()
 
-    // Link chia sẻ tải được mà không cần khoá.
+    // Link chia sẻ tải được mà không cần khoá (chọn thời hạn rồi bấm Create link).
     await file.click()
     await view.getByTestId('s3-link').click()
-    await page.getByTestId('s3-dialog-submit').click()
+    await page.getByTestId('s3-link-expiry-86400').click()
+    await page.getByTestId('s3-link-create').click()
+    await expect(page.getByTestId('s3-link-expiry')).toContainText('Expires')
     const url = await page.getByTestId('s3-link-url').inputValue()
     expect(await (await fetch(url)).text()).toBe('nội dung báo cáo')
     await page.keyboard.press('Escape')
@@ -342,5 +344,104 @@ test('S3: export danh sách bucket (CSV) và đồng bộ sang tài khoản khá
     cb.destroy()
     await other.close()
     rmSync(out, { recursive: true, force: true })
+  }
+})
+
+test('S3: bảng chi tiết (tag, metadata, địa chỉ), cài đặt bucket (CORS, versioning, lifecycle), thanh đường dẫn sâu', async ({
+  page
+}) => {
+  test.setTimeout(60_000)
+  const { HeadObjectCommand, PutObjectCommand, S3Client } = await import('@aws-sdk/client-s3')
+  server = await startS3TestServer(['demo'])
+  const client = new S3Client({
+    endpoint: server.endpoint,
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: server.accessKeyId, secretAccessKey: server.secretAccessKey }
+  })
+  try {
+    await client.send(
+      new PutObjectCommand({
+        Bucket: 'demo',
+        Key: 'a/b/c/d/e/report.txt',
+        Body: 'hello',
+        ContentType: 'text/plain'
+      })
+    )
+    const r = (await page.evaluate(
+      (input) => window.shellhouse.invokeModule('s3', 'save', [input]),
+      {
+        name: 'Details test',
+        endpoint: server.endpoint,
+        region: 'us-east-1',
+        accessKeyId: server.accessKeyId,
+        secretAccessKey: server.secretAccessKey,
+        forcePathStyle: true
+      }
+    )) as { ok: boolean }
+    expect(r.ok).toBe(true)
+    await page.locator('[data-testid="s3-account"][data-name="Details test"]').dblclick()
+    const view = page.getByTestId('s3-view')
+    await view.locator('[data-testid="s3-bucket"][data-name="demo"]').dblclick()
+
+    // Đi sâu 5 cấp: thanh đường dẫn gộp các cấp giữa vào nút "…".
+    for (const name of ['a', 'b', 'c', 'd', 'e'])
+      await view.locator(`[data-testid="s3-entry"][data-name="${name}"]`).dblclick()
+    await expect(view.getByTestId('s3-crumb-more')).toBeVisible()
+    await expect(view.getByTestId('s3-crumb')).toHaveCount(3)
+    await view.getByTestId('s3-crumb-more').click()
+    await page.getByRole('menuitem', { name: 'b' }).click()
+    await expect(view.locator('[data-testid="s3-entry"][data-name="c"]')).toBeVisible()
+    for (const name of ['c', 'd', 'e'])
+      await view.locator(`[data-testid="s3-entry"][data-name="${name}"]`).dblclick()
+
+    // Bảng chi tiết: Space mở, thấy key / kiểu nội dung; sửa tag và metadata.
+    const file = view.locator('[data-testid="s3-entry"][data-name="report.txt"]')
+    await file.click()
+    await page.keyboard.press('Space')
+    const details = view.getByTestId('s3-details')
+    await expect(details.getByTestId('s3-details-name')).toHaveText('report.txt')
+    await expect(details.getByTestId('s3-details-overview')).toContainText('a/b/c/d/e/report.txt')
+    await expect(details.getByTestId('s3-details-overview')).toContainText('text/plain')
+
+    await details.getByTestId('s3-details-tags').getByText('Add tag').click()
+    const tagRow = details.getByTestId('s3-details-tag-list')
+    await tagRow.getByLabel('Key').fill('env')
+    await tagRow.getByLabel('Value').fill('prod')
+    await details.getByTestId('s3-details-save-tags').click()
+    await expect(details.getByTestId('s3-details-save-tags')).toHaveCount(0)
+
+    await details.getByTestId('s3-details-cc').fill('max-age=60')
+    await details.getByTestId('s3-details-save-props').click()
+    await expect(details.getByTestId('s3-details-save-props')).toHaveCount(0)
+    await expect
+      .poll(
+        async () =>
+          (
+            await client.send(
+              new HeadObjectCommand({ Bucket: 'demo', Key: 'a/b/c/d/e/report.txt' })
+            )
+          ).CacheControl
+      )
+      .toBe('max-age=60')
+    await expect(details.getByTestId('s3-details-versions')).toContainText(/Versioning/)
+
+    // Cài đặt bucket: CORS ghi được; lifecycle của s3rver không hỗ trợ → báo rõ, không lỗi.
+    await view.getByTestId('s3-open-bucket-settings').click()
+    const settings = page.getByTestId('s3-bucket-settings')
+    await settings.getByTestId('s3-settings-tab-cors').click()
+    await settings.getByRole('button', { name: 'Insert example' }).click()
+    await settings.getByTestId('s3-cors-save').click()
+    await expect(settings.getByTestId('s3-cors-remove')).toBeVisible()
+    await settings.getByTestId('s3-settings-tab-lifecycle').click()
+    await expect(settings.getByTestId('s3-feature-unavailable')).toHaveText(
+      'Not supported by this provider'
+    )
+    await settings.getByTestId('s3-settings-tab-versioning').click()
+    await expect(settings).not.toContainText('Loading…')
+    await page.keyboard.press('Escape')
+    await expect(settings).toHaveCount(0)
+  } finally {
+    client.destroy()
   }
 })

@@ -7,6 +7,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Tag,
   X
 } from 'lucide-react'
@@ -20,9 +21,10 @@ import {
   type Viewport
 } from '@xyflow/react'
 import '@xyflow/react/dist/base.css'
-import { cx, Segmented } from '../../../renderer/src/components/ui'
+import { cx } from '../../../renderer/src/components/ui'
 import { Pill, SidePanel } from '../../../renderer/src/components/panels'
 import { cleanError } from '../../../renderer/src/lib/format'
+import { formatTime, t, tn } from '../../registry/renderer-kit'
 import {
   filterMapData,
   groupingKeys,
@@ -58,12 +60,25 @@ import {
   MAX_ANIMATED_EDGES,
   type Options,
   loadOptions,
-  KIND_TITLE,
+  kindTitle,
   Z,
   routeTitle,
   DOT
 } from './mapModel'
-import { ZoomLabel, TrafficDot, Chip, MapButton, Legend } from './MapControls'
+import {
+  ZoomLabel,
+  MapButton,
+  Legend,
+  MenuButton,
+  MenuHeading,
+  MenuItem,
+  MenuToggle,
+  TrafficMenu,
+  ViewSwitch,
+  useElementWidth
+} from './MapControls'
+import { panelOverlay, toolbarFit } from '../shared/toolbarFit'
+import { TopologyMap } from './topology/TopologyMap'
 import { MapPanel, HoverCard } from './MapPanel'
 import { buildMapEdges } from './mapEdges'
 
@@ -99,7 +114,9 @@ export function MapView(props: {
   active: boolean
   onOpen: (ref: MapRef) => void
   onLogs: (ref: MapRef, labels: Record<string, string> | null) => void
-  onShell: (ref: MapRef) => void
+  onShell?: ((ref: MapRef) => void) | undefined
+  /** Mở hộp thoại port-forward (Service / pod) — không truyền → ẩn nút. */
+  onPortForward?: ((ref: MapRef) => void) | undefined
 }): React.JSX.Element {
   return (
     <ReactFlowProvider>
@@ -115,7 +132,8 @@ function MapInner({
   active,
   onOpen,
   onLogs,
-  onShell
+  onShell,
+  onPortForward
 }: {
   tabId: string
   request: Request
@@ -123,10 +141,18 @@ function MapInner({
   active: boolean
   onOpen: (ref: MapRef) => void
   onLogs: (ref: MapRef, labels: Record<string, string> | null) => void
-  onShell: (ref: MapRef) => void
+  onShell?: ((ref: MapRef) => void) | undefined
+  /** Mở hộp thoại port-forward (Service / pod) — không truyền → ẩn nút. */
+  onPortForward?: ((ref: MapRef) => void) | undefined
 }): React.JSX.Element {
   const rf = useReactFlow<MapFlowNode, MapFlowEdge>()
-  const [data, setData] = useState<MapData | null>(null)
+  /** Dữ liệu kèm phiên (request) và phạm vi namespace đã đọc — đổi cluster / namespace thì dữ liệu
+   * cũ không hiện nữa (không thấy bản đồ của cluster trước trong lúc chờ). */
+  const [loaded, setLoaded] = useState<{
+    request: Request
+    ns: string
+    data: MapData
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [updated, setUpdated] = useState(0)
@@ -180,29 +206,51 @@ function MapInner({
   const [customGroup, setCustomGroup] = useState<string | null>(null)
   const goToRef = useRef<(n: MapNode) => void>(() => undefined)
   const nsKey = namespaces.join(',')
+  const data = loaded && loaded.request === request && loaded.ns === nsKey ? loaded.data : null
   const trafficView = options.view === 'traffic'
-  // Nodes / Traffic: không vẽ bản đồ workload (ẩn các điều khiển của nó).
+  const topologyView = options.view === 'topology'
+  // Topology / Nodes / Traffic: không vẽ bản đồ workload (ẩn các điều khiển của nó).
   const nodesView = options.view !== 'workloads'
   const traffic = useTraffic(
     request,
-    active && (trafficView || (options.traffic && options.view === 'workloads'))
+    active &&
+      (trafficView ||
+        (options.traffic && (options.view === 'workloads' || options.view === 'topology')))
   )
+  /** Ô trên thanh công cụ để Topology đặt điều khiển của nó (một hàng). */
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null)
+  // Độ rộng thật của thanh công cụ → mức gọn (cửa sổ hẹp / sidebar host rộng / bảng tài nguyên).
+  const [toolbarRef, toolbarWidth] = useElementWidth()
+  const barFit = toolbarFit(toolbarWidth)
 
   // ——— Dữ liệu ———
   useEffect(() => {
     if (!active) return
     let cancelled = false
+    // Một lần đọc tại một thời điểm: cluster chậm (> 20 s) không chồng nhiều lần đọc, kết quả cũ
+    // không đè kết quả mới.
+    let inFlight = false
+    let lastJson = ''
     const load = (): void => {
+      if (inFlight) return
+      inFlight = true
       setLoading(true)
       request<MapData>({ op: 'map', namespaces: nsKey ? nsKey.split(',') : [] }).then(
         (d) => {
+          inFlight = false
           if (cancelled) return
-          setData(d)
+          // Không đổi gì → giữ nguyên đối tượng cũ (bản đồ không tính / vẽ lại).
+          const json = JSON.stringify(d)
+          if (json !== lastJson) {
+            lastJson = json
+            setLoaded({ request, ns: nsKey, data: d })
+          }
           setError(null)
           setUpdated(Date.now())
           setLoading(false)
         },
         (e: unknown) => {
+          inFlight = false
           if (cancelled) return
           setError(cleanError(e))
           setLoading(false)
@@ -493,21 +541,26 @@ function MapInner({
 
   // Lần đầu có dữ liệu: vừa khung (không animation).
   useEffect(() => {
-    if (!layout || fitted.current) return
+    // Khung bản đồ workload đang ẩn (Topology / Nodes / Traffic) → đợi tới khi hiện mới vừa khung.
+    if (!layout || fitted.current || nodesView) return
     const wrap = wrapRef.current
     if (!wrap || !wrap.clientWidth) return
     fitted.current = true
-    const zoom = Math.min(
+    const fitZoom = Math.min(
       1,
       (wrap.clientWidth - 80) / Math.max(1, layout.width),
       (wrap.clientHeight - 80) / Math.max(1, layout.height)
     )
+    // Vừa khung mà chữ của thẻ nhỏ hơn mức đọc được (giữa nhìn xa và cỡ thật): mở ở cỡ thật, góc
+    // trên trái — kéo / cuộn để xem tiếp. Cluster lớn (vừa khung đã ở mức nhìn xa) giữ nhìn xa:
+    // nhãn namespace giữ cỡ cố định trên màn hình.
+    const zoom = fitZoom >= 0.95 || fitZoom < NEAR_ZOOM ? fitZoom : 1
     void rf.setViewport({
       zoom,
-      x: (wrap.clientWidth - layout.width * zoom) / 2,
-      y: (wrap.clientHeight - layout.height * zoom) / 2
+      x: Math.max(24, (wrap.clientWidth - layout.width * zoom) / 2),
+      y: zoom === fitZoom ? (wrap.clientHeight - layout.height * zoom) / 2 : 24
     })
-  }, [layout, rf])
+  }, [layout, rf, nodesView])
 
   const zoomBy = (factor: number): void => {
     const v = rf.getViewport()
@@ -681,556 +734,652 @@ function MapInner({
     }
   }, [selectedNode, traffic])
 
-  return (
-    <div className="flex min-h-0 flex-1" data-testid="k8s-map">
-      <div className="relative flex min-w-0 flex-1 flex-col">
-        {/* Thanh công cụ của bản đồ */}
-        <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-1.5 border-b border-line px-2 py-1.5 text-xs">
-          <Segmented
-            value={options.view}
-            testIdPrefix="k8s-map-view"
-            options={[
-              { value: 'workloads', label: 'Workloads' },
-              { value: 'nodes', label: 'Nodes' },
-              { value: 'traffic', label: 'Traffic' }
-            ]}
-            onChange={(view) => {
-              setOpt({ view })
-            }}
-          />
-          <div className={cx(nodesView ? 'hidden' : 'contents')}>
-            <div className="relative w-64">
-              <div className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent">
-                <Search size={12} className="text-faint" />
-                <input
-                  ref={searchRef}
-                  type="search"
-                  placeholder="Find on map…  ( / )"
-                  data-testid="k8s-map-search"
-                  className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint"
-                  value={query}
-                  onFocus={() => {
-                    setSearchOpen(true)
-                  }}
-                  onBlur={() => {
-                    setTimeout(() => {
-                      setSearchOpen(false)
-                    }, 150)
-                  }}
-                  onChange={(e) => {
-                    setQuery(e.target.value)
-                    setSearchOpen(true)
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && matches[0]) {
-                      e.preventDefault()
-                      goTo(matches[0])
-                    } else if (e.key === 'Escape') {
-                      setQuery('')
-                      wrapRef.current?.focus()
-                    }
-                  }}
-                />
-              </div>
-              {searchOpen && (matches.length > 0 || hiddenMatches.length > 0) && (
-                <div
-                  className="absolute top-8 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md border border-line bg-elevated p-1 shadow-lg"
-                  data-testid="k8s-map-results"
-                >
-                  {matches.map((n) => (
-                    <button
-                      key={n.id}
-                      type="button"
-                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-hover"
-                      data-testid="k8s-map-result"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        goTo(n)
-                      }}
-                    >
-                      <span className={cx('size-2 shrink-0 rounded-full', DOT[n.tone])} />
-                      <span className="min-w-0 flex-1 truncate text-fg">{n.label}</span>
-                      <span className="shrink-0 text-faint">
-                        {n.kind === 'route' ? routeTitle(n.ref?.kind ?? '') : KIND_TITLE[n.kind]}
-                        {n.ns && n.kind !== 'namespace' ? ` · ${n.ns}` : ''}
-                      </span>
-                    </button>
-                  ))}
-                  {hiddenMatches.map((w) => (
-                    <button
-                      key={`${w.kind}:${w.ns}/${w.name}`}
-                      type="button"
-                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-hover"
-                      data-testid="k8s-map-result"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        revealWorkload(w)
-                      }}
-                    >
-                      <span className={cx('size-2 shrink-0 rounded-full', DOT[w.tone])} />
-                      <span className="min-w-0 flex-1 truncate text-fg">{w.name}</span>
-                      <span className="shrink-0 text-faint">
-                        {workloadKindLabel(w.kind)} · {w.ns} (collapsed)
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            {customGroup !== null ? (
-              <input
-                autoFocus
-                type="text"
-                spellCheck={false}
-                placeholder="Label key, e.g. team"
-                aria-label="Group by label key"
-                data-testid="k8s-map-grouping-custom"
-                className="h-7 w-48 rounded-md border border-accent bg-subtle px-2 font-mono text-xs text-fg outline-none"
-                value={customGroup}
-                onChange={(e) => {
-                  setCustomGroup(e.target.value)
-                }}
-                onBlur={() => {
-                  setCustomGroup(null)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    const key = customGroup.trim()
-                    if (key) setOpt({ grouping: `label:${key}` })
-                    setCustomGroup(null)
-                  } else if (e.key === 'Escape') setCustomGroup(null)
-                }}
-              />
-            ) : (
-              <label
-                className="flex h-7 items-center gap-1 rounded-md border border-line pl-2 text-muted"
-                title="Group namespaces into regions"
-              >
-                <span className="text-faint">Group</span>
-                <select
-                  data-testid="k8s-map-grouping"
-                  className="h-full max-w-44 cursor-pointer rounded-md bg-transparent pr-1 font-medium text-fg outline-none"
-                  value={options.grouping}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    if (v === '__custom') {
-                      setCustomGroup('')
-                      return
-                    }
-                    setOpt({ grouping: v as MapGrouping })
-                  }}
-                >
-                  <option value="purpose">by purpose</option>
-                  <option value="prefix">by name prefix</option>
-                  {[
-                    ...groupKeys,
-                    ...(options.grouping.startsWith('label:') &&
-                    !groupKeys.includes(options.grouping.slice(6))
-                      ? [options.grouping.slice(6)]
-                      : [])
-                  ].map((k) => (
-                    <option key={k} value={`label:${k}`}>
-                      by {k}
-                    </option>
-                  ))}
-                  <option value="__custom">by label…</option>
-                </select>
-              </label>
-            )}
-          </div>
-          <div
-            className={cx(
-              'flex h-7 w-60 items-center gap-1.5 rounded-md border bg-subtle px-2',
-              selectorError
-                ? 'border-danger'
-                : selectorText.trim()
-                  ? 'border-accent/60'
-                  : 'border-line focus-within:border-accent'
-            )}
-            title={
-              selectorError ??
-              'Show only workloads whose pod labels match — e.g. tier=backend, app.kubernetes.io/part-of=shop, env in (prod,staging), !canary'
-            }
-          >
-            <Tag size={12} className="shrink-0 text-faint" />
-            <input
-              type="text"
-              list="k8s-map-labels"
-              spellCheck={false}
-              placeholder="Filter by label: tier=backend"
-              aria-label="Filter by label"
-              aria-invalid={Boolean(selectorError)}
-              data-testid="k8s-map-label-filter"
-              className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-faint"
-              value={selectorText}
-              onChange={(e) => {
-                setSelectorText(e.target.value)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') setSelectorText('')
-              }}
-            />
-            {selectorText && (
-              <button
-                type="button"
-                aria-label="Clear label filter"
-                className="shrink-0 rounded text-faint hover:text-fg"
-                onClick={() => {
-                  setSelectorText('')
-                }}
-              >
-                <X size={12} />
-              </button>
-            )}
-            <datalist id="k8s-map-labels">
-              {labelSuggestions.map((l) => (
-                <option key={l} value={l} />
-              ))}
-            </datalist>
-          </div>
-          <div className={cx(nodesView ? 'hidden' : 'contents')}>
-            <button
-              type="button"
-              className="flex h-7 items-center gap-1 rounded-md border border-line px-2 font-medium whitespace-nowrap text-muted hover:text-fg"
-              data-testid="k8s-map-fold-all"
-              title={
-                fold.all && fold.except.size === 0
-                  ? 'Expand every namespace'
-                  : 'Collapse every namespace'
-              }
-              onClick={() => {
-                setFold({ all: !(fold.all && fold.except.size === 0), except: new Set() })
-              }}
-            >
-              {fold.all && fold.except.size === 0 ? (
-                <>
-                  <ChevronsUpDown size={13} /> Expand all
-                </>
-              ) : (
-                <>
-                  <ChevronsDownUp size={13} /> Collapse all
-                </>
-              )}
-            </button>
-            <Chip
-              on={!options.hideSystem}
-              testId="k8s-map-system"
-              onClick={() => {
-                setOpt({ hideSystem: !options.hideSystem })
-              }}
-            >
-              System namespaces
-            </Chip>
-            <Chip
-              on={options.pods}
-              onClick={() => {
-                setOpt({ pods: !options.pods })
-              }}
-            >
-              Pods
-            </Chip>
-            <Chip
-              on={options.edges}
-              onClick={() => {
-                setOpt({ edges: !options.edges })
-              }}
-            >
-              Connections
-            </Chip>
-            <Chip
-              on={options.traffic}
-              testId="k8s-map-traffic"
-              title={
-                traffic.status === 'unavailable'
-                  ? (traffic.reason ?? 'Live traffic is not available')
-                  : 'Live traffic between workloads (Caretta)'
-              }
-              onClick={() => {
-                setOpt({ traffic: !options.traffic })
-              }}
-            >
-              <span className="inline-flex items-center gap-1.5">
-                Traffic
-                {options.traffic && <TrafficDot status={traffic.status} />}
-              </span>
-            </Chip>
-            <Chip
-              on={options.darkCanvas}
-              testId="k8s-map-dark-canvas"
-              title="Dark background for the map, whatever the app theme"
-              onClick={() => {
-                setOpt({ darkCanvas: !options.darkCanvas })
-              }}
-            >
-              Dark canvas
-            </Chip>
-            <Chip
-              on={problemsOnly}
-              testId="k8s-map-problems"
-              onClick={() => {
-                setProblemsOnly(!problemsOnly)
-              }}
-            >
-              Problems only
-            </Chip>
-          </div>
-          <div className="flex-1" />
-          {!nodesView && (counts.bad > 0 || counts.warn > 0) && (
-            <button
-              type="button"
-              className="flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-hover"
-              title="Go to the next problem"
-              data-testid="k8s-map-next-problem"
-              onClick={nextProblem}
-            >
-              {counts.bad > 0 && <Pill tone="bad">{`${counts.bad} failing`}</Pill>}
-              {counts.warn > 0 && <Pill tone="warn">{`${counts.warn} degraded`}</Pill>}
-            </button>
-          )}
-          <span
-            className={cx('text-faint tabular-nums', nodesView && 'hidden')}
-            data-testid="k8s-map-summary"
-          >
-            {counts.workloads} workloads · {counts.pods} pods
-            {data ? ` · nodes ${data.nodes.ready}/${data.nodes.total}` : ''}
-          </span>
-          <button
-            type="button"
-            aria-label="Refresh"
-            title={updated ? `Updated ${new Date(updated).toLocaleTimeString()}` : 'Refresh'}
-            className="rounded p-1 text-faint hover:bg-hover hover:text-fg"
-            onClick={() => {
-              setTick((n) => n + 1)
-            }}
-          >
-            <RefreshCw size={13} className={cx(loading && 'animate-spin')} />
-          </button>
-        </div>
-        {error && <p className="border-b border-line px-3 py-1.5 text-xs text-danger">{error}</p>}
-        {data?.truncated && (
-          <p className="border-b border-line px-3 py-1.5 text-xs text-warning">
-            This cluster is very large — only part of it is on the map. Pick fewer namespaces.
-          </p>
-        )}
-        {options.view === 'nodes' && data && shownData && (
-          <NodesView data={data} shown={shownData} onOpen={onOpen} />
-        )}
-        {trafficView && (
-          <div className={cx('k8s-map flex min-h-0 flex-1', options.darkCanvas && 'k8s-map-dark')}>
-            <TrafficMap
-              traffic={traffic}
-              scope={namespaces}
-              palette={palette.ramp}
-              particles={!reducedMotion && traffic.rates.length <= MAX_ANIMATED_EDGES}
-              onOpen={onOpen}
-            />
-          </div>
-        )}
-        {!nodesView && options.traffic && traffic.status === 'unavailable' && (
-          <p
-            className="border-b border-line px-3 py-1.5 text-xs text-faint"
-            data-testid="k8s-map-traffic-note"
-          >
-            No live traffic data — {traffic.reason ?? 'Caretta is not available'}. Install{' '}
-            <span className="font-mono">groundcover-com/caretta</span> to see traffic roads.
-          </p>
-        )}
-        <div
-          ref={attachMap}
-          tabIndex={0}
-          role="application"
-          aria-label="Cluster map — drag to move, scroll to zoom, click to select"
-          data-testid="k8s-map-canvas"
-          className={cx(
-            'k8s-map relative min-h-0 flex-1 overflow-hidden outline-none',
-            options.darkCanvas && 'k8s-map-dark',
-            nodesView && 'hidden'
-          )}
-          onKeyDown={onKeyDown}
-          onPointerLeave={() => {
-            setHover(null)
+  /** Ô lọc theo nhãn — trên thanh công cụ khi đủ chỗ, trong menu View khi hẹp. */
+  const labelFilter = (size: string): React.JSX.Element => (
+    <div
+      className={cx(
+        'flex items-center gap-1.5 rounded-md border bg-subtle px-2',
+        size,
+        selectorError
+          ? 'border-danger'
+          : selectorText.trim()
+            ? 'border-accent/60'
+            : 'border-line focus-within:border-accent'
+      )}
+      title={
+        selectorError ??
+        t(
+          'Show only workloads whose pod labels match — e.g. tier=backend, app.kubernetes.io/part-of=shop, env in (prod,staging), !canary'
+        )
+      }
+    >
+      <Tag size={12} className="shrink-0 text-faint" />
+      <input
+        type="text"
+        list="k8s-map-labels"
+        spellCheck={false}
+        placeholder={t('Filter by label: tier=backend')}
+        aria-label={t('Filter by label')}
+        aria-invalid={Boolean(selectorError)}
+        data-testid="k8s-map-label-filter"
+        className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-faint"
+        value={selectorText}
+        onChange={(e) => {
+          setSelectorText(e.target.value)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setSelectorText('')
+        }}
+      />
+      {selectorText && (
+        <button
+          type="button"
+          aria-label={t('Clear label filter')}
+          className="shrink-0 rounded text-faint hover:text-fg"
+          onClick={() => {
+            setSelectorText('')
           }}
         >
-          <MapContext.Provider value={ctx}>
-            <ReactFlow<MapFlowNode, MapFlowEdge>
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={NODE_TYPES}
-              edgeTypes={EDGE_TYPES}
-              defaultViewport={savedViewports.get(tabId) ?? { x: 40, y: 40, zoom: 0.5 }}
-              minZoom={MIN_ZOOM}
-              maxZoom={MAX_ZOOM}
-              nodesDraggable={false}
-              nodesConnectable={false}
-              elementsSelectable={false}
-              nodesFocusable={false}
-              edgesFocusable={false}
-              disableKeyboardA11y
-              onlyRenderVisibleElements
-              zoomOnDoubleClick
-              proOptions={{ hideAttribution: true }}
-              onMove={(_, v) => {
-                // Chữ nhìn xa giữ cỡ trên màn hình (CSS chia cho zoom) — không render lại node.
-                wrapRef.current?.style.setProperty('--map-zoom', String(v.zoom))
-                const next: Band = v.zoom >= NEAR_ZOOM ? 'near' : 'far'
-                if (next !== band) setBand(next)
-              }}
-              onMoveEnd={(_, v) => {
-                savedViewports.set(tabId, v)
-              }}
-              onMoveStart={() => {
-                setHover(null)
-              }}
-              onNodeClick={(_, n) => {
-                setSelected(n.id)
-                wrapRef.current?.focus()
-              }}
-              onNodeDoubleClick={(_, n) => {
-                const m = index.byId.get(n.id)
-                if (m) flyTo(m, 1.4)
-              }}
-              onPaneClick={() => {
-                setSelected(null)
-                wrapRef.current?.focus()
-              }}
-              onNodeMouseEnter={(e, n) => {
-                // Namespace / vùng đã có tên + số liệu ngay trên khung — bảng nổi chỉ che thẻ bên trong.
-                if (n.type === 'region' || n.type === 'namespace') return
-                const at = local(e)
-                // Đang trỏ một pod trong thẻ này → giữ bảng của pod.
-                setHover((h) =>
-                  h && index.byId.get(h.id)?.parent === n.id ? h : { id: n.id, ...at }
-                )
-              }}
-              onNodeMouseLeave={() => {
-                setHover(null)
-              }}
-            >
-              <Background
-                variant={BackgroundVariant.Dots}
-                gap={24}
-                size={1}
-                className="!bg-transparent"
-              />
-              <MiniMap
-                pannable
-                zoomable
-                position="bottom-right"
-                className="!m-3 !mb-12 overflow-hidden rounded-md border border-line !bg-surface shadow-sm"
-                style={{ width: 180, height: 120 }}
-                maskColor="rgb(120 130 145 / 0.18)"
-                nodeColor={(n) => {
-                  const m = (n.data as { node?: MapNode } | undefined)?.node
-                  if (!m) return 'transparent'
-                  if (m.kind === 'region') return 'rgb(150 160 175 / 0.2)'
-                  if (m.kind === 'namespace')
-                    return m.tone === 'bad'
-                      ? 'rgb(217 56 30 / 0.25)'
-                      : m.tone === 'warn'
-                        ? 'rgb(194 122 14 / 0.25)'
-                        : 'rgb(150 160 175 / 0.35)'
-                  return m.tone === 'bad' ? '#d9381e' : m.tone === 'warn' ? '#c27a0e' : '#9aa3b0'
+          <X size={12} />
+        </button>
+      )}
+      <datalist id="k8s-map-labels">
+        {labelSuggestions.map((l) => (
+          <option key={l} value={l} />
+        ))}
+      </datalist>
+    </div>
+  )
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="k8s-map">
+      {/* Thanh công cụ của bản đồ: một hàng, luôn nằm trên canvas và bảng chi tiết (không bị che);
+          hẹp dần → nút chỉ còn icon, rồi chọn chế độ xem thành menu, lọc nhãn vào menu View. */}
+      <div
+        ref={toolbarRef}
+        className={cx(
+          'relative z-30 flex min-h-10 min-w-0 shrink-0 items-center gap-1.5 border-b border-line bg-surface px-2 py-1.5 text-xs',
+          // Rất hẹp: xuống dòng thay vì đè lên nhau.
+          barFit === 'narrow' && 'flex-wrap'
+        )}
+        data-testid="k8s-map-toolbar"
+        data-fit={barFit}
+      >
+        <ViewSwitch
+          value={options.view}
+          compact={barFit === 'narrow'}
+          testIdPrefix="k8s-map-view"
+          options={[
+            { value: 'topology', label: t('Topology') },
+            { value: 'workloads', label: t('Workloads') },
+            { value: 'nodes', label: t('Nodes') },
+            { value: 'traffic', label: t('Traffic') }
+          ]}
+          onChange={(view) => {
+            setOpt({ view })
+          }}
+        />
+        {topologyView && (
+          <div ref={setToolbarSlot} className="flex min-w-0 flex-1 items-center gap-1.5" />
+        )}
+        {!nodesView && (
+          <div
+            className={cx('relative min-w-24 shrink-[3]', barFit === 'narrow' ? 'w-40' : 'w-56')}
+          >
+            <div className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent">
+              <Search size={12} className="shrink-0 text-faint" />
+              <input
+                ref={searchRef}
+                type="search"
+                placeholder={t('Find on map…  ( / )')}
+                aria-label={t('Find on map')}
+                data-testid="k8s-map-search"
+                className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint"
+                value={query}
+                onFocus={() => {
+                  setSearchOpen(true)
                 }}
-                nodeStrokeWidth={0}
+                onBlur={() => {
+                  setTimeout(() => {
+                    setSearchOpen(false)
+                  }, 150)
+                }}
+                onChange={(e) => {
+                  setQuery(e.target.value)
+                  setSearchOpen(true)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && matches[0]) {
+                    e.preventDefault()
+                    goTo(matches[0])
+                  } else if (e.key === 'Escape') {
+                    setQuery('')
+                    wrapRef.current?.focus()
+                  }
+                }}
               />
-            </ReactFlow>
-          </MapContext.Provider>
-          {!data && !error && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-faint">
-              Drawing the cluster map…
             </div>
-          )}
-          {hoverNode && hover && (
-            <HoverCard
-              node={hoverNode}
-              podsOf={index.podsOf}
-              x={Math.max(8, Math.min(hover.x + 16, hover.w - 300))}
-              // Gần đáy → bảng hiện phía trên con trỏ.
-              {...(hover.y + 230 > hover.h
-                ? { bottom: hover.h - hover.y + 12 }
-                : { y: hover.y + 16 })}
-            />
-          )}
-          {/* Điều khiển zoom + chú giải */}
-          <div className="absolute right-3 bottom-3 z-10 flex overflow-hidden rounded-md border border-line bg-surface shadow-sm">
-            <MapButton
-              label="Zoom out ( - )"
-              onClick={() => {
-                zoomBy(0.8)
-              }}
-            >
-              <Minus size={13} />
-            </MapButton>
-            <ZoomLabel />
-            <MapButton
-              label="Zoom in ( + )"
-              onClick={() => {
-                zoomBy(1.25)
-              }}
-            >
-              <Plus size={13} />
-            </MapButton>
-            <MapButton label="Fit the whole cluster ( 0 )" testId="k8s-map-fit" onClick={fit}>
-              <Maximize size={13} />
-            </MapButton>
-          </div>
-          <div className="pointer-events-none absolute bottom-3 left-3 z-10 flex items-center gap-3 rounded-md border border-line bg-surface/90 px-2 py-1 text-[11px] text-faint">
-            <Legend color="bg-success" label="Healthy" />
-            <Legend color="bg-warning" label="Degraded" />
-            <Legend color="bg-danger-solid" label="Failing" />
-            {options.traffic && traffic.status === 'live' && (
-              <span className="flex items-center gap-1" data-testid="k8s-map-traffic-legend">
-                <svg width="46" height="10" aria-hidden>
-                  <defs>
-                    <linearGradient id="k8s-map-ramp" x1="0" x2="1" y1="0" y2="0">
-                      {palette.ramp.map((c, i) => (
-                        <stop key={c} offset={i / (palette.ramp.length - 1)} stopColor={c} />
-                      ))}
-                    </linearGradient>
-                  </defs>
-                  <path
-                    d="M1 7 L45 3"
-                    stroke="url(#k8s-map-ramp)"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                traffic {BANDS[0].label} … {BANDS[BANDS.length - 1]?.label}
-              </span>
+            {searchOpen && (matches.length > 0 || hiddenMatches.length > 0) && (
+              <div
+                className="absolute top-8 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md border border-line bg-elevated p-1 shadow-lg"
+                data-testid="k8s-map-results"
+              >
+                {matches.map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-hover"
+                    data-testid="k8s-map-result"
+                    data-kind={n.kind}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      goTo(n)
+                    }}
+                  >
+                    <span className={cx('size-2 shrink-0 rounded-full', DOT[n.tone])} />
+                    <span className="min-w-0 flex-1 truncate text-fg">{n.label}</span>
+                    <span className="shrink-0 text-faint">
+                      {n.kind === 'route' ? routeTitle(n.ref?.kind ?? '') : kindTitle(n.kind)}
+                      {n.ns && n.kind !== 'namespace' ? ` · ${n.ns}` : ''}
+                    </span>
+                  </button>
+                ))}
+                {hiddenMatches.map((w) => (
+                  <button
+                    key={`${w.kind}:${w.ns}/${w.name}`}
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded px-2 py-1 text-left hover:bg-hover"
+                    data-testid="k8s-map-result"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      revealWorkload(w)
+                    }}
+                  >
+                    <span className={cx('size-2 shrink-0 rounded-full', DOT[w.tone])} />
+                    <span className="min-w-0 flex-1 truncate text-fg">{w.name}</span>
+                    <span className="shrink-0 text-faint">
+                      {workloadKindLabel(w.kind)} · {w.ns} ({t('collapsed')})
+                    </span>
+                  </button>
+                ))}
+              </div>
             )}
           </div>
-        </div>
-      </div>
-      {selectedNode && !nodesView && (
-        <SidePanel storageKey="k8s-map" defaultWidth={340} testId="k8s-map-panel">
-          <MapPanel
-            node={selectedNode}
-            layout={layout}
-            index={index}
-            onClose={() => {
-              setSelected(null)
+        )}
+        {(options.view === 'nodes' || (options.view === 'workloads' && barFit !== 'narrow')) &&
+          labelFilter('h-7 w-56 min-w-28 shrink')}
+        {!nodesView && (counts.bad > 0 || counts.warn > 0) && (
+          <button
+            type="button"
+            className="flex shrink-0 items-center gap-1 rounded-md px-1 py-1 hover:bg-hover"
+            title={[
+              t('Go to the next problem'),
+              counts.bad > 0 ? tn(counts.bad, '{n} failing', '{n} failing') : '',
+              counts.warn > 0 ? tn(counts.warn, '{n} degraded', '{n} degraded') : ''
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+            data-testid="k8s-map-next-problem"
+            onClick={nextProblem}
+          >
+            {/* Hẹp: chỉ còn số (chữ đầy đủ ở tooltip). */}
+            {counts.bad > 0 && (
+              <Pill tone="bad">
+                {barFit === 'full'
+                  ? tn(counts.bad, '{n} failing', '{n} failing')
+                  : String(counts.bad)}
+              </Pill>
+            )}
+            {counts.warn > 0 && (
+              <Pill tone="warn">
+                {barFit === 'full'
+                  ? tn(counts.warn, '{n} degraded', '{n} degraded')
+                  : String(counts.warn)}
+              </Pill>
+            )}
+          </button>
+        )}
+        {!nodesView && <div className="flex-1" />}
+        {!nodesView && (
+          <TrafficMenu
+            on={options.traffic}
+            traffic={traffic}
+            compact={barFit !== 'full'}
+            onChange={(on) => {
+              setOpt({ traffic: on })
             }}
-            onGo={goTo}
-            onOpen={onOpen}
-            onLogs={(ref) => {
-              const w = data?.workloads.find(
-                (x) => x.kind === ref.kind && x.ns === ref.ns && x.name === ref.name
-              )
-              onLogs(ref, w?.labels ?? null)
-            }}
-            onShell={onShell}
-            folded={
-              selectedNode.kind === 'namespace' && selectedNode.ns
-                ? isFolded(selectedNode.ns)
-                : null
-            }
-            onToggleNs={toggleNs}
-            impact={impactMode}
-            onImpact={setImpactMode}
-            traffic={nodeTraffic}
           />
-        </SidePanel>
+        )}
+        {!nodesView && (
+          <MenuButton
+            testId="k8s-map-options"
+            icon={<SlidersHorizontal size={12} />}
+            label={t('View')}
+            title={t('View options')}
+            iconOnly={barFit !== 'full'}
+            active={
+              (barFit === 'narrow' && Boolean(selectorText.trim())) ||
+              !options.hideSystem ||
+              !options.pods ||
+              !options.edges ||
+              problemsOnly ||
+              options.darkCanvas ||
+              options.grouping !== 'purpose'
+            }
+          >
+            {(close) => (
+              <>
+                {barFit === 'narrow' && (
+                  <>
+                    <MenuHeading>{t('Filter by label')}</MenuHeading>
+                    <div className="mx-2 mb-1">{labelFilter('h-7 w-full')}</div>
+                  </>
+                )}
+                <MenuHeading>{t('Group namespaces')}</MenuHeading>
+                {customGroup !== null ? (
+                  <input
+                    autoFocus
+                    type="text"
+                    spellCheck={false}
+                    placeholder={t('Label key, e.g. team')}
+                    aria-label={t('Group by label key')}
+                    data-testid="k8s-map-grouping-custom"
+                    className="mx-2 mb-1 h-7 rounded-md border border-accent bg-subtle px-2 font-mono text-xs text-fg outline-none"
+                    value={customGroup}
+                    onChange={(e) => {
+                      setCustomGroup(e.target.value)
+                    }}
+                    onBlur={() => {
+                      setCustomGroup(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const key = customGroup.trim()
+                        if (key) setOpt({ grouping: `label:${key}` })
+                        setCustomGroup(null)
+                      } else if (e.key === 'Escape') {
+                        e.stopPropagation()
+                        setCustomGroup(null)
+                      }
+                    }}
+                  />
+                ) : (
+                  <select
+                    data-testid="k8s-map-grouping"
+                    aria-label={t('Group namespaces into regions')}
+                    className="mx-2 mb-1 h-7 cursor-pointer rounded-md border border-line bg-subtle px-1.5 text-xs text-fg outline-none"
+                    value={options.grouping}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      if (v === '__custom') {
+                        setCustomGroup('')
+                        return
+                      }
+                      setOpt({ grouping: v as MapGrouping })
+                    }}
+                  >
+                    <option value="purpose">{t('by purpose')}</option>
+                    <option value="prefix">{t('by name prefix')}</option>
+                    {[
+                      ...groupKeys,
+                      ...(options.grouping.startsWith('label:') &&
+                      !groupKeys.includes(options.grouping.slice(6))
+                        ? [options.grouping.slice(6)]
+                        : [])
+                    ].map((k) => (
+                      <option key={k} value={`label:${k}`}>
+                        {t('by {key}', { key: k })}
+                      </option>
+                    ))}
+                    <option value="__custom">{t('by label…')}</option>
+                  </select>
+                )}
+                <MenuHeading>{t('Show')}</MenuHeading>
+                <MenuToggle
+                  on={!options.hideSystem}
+                  label={t('System namespaces')}
+                  hint="kube-system, …"
+                  testId="k8s-map-system"
+                  onChange={(on) => {
+                    setOpt({ hideSystem: !on })
+                  }}
+                />
+                <MenuToggle
+                  on={options.pods}
+                  label={t('Pods')}
+                  testId="k8s-map-pods"
+                  onChange={(on) => {
+                    setOpt({ pods: on })
+                  }}
+                />
+                <MenuToggle
+                  on={options.edges}
+                  label={t('Connections')}
+                  hint={t('Route → Service → workload → volume')}
+                  testId="k8s-map-edges"
+                  onChange={(on) => {
+                    setOpt({ edges: on })
+                  }}
+                />
+                <MenuToggle
+                  on={problemsOnly}
+                  label={t('Problems only')}
+                  hint={t('Dim everything that is healthy')}
+                  testId="k8s-map-problems"
+                  onChange={setProblemsOnly}
+                />
+                <MenuToggle
+                  on={options.darkCanvas}
+                  label={t('Dark canvas')}
+                  hint={t('Dark background for the map, whatever the app theme')}
+                  testId="k8s-map-dark-canvas"
+                  onChange={(on) => {
+                    setOpt({ darkCanvas: on })
+                  }}
+                />
+                <MenuHeading>{t('Namespaces')}</MenuHeading>
+                <MenuItem
+                  testId="k8s-map-fold-all"
+                  icon={
+                    fold.all && fold.except.size === 0 ? (
+                      <ChevronsUpDown size={13} />
+                    ) : (
+                      <ChevronsDownUp size={13} />
+                    )
+                  }
+                  label={fold.all && fold.except.size === 0 ? t('Expand all') : t('Collapse all')}
+                  onClick={() => {
+                    setFold({ all: !(fold.all && fold.except.size === 0), except: new Set() })
+                    close()
+                  }}
+                />
+              </>
+            )}
+          </MenuButton>
+        )}
+        {options.view === 'nodes' && <div className="flex-1" />}
+        <button
+          type="button"
+          aria-label={t('Refresh')}
+          title={updated ? t('Updated {time}', { time: formatTime(updated) }) : t('Refresh')}
+          className="shrink-0 rounded p-1 text-faint hover:bg-hover hover:text-fg"
+          data-testid="k8s-map-refresh"
+          onClick={() => {
+            setTick((n) => n + 1)
+          }}
+        >
+          <RefreshCw size={13} className={cx(loading && 'animate-spin')} />
+        </button>
+      </div>
+      {error && <p className="border-b border-line px-3 py-1.5 text-xs text-danger">{error}</p>}
+      {data?.truncated && (
+        <p className="border-b border-line px-3 py-1.5 text-xs text-warning">
+          {t('This cluster is very large — only part of it is on the map. Pick fewer namespaces.')}
+        </p>
       )}
+      {/* Canvas + bảng chi tiết nằm dưới thanh công cụ; canvas luôn giữ phần lớn chỗ. */}
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          {options.view === 'nodes' && data && shownData && (
+            <NodesView data={data} shown={shownData} onOpen={onOpen} />
+          )}
+          {trafficView && (
+            <div
+              className={cx('k8s-map flex min-h-0 flex-1', options.darkCanvas && 'k8s-map-dark')}
+            >
+              <TrafficMap
+                traffic={traffic}
+                scope={namespaces}
+                palette={palette.ramp}
+                particles={!reducedMotion && traffic.rates.length <= MAX_ANIMATED_EDGES}
+                onOpen={onOpen}
+              />
+            </div>
+          )}
+          {topologyView && (
+            <TopologyMap
+              tabId={tabId}
+              data={data}
+              error={error}
+              request={request}
+              traffic={traffic}
+              trafficOn={options.traffic}
+              onTrafficOn={(on) => {
+                setOpt({ traffic: on })
+              }}
+              darkCanvas={options.darkCanvas}
+              onDarkCanvas={(on) => {
+                setOpt({ darkCanvas: on })
+              }}
+              toolbar={toolbarSlot}
+              barFit={barFit}
+              overlayPanel={panelOverlay(toolbarWidth)}
+              onOpen={onOpen}
+              onLogs={onLogs}
+              onShell={onShell}
+              onPortForward={onPortForward}
+            />
+          )}
+          <div
+            ref={attachMap}
+            tabIndex={0}
+            role="application"
+            aria-label={t('Cluster map — drag to move, scroll to zoom, click to select')}
+            data-testid="k8s-map-canvas"
+            className={cx(
+              'k8s-map @container relative min-h-0 flex-1 overflow-hidden outline-none',
+              options.darkCanvas && 'k8s-map-dark',
+              nodesView && 'hidden'
+            )}
+            onKeyDown={onKeyDown}
+            onPointerLeave={() => {
+              setHover(null)
+            }}
+          >
+            <MapContext.Provider value={ctx}>
+              <ReactFlow<MapFlowNode, MapFlowEdge>
+                nodes={nodes}
+                edges={edges}
+                nodeTypes={NODE_TYPES}
+                edgeTypes={EDGE_TYPES}
+                defaultViewport={savedViewports.get(tabId) ?? { x: 40, y: 40, zoom: 0.5 }}
+                minZoom={MIN_ZOOM}
+                maxZoom={MAX_ZOOM}
+                nodesDraggable={false}
+                nodesConnectable={false}
+                elementsSelectable={false}
+                nodesFocusable={false}
+                edgesFocusable={false}
+                disableKeyboardA11y
+                onlyRenderVisibleElements
+                zoomOnDoubleClick
+                proOptions={{ hideAttribution: true }}
+                onMove={(_, v) => {
+                  // Chữ nhìn xa giữ cỡ trên màn hình (CSS chia cho zoom) — không render lại node.
+                  wrapRef.current?.style.setProperty('--map-zoom', String(v.zoom))
+                  const next: Band = v.zoom >= NEAR_ZOOM ? 'near' : 'far'
+                  if (next !== band) setBand(next)
+                }}
+                onMoveEnd={(_, v) => {
+                  savedViewports.set(tabId, v)
+                }}
+                onMoveStart={() => {
+                  setHover(null)
+                }}
+                onNodeClick={(_, n) => {
+                  setSelected(n.id)
+                  wrapRef.current?.focus()
+                }}
+                onNodeDoubleClick={(_, n) => {
+                  const m = index.byId.get(n.id)
+                  if (m) flyTo(m, 1.4)
+                }}
+                onPaneClick={() => {
+                  setSelected(null)
+                  wrapRef.current?.focus()
+                }}
+                onNodeMouseEnter={(e, n) => {
+                  // Namespace / vùng đã có tên + số liệu ngay trên khung — bảng nổi chỉ che thẻ bên trong.
+                  if (n.type === 'region' || n.type === 'namespace') return
+                  const at = local(e)
+                  // Đang trỏ một pod trong thẻ này → giữ bảng của pod.
+                  setHover((h) =>
+                    h && index.byId.get(h.id)?.parent === n.id ? h : { id: n.id, ...at }
+                  )
+                }}
+                onNodeMouseLeave={() => {
+                  setHover(null)
+                }}
+              >
+                <Background
+                  variant={BackgroundVariant.Dots}
+                  gap={24}
+                  size={1}
+                  className="!bg-transparent"
+                />
+                <MiniMap
+                  pannable
+                  zoomable
+                  position="bottom-right"
+                  className="!m-3 !mb-12 overflow-hidden rounded-md border border-line !bg-surface shadow-sm"
+                  style={{ width: 180, height: 120 }}
+                  maskColor="rgb(120 130 145 / 0.18)"
+                  nodeColor={(n) => {
+                    const m = (n.data as { node?: MapNode } | undefined)?.node
+                    if (!m) return 'transparent'
+                    if (m.kind === 'region') return 'rgb(150 160 175 / 0.2)'
+                    if (m.kind === 'namespace')
+                      return m.tone === 'bad'
+                        ? 'rgb(217 56 30 / 0.25)'
+                        : m.tone === 'warn'
+                          ? 'rgb(194 122 14 / 0.25)'
+                          : 'rgb(150 160 175 / 0.35)'
+                    return m.tone === 'bad' ? '#d9381e' : m.tone === 'warn' ? '#c27a0e' : '#9aa3b0'
+                  }}
+                  nodeStrokeWidth={0}
+                />
+              </ReactFlow>
+            </MapContext.Provider>
+            {!data && !error && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-faint">
+                {t('Drawing the cluster map…')}
+              </div>
+            )}
+            {hoverNode && hover && (
+              <HoverCard
+                node={hoverNode}
+                podsOf={index.podsOf}
+                x={Math.max(8, Math.min(hover.x + 16, hover.w - 300))}
+                // Gần đáy → bảng hiện phía trên con trỏ.
+                {...(hover.y + 230 > hover.h
+                  ? { bottom: hover.h - hover.y + 12 }
+                  : { y: hover.y + 16 })}
+              />
+            )}
+            {/* Điều khiển zoom + chú giải */}
+            <div className="absolute right-3 bottom-3 z-10 flex overflow-hidden rounded-md border border-line bg-surface shadow-sm">
+              <MapButton
+                label={t('Zoom out ( - )')}
+                onClick={() => {
+                  zoomBy(0.8)
+                }}
+              >
+                <Minus size={13} />
+              </MapButton>
+              <ZoomLabel />
+              <MapButton
+                label={t('Zoom in ( + )')}
+                onClick={() => {
+                  zoomBy(1.25)
+                }}
+              >
+                <Plus size={13} />
+              </MapButton>
+              <MapButton
+                label={t('Fit the whole cluster ( 0 )')}
+                testId="k8s-map-fit"
+                onClick={fit}
+              >
+                <Maximize size={13} />
+              </MapButton>
+            </div>
+            {/* Góc trái dưới: tổng số + chú giải (canvas hẹp → chỉ còn tổng số, tránh đè nút zoom). */}
+            <div className="pointer-events-none absolute bottom-3 left-3 z-10 flex max-w-[calc(100%-11rem)] items-center gap-3 rounded-md border border-line bg-surface/90 px-2 py-1 text-[11px] text-faint">
+              <span
+                className="min-w-0 truncate whitespace-nowrap tabular-nums"
+                data-testid="k8s-map-summary"
+              >
+                {tn(counts.workloads, '{n} workload', '{n} workloads')} ·{' '}
+                {tn(counts.pods, '{n} pod', '{n} pods')}
+              </span>
+              <span className="hidden shrink-0 items-center gap-3 border-l border-line pl-3 @2xl:flex">
+                <Legend color="bg-success" label={t('Healthy')} />
+                <Legend color="bg-warning" label={t('Degraded')} />
+                <Legend color="bg-danger-solid" label={t('Failing')} />
+              </span>
+              {options.traffic && traffic.status === 'live' && (
+                <span
+                  className="hidden shrink-0 items-center gap-1 @4xl:flex"
+                  data-testid="k8s-map-traffic-legend"
+                >
+                  <svg width="46" height="10" aria-hidden>
+                    <defs>
+                      <linearGradient id="k8s-map-ramp" x1="0" x2="1" y1="0" y2="0">
+                        {palette.ramp.map((c, i) => (
+                          <stop key={c} offset={i / (palette.ramp.length - 1)} stopColor={c} />
+                        ))}
+                      </linearGradient>
+                    </defs>
+                    <path
+                      d="M1 7 L45 3"
+                      stroke="url(#k8s-map-ramp)"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  {t('traffic')} {BANDS[0].label} … {BANDS[BANDS.length - 1]?.label}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+        {selectedNode && !nodesView && (
+          <SidePanel
+            storageKey="k8s-map"
+            defaultWidth={340}
+            maxRatio={0.4}
+            overlay={panelOverlay(toolbarWidth)}
+            testId="k8s-map-panel"
+          >
+            <MapPanel
+              node={selectedNode}
+              layout={layout}
+              index={index}
+              onClose={() => {
+                setSelected(null)
+              }}
+              onGo={goTo}
+              onOpen={onOpen}
+              onLogs={(ref) => {
+                const w = data?.workloads.find(
+                  (x) => x.kind === ref.kind && x.ns === ref.ns && x.name === ref.name
+                )
+                onLogs(ref, w?.labels ?? null)
+              }}
+              onShell={onShell}
+              folded={
+                selectedNode.kind === 'namespace' && selectedNode.ns
+                  ? isFolded(selectedNode.ns)
+                  : null
+              }
+              onToggleNs={toggleNs}
+              impact={impactMode}
+              onImpact={setImpactMode}
+              traffic={nodeTraffic}
+            />
+          </SidePanel>
+        )}
+      </div>
     </div>
   )
 }

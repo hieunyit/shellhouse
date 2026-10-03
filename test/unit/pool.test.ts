@@ -23,6 +23,31 @@ describe('pool', () => {
     expect(out).toEqual(Array.from({ length: 20 }, (_, i) => i))
   })
 
+  it('createLimiter: việc mới đến đúng lúc một việc xong không chen vượt trần', async () => {
+    // Lời gọi mới rơi vào khe giữa "trả chỗ" và "việc đang chờ chạy" (vài microtask sau khi xong).
+    for (let ticks = 0; ticks < 5; ticks++) {
+      const limit = createLimiter(1)
+      let active = 0
+      let peak = 0
+      const late: Promise<void>[] = []
+      const job = (hook: boolean): Promise<void> =>
+        limit(async () => {
+          active++
+          peak = Math.max(peak, active)
+          await sleep(1)
+          active--
+          if (!hook) return
+          let p = Promise.resolve()
+          for (let i = 0; i < ticks; i++) p = p.then(() => undefined)
+          void p.then(() => late.push(job(false)))
+        })
+      await Promise.all([job(true), job(false)])
+      await sleep(10)
+      await Promise.all(late)
+      expect(peak).toBe(1)
+    }
+  })
+
   it('mapLimit: giữ thứ tự, song song thật (nhanh hơn tuần tự), lỗi → reject', async () => {
     const started = Date.now()
     const out = await mapLimit([30, 30, 30, 30, 30, 30, 30, 30], 8, async (ms, i) => {

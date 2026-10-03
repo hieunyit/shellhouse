@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Download, FileQuestion, Loader2 } from 'lucide-react'
 import { formatSize, cleanError } from '../../lib/format'
+import { t } from '@shared/i18n'
 import { Button, Modal, Notice } from '../ui'
 
 export interface PreviewData {
@@ -114,11 +115,11 @@ export function FilePreview({
                 onClose()
               }}
             >
-              Download
+              {t('Download')}
             </Button>
           )}
           <Button variant="primary" onClick={onClose}>
-            Close
+            {t('Close')}
           </Button>
         </>
       }
@@ -126,7 +127,7 @@ export function FilePreview({
       {error && <Notice tone="danger">{error}</Notice>}
       {!data && !error && (
         <div className="flex h-40 items-center justify-center gap-2 text-xs text-faint">
-          <Loader2 size={14} className="animate-spin" /> Loading preview…
+          <Loader2 size={14} className="animate-spin" /> {t('Loading preview…')}
         </div>
       )}
       {view?.kind === 'image' && (
@@ -143,7 +144,10 @@ export function FilePreview({
         <>
           {data?.truncated && (
             <p className="mb-2 text-xs text-faint">
-              Showing the first {formatSize(PREVIEW_TEXT_BYTES)} of {formatSize(data.size)}.
+              {t('Showing the first {shown} of {size}.', {
+                shown: formatSize(PREVIEW_TEXT_BYTES),
+                size: formatSize(data.size)
+              })}
             </p>
           )}
           <pre
@@ -168,8 +172,10 @@ export function FilePreview({
         >
           <FileQuestion size={28} className="text-faint" />
           {view.kind === 'binary'
-            ? 'This file is not text or an image — download it to open it.'
-            : `This image is larger than ${formatSize(PREVIEW_IMAGE_BYTES)} — download it to view it.`}
+            ? t('This file is not text or an image — download it to open it.')
+            : t('This image is larger than {size} — download it to view it.', {
+                size: formatSize(PREVIEW_IMAGE_BYTES)
+              })}
         </div>
       )}
     </Modal>

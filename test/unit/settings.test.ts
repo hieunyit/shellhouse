@@ -41,6 +41,24 @@ describe('settings', () => {
   })
 })
 
+describe('SettingsPatch (renderer → main)', () => {
+  it('bỏ files.editor và security.rememberOnDevice; giữ các trường khác', async () => {
+    const { SettingsPatch } = await import('@shared/settings')
+    const patch = SettingsPatch.parse({
+      files: { editor: '/tmp/evil.sh', inApp: false },
+      security: { rememberOnDevice: true, autoLockMinutes: 5 }
+    })
+    expect(patch).toEqual({ files: { inApp: false }, security: { autoLockMinutes: 5 } })
+    const next = applyPatch(DEFAULT_SETTINGS, patch)
+    expect(next.files.editor).toBe('')
+    expect(next.security.rememberOnDevice).toBe(false)
+    // Main vẫn đặt được (qua hộp thoại / vault:setRemember).
+    expect(applyPatch(DEFAULT_SETTINGS, { files: { editor: '/usr/bin/code' } }).files.editor).toBe(
+      '/usr/bin/code'
+    )
+  })
+})
+
 describe('SettingsService', () => {
   it('lưu và đọc lại; JSON hỏng trong DB → mặc định', async () => {
     const { openDatabase } = await import('../../src/main/store/db')

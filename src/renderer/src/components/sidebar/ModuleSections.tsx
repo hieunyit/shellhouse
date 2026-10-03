@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Puzzle } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { ModuleSuggestion } from '../ModuleSuggestion'
 import { useEnabledModules } from '../../../../modules/registry/renderer-kit'
 import { browseModules } from '../../stores/module-ui'
@@ -17,13 +18,18 @@ export function ModuleSections(): React.JSX.Element {
       {local.length > 0 && (
         <ModuleSuggestion
           candidates={local}
-          where="on this computer"
+          where={t('on this computer')}
           className="mt-2 h-auto min-h-8 flex-wrap rounded-md border py-1"
         />
       )}
       {modules.map((m) => {
         const Section = m.SidebarSection
-        return Section ? <Section key={m.manifest.id} /> : null
+        // Neo cho thanh icon (bấm icon module → mở thanh bên tới đúng mục).
+        return Section ? (
+          <div key={m.manifest.id} data-module-section={m.manifest.id} className="scroll-mt-2">
+            <Section />
+          </div>
+        ) : null
       })}
       <button
         type="button"
@@ -33,7 +39,7 @@ export function ModuleSections(): React.JSX.Element {
           browseModules()
         }}
       >
-        <Puzzle size={13} /> Add module…
+        <Puzzle size={13} /> {t('Add module…')}
       </button>
     </>
   )

@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { Hostname, Username, type ImportCandidate } from '@shared/hosts'
+import { t } from '@shared/i18n'
 
 /**
  * Nhập host từ CSV (Termius, bảng tính, công cụ khác). Nhận cột theo tên, không phân biệt hoa
@@ -94,7 +95,9 @@ export function scanCsv(text: string, options: CsvScanOptions): CsvScan {
     protocol: find(COLUMNS.protocol)
   }
   if (col.hostname === -1)
-    throw new Error('No host column found (expected a column named Hostname, Host, IP or Address)')
+    throw new Error(
+      t('No host column found (expected a column named Hostname, Host, IP or Address)')
+    )
   const secretColumns = header.filter((h) => SECRET_COLUMNS.test(normalize(h)))
 
   const existing = new Set(options.existingLabels.map((l) => l.toLowerCase()))
@@ -133,11 +136,14 @@ export function scanCsv(text: string, options: CsvScanOptions): CsvScan {
       .filter((t) => t && t.length <= 40)
 
     let problem: string | null = null
-    if (!Hostname.safeParse(hostname).success) problem = `Invalid hostname: ${hostname}`
+    if (!Hostname.safeParse(hostname).success)
+      problem = t('Invalid hostname: {value}', { value: hostname })
     else if (!Number.isInteger(port) || port < 1 || port > 65535)
-      problem = `Invalid port: ${portRaw}`
-    else if (!Username.safeParse(username).success) problem = `Invalid username: ${username}`
-    else if (keyFile && !existsSync(keyFile)) problem = `Private key not found: ${keyFile}`
+      problem = t('Invalid port: {value}', { value: portRaw })
+    else if (!Username.safeParse(username).success)
+      problem = t('Invalid username: {value}', { value: username })
+    else if (keyFile && !existsSync(keyFile))
+      problem = t('Private key not found: {path}', { path: keyFile })
 
     candidates.push({
       alias,

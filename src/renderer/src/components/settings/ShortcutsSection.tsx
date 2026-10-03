@@ -7,7 +7,8 @@ import {
   keybindingFor,
   reservedForTerminal
 } from '@shared/commands'
-import { displayKeybinding, isMac } from '../../lib/keybindings'
+import { t } from '@shared/i18n'
+import { commandTitle, displayKeybinding, isMac } from '../../lib/keybindings'
 import { useSettings } from '../../stores/settings'
 import { cx, IconButton, SectionTitle } from '../ui'
 
@@ -25,8 +26,10 @@ export function ShortcutsSection(): React.JSX.Element {
 
   return (
     <div data-testid="settings-shortcuts">
-      <SectionTitle description="Click a shortcut, then press the new key combination. Esc cancels.">
-        Keyboard shortcuts
+      <SectionTitle
+        description={t('Click a shortcut, then press the new key combination. Esc cancels.')}
+      >
+        {t('Keyboard shortcuts')}
       </SectionTitle>
       <div className="overflow-hidden rounded-lg border border-line">
         {COMMANDS.map((cmd) => {
@@ -39,18 +42,19 @@ export function ShortcutsSection(): React.JSX.Element {
               data-testid="shortcut-row"
               data-command={cmd.id}
             >
-              <span className="flex-1">{cmd.title}</span>
+              <span className="flex-1">{commandTitle(cmd.id)}</span>
               {conflict && (
                 <span className="text-xs text-danger">
-                  Also used by{' '}
-                  {conflict
-                    .filter((c) => c !== cmd.id)
-                    .map((c) => COMMANDS.find((x) => x.id === c)?.title)
-                    .join(', ')}
+                  {t('Also used by {names}', {
+                    names: conflict
+                      .filter((c) => c !== cmd.id)
+                      .map((c) => commandTitle(c))
+                      .join(', ')
+                  })}
                 </span>
               )}
               {key && reservedForTerminal(key) && (
-                <span className="text-xs text-warning">Terminals need this key</span>
+                <span className="text-xs text-warning">{t('Terminals need this key')}</span>
               )}
               <button
                 type="button"
@@ -82,10 +86,10 @@ export function ShortcutsSection(): React.JSX.Element {
                   setRecording(null)
                 }}
               >
-                {recording === cmd.id ? 'Press keys…' : displayKeybinding(key)}
+                {recording === cmd.id ? t('Press keys…') : displayKeybinding(key)}
               </button>
               <IconButton
-                label="Remove shortcut"
+                label={t('Remove shortcut')}
                 size="sm"
                 onClick={() => {
                   set(cmd.id, '')
@@ -94,7 +98,7 @@ export function ShortcutsSection(): React.JSX.Element {
                 <X size={13} />
               </IconButton>
               <IconButton
-                label="Reset to default"
+                label={t('Reset to default')}
                 size="sm"
                 onClick={() => {
                   set(cmd.id, null)

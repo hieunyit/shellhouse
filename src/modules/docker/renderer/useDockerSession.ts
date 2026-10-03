@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PromptRequest } from '@shared/stream-protocol'
-import { ModuleSessionClient, whenHostRunning, setTabState } from '../../registry/renderer-kit'
+import { ModuleSessionClient, whenHostRunning, setTabState, t } from '../../registry/renderer-kit'
 import type { DockerOp } from '../shared/ops'
 import { wslDistroOf } from '../shared/ipc'
 import { useDocker } from './store'
@@ -34,10 +34,10 @@ export function useDockerSession(
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState(
     wslDistroOf(hostId)
-      ? `Connecting to Docker in ${wslDistroOf(hostId) ?? ''} (WSL)…`
+      ? t('Connecting to Docker in {distro} (WSL)…', { distro: wslDistroOf(hostId) ?? '' })
       : hostId
-        ? 'Connecting…'
-        : 'Looking for Docker on this computer…'
+        ? t('Connecting…')
+        : t('Looking for Docker on this computer…')
   )
   const [prompt, setPrompt] = useState<DockerSession['prompt']>(null)
   const [attempt, setAttempt] = useState(0)
@@ -83,10 +83,10 @@ export function useDockerSession(
         onExit: (reason) => {
           fail(
             reason === 'auth'
-              ? 'Could not log in to the server.'
+              ? t('Could not log in to the server.')
               : reason === 'hostkey'
-                ? 'The host key was not accepted.'
-                : 'The connection was closed.'
+                ? t('The host key was not accepted.')
+                : t('The connection was closed.')
           )
         },
         onEvent: (event, data) => {
@@ -95,7 +95,7 @@ export function useDockerSession(
         onHostRestart: () => {
           if (cancelled) return
           // Session Host vừa khởi động lại: đợi nó chạy rồi mở phiên mới (kết nối lại) thay vì treo.
-          setStatus('The session host restarted — reconnecting…')
+          setStatus(t('The session host restarted — reconnecting…'))
           void whenHostRunning().then(() => {
             if (cancelled) return
             setReady(false)
@@ -123,14 +123,19 @@ export function useDockerSession(
     }
   }, [tabId, hostId, attempt])
 
-  // Chế độ chỉ đọc cũng được Session Host kiểm (thao tác thay đổi bị từ chối).
+  // Chế độ chỉ đọc cũng được Session Host kiểm (thao tác thay đổi bị từ chối); host SSH báo kèm
+  // hostId để Session Host hỏi main cờ đã lưu (máy này / WSL: Session Host tự biết nguồn).
   useEffect(() => {
-    if (ready) void clientRef.current?.request({ op: 'configure', readOnly }).catch(() => undefined)
-  }, [ready, readOnly])
+    if (!ready) return
+    const sshHost = hostId && !wslDistroOf(hostId) ? hostId : undefined
+    void clientRef.current
+      ?.request({ op: 'configure', readOnly, ...(sshHost ? { hostId: sshHost } : {}) })
+      .catch(() => undefined)
+  }, [ready, readOnly, hostId])
 
   const request = useCallback(<T>(op: DockerOp, signal?: AbortSignal): Promise<T> => {
     const client = clientRef.current
-    if (!client) return Promise.reject(new Error('Not connected'))
+    if (!client) return Promise.reject(new Error(t('Not connected')))
     return client.request<T>(op, signal)
   }, [])
 
@@ -145,7 +150,7 @@ export function useDockerSession(
   const retry = useCallback(() => {
     setReady(false)
     setError(null)
-    setStatus('Connecting…')
+    setStatus(t('Connecting…'))
     setAttempt((a) => a + 1)
   }, [])
 

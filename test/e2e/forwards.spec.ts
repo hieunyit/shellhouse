@@ -1,7 +1,7 @@
 import { connect, createServer, type AddressInfo, type Server } from 'node:net'
 import type { Page } from '@playwright/test'
 import { startTestSshServer, type TestSshServer } from '../integration/ssh-test-server'
-import { activeTab, expect, test, waitForText } from './fixtures'
+import { activeTab, confirmTabClose, expect, test, waitForText } from './fixtures'
 
 let ssh: TestSshServer | null = null
 let echo: Server | null = null
@@ -96,6 +96,8 @@ test('forward -L qua giao diện: dữ liệu đi qua tunnel; lưu + tự bật 
 
   // Đóng tab → forward dừng; mở lại host → forward tự bật (cổng mới do hệ điều hành chọn).
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+W' : 'Control+Shift+W')
+  // Tab SSH đang kết nối: đóng phải xác nhận.
+  await confirmTabClose(page)
   await expect
     .poll(() =>
       throughTunnel(port, 'x').then(

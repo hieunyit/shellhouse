@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { normalize, parse as parsePath, sep } from 'node:path'
 import { Hostname, Username, type ImportCandidate } from '@shared/hosts'
+import { t } from '@shared/i18n'
 
 /**
  * Nhập phiên SSH từ MobaXterm.ini (mục [Bookmarks], [Bookmarks_1]…). Mỗi mục có `SubRep=` (thư mục,
@@ -80,13 +81,16 @@ function proxyJump(fields: string[]): { value: string | null; problem: string | 
     const host = raw.trim()
     if (!host) continue
     if (!Hostname.safeParse(host).success)
-      return { value: null, problem: `Invalid jump host: ${host}` }
+      return { value: null, problem: t('Invalid jump host: {value}', { value: host }) }
     const user = (users[i] ?? '').trim()
     if (user && !Username.safeParse(user).success)
-      return { value: null, problem: `Invalid jump host user: ${user}` }
+      return { value: null, problem: t('Invalid jump host user: {value}', { value: user }) }
     const port = Number((ports[i] ?? '').trim() || 22)
     if (!Number.isInteger(port) || port < 1 || port > 65535)
-      return { value: null, problem: `Invalid jump host port: ${ports[i] ?? ''}` }
+      return {
+        value: null,
+        problem: t('Invalid jump host port: {value}', { value: ports[i] ?? '' })
+      }
     const target = host.includes(':') ? `[${host}]` : host
     hops.push(`${user ? `${user}@` : ''}${target}${port === 22 ? '' : `:${port}`}`)
   }
@@ -147,12 +151,15 @@ export function scanMobaXterm(text: string, options: MobaScanOptions): MobaScan 
     const jump = proxyJump(fields)
 
     let problem: string | null = null
-    if (!Hostname.safeParse(hostname).success) problem = `Invalid hostname: ${hostname}`
+    if (!Hostname.safeParse(hostname).success)
+      problem = t('Invalid hostname: {value}', { value: hostname })
     else if (!Number.isInteger(port) || port < 1 || port > 65535)
-      problem = `Invalid port: ${portRaw}`
-    else if (!Username.safeParse(username).success) problem = `Invalid username: ${username}`
+      problem = t('Invalid port: {value}', { value: portRaw })
+    else if (!Username.safeParse(username).success)
+      problem = t('Invalid username: {value}', { value: username })
     else if (jump.problem) problem = jump.problem
-    else if (keyFile && !existsSync(keyFile)) problem = `Private key not found: ${keyFile}`
+    else if (keyFile && !existsSync(keyFile))
+      problem = t('Private key not found: {path}', { path: keyFile })
 
     candidates.push({
       alias,

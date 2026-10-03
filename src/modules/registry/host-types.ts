@@ -28,7 +28,7 @@ export interface RunningProgram {
 
 export interface ExecOptions {
   /** Ghi vào stdin rồi đóng. */
-  input?: string
+  input?: string | Buffer
   timeoutMs?: number
   signal?: AbortSignal
   /** Giới hạn byte stdout giữ lại (mặc định 16 MB). */

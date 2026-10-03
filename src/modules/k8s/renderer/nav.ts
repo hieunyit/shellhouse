@@ -1,5 +1,6 @@
 import type { DiscoveredKind } from '../shared/ops'
 import { BUILTIN_KINDS } from '../shared/resources'
+import { t } from '../../registry/renderer-kit'
 
 /**
  * Điều hướng kiểu k9s: alias ngắn cho thanh lệnh `:` (po, deploy, svc…), "overview" và lệnh đặc
@@ -134,7 +135,7 @@ export function suggest(
       .slice(0, 12)
       .map((c) => ({ value: `ctx ${c}`, label: c, hint: 'context' }))
   const views: CommandSuggestion[] = [
-    { value: OVERVIEW, label: 'Overview', hint: 'ov' },
+    { value: OVERVIEW, label: t('Overview'), hint: 'ov' },
     ...kinds
       .filter((k) => !k.forbidden)
       .map((k) => {
@@ -142,8 +143,8 @@ export function suggest(
         const short = Object.entries(ALIASES).find(([a, id]) => id === k.id && a.length <= 4)?.[0]
         return { value: short ?? k.id, label: builtin?.title ?? k.kind, hint: short ?? k.id }
       }),
-    { value: 'ns ', label: 'Switch namespace…', hint: 'ns <name>' },
-    { value: 'ctx ', label: 'Switch context…', hint: 'ctx <name>' }
+    { value: 'ns ', label: t('Switch namespace…'), hint: 'ns <name>' },
+    { value: 'ctx ', label: t('Switch context…'), hint: 'ctx <name>' }
   ]
   if (!q) return views.slice(0, 14)
   return views

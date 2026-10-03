@@ -15,9 +15,13 @@ import { startS3TestServer } from '../../src/modules/s3/test/s3-test-server'
 /**
  * Chụp màn hình các module (Kubernetes, Docker, S3) ở cả sáng và tối để rà soát giao diện.
  *   pnpm build && pnpm screens      → ảnh trong screens/<theme>-m-<tên>.png
+ *   SHELLHOUSE_LANG=vi …             → giao diện tiếng Việt: screens/vi-<theme>-m-<tên>.png
  * Mỗi ảnh chụp độc lập: một bước lỗi chỉ bỏ ảnh đó (ghi ra console), không dừng cả lượt.
+ * Bộ chọn chỉ dùng data-testid / data-* (không dựa chữ hiển thị) — chạy được với mọi ngôn ngữ.
  */
 const OUT = 'screens'
+/** launchApp đọc SHELLHOUSE_LANG (mặc định en); ảnh tiếng Việt có tiền tố riêng, không đè ảnh tiếng Anh. */
+const PREFIX = process.env['SHELLHOUSE_LANG'] === 'vi' ? 'vi-' : ''
 test.setTimeout(600_000)
 
 async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
@@ -40,9 +44,9 @@ function shooter(page: Page, theme: string) {
     try {
       await steps()
       await page.waitForTimeout(500)
-      await (target ?? page).screenshot({ path: join(OUT, `${theme}-m-${name}.png`) })
+      await (target ?? page).screenshot({ path: join(OUT, `${PREFIX}${theme}-m-${name}.png`) })
     } catch (e) {
-      console.log(`SKIP ${theme}-m-${name}: ${String(e).split('\n')[0] ?? ''}`)
+      console.log(`SKIP ${PREFIX}${theme}-m-${name}: ${String(e).split('\n')[0] ?? ''}`)
     }
   }
 }
@@ -75,6 +79,8 @@ for (const theme of ['light', 'dark'] as const) {
     const server = await startApiTestServer()
     server.enableCaretta()
     server.enablePrometheus()
+    // Cluster mẫu giống thật (nhiều namespace, Ingress / TLS, Service đủ loại, lỗi cấu hình…).
+    server.seedDemo()
     const dir = mkdtempSync(join(tmpdir(), 'sh-scr-kube-'))
     writeFileSync(join(dir, 'config'), kubeconfig(server))
     const launched = await launchApp({ KUBECONFIG: join(dir, 'config') })
@@ -130,12 +136,84 @@ for (const theme of ['light', 'dark'] as const) {
         await detail.waitFor()
       })
       await page.keyboard.press('Escape')
-      // Bản đồ.
+      // Bản đồ: Topology tĩnh (mặc định) — namespace shop, payments, monitoring.
       const map = view.getByTestId('k8s-map')
-      await shot('k8s-20-map', async () => {
+      await view.getByTestId('k8s-namespace').click()
+      for (const ns of ['payments', 'monitoring']) await view.getByTestId(`k8s-ns-${ns}`).click()
+      await page.keyboard.press('Escape')
+      await shot('k8s-19-topology', async () => {
         await nav('map')
-        await map.waitFor()
+        await map.getByTestId('k8s-topo-canvas').waitFor()
         await page.waitForTimeout(2500)
+      })
+      await shot('k8s-19-topology-selected', async () => {
+        await map.getByTestId('k8s-topo-search').fill('storefront')
+        await map.getByTestId('k8s-topo-result').first().click()
+        await page.waitForTimeout(1200)
+      })
+      await shot('k8s-19-topology-problems', async () => {
+        await page.keyboard.press('Escape')
+        await map.getByTestId('k8s-topo-problems').click()
+        await page.waitForTimeout(800)
+      })
+      await shot('k8s-19-topology-focus', async () => {
+        await page.keyboard.press('Escape')
+        await map.getByTestId('k8s-topo-search').fill('api')
+        await map.locator('[data-testid="k8s-topo-result"][data-kind="service"]').first().click()
+        await view.getByTestId('k8s-topo-focus').click()
+        await page.waitForTimeout(1200)
+      })
+      await shot('k8s-19-topology-pods', async () => {
+        await view.getByTestId('k8s-topo-focus').click()
+        await page.keyboard.press('Escape')
+        await map.getByTestId('k8s-topo-search').fill('web')
+        await map
+          .locator('[data-testid="k8s-topo-result"][data-ref="deployments.apps"]')
+          .first()
+          .click()
+        await page.waitForTimeout(800)
+        await map
+          .locator(
+            '[data-testid="k8s-topo-node"][data-kind="pods"][data-name="wl:deployments.apps:shop/web"]'
+          )
+          .getByTestId('k8s-topo-pods-toggle')
+          .click()
+        await map.getByTestId('k8s-topo-pod').first().click()
+        await page.waitForTimeout(1000)
+      })
+      await shot('k8s-19-topology-deps', async () => {
+        await page.keyboard.press('Escape')
+        await map.getByTestId('k8s-topo-view').click()
+        await map.getByTestId('k8s-topo-deps').click()
+        await page.keyboard.press('Escape')
+        await map.getByTestId('k8s-topo-search').fill('api')
+        await map
+          .locator('[data-testid="k8s-topo-result"][data-ref="deployments.apps"]')
+          .first()
+          .click()
+        await page.waitForTimeout(1200)
+      })
+      await shot('k8s-19-topology-fit', async () => {
+        await page.keyboard.press('Escape')
+        await map.getByTestId('k8s-topo-view').click()
+        await map.getByTestId('k8s-topo-deps').click()
+        await page.keyboard.press('Escape')
+        await map.getByTestId('k8s-topo-fit').click()
+        await page.waitForTimeout(1200)
+      })
+      await shot('k8s-20-map', async () => {
+        await map.getByTestId('k8s-map-view-workloads').click()
+        await map.getByTestId('k8s-map-canvas').waitFor()
+        await page.waitForTimeout(2500)
+      })
+      await shot('k8s-20-map-zoomed', async () => {
+        await map.getByTestId('k8s-map-search').fill('checkout')
+        await map.locator('[data-testid="k8s-map-result"][data-kind="workload"]').first().click()
+        await page.waitForTimeout(1200)
+        await map.getByTestId('k8s-map-canvas').focus()
+        await page.keyboard.press('Escape')
+        await page.keyboard.press('+')
+        await page.waitForTimeout(800)
       })
       await shot('k8s-21-map-selected', async () => {
         await map.getByTestId('k8s-map-search').fill('web')
@@ -175,7 +253,7 @@ for (const theme of ['light', 'dark'] as const) {
     try {
       await setTheme(page, theme)
       await enableModule(page, 'docker')
-      await page.locator('[data-testid="docker-endpoint"][data-name="This computer"]').dblclick()
+      await page.getByTestId('docker-endpoint').first().dblclick()
       const view = page.getByTestId('docker-view')
       await shot('docker-01-containers', async () => {
         await view.getByTestId('docker-container').first().waitFor()
@@ -250,3 +328,67 @@ for (const theme of ['light', 'dark'] as const) {
     }
   })
 }
+
+/**
+ * Bản đồ K8s ở cửa sổ hẹp (sidebar host đầy đủ + danh sách tài nguyên): thanh công cụ không bị
+ * bảng chi tiết che, các nút gọn dần, không đè nhau — ảnh screens/narrow-m-k8s-map-<rộng>-*.png.
+ */
+test('module — Kubernetes map at narrow widths', async () => {
+  mkdirSync(OUT, { recursive: true })
+  const server = await startApiTestServer()
+  server.enableCaretta()
+  server.seedDemo()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-scr-kube-'))
+  writeFileSync(join(dir, 'config'), kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: join(dir, 'config') })
+  const { page } = launched
+  await page.setViewportSize({ width: 1366, height: 820 })
+  page.setDefaultTimeout(10_000)
+  try {
+    await enableModule(page, 'k8s')
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await view.getByTestId('k8s-namespace').click()
+    for (const ns of ['default', 'payments']) await view.getByTestId(`k8s-ns-${ns}`).click()
+    await page.keyboard.press('Escape')
+    await view.getByTestId('k8s-nav-map').click()
+    const map = view.getByTestId('k8s-map')
+    await map.getByTestId('k8s-topo-canvas').waitFor()
+    for (const width of [1366, 1180, 1024, 900]) {
+      const shot = shooter(page, `narrow-${String(width)}`)
+      await page.setViewportSize({ width, height: 820 })
+      await page.waitForTimeout(400)
+      const pick = async (name: string): Promise<void> => {
+        const compact = await map.getByTestId('k8s-map-view-menu').count()
+        if (compact) await map.getByTestId('k8s-map-view-menu').click()
+        await map.getByTestId(`k8s-map-view-${name}`).click()
+      }
+      await shot('k8s-map-topology', async () => {
+        await pick('topology')
+        await page.keyboard.press('Escape')
+        await page.waitForTimeout(1500)
+      })
+      await shot('k8s-map-topology-focus', async () => {
+        await map.getByTestId('k8s-topo-search').fill('storefront')
+        await map.getByTestId('k8s-topo-result').first().click()
+        await view.getByTestId('k8s-topo-focus').click()
+        await page.waitForTimeout(1200)
+      })
+      await page.keyboard.press('Escape')
+      await shot('k8s-map-workloads', async () => {
+        await pick('workloads')
+        await map.getByTestId('k8s-map-search').fill('web')
+        await map.locator('[data-testid="k8s-map-result"][data-kind="workload"]').first().click()
+        await page.waitForTimeout(1500)
+      })
+      await shot('k8s-map-workloads-view-menu', async () => {
+        await map.getByTestId('k8s-map-options').click()
+        await page.waitForTimeout(400)
+      })
+      await page.keyboard.press('Escape')
+    }
+  } finally {
+    await launched.close()
+    await server.close()
+  }
+})

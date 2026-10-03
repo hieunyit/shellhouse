@@ -3,6 +3,8 @@
  * theo từng trường. Thuần — renderer vẽ form, test kiểm manifest sinh ra.
  */
 
+import { t, tn } from '@shared/i18n'
+
 export interface KV {
   key: string
   value: string
@@ -263,32 +265,67 @@ const LABEL_VALUE = /^(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?$/
 const ENV_NAME = /^[-._a-zA-Z][-._a-zA-Z0-9]*$/
 const CRON = /^(@(yearly|annually|monthly|weekly|daily|midnight|hourly)|(\S+\s+){4}\S+)$/
 
-export function checkName(v: string, what = 'Name', max = 63, subdomain = false): string | null {
-  if (!v) return `${what} is required`
-  if (v.length > max) return `${what} must be at most ${String(max)} characters`
+type NameOf = 'name' | 'container' | 'volume'
+
+export function checkName(
+  v: string,
+  what: NameOf = 'name',
+  max = 63,
+  subdomain = false
+): string | null {
+  if (!v)
+    return what === 'container'
+      ? t('Container name is required')
+      : what === 'volume'
+        ? t('Volume name is required')
+        : t('Name is required')
+  if (v.length > max)
+    return what === 'container'
+      ? tn(
+          max,
+          'Container name must be at most {n} character',
+          'Container name must be at most {n} characters'
+        )
+      : what === 'volume'
+        ? tn(
+            max,
+            'Volume name must be at most {n} character',
+            'Volume name must be at most {n} characters'
+          )
+        : tn(max, 'Name must be at most {n} character', 'Name must be at most {n} characters')
   if (!(subdomain ? DNS1123_SUBDOMAIN : DNS1123_LABEL).test(v))
-    return `${what} may only contain lowercase letters, digits and “-”, and must start and end with a letter or digit`
+    return what === 'container'
+      ? t(
+          'Container name may only contain lowercase letters, digits and “-”, and must start and end with a letter or digit'
+        )
+      : what === 'volume'
+        ? t(
+            'Volume name may only contain lowercase letters, digits and “-”, and must start and end with a letter or digit'
+          )
+        : t(
+            'Name may only contain lowercase letters, digits and “-”, and must start and end with a letter or digit'
+          )
   return null
 }
 
 const isInt = (v: string, min: number, max = Number.MAX_SAFE_INTEGER): boolean =>
   /^\d+$/.test(v) && Number(v) >= min && Number(v) <= max
 
-function checkQuantity(errors: FieldErrors, path: string, v: string): void {
+function checkQuantity(errors: FieldErrors, v: string, path: string): void {
   if (v && !QUANTITY.test(v.trim()))
-    errors[path] = 'Use a Kubernetes quantity such as 250m, 1, 512Mi or 2Gi'
+    errors[path] = t('Use a Kubernetes quantity such as 250m, 1, 512Mi or 2Gi')
 }
 
 function checkKV(errors: FieldErrors, path: string, list: KV[], labels: boolean): void {
   const seen = new Set<string>()
   list.forEach((kv, i) => {
     if (!kv.key && !kv.value) return
-    if (!kv.key) errors[`${path}.${String(i)}.key`] = 'Key is required'
+    if (!kv.key) errors[`${path}.${String(i)}.key`] = t('Key is required')
     else if (labels && !LABEL_KEY.test(kv.key))
-      errors[`${path}.${String(i)}.key`] = 'Not a valid key'
-    else if (seen.has(kv.key)) errors[`${path}.${String(i)}.key`] = 'Duplicate key'
+      errors[`${path}.${String(i)}.key`] = t('Not a valid key')
+    else if (seen.has(kv.key)) errors[`${path}.${String(i)}.key`] = t('Duplicate key')
     if (labels && !LABEL_VALUE.test(kv.value))
-      errors[`${path}.${String(i)}.value`] = 'Up to 63 letters, digits, “-”, “_” or “.”'
+      errors[`${path}.${String(i)}.value`] = t('Up to 63 letters, digits, “-”, “_” or “.”')
     seen.add(kv.key)
   })
 }
@@ -296,63 +333,64 @@ function checkKV(errors: FieldErrors, path: string, list: KV[], labels: boolean)
 function checkProbe(errors: FieldErrors, path: string, p: ProbeForm): void {
   if (p.type === 'none') return
   if ((p.type === 'http' || p.type === 'tcp') && !p.port)
-    errors[`${path}.port`] = 'Port is required'
+    errors[`${path}.port`] = t('Port is required')
   if (p.type === 'http' && !p.path.startsWith('/'))
-    errors[`${path}.path`] = 'Path must start with /'
-  if (p.type === 'exec' && !p.command.trim()) errors[`${path}.command`] = 'Command is required'
+    errors[`${path}.path`] = t('Path must start with /')
+  if (p.type === 'exec' && !p.command.trim()) errors[`${path}.command`] = t('Command is required')
 }
 
 export function validateWorkload(f: WorkloadForm): FieldErrors {
   const e: FieldErrors = {}
-  const n = checkName(f.name, 'Name', f.kind === 'CronJob' ? 52 : 63)
+  const n = checkName(f.name, 'name', f.kind === 'CronJob' ? 52 : 63)
   if (n) e['name'] = n
-  if (!f.namespace) e['namespace'] = 'Pick a namespace'
+  if (!f.namespace) e['namespace'] = t('Pick a namespace')
   if ((f.kind === 'Deployment' || f.kind === 'StatefulSet') && !isInt(f.replicas, 0, 10_000))
-    e['replicas'] = 'A whole number from 0'
+    e['replicas'] = t('A whole number from 0')
   if (f.kind === 'CronJob' && !CRON.test(f.schedule.trim()))
-    e['schedule'] = 'Five fields: minute hour day month weekday (e.g. 0 2 * * *)'
+    e['schedule'] = t('Five fields: minute hour day month weekday (e.g. 0 2 * * *)')
   if ((f.kind === 'Job' || f.kind === 'CronJob') && f.backoffLimit && !isInt(f.backoffLimit, 0))
-    e['backoffLimit'] = 'A whole number'
+    e['backoffLimit'] = t('A whole number')
   checkKV(e, 'labels', f.labels, true)
   checkKV(e, 'nodeSelector', f.nodeSelector, true)
   const names = new Set<string>()
   f.containers.forEach((c, i) => {
     const p = `containers.${String(i)}`
-    const cn = checkName(c.name, 'Container name')
+    const cn = checkName(c.name, 'container')
     if (cn) e[`${p}.name`] = cn
-    else if (names.has(c.name)) e[`${p}.name`] = 'Container names must be unique'
+    else if (names.has(c.name)) e[`${p}.name`] = t('Container names must be unique')
     names.add(c.name)
-    if (!c.image.trim()) e[`${p}.image`] = 'Image is required'
-    else if (/\s/.test(c.image.trim())) e[`${p}.image`] = 'Image cannot contain spaces'
+    if (!c.image.trim()) e[`${p}.image`] = t('Image is required')
+    else if (/\s/.test(c.image.trim())) e[`${p}.image`] = t('Image cannot contain spaces')
     c.ports.forEach((port, j) => {
       if (!isInt(port.port, 1, 65_535)) e[`${p}.ports.${String(j)}.port`] = '1–65535'
     })
     c.env.forEach((env, j) => {
-      if (!env.name) e[`${p}.env.${String(j)}.name`] = 'Name is required'
+      if (!env.name) e[`${p}.env.${String(j)}.name`] = t('Name is required')
       else if (!ENV_NAME.test(env.name))
-        e[`${p}.env.${String(j)}.name`] = 'Letters, digits, “_”, “-” or “.”'
+        e[`${p}.env.${String(j)}.name`] = t('Letters, digits, “_”, “-” or “.”')
       if (env.source !== 'value' && (!env.ref || !env.key))
-        e[`${p}.env.${String(j)}.ref`] = 'Pick the source and key'
+        e[`${p}.env.${String(j)}.ref`] = t('Pick the source and key')
     })
-    checkQuantity(e, `${p}.cpuRequest`, c.cpuRequest)
-    checkQuantity(e, `${p}.memoryRequest`, c.memoryRequest)
-    checkQuantity(e, `${p}.cpuLimit`, c.cpuLimit)
-    checkQuantity(e, `${p}.memoryLimit`, c.memoryLimit)
+    checkQuantity(e, c.cpuRequest, `${p}.cpuRequest`)
+    checkQuantity(e, c.memoryRequest, `${p}.memoryRequest`)
+    checkQuantity(e, c.cpuLimit, `${p}.cpuLimit`)
+    checkQuantity(e, c.memoryLimit, `${p}.memoryLimit`)
     checkProbe(e, `${p}.readiness`, c.readiness)
     checkProbe(e, `${p}.liveness`, c.liveness)
     c.mounts.forEach((m, j) => {
       if (!f.volumes.some((v) => v.name === m.volume))
-        e[`${p}.mounts.${String(j)}.volume`] = 'Pick a volume'
-      if (!m.path.startsWith('/')) e[`${p}.mounts.${String(j)}.path`] = 'Absolute path, e.g. /data'
+        e[`${p}.mounts.${String(j)}.volume`] = t('Pick a volume')
+      if (!m.path.startsWith('/'))
+        e[`${p}.mounts.${String(j)}.path`] = t('Absolute path, e.g. /data')
     })
   })
   const vols = new Set<string>()
   f.volumes.forEach((v, i) => {
-    const vn = checkName(v.name, 'Volume name')
+    const vn = checkName(v.name, 'volume')
     if (vn) e[`volumes.${String(i)}.name`] = vn
-    else if (vols.has(v.name)) e[`volumes.${String(i)}.name`] = 'Duplicate volume name'
+    else if (vols.has(v.name)) e[`volumes.${String(i)}.name`] = t('Duplicate volume name')
     vols.add(v.name)
-    if (v.type !== 'emptydir' && !v.source) e[`volumes.${String(i)}.source`] = 'Pick the source'
+    if (v.type !== 'emptydir' && !v.source) e[`volumes.${String(i)}.source`] = t('Pick the source')
   })
   if (f.expose) checkServicePorts(e, 'service.ports', f.service.ports, f.service.type)
   return e
@@ -364,13 +402,13 @@ function checkServicePorts(
   ports: ServicePortForm[],
   type: ServiceType
 ): void {
-  if (!ports.length && type !== 'Headless') e[path] = 'Add at least one port'
+  if (!ports.length && type !== 'Headless') e[path] = t('Add at least one port')
   ports.forEach((p, i) => {
     if (!isInt(p.port, 1, 65_535)) e[`${path}.${String(i)}.port`] = '1–65535'
     if (p.nodePort && !isInt(p.nodePort, 30_000, 32_767))
       e[`${path}.${String(i)}.nodePort`] = '30000–32767'
     if (ports.length > 1 && !p.name)
-      e[`${path}.${String(i)}.name`] = 'Name each port when there are several'
+      e[`${path}.${String(i)}.name`] = t('Name each port when there are several')
   })
 }
 
@@ -378,7 +416,7 @@ export function validateService(f: ServiceForm): FieldErrors {
   const e: FieldErrors = {}
   const n = checkName(f.name)
   if (n) e['name'] = n
-  if (!f.namespace) e['namespace'] = 'Pick a namespace'
+  if (!f.namespace) e['namespace'] = t('Pick a namespace')
   checkKV(e, 'selector', f.selector, true)
   checkServicePorts(e, 'ports', f.ports, f.type)
   return e
@@ -386,69 +424,69 @@ export function validateService(f: ServiceForm): FieldErrors {
 
 export function validateIngress(f: IngressForm): FieldErrors {
   const e: FieldErrors = {}
-  const n = checkName(f.name, 'Name', 253, true)
+  const n = checkName(f.name, 'name', 253, true)
   if (n) e['name'] = n
-  if (!f.namespace) e['namespace'] = 'Pick a namespace'
-  if (!f.rules.length) e['rules'] = 'Add at least one rule'
+  if (!f.namespace) e['namespace'] = t('Pick a namespace')
+  if (!f.rules.length) e['rules'] = t('Add at least one rule')
   f.rules.forEach((r, i) => {
     if (
       r.host &&
       !/^(\*\.)?[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/.test(r.host)
     )
-      e[`rules.${String(i)}.host`] = 'Not a valid host name'
-    if (!r.path.startsWith('/')) e[`rules.${String(i)}.path`] = 'Path must start with /'
-    if (!r.service) e[`rules.${String(i)}.service`] = 'Pick a service'
-    if (!r.port) e[`rules.${String(i)}.port`] = 'Port is required'
+      e[`rules.${String(i)}.host`] = t('Not a valid host name')
+    if (!r.path.startsWith('/')) e[`rules.${String(i)}.path`] = t('Path must start with /')
+    if (!r.service) e[`rules.${String(i)}.service`] = t('Pick a service')
+    if (!r.port) e[`rules.${String(i)}.port`] = t('Port is required')
   })
   return e
 }
 
 export function validateConfigMap(f: ConfigMapForm): FieldErrors {
   const e: FieldErrors = {}
-  const n = checkName(f.name, 'Name', 253, true)
+  const n = checkName(f.name, 'name', 253, true)
   if (n) e['name'] = n
-  if (!f.namespace) e['namespace'] = 'Pick a namespace'
+  if (!f.namespace) e['namespace'] = t('Pick a namespace')
   checkKV(e, 'data', f.data, false)
   f.data.forEach((kv, i) => {
     if (kv.key && !/^[-._a-zA-Z0-9]+$/.test(kv.key))
-      e[`data.${String(i)}.key`] = 'Letters, digits, “-”, “_” or “.”'
+      e[`data.${String(i)}.key`] = t('Letters, digits, “-”, “_” or “.”')
   })
   return e
 }
 
 export function validateSecret(f: SecretForm): FieldErrors {
   const e: FieldErrors = {}
-  const n = checkName(f.name, 'Name', 253, true)
+  const n = checkName(f.name, 'name', 253, true)
   if (n) e['name'] = n
-  if (!f.namespace) e['namespace'] = 'Pick a namespace'
+  if (!f.namespace) e['namespace'] = t('Pick a namespace')
   if (f.type === 'Opaque') {
     checkKV(e, 'data', f.data, false)
     f.data.forEach((kv, i) => {
       if (kv.key && !/^[-._a-zA-Z0-9]+$/.test(kv.key))
-        e[`data.${String(i)}.key`] = 'Letters, digits, “-”, “_” or “.”'
+        e[`data.${String(i)}.key`] = t('Letters, digits, “-”, “_” or “.”')
     })
   }
   if (f.type === 'kubernetes.io/tls') {
-    if (!f.tlsCert.includes('BEGIN CERTIFICATE')) e['tlsCert'] = 'Paste a PEM certificate'
-    if (!/BEGIN (RSA |EC )?PRIVATE KEY/.test(f.tlsKey)) e['tlsKey'] = 'Paste a PEM private key'
+    if (!f.tlsCert.includes('BEGIN CERTIFICATE')) e['tlsCert'] = t('Paste a PEM certificate')
+    if (!/BEGIN (RSA |EC )?PRIVATE KEY/.test(f.tlsKey)) e['tlsKey'] = t('Paste a PEM private key')
   }
   if (f.type === 'kubernetes.io/dockerconfigjson') {
-    if (!f.registry.server) e['registry.server'] = 'Registry is required'
-    if (!f.registry.username) e['registry.username'] = 'Username is required'
-    if (!f.registry.password) e['registry.password'] = 'Password or token is required'
+    if (!f.registry.server) e['registry.server'] = t('Registry is required')
+    if (!f.registry.username) e['registry.username'] = t('Username is required')
+    if (!f.registry.password) e['registry.password'] = t('Password or token is required')
   }
   if (f.type === 'kubernetes.io/basic-auth' && !f.basic.username)
-    e['basic.username'] = 'Username is required'
+    e['basic.username'] = t('Username is required')
   return e
 }
 
 export function validatePvc(f: PvcForm): FieldErrors {
   const e: FieldErrors = {}
-  const n = checkName(f.name, 'Name', 253, true)
+  const n = checkName(f.name, 'name', 253, true)
   if (n) e['name'] = n
-  if (!f.namespace) e['namespace'] = 'Pick a namespace'
-  if (!f.size) e['size'] = 'Size is required'
-  else checkQuantity(e, 'size', f.size)
+  if (!f.namespace) e['namespace'] = t('Pick a namespace')
+  if (!f.size) e['size'] = t('Size is required')
+  else checkQuantity(e, f.size, 'size')
   return e
 }
 
@@ -456,15 +494,15 @@ export function validateHpa(f: HpaForm): FieldErrors {
   const e: FieldErrors = {}
   const n = checkName(f.name)
   if (n) e['name'] = n
-  if (!f.namespace) e['namespace'] = 'Pick a namespace'
-  if (!f.target) e['target'] = 'Pick the workload to scale'
-  if (!isInt(f.min, 1)) e['min'] = 'At least 1'
-  if (!isInt(f.max, 1)) e['max'] = 'At least 1'
+  if (!f.namespace) e['namespace'] = t('Pick a namespace')
+  if (!f.target) e['target'] = t('Pick the workload to scale')
+  if (!isInt(f.min, 1)) e['min'] = t('At least 1')
+  if (!isInt(f.max, 1)) e['max'] = t('At least 1')
   else if (isInt(f.min, 1) && Number(f.max) < Number(f.min))
-    e['max'] = 'Must be at least the minimum'
-  if (!f.cpu && !f.memory) e['cpu'] = 'Set a CPU or memory target'
-  if (f.cpu && !isInt(f.cpu, 1, 1000)) e['cpu'] = 'Percent, 1–1000'
-  if (f.memory && !isInt(f.memory, 1, 1000)) e['memory'] = 'Percent, 1–1000'
+    e['max'] = t('Must be at least the minimum')
+  if (!f.cpu && !f.memory) e['cpu'] = t('Set a CPU or memory target')
+  if (f.cpu && !isInt(f.cpu, 1, 1000)) e['cpu'] = t('Percent, 1–1000')
+  if (f.memory && !isInt(f.memory, 1, 1000)) e['memory'] = t('Percent, 1–1000')
   return e
 }
 

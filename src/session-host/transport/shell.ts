@@ -23,11 +23,17 @@ interface ShellContext {
 const STRIPPED_ENV =
   /^(ELECTRON_|VITE_|SHELLHOUSE_)|^(NODE_OPTIONS|NODE_ENV|CHROME_DESKTOP|GOOGLE_API_KEY)$/
 
-export function buildShellEnv(ctx: ShellContext): Record<string, string> {
+/** Môi trường của app sau khi bỏ biến riêng của app/Electron (và giá trị undefined). */
+export function appFreeEnv(source: NodeJS.ProcessEnv): Record<string, string> {
   const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(ctx.env)) {
+  for (const [key, value] of Object.entries(source)) {
     if (value !== undefined && !STRIPPED_ENV.test(key)) env[key] = value
   }
+  return env
+}
+
+export function buildShellEnv(ctx: ShellContext): Record<string, string> {
+  const env = appFreeEnv(ctx.env)
   env['TERM'] = 'xterm-256color'
   env['COLORTERM'] = 'truecolor'
   env['TERM_PROGRAM'] = 'Shellhouse'

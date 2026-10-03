@@ -1,12 +1,11 @@
 import { toast } from '../../stores/toasts'
 import { useMemo, useState } from 'react'
 import { X } from 'lucide-react'
+import { t, tn } from '@shared/i18n'
 import type { HostSummary } from '@shared/hosts'
 import { useHosts } from '../../stores/hosts'
 import { GroupSelect } from '../GroupSelect'
 import { Button, Field, Input, Modal, Notice } from '../ui'
-
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
 export function ConfirmDialog({
   title,
@@ -31,7 +30,7 @@ export function ConfirmDialog({
       testId="confirm-dialog"
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t('Cancel')}</Button>
           <Button
             autoFocus
             variant={danger ? 'danger' : 'primary'}
@@ -62,14 +61,22 @@ export function DeleteHostsDialog({
   const single = hosts.length === 1 ? hosts[0] : undefined
   return (
     <ConfirmDialog
-      title={single ? `Delete “${single.label}”?` : `Delete ${plural(hosts.length, 'host')}?`}
-      message="Saved passwords and port forwards of these hosts are deleted too. Open sessions keep running."
-      confirmLabel="Delete"
+      title={
+        single
+          ? t('Delete “{name}”?', { name: single.label })
+          : tn(hosts.length, 'Delete {n} host?', 'Delete {n} hosts?')
+      }
+      message={t(
+        'Saved passwords and port forwards of these hosts are deleted too. Open sessions keep running.'
+      )}
+      confirmLabel={t('Delete')}
       danger
       onConfirm={async () => {
         await window.shellhouse.deleteHosts(hosts.map((h) => h.id))
         toast.success(
-          single ? `Deleted ${single.label}` : `Deleted ${plural(hosts.length, 'host')}`
+          single
+            ? t('Deleted {name}', { name: single.label })
+            : tn(hosts.length, 'Deleted {n} host', 'Deleted {n} hosts')
         )
         onDone()
       }}
@@ -101,28 +108,28 @@ export function MoveHostsDialog({
     <Modal
       title={
         hosts.length === 1
-          ? `Move “${hosts[0]?.label ?? ''}”`
-          : `Move ${plural(hosts.length, 'host')}`
+          ? t('Move “{name}”', { name: hosts[0]?.label ?? '' })
+          : tn(hosts.length, 'Move {n} host', 'Move {n} hosts')
       }
       onClose={onClose}
       width="max-w-sm"
       testId="move-dialog"
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t('Cancel')}</Button>
           <Button variant="primary" data-testid="move-ok" onClick={() => void move()}>
-            Move
+            {t('Move')}
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="To group">
+        <Field label={t('To group')}>
           <GroupSelect
             testId="move-target"
             value={groupId}
             onChange={setGroupId}
-            noneLabel="No group"
+            noneLabel={t('No group')}
           />
         </Field>
         {error && <Notice tone="danger">{error}</Notice>}
@@ -144,7 +151,7 @@ export function TagHostsDialog({
   const allTags = useMemo(() => allHosts.flatMap((h) => h.tags), [allHosts])
   const current = useMemo(() => {
     const counts = new Map<string, number>()
-    for (const h of hosts) for (const t of h.tags) counts.set(t, (counts.get(t) ?? 0) + 1)
+    for (const h of hosts) for (const tag of h.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1)
     return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]))
   }, [hosts])
   const [text, setText] = useState('')
@@ -152,10 +159,10 @@ export function TagHostsDialog({
   const [error, setError] = useState<string | null>(null)
   const add = text
     .split(',')
-    .map((t) => t.trim())
+    .map((tag) => tag.trim())
     .filter(Boolean)
   const suggestions = [...new Set(allTags)]
-    .filter((t) => !current.some(([c]) => c === t))
+    .filter((tag) => !current.some(([c]) => c === tag))
     .slice(0, 8)
 
   const save = async (): Promise<void> => {
@@ -172,22 +179,22 @@ export function TagHostsDialog({
     <Modal
       title={
         hosts.length === 1
-          ? `Tags of “${hosts[0]?.label ?? ''}”`
-          : `Tags of ${plural(hosts.length, 'host')}`
+          ? t('Tags of “{name}”', { name: hosts[0]?.label ?? '' })
+          : tn(hosts.length, 'Tags of {n} host', 'Tags of {n} hosts')
       }
       onClose={onClose}
       width="max-w-md"
       testId="tags-dialog"
       footer={
         <>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t('Cancel')}</Button>
           <Button
             variant="primary"
             data-testid="tags-ok"
             disabled={add.length === 0 && remove.length === 0}
             onClick={() => void save()}
           >
-            Apply
+            {t('Apply')}
           </Button>
         </>
       }
@@ -195,7 +202,9 @@ export function TagHostsDialog({
       <div className="flex flex-col gap-3">
         {current.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-medium text-muted">Current tags — click to remove</p>
+            <p className="mb-1.5 text-xs font-medium text-muted">
+              {t('Current tags — click to remove')}
+            </p>
             <div className="flex flex-wrap gap-1.5">
               {current.map(([tag, n]) => {
                 const removing = remove.includes(tag)
@@ -210,7 +219,7 @@ export function TagHostsDialog({
                         : 'inline-flex items-center gap-1 rounded-full border border-line bg-subtle px-2 py-0.5 text-xs text-fg hover:border-line-strong'
                     }
                     onClick={() => {
-                      setRemove(removing ? remove.filter((t) => t !== tag) : [...remove, tag])
+                      setRemove(removing ? remove.filter((x) => x !== tag) : [...remove, tag])
                     }}
                   >
                     {tag}
@@ -222,11 +231,11 @@ export function TagHostsDialog({
             </div>
           </div>
         )}
-        <Field label="Add tags" hint="Comma separated">
+        <Field label={t('Add tags')} hint={t('Comma separated')}>
           <Input
             autoFocus
             data-testid="tags-add"
-            placeholder="e.g. prod, web"
+            placeholder={t('e.g. {example}', { example: 'prod, web' })}
             value={text}
             onChange={(e) => {
               setText(e.target.value)
@@ -238,17 +247,17 @@ export function TagHostsDialog({
         </Field>
         {suggestions.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs text-faint">
-            Used elsewhere:
-            {suggestions.map((t) => (
+            {t('Used elsewhere:')}
+            {suggestions.map((tag) => (
               <button
-                key={t}
+                key={tag}
                 type="button"
                 className="rounded-full border border-dashed border-line px-2 py-0.5 text-muted hover:border-line-strong hover:text-fg"
                 onClick={() => {
-                  setText(add.includes(t) ? text : [...add, t].join(', '))
+                  setText(add.includes(tag) ? text : [...add, tag].join(', '))
                 }}
               >
-                + {t}
+                + {tag}
               </button>
             ))}
           </div>

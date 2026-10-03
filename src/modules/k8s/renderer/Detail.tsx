@@ -13,6 +13,8 @@ import {
   type Tone
 } from '../../../renderer/src/components/panels'
 import { cleanError } from '../../../renderer/src/lib/format'
+import { formatDateTime, formatRelative, t, tn } from '../../registry/renderer-kit'
+import { tk } from './i18n'
 import type { K8sOp, RelatedGroup, RelatedItem, RelatedResult, Usage } from '../shared/ops'
 import {
   age,
@@ -29,6 +31,8 @@ import { HAS_PODS, keyLabel, toMenu, type K8sAction } from './actions'
 import { TOPOLOGY_KINDS, TopologyOf } from './Topology'
 import { TRAFFIC_KINDS, TrafficOf } from './TrafficTab'
 import { UsagePanel } from './Usage'
+import { ObjectEvents } from './Events'
+import type { EventBus } from './useResourceList'
 import {
   MetricsOf,
   POD_TEMPLATE_KINDS,
@@ -93,7 +97,8 @@ export function Detail({
   onNavigate,
   onShowPods,
   readOnly = false,
-  onNotify
+  onNotify,
+  bus
 }: {
   kindId: string
   obj: K8sObject
@@ -111,6 +116,8 @@ export function Detail({
   onShowPods?: () => void
   readOnly?: boolean
   onNotify?: (text: string, tone?: 'danger') => void
+  /** Sự kiện của phiên (watch) — tab Events cập nhật sống. */
+  bus?: EventBus
 }): React.JSX.Element {
   const ns = obj.metadata.namespace
   const hasPods = HAS_PODS.includes(kindId) || kindId === 'nodes'
@@ -145,13 +152,14 @@ export function Detail({
           </div>
           <div className="truncate text-xs text-faint">
             {obj.kind}
-            {ns ? ` · ${ns}` : ''} · {age(Date.parse(obj.metadata.creationTimestamp ?? ''))} old
+            {ns ? ` · ${ns}` : ''} ·{' '}
+            {t('{age} old', { age: age(Date.parse(obj.metadata.creationTimestamp ?? '')) })}
           </div>
         </div>
         <button
           type="button"
-          aria-label={wide ? 'Restore panel' : 'Expand to full width'}
-          title={wide ? 'Restore panel' : 'Expand to full width'}
+          aria-label={wide ? t('Restore panel') : t('Expand to full width')}
+          title={wide ? t('Restore panel') : t('Expand to full width')}
           className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
           data-testid="k8s-detail-wide"
           onClick={() => {
@@ -169,7 +177,7 @@ export function Detail({
         </button>
         <button
           type="button"
-          aria-label="More actions"
+          aria-label={t('More actions')}
           className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
           data-testid="k8s-detail-more"
           onClick={(e) => {
@@ -180,7 +188,7 @@ export function Detail({
         </button>
         <button
           type="button"
-          aria-label="Close"
+          aria-label={t('Close')}
           className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
           onClick={onClose}
         >
@@ -211,24 +219,24 @@ export function Detail({
         onChange={setTab}
         testIdPrefix="k8s-detail-tab"
         tabs={[
-          { id: 'overview', label: 'Overview' },
-          ...(hasTopology ? [{ id: 'topology' as const, label: 'Topology' }] : []),
-          ...(hasRelated ? [{ id: 'related' as const, label: 'Related' }] : []),
+          { id: 'overview', label: t('Overview') },
+          ...(hasTopology ? [{ id: 'topology' as const, label: t('Topology') }] : []),
+          ...(hasRelated ? [{ id: 'related' as const, label: t('Related') }] : []),
           ...(hasPods && !WORKLOAD_VIEW_KINDS.has(kindId)
-            ? [{ id: 'pods' as const, label: 'Pods' }]
+            ? [{ id: 'pods' as const, label: t('Pods') }]
             : []),
-          ...(hasMetrics ? [{ id: 'metrics' as const, label: 'Metrics' }] : []),
-          ...(TRAFFIC_KINDS.has(kindId) ? [{ id: 'traffic' as const, label: 'Traffic' }] : []),
+          ...(hasMetrics ? [{ id: 'metrics' as const, label: t('Metrics') }] : []),
+          ...(TRAFFIC_KINDS.has(kindId) ? [{ id: 'traffic' as const, label: t('Traffic') }] : []),
           ...(hasData
             ? [
                 {
                   id: 'data' as const,
-                  label: 'Data',
+                  label: t('Data'),
                   count: Object.keys(o(obj.data)).length || Object.keys(o(obj['data'])).length
                 }
               ]
             : []),
-          { id: 'events', label: 'Events' },
+          { id: 'events', label: t('Events') },
           { id: 'yaml', label: 'YAML' }
         ]}
       />
@@ -280,7 +288,7 @@ export function Detail({
           <PodsOf kindId={kindId} obj={obj} request={request} onOpenPod={onOpenPod} />
         )}
         {tab === 'data' && <DataOf kindId={kindId} obj={obj} request={request} />}
-        {tab === 'events' && <EventsOf obj={obj} request={request} />}
+        {tab === 'events' && (bus ? <ObjectEvents obj={obj} request={request} bus={bus} /> : null)}
         {tab === 'yaml' && <YamlOf kindId={kindId} obj={obj} request={request} />}
       </div>
       {menu}
@@ -313,7 +321,7 @@ function Conditions({ list }: { list: Obj[] }): React.JSX.Element | null {
   )
   if (bad.length === 0) return null
   return (
-    <Section title="Conditions">
+    <Section title={t('Conditions')}>
       <div className="flex flex-col gap-1 text-xs" data-testid="k8s-conditions">
         {bad.map((c) => (
           <div key={s(c['type'])} className="flex items-center gap-2" title={s(c['message'])}>
@@ -337,7 +345,7 @@ function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Ele
     ...a(spec['containers']).map((c) => ({ c, init: false }))
   ]
   return (
-    <Section title={`Containers ${String(list.length)}`}>
+    <Section title={t('Containers {n}', { n: list.length })}>
       <div className="flex flex-col divide-y divide-line">
         {list.map(({ c, init }) => {
           const st = statuses.find((x) => x['name'] === c['name'])
@@ -377,7 +385,7 @@ function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Ele
                 {!healthy && <span className={CONTAINER_TEXT[tone]}>{reason || stateName}</span>}
                 {restarts > 0 && (
                   <span className={restarts > 5 ? 'text-danger' : 'text-warning'}>
-                    {restarts} restart{restarts === 1 ? '' : 's'}
+                    {tn(restarts, '{n} restart', '{n} restarts')}
                   </span>
                 )}
               </div>
@@ -390,7 +398,7 @@ function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Ele
               <div className="mt-0.5 flex flex-wrap gap-x-4 pl-4 text-[11px] text-faint">
                 {ports.length > 0 && (
                   <span>
-                    Ports{' '}
+                    {t('Ports')}{' '}
                     <span className="text-fg">
                       {ports
                         .map(
@@ -408,16 +416,16 @@ function Containers({ spec, status }: { spec: Obj; status: Obj }): React.JSX.Ele
                 )}
                 {rq('memory') && (
                   <span>
-                    Memory <span className="text-fg tabular-nums">{rq('memory')}</span>
+                    {t('Memory')} <span className="text-fg tabular-nums">{rq('memory')}</span>
                   </span>
                 )}
               </div>
               {(command.length > 0 || mounts.length > 0 || env.length > 0) && (
                 <details className="mt-1 pl-4 text-[11px]">
                   <summary className="cursor-pointer text-faint hover:text-fg">
-                    Details
-                    {env.length > 0 ? ` · ${String(env.length)} env` : ''}
-                    {mounts.length > 0 ? ` · ${String(mounts.length)} mounts` : ''}
+                    {t('Details')}
+                    {env.length > 0 ? ` · ${t('{n} env', { n: env.length })}` : ''}
+                    {mounts.length > 0 ? ` · ${t('{n} mounts', { n: mounts.length })}` : ''}
                   </summary>
                   <div className="mt-1 flex flex-col gap-1.5 font-mono">
                     {command.length > 0 && (
@@ -486,14 +494,14 @@ function MetaHeader({ obj }: { obj: K8sObject }): React.JSX.Element | null {
     >
       {owners.length > 0 && (
         <p className="text-xs text-faint">
-          Owned by{' '}
+          {t('Owned by')}{' '}
           <span className="text-fg">{owners.map((x) => `${x.kind}/${x.name}`).join(', ')}</span>
         </p>
       )}
       {Object.keys(meta.labels ?? {}).length > 0 && (
         <details className="text-xs" data-testid="k8s-labels">
           <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-faint uppercase">
-            Labels ({Object.keys(meta.labels ?? {}).length})
+            {t('Labels ({n})', { n: Object.keys(meta.labels ?? {}).length })}
           </summary>
           <div className="mt-1.5">
             <LabelChips labels={meta.labels} />
@@ -503,7 +511,7 @@ function MetaHeader({ obj }: { obj: K8sObject }): React.JSX.Element | null {
       {annotations.length > 0 && (
         <details className="text-xs" data-testid="k8s-annotations">
           <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-faint uppercase">
-            Annotations ({annotations.length})
+            {t('Annotations ({n})', { n: annotations.length })}
           </summary>
           <div className="mt-1 flex flex-col gap-1 font-mono text-[11px]">
             {annotations.map(([k, v]) => (
@@ -580,7 +588,7 @@ function OverviewBody({
                 </span>
               )
             ) : (
-              <span className="text-warning">Not scheduled</span>
+              <span className="text-warning">{t('Not scheduled')}</span>
             )}
             {s(status['podIP']) && (
               <span className="text-muted">
@@ -589,7 +597,7 @@ function OverviewBody({
             )}
           </div>
           {obj.metadata.namespace && st.text === 'Running' && (
-            <Section title="Usage">
+            <Section title={t('Usage')}>
               <UsagePanel
                 request={request}
                 namespace={obj.metadata.namespace}
@@ -632,7 +640,7 @@ function OverviewBody({
       const template = o(o(spec['template'])['spec'])
       return (
         <>
-          <Section title="Replicas">
+          <Section title={t('Replicas')}>
             <Meter
               value={ready}
               max={Math.max(want, 1)}
@@ -644,24 +652,24 @@ function OverviewBody({
               className="mt-2"
               items={[
                 [
-                  'Desired',
+                  t('Desired'),
                   <span key="d" data-testid="k8s-replicas">
                     {want}
                   </span>
                 ],
                 status['updatedReplicas'] !== undefined && [
-                  'Up to date',
+                  t('Up to date'),
                   s(status['updatedReplicas'])
                 ],
                 status['availableReplicas'] !== undefined && [
-                  'Available',
+                  t('Available'),
                   s(status['availableReplicas'])
                 ],
-                spec['strategy'] !== undefined && ['Strategy', s(o(spec['strategy'])['type'])],
+                spec['strategy'] !== undefined && [t('Strategy'), s(o(spec['strategy'])['type'])],
                 spec['paused'] === true && [
-                  'Rollout',
+                  t('Rollout'),
                   <Pill key="p" tone="warn">
-                    paused
+                    {t('paused')}
                   </Pill>
                 ],
                 [
@@ -671,7 +679,7 @@ function OverviewBody({
                   </span>
                 ],
                 [
-                  'Images',
+                  t('Images'),
                   <span key="i" className="font-mono text-[11px]">
                     {a(template['containers'])
                       .map((c) => s(c['image']))
@@ -692,7 +700,7 @@ function OverviewBody({
       const mem = parseMemory(alloc['memory'])
       return (
         <>
-          <Section title="Resources">
+          <Section title={t('Resources')}>
             <div className="flex flex-col gap-2">
               {nodeUsage ? (
                 <>
@@ -705,7 +713,7 @@ function OverviewBody({
                   <Meter
                     value={nodeUsage.memory}
                     max={mem}
-                    label="Memory"
+                    label={t('Memory')}
                     detail={`${formatMemory(nodeUsage.memory)} / ${formatMemory(mem)}`}
                   />
                 </>
@@ -713,14 +721,14 @@ function OverviewBody({
                 <DefList
                   items={[
                     ['CPU', formatCpu(cpu)],
-                    ['Memory', formatMemory(mem)],
-                    ['Pods', s(alloc['pods'])]
+                    [t('Memory'), formatMemory(mem)],
+                    [t('Pods'), s(alloc['pods'])]
                   ]}
                 />
               )}
             </div>
           </Section>
-          <Section title="System">
+          <Section title={tk('System')}>
             <DefList
               items={[
                 // Chỉ dòng có giá trị — không hiện "OS ()" hay ô trống.
@@ -729,33 +737,33 @@ function OverviewBody({
                   'OS',
                   `${s(info['osImage'])}${s(info['architecture']) ? ` (${s(info['architecture'])})` : ''}`
                 ],
-                Boolean(s(info['kernelVersion'])) && ['Kernel', s(info['kernelVersion'])],
+                Boolean(s(info['kernelVersion'])) && [t('Kernel'), s(info['kernelVersion'])],
                 Boolean(s(info['containerRuntimeVersion'])) && [
                   'Runtime',
                   s(info['containerRuntimeVersion'])
                 ],
                 a(status['addresses']).length > 0 && [
-                  'Addresses',
+                  t('Addresses'),
                   a(status['addresses'])
                     .map((x) => s(x['address']))
                     .join(', ')
                 ],
                 spec['unschedulable'] === true && [
-                  'Scheduling',
+                  t('Scheduling'),
                   <Pill key="c" tone="warn">
-                    cordoned
+                    {t('cordoned')}
                   </Pill>
                 ]
               ]}
             />
           </Section>
           {a(spec['taints']).length > 0 && (
-            <Section title="Taints">
+            <Section title={t('Taints')}>
               <div className="flex flex-col gap-0.5 font-mono text-[11px] text-muted">
-                {a(spec['taints']).map((t) => (
-                  <span key={`${s(t['key'])}${s(t['effect'])}`}>
-                    {s(t['key'])}
-                    {t['value'] ? `=${s(t['value'])}` : ''}:{s(t['effect'])}
+                {a(spec['taints']).map((x) => (
+                  <span key={`${s(x['key'])}${s(x['effect'])}`}>
+                    {s(x['key'])}
+                    {x['value'] ? `=${s(x['value'])}` : ''}:{s(x['effect'])}
                   </span>
                 ))}
               </div>
@@ -771,7 +779,7 @@ function OverviewBody({
           <Section title="Service">
             <DefList
               items={[
-                ['Type', s(spec['type'])],
+                [t('Type'), s(spec['type'])],
                 [
                   'Cluster IP',
                   <span key="i" className="font-mono">
@@ -779,13 +787,13 @@ function OverviewBody({
                   </span>
                 ],
                 a(o(status['loadBalancer'])['ingress']).length > 0 && [
-                  'External',
+                  t('External'),
                   a(o(status['loadBalancer'])['ingress'])
                     .map((i) => s(i['ip']) || s(i['hostname']))
                     .join(', ')
                 ],
                 [
-                  'Ports',
+                  t('Ports'),
                   <span key="p" className="font-mono">
                     {a(spec['ports'])
                       .map(
@@ -809,7 +817,7 @@ function OverviewBody({
     case 'ingresses.networking.k8s.io':
       return (
         <>
-          <Section title="Rules">
+          <Section title={t('Rules')}>
             <div className="flex flex-col gap-1 font-mono text-[11px]">
               {a(spec['rules']).flatMap((r) =>
                 a(o(r['http'])['paths']).map((p) => {
@@ -830,8 +838,8 @@ function OverviewBody({
               <div className="font-mono text-[11px] text-muted">
                 {a(spec['tls'])
                   .map(
-                    (t) =>
-                      `${(t['hosts'] as string[] | undefined)?.join(', ') ?? ''} (${s(t['secretName'])})`
+                    (x) =>
+                      `${(x['hosts'] as string[] | undefined)?.join(', ') ?? ''} (${s(x['secretName'])})`
                   )
                   .join('; ')}
               </div>
@@ -842,35 +850,35 @@ function OverviewBody({
     case 'cronjobs.batch':
       return (
         <>
-          <Section title="Schedule">
+          <Section title={t('Schedule')}>
             <DefList
               items={[
                 [
-                  'Schedule',
+                  t('Schedule'),
                   <span key="s" className="font-mono">
                     {s(spec['schedule'])}
                   </span>
                 ],
                 spec['timeZone'] !== undefined
-                  ? (['Time zone', s(spec['timeZone'])] as const)
+                  ? ([t('Time zone'), s(spec['timeZone'])] as const)
                   : null,
                 [
-                  'Suspended',
+                  t('Suspended'),
                   spec['suspend'] === true ? (
                     <Pill key="p" tone="warn">
-                      yes
+                      {t('yes')}
                     </Pill>
                   ) : (
-                    'no'
+                    t('no')
                   )
                 ],
                 [
-                  'Last run',
+                  t('Last run'),
                   status['lastScheduleTime']
-                    ? `${age(Date.parse(s(status['lastScheduleTime'])))} ago`
-                    : 'never'
+                    ? formatRelative(Date.parse(s(status['lastScheduleTime'])))
+                    : t('never')
                 ],
-                ['Active jobs', String(a(status['active']).length)]
+                [t('Active jobs'), String(a(status['active']).length)]
               ]}
             />
           </Section>
@@ -882,16 +890,25 @@ function OverviewBody({
           <Section title="Job">
             <DefList
               items={[
-                ['Completions', `${s(status['succeeded'] ?? 0)} / ${s(spec['completions'] ?? 1)}`],
-                ['Failed', s(status['failed'] ?? 0)],
+                [
+                  tk('Completions'),
+                  [s(status['succeeded'] ?? 0), s(spec['completions'] ?? 1)].join(' / ')
+                ],
+                [t('Failed'), s(status['failed'] ?? 0)],
                 status['startTime'] !== undefined && [
-                  'Started',
-                  new Date(s(status['startTime'])).toLocaleString()
+                  t('Started'),
+                  formatDateTime(s(status['startTime']))
                 ],
                 status['completionTime'] !== undefined &&
                   status['startTime'] !== undefined && [
-                    'Duration',
-                    `${Math.round((Date.parse(s(status['completionTime'])) - Date.parse(s(status['startTime']))) / 1000)}s`
+                    t('Duration'),
+                    t('{n}s', {
+                      n: Math.round(
+                        (Date.parse(s(status['completionTime'])) -
+                          Date.parse(s(status['startTime']))) /
+                          1000
+                      )
+                    })
                   ]
               ]}
             />
@@ -905,15 +922,15 @@ function OverviewBody({
           <Section title="Claim">
             <DefList
               items={[
-                ['Status', s(status['phase'])],
+                [t('Status'), s(status['phase'])],
                 [
-                  'Capacity',
+                  t('Capacity'),
                   s(o(status['capacity'])['storage']) ||
                     s(o(o(spec['resources'])['requests'])['storage'])
                 ],
-                ['Access', ((spec['accessModes'] as string[] | undefined) ?? []).join(', ')],
-                ['Class', s(spec['storageClassName'])],
-                ['Volume', s(spec['volumeName'])]
+                [t('Access'), ((spec['accessModes'] as string[] | undefined) ?? []).join(', ')],
+                [t('Class'), s(spec['storageClassName'])],
+                [t('Volume'), s(spec['volumeName'])]
               ]}
             />
           </Section>
@@ -985,8 +1002,8 @@ function PodsOf({
     }
   }, [kindId, obj, request])
   if (error) return <p className="text-xs text-danger">{error}</p>
-  if (!pods) return <p className="text-xs text-faint">Loading…</p>
-  if (pods.length === 0) return <p className="text-xs text-faint">No pods.</p>
+  if (!pods) return <p className="text-xs text-faint">{t('Loading…')}</p>
+  if (pods.length === 0) return <p className="text-xs text-faint">{t('No pods.')}</p>
   return (
     <div className="flex flex-col divide-y divide-line text-xs" data-testid="k8s-detail-pods">
       {pods.map((p) => {
@@ -1023,7 +1040,7 @@ function DataOf({
   const data = o(obj.data ?? obj['data'])
   const binary = o(obj['binaryData'])
   const keys = [...Object.keys(data), ...Object.keys(binary)]
-  if (keys.length === 0) return <p className="text-xs text-faint">No data.</p>
+  if (keys.length === 0) return <p className="text-xs text-faint">{t('No data.')}</p>
   const reveal = (key: string): Promise<string> =>
     request<string>({
       op: 'secret.reveal',
@@ -1045,7 +1062,7 @@ function DataOf({
             for (const k of keys) void reveal(k)
           }}
         >
-          Reveal all
+          {t('Reveal all')}
         </button>
       )}
       {keys.map((key) => {
@@ -1061,13 +1078,13 @@ function DataOf({
                   data-testid="k8s-secret-reveal"
                   onClick={() => void reveal(key)}
                 >
-                  <Eye size={12} /> Reveal
+                  <Eye size={12} /> {t('Reveal')}
                 </button>
               )}
               {value !== undefined && (
                 <button
                   type="button"
-                  aria-label={`Copy ${key}`}
+                  aria-label={t('Copy {key}', { key })}
                   className="text-faint hover:text-fg"
                   onClick={() => void window.shellhouse.writeClipboard(value)}
                 >
@@ -1085,65 +1102,6 @@ function DataOf({
                 {value}
               </pre>
             )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function EventsOf({ obj, request }: { obj: K8sObject; request: Request }): React.JSX.Element {
-  const [events, setEvents] = useState<K8sObject[] | null>(null)
-  const ns = obj.metadata.namespace
-  useEffect(() => {
-    let cancelled = false
-    request<{ items: K8sObject[] }>({
-      op: 'list',
-      kind: 'events',
-      ...(ns ? { namespace: ns } : {}),
-      fieldSelector: `involvedObject.name=${obj.metadata.name}`,
-      limit: 100
-    }).then(
-      (r) => {
-        if (!cancelled)
-          setEvents(
-            r.items.sort((x, y) => s(o(y)['lastTimestamp']).localeCompare(s(o(x)['lastTimestamp'])))
-          )
-      },
-      () => {
-        if (!cancelled) setEvents([])
-      }
-    )
-    return () => {
-      cancelled = true
-    }
-  }, [request, ns, obj.metadata.name])
-  if (!events) return <p className="text-xs text-faint">Loading…</p>
-  if (events.length === 0) return <p className="text-xs text-faint">No recent events.</p>
-  return (
-    <div className="flex flex-col gap-2 text-xs" data-testid="k8s-events">
-      {events.map((e) => {
-        const warn = o(e)['type'] === 'Warning'
-        return (
-          <div key={e.metadata.name} className="flex gap-2">
-            <span
-              className={cx(
-                'mt-1 size-1.5 shrink-0 rounded-full',
-                warn ? 'bg-warning' : 'bg-line-strong'
-              )}
-            />
-            <div className="min-w-0">
-              <div>
-                <span className={warn ? 'font-medium text-warning' : 'font-medium text-muted'}>
-                  {s(o(e)['reason'])}
-                </span>
-                <span className="ml-2 text-faint">
-                  {o(e)['lastTimestamp'] ? `${age(Date.parse(s(o(e)['lastTimestamp'])))} ago` : ''}
-                  {Number(o(e)['count'] ?? 1) > 1 ? ` · ×${s(o(e)['count'])}` : ''}
-                </span>
-              </div>
-              <div className="text-fg">{s(o(e)['message'])}</div>
-            </div>
           </div>
         )
       })}
@@ -1170,8 +1128,8 @@ function YamlOf({
       name: obj.metadata.name,
       format: 'yaml'
     }).then(
-      (t) => {
-        if (!cancelled) setText(t)
+      (yaml) => {
+        if (!cancelled) setText(yaml)
       },
       (e: unknown) => {
         if (!cancelled) setText(`# ${cleanError(e)}`)
@@ -1187,7 +1145,7 @@ function YamlOf({
       className="overflow-auto font-mono text-[11px] leading-relaxed text-fg select-text"
       data-testid="k8s-detail-yaml"
     >
-      {text ?? 'Loading…'}
+      {text ?? t('Loading…')}
     </pre>
   )
 }
@@ -1234,19 +1192,22 @@ function RelatedOf({
     }
   }, [request, kindId, ns, name, tick])
   if (error) return <p className="text-xs text-danger">{error}</p>
-  if (!data) return <p className="text-xs text-faint">Finding related resources…</p>
+  if (!data) return <p className="text-xs text-faint">{t('Finding related resources…')}</p>
   const shown = data.groups.filter((g) => g.items.length > 0 || g.error || ALWAYS.has(g.id))
   const hidden = data.groups.filter((g) => !shown.includes(g))
   // "Used by" không phải danh từ → câu riêng ("No used by." sai ngữ pháp).
   const unused = hidden.some((g) => g.id === 'used-by')
-  const empty = hidden.filter((g) => g.id !== 'used-by').map((g) => g.title.toLowerCase())
+  const empty = hidden.filter((g) => g.id !== 'used-by').map((g) => t(g.title).toLowerCase())
   const missing = data.groups.flatMap((g) => g.items.filter((i) => i.missing))
   return (
     <div className="flex flex-col gap-4" data-testid="k8s-related">
       {missing.length > 0 && (
         <p className="rounded-md bg-danger-soft px-2 py-1.5 text-xs text-danger">
-          {missing.length} referenced resource{missing.length === 1 ? ' is' : 's are'} missing —
-          pods that need {missing.length === 1 ? 'it' : 'them'} will not start.
+          {tn(
+            missing.length,
+            '{n} referenced resource is missing — pods that need it will not start.',
+            '{n} referenced resources are missing — pods that need them will not start.'
+          )}
         </p>
       )}
       {shown.map((g) => (
@@ -1260,9 +1221,9 @@ function RelatedOf({
       <div className="flex items-center gap-2 text-xs text-faint">
         {(empty.length > 0 || unused) && (
           <span className="flex-1">
-            {unused && 'Not used by any workload.'}
+            {unused && t('Not used by any workload.')}
             {unused && empty.length > 0 && ' '}
-            {empty.length > 0 && `No ${empty.join(', ')}.`}
+            {empty.length > 0 && t('No {list}.', { list: empty.join(', ') })}
           </span>
         )}
         <button
@@ -1272,7 +1233,7 @@ function RelatedOf({
             setTick((n) => n + 1)
           }}
         >
-          <RefreshCw size={11} /> Refresh
+          <RefreshCw size={11} /> {t('Refresh')}
         </button>
       </div>
     </div>
@@ -1292,7 +1253,7 @@ function RelatedSection({
     <section data-testid="k8s-related-group" data-group={group.id}>
       <div className="mb-1 flex items-center gap-2">
         <Heading>
-          {group.title}
+          {t(group.title)}
           {group.items.length > 0 && (
             <span className="ml-1.5 font-normal text-faint tabular-nums">{group.items.length}</span>
           )}
@@ -1304,12 +1265,14 @@ function RelatedSection({
             data-testid="k8s-related-show-pods"
             onClick={onShowPods}
           >
-            <Rows3 size={12} /> Show in table
+            <Rows3 size={12} /> {t('Show in table')}
           </button>
         )}
       </div>
       {group.error && <p className="text-xs text-warning">{group.error}</p>}
-      {group.items.length === 0 && !group.error && <p className="text-xs text-faint">None</p>}
+      {group.items.length === 0 && !group.error && (
+        <p className="text-xs text-faint">{t('None')}</p>
+      )}
       <div className="flex flex-col">
         {group.items.map((item) => (
           <RelatedRow
@@ -1343,7 +1306,7 @@ function RelatedRow({
       >
         {item.name}
       </span>
-      {item.missing && <Pill tone="bad">missing</Pill>}
+      {item.missing && <Pill tone="bad">{t('missing')}</Pill>}
       <span className="ml-auto min-w-0 truncate text-right text-faint" title={item.summary}>
         {item.summary}
       </span>

@@ -4,6 +4,7 @@ import { isAbsolute, join, normalize } from 'node:path'
 // (bản CJS mà Electron nạp trả về namespace) → `SSHConfig.DIRECTIVE` sẽ là undefined.
 import { LineType, parse, type SSHConfig } from 'ssh-config'
 import { Hostname, Username, type ImportCandidate } from '@shared/hosts'
+import { t } from '@shared/i18n'
 
 const MAX_INCLUDE_DEPTH = 5
 
@@ -86,7 +87,9 @@ export function scanSshConfig(text: string, options: ScanOptions): ImportCandida
     config = parse(cleaned)
   } catch (error) {
     throw new Error(
-      `Could not read ~/.ssh/config: ${error instanceof Error ? error.message : String(error)}`,
+      t('Could not read ~/.ssh/config: {error}', {
+        error: error instanceof Error ? error.message : String(error)
+      }),
       {
         cause: error
       }
@@ -108,7 +111,7 @@ export function scanSshConfig(text: string, options: ScanOptions): ImportCandida
         keyFile: null,
         proxyJump: null,
         duplicate: false,
-        problem: 'Could not read this entry'
+        problem: t('Could not read this entry')
       }
     }
     const hostname = first(computed['hostname']) ?? alias
@@ -120,11 +123,14 @@ export function scanSshConfig(text: string, options: ScanOptions): ImportCandida
     const proxyJump = first(computed['proxyjump']) ?? null
 
     let problem: string | null = null
-    if (!Hostname.safeParse(hostname).success) problem = `Invalid hostname: ${hostname}`
+    if (!Hostname.safeParse(hostname).success)
+      problem = t('Invalid hostname: {value}', { value: hostname })
     else if (!Number.isInteger(port) || port < 1 || port > 65535)
-      problem = `Invalid port: ${portRaw ?? ''}`
-    else if (!Username.safeParse(username).success) problem = `Invalid username: ${username}`
-    else if (keyFile && !existsSync(keyFile)) problem = `IdentityFile not found: ${keyFile}`
+      problem = t('Invalid port: {value}', { value: portRaw ?? '' })
+    else if (!Username.safeParse(username).success)
+      problem = t('Invalid username: {value}', { value: username })
+    else if (keyFile && !existsSync(keyFile))
+      problem = t('IdentityFile not found: {path}', { path: keyFile })
 
     return {
       alias,

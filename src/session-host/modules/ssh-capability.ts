@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import type { Duplex } from 'node:stream'
 import type { Client, ClientChannel } from 'ssh2'
 import { shellQuote } from '../../node-shared/shell-quote'
@@ -31,7 +32,7 @@ function execChannel(client: Client, command: string, pty?: TerminalSize): Promi
 export function collect(
   program: RunningProgram,
   options: ExecOptions,
-  write?: (input: string) => void
+  write?: (input: string | Buffer) => void
 ): Promise<ExecResult> {
   const max = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT
   return new Promise((resolve, reject) => {
@@ -43,7 +44,11 @@ export function collect(
     const timer =
       options.timeoutMs !== undefined
         ? setTimeout(() => {
-            fail(new Error(`Timed out after ${Math.round((options.timeoutMs ?? 0) / 1000)} s`))
+            fail(
+              new Error(
+                t('Timed out after {n} s', { n: Math.round((options.timeoutMs ?? 0) / 1000) })
+              )
+            )
           }, options.timeoutMs)
         : null
     const onAbort = (): void => {
@@ -63,7 +68,7 @@ export function collect(
     }
     program.onStdout((chunk) => {
       outBytes += chunk.length
-      if (outBytes > max) fail(new Error('The command printed too much output'))
+      if (outBytes > max) fail(new Error(t('The command printed too much output')))
       else out.push(chunk)
     })
     program.onStderr((chunk) => {
@@ -106,7 +111,15 @@ function wrapChannel(stream: ClientChannel): RunningProgram {
       else exitListeners.push(l)
     },
     kill: () => {
-      if (!exited) stream.close()
+      if (exited) return
+      // Đóng kênh thôi thì lệnh không có PTY (`docker logs -f`, `kubectl get -w`…) vẫn chạy tiếp
+      // trên server tới lần ghi sau → gửi SIGTERM trước (OpenSSH ≥ 7.9 hỗ trợ; không thì bỏ qua).
+      try {
+        stream.signal('TERM')
+      } catch {
+        // Kênh vừa đóng.
+      }
+      stream.close()
     }
   }
 }
@@ -145,10 +158,12 @@ class PtyChannelTransport implements Transport {
 
   pause(): void {
     this.stream.pause()
+    this.stream.stderr.pause()
   }
 
   resume(): void {
     this.stream.resume()
+    this.stream.stderr.resume()
   }
 
   close(): void {
@@ -162,9 +177,15 @@ export function createSshCapability(client: Client, label: string): SshCapabilit
   const spawn = async (argv: readonly string[], signal?: AbortSignal): Promise<RunningProgram> => {
     const stream = await execChannel(client, shellQuote(argv))
     const program = wrapChannel(stream)
-    signal?.addEventListener('abort', () => {
-      program.kill()
-    })
+    if (signal?.aborted) program.kill()
+    else
+      signal?.addEventListener(
+        'abort',
+        () => {
+          program.kill()
+        },
+        { once: true }
+      )
     return program
   }
   return {

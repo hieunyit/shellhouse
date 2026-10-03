@@ -255,6 +255,25 @@ describe('HostService', () => {
     expect(service.tree().hosts.find((h) => h.id === app)?.jumpHostIds).toEqual([inner])
   })
 
+  it('jump host: đồ thị hình thoi lồng nhau dừng sớm khi quá 8 chặng (không bùng nổ)', async () => {
+    const { service } = await setup()
+    // Mỗi tầng có 2 host cùng trỏ vào cả 2 host của tầng dưới: đi hết sẽ là 2^tầng lượt.
+    let below: string[] = [service.saveHost({ ...base, label: 'root', hostname: 'root.example' })]
+    for (let level = 0; level < 14; level++) {
+      below = [0, 1].map((i) =>
+        service.saveHost({
+          ...base,
+          label: `l${String(level)}-${String(i)}`,
+          jumpHostIds: below.slice(0, 8)
+        })
+      )
+    }
+    const top = service.saveHost({ ...base, label: 'top', jumpHostIds: below })
+    const started = Date.now()
+    expect(() => service.resolveForConnect(top)).toThrow(/too long \(maximum 8\)/)
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
   it('jump host: chặn tự trỏ và vòng lặp', async () => {
     const { service } = await setup()
     const a = service.saveHost({ ...base, label: 'a' })

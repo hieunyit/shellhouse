@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Bug, Check, Copy, ExternalLink, RefreshCw } from 'lucide-react'
 import type { AppInfo } from '@shared/ipc'
+import { t } from '@shared/i18n'
 import { Logo } from '../Logo'
 import { Button } from '../ui'
 
@@ -19,13 +20,14 @@ export function AboutSection({
     void window.shellhouse.getInfo().then(setInfo)
   }, [])
 
-  const rows: [string, string][] = info
+  // [nhãn hiển thị, nhãn tiếng Anh khi sao chép (dán vào báo lỗi), giá trị]
+  const rows: [string, string, string][] = info
     ? [
-        ['Version', info.version],
-        ['Electron', info.electron],
-        ['Chromium', info.chrome],
-        ['Node.js', info.node],
-        ['Platform', `${info.platform} ${info.arch}`]
+        [t('Version'), 'Version', info.version],
+        ['Electron', 'Electron', info.electron],
+        ['Chromium', 'Chromium', info.chrome],
+        ['Node.js', 'Node.js', info.node],
+        [t('Platform'), 'Platform', `${info.platform} ${info.arch}`]
       ]
     : []
   const beta = info?.version.includes('-') ?? false
@@ -44,17 +46,17 @@ export function AboutSection({
             )}
           </h2>
           <p className="mt-0.5 text-[13px] text-muted">
-            SSH, SFTP, Telnet, serial and S3 — one secure workspace for your servers.
+            {t('SSH, SFTP, Telnet, serial and S3 — one secure workspace for your servers.')}
           </p>
           <p className="mt-1 font-mono text-xs text-faint" data-testid="about-version">
-            {info ? `Version ${info.version}` : ' '}
+            {info ? t('Version {version}', { version: info.version }) : ' '}
           </p>
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
         <Button icon={<RefreshCw size={13} />} onClick={onCheckUpdates}>
-          Check for updates
+          {t('Check for updates')}
         </Button>
         <a
           href={`${REPO}/releases`}
@@ -62,7 +64,7 @@ export function AboutSection({
           rel="noreferrer"
           className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium text-muted hover:bg-hover hover:text-fg"
         >
-          <ExternalLink size={13} /> Release notes
+          <ExternalLink size={13} /> {t('Release notes')}
         </a>
         <a
           href={`${REPO}/issues/new`}
@@ -70,13 +72,13 @@ export function AboutSection({
           rel="noreferrer"
           className="inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-medium text-muted hover:bg-hover hover:text-fg"
         >
-          <Bug size={13} /> Report a problem
+          <Bug size={13} /> {t('Report a problem')}
         </a>
       </div>
 
       <div className="rounded-lg border border-line">
         <dl className="divide-y divide-line text-[13px]">
-          {rows.map(([k, v]) => (
+          {rows.map(([k, , v]) => (
             <div key={k} className="flex items-center justify-between gap-4 px-3.5 py-2">
               <dt className="text-muted">{k}</dt>
               <dd className="font-mono text-xs text-fg">{v}</dd>
@@ -91,19 +93,19 @@ export function AboutSection({
             disabled={!info}
             onClick={() => {
               void window.shellhouse
-                .writeClipboard(rows.map(([k, v]) => `${k}: ${v}`).join('\n'))
+                .writeClipboard(rows.map(([, k, v]) => `${k}: ${v}`).join('\n'))
                 .then(() => {
                   setCopied(true)
                 })
             }}
           >
-            {copied ? 'Copied' : 'Copy details'}
+            {copied ? t('Copied') : t('Copy details')}
           </Button>
         </div>
       </div>
 
       <p className="text-xs text-faint">
-        Passwords and keys stay encrypted on this computer. Shellhouse sends no telemetry.
+        {t('Passwords and keys stay encrypted on this computer. Shellhouse sends no telemetry.')}
       </p>
     </div>
   )

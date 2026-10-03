@@ -8,6 +8,8 @@ export default defineConfig({
       'test/unit/**/*.test.ts',
       'test/integration/**/*.test.ts',
       'test/fuzz/**/*.test.ts',
+      // Logic thuần của renderer (typecheck theo tsconfig.web.json).
+      'test/renderer/**/*.test.ts',
       'src/modules/*/test/{unit,integration}/**/*.test.ts'
     ],
     environment: 'node',

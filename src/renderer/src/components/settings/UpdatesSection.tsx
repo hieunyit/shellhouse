@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { t } from '@shared/i18n'
+import { formatTime } from '@shared/i18n/format'
 import type { UpdateStatus } from '@shared/updates'
 import { useSettings } from '../../stores/settings'
 import { Button, Checkbox, Field, Notice, SectionTitle, Select } from '../ui'
@@ -8,19 +10,19 @@ function describe(s: UpdateStatus): string {
     case 'disabled':
       return s.reason
     case 'idle':
-      return 'Not checked yet.'
+      return t('Not checked yet.')
     case 'checking':
-      return 'Checking for updates…'
+      return t('Checking for updates…')
     case 'none':
-      return `You are up to date (checked at ${new Date(s.checkedAt).toLocaleTimeString()}).`
+      return t('You are up to date (checked at {time}).', { time: formatTime(s.checkedAt) })
     case 'available':
-      return `Version ${s.version} is available.`
+      return t('Version {version} is available.', { version: s.version })
     case 'downloading':
-      return `Downloading… ${s.percent}%`
+      return t('Downloading… {percent}%', { percent: s.percent })
     case 'ready':
-      return `Version ${s.version} is ready. Restart to install it.`
+      return t('Version {version} is ready. Restart to install it.', { version: s.version })
     case 'error':
-      return `Error: ${s.message}`
+      return t('Error: {message}', { message: s.message })
   }
 }
 
@@ -39,8 +41,10 @@ export function UpdatesSection(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-4" data-testid="settings-updates">
-      <SectionTitle description={`Current version: ${version}`}>Updates</SectionTitle>
-      <Field label="Channel">
+      <SectionTitle description={t('Current version: {version}', { version })}>
+        {t('Updates')}
+      </SectionTitle>
+      <Field label={t('Channel')}>
         <Select
           className="w-56"
           value={settings.updates.channel}
@@ -48,12 +52,12 @@ export function UpdatesSection(): React.JSX.Element {
             void update({ updates: { channel: e.target.value as 'stable' | 'beta' } })
           }
         >
-          <option value="stable">Stable</option>
-          <option value="beta">Beta (early access)</option>
+          <option value="stable">{t('Stable')}</option>
+          <option value="beta">{t('Beta (early access)')}</option>
         </Select>
       </Field>
       <Checkbox
-        label="Check for updates when the app starts"
+        label={t('Check for updates when the app starts')}
         checked={settings.updates.autoCheck}
         onChange={(e) => void update({ updates: { autoCheck: e.target.checked } })}
       />
@@ -65,16 +69,16 @@ export function UpdatesSection(): React.JSX.Element {
           disabled={status.state === 'disabled' || status.state === 'checking'}
           onClick={() => void window.shellhouse.checkForUpdates()}
         >
-          Check now
+          {t('Check now')}
         </Button>
         {status.state === 'available' && (
           <Button variant="primary" onClick={() => void window.shellhouse.downloadUpdate()}>
-            Download
+            {t('Download')}
           </Button>
         )}
         {status.state === 'ready' && (
           <Button variant="primary" onClick={() => void window.shellhouse.installUpdate()}>
-            Restart to update
+            {t('Restart to update')}
           </Button>
         )}
       </div>

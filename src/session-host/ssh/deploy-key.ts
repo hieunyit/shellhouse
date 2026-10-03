@@ -1,4 +1,5 @@
-import type { Client } from 'ssh2'
+import { t } from '@shared/i18n'
+import type { Client, ClientChannel } from 'ssh2'
 
 /**
  * Tương đương ssh-copy-id. Câu lệnh cố định; public key đi qua STDIN, không bao giờ ghép vào lệnh.
@@ -24,18 +25,28 @@ export function deployPublicKey(
   timeoutMs = 15_000
 ): Promise<DeployResult> {
   return new Promise((resolve) => {
+    let timedOut = false
+    let open: ClientChannel | null = null
     const timer = setTimeout(() => {
-      resolve({ status: 'error', message: 'The server did not respond' })
+      timedOut = true
+      resolve({ status: 'error', message: t('The server did not respond') })
+      // Không để kênh treo chiếm một trong MaxSessions của server.
+      open?.close()
     }, timeoutMs)
     client.exec(`sh -c '${DEPLOY_SCRIPT.replace(/'/g, `'\\''`)}'`, (error, stream) => {
       if (error) {
         clearTimeout(timer)
         resolve({
           status: 'error',
-          message: `Could not run a command on the server: ${error.message}`
+          message: t('Could not run a command on the server: {error}', { error: error.message })
         })
         return
       }
+      if (timedOut) {
+        stream.close()
+        return
+      }
+      open = stream
       let out = ''
       let err = ''
       stream.on('data', (d: Buffer) => (out += d.toString()))
@@ -47,7 +58,14 @@ export function deployPublicKey(
         else
           resolve({
             status: 'error',
-            message: `Adding the key failed (code ${String(code)})${err ? `: ${err.trim().slice(0, 300)}` : ' — does the server use a POSIX shell?'}`
+            message: err
+              ? t('Adding the key failed (code {code}): {error}', {
+                  code: String(code),
+                  error: err.trim().slice(0, 300)
+                })
+              : t('Adding the key failed (code {code}) — does the server use a POSIX shell?', {
+                  code: String(code)
+                })
           })
       })
       stream.end(`${publicKey}\n`)

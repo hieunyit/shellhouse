@@ -29,8 +29,19 @@ function subscribe<C extends EventChannel>(
   }
 }
 
+/** `--shellhouse-lang=vi` do main thêm vào argv (webPreferences.additionalArguments). */
+function argValue(name: string): string | undefined {
+  const prefix = `--${name}=`
+  return process.argv.find((a) => a.startsWith(prefix))?.slice(prefix.length)
+}
+const language = argValue('shellhouse-lang') === 'vi' ? 'vi' : 'en'
+const locale = argValue('shellhouse-locale')?.slice(0, 35) ?? 'en-US'
+
 // Chỉ phơi ra các hàm cụ thể — không bao giờ phơi ipcRenderer.
 const api: ShellhouseApi = {
+  language,
+  locale,
+  relaunch: () => invoke('app:relaunch'),
   getInfo: () => invoke('app:getInfo'),
   getSessionHostStatus: () => invoke('sessionHost:getStatus'),
   checkNativeModules: () => invoke('diagnostics:nativeModules'),
@@ -52,6 +63,7 @@ const api: ShellhouseApi = {
   tagHosts: (ids, add, remove) => invoke('hosts:tag', ids, add, remove),
   reorderHosts: (groupId, ids) => invoke('hosts:reorder', groupId, ids),
   duplicateHost: (id) => invoke('hosts:duplicate', id),
+  setHostPassword: (id, password) => invoke('hosts:setPassword', id, password),
   reorderGroups: (parentId, ids) => invoke('groups:reorder', parentId, ids),
   importKeyFromFile: () => invoke('keys:importFromFile'),
   deleteKey: (id) => invoke('keys:delete', id),
@@ -70,7 +82,8 @@ const api: ShellhouseApi = {
   deleteForward: (id) => invoke('forwards:delete', id),
   pickFilesToUpload: () => invoke('dialog:openFiles'),
   pickSaveLocation: (defaultName) => invoke('dialog:saveFile', defaultName),
-  pickProgram: () => invoke('dialog:pickProgram'),
+  chooseEditor: () => invoke('files:chooseEditor'),
+  resetEditor: () => invoke('files:resetEditor'),
   listLocal: (path) => invoke('local:list', path),
   trashLocal: (paths) => invoke('local:trash', paths),
   listSerialPorts: () => invoke('serial:list'),
@@ -109,7 +122,7 @@ const api: ShellhouseApi = {
   lockVault: () => invoke('vault:lock'),
   vaultSecurity: () => invoke('vault:security'),
   changeMasterPassword: (current, next) => invoke('vault:changePassword', current, next),
-  setRememberOnDevice: (enabled) => invoke('vault:setRemember', enabled),
+  setRememberOnDevice: (enabled, password) => invoke('vault:setRemember', enabled, password),
   exportBackup: () => invoke('vault:exportBackup'),
   restoreBackup: (password) => invoke('vault:restoreBackup', password),
   onVaultState: (listener) => subscribe('vault:state', listener),

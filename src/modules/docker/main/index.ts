@@ -4,6 +4,8 @@ import { DockerIpc, endpointId, type DockerEndpoint } from '../shared/ipc'
 import { DockerSessionConfig } from '../shared/ops'
 import m0001 from '../migrations/0001_endpoints.sql?raw'
 import m0002 from '../migrations/0002_hidden.sql?raw'
+import m0003 from '../migrations/0003_registries.sql?raw'
+import { DockerRegistries } from './registries'
 
 interface Row {
   id: string
@@ -17,7 +19,8 @@ export const dockerMain: MainModule = {
   manifest: dockerManifest,
   migrations: [
     { version: 1, name: 'endpoints', sql: m0001 },
-    { version: 2, name: 'hidden', sql: m0002 }
+    { version: 2, name: 'hidden', sql: m0002 },
+    { version: 3, name: 'registries', sql: m0003 }
   ],
   activate(ctx) {
     const now = (): number => Date.now()
@@ -71,7 +74,38 @@ export const dockerMain: MainModule = {
       changed()
     })
     ctx.ipc.handle('wslDistros', DockerIpc.wslDistros, () => ctx.wslDistros())
+    // Registry (mật khẩu / token trong vault): renderer chỉ thấy tên, máy chủ, tên đăng nhập.
+    const registries = new DockerRegistries(ctx.db, ctx.secrets)
+    ctx.ipc.handle('registries', DockerIpc.registries, () => registries.list())
+    ctx.ipc.handle('saveRegistry', DockerIpc.saveRegistry, (input) => {
+      try {
+        const id = registries.save(input)
+        changed()
+        return { ok: true, id }
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : String(error) }
+      }
+    })
+    ctx.ipc.handle('deleteRegistry', DockerIpc.deleteRegistry, (id) => {
+      registries.delete(id)
+      changed()
+    })
+    /** Cờ chỉ đọc đã lưu của một nguồn (null = máy này). */
+    const readOnlyOf = (hostId: string | null): boolean => {
+      const row = ctx.db
+        .prepare('SELECT read_only FROM docker_endpoints WHERE id = ?')
+        .get(endpointId(hostId)) as { read_only: number } | undefined
+      return row?.read_only === 1
+    }
     return {
+      // Session Host hỏi cờ chỉ đọc (thao tác thay đổi, shell / exec) — không tin cờ renderer gửi.
+      onHostRequest: (name, params): unknown => {
+        if (name === 'readOnly') return readOnlyOf(DockerIpc.readOnlyQuery.parse(params))
+        // Kéo / đẩy image riêng tư: mật khẩu giải mã ở đây, đi thẳng sang Session Host.
+        if (name === 'registryAuth')
+          return registries.resolve(DockerIpc.registryAuthQuery.parse(params))
+        throw new Error(`Unknown request: ${name}`)
+      },
       // Phiên trên máy này: không có gì cần giải mã — Session Host tự dò socket. Tab / terminal
       // của Docker trong WSL mang tên distro.
       resolveSession: (_kind, raw): DockerSessionConfig => {

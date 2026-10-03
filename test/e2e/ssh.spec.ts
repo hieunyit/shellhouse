@@ -76,6 +76,8 @@ test('host key bị đổi: cảnh báo đỏ, phải xác nhận 2 bước; hu�
   await page
     .locator(`[data-testid="tab"][data-tab-id="${first}"] [data-testid="tab-close"]`)
     .click()
+  // Tab SSH đang kết nối: đóng phải xác nhận.
+  await page.getByTestId('close-tab-confirm').getByTestId('confirm-ok').click()
   await expect(page.locator(`[data-testid="tab"][data-tab-id="${first}"]`)).toHaveCount(0)
 
   // Server khác (host key khác) trên cùng port — giống bị MITM hoặc cài lại server.

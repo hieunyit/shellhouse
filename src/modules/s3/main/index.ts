@@ -1,3 +1,4 @@
+import { language, locale, t } from '@shared/i18n'
 import type { MainModule } from '../../registry/main-types'
 import { s3Manifest } from '../manifest'
 import { S3BrowserParams, S3Ipc, type S3SessionConfig } from '../shared/ipc'
@@ -34,6 +35,25 @@ export const s3Main: MainModule = {
         return { ok: false, message: error instanceof Error ? error.message : String(error) }
       }
     })
+    ctx.ipc.handle('test', S3Ipc.test, async (input) => {
+      try {
+        const secretAccessKey =
+          input.secretAccessKey ||
+          (input.id ? accounts.resolve(input.id).secretAccessKey : undefined)
+        if (!secretAccessKey) return { ok: false, message: t('Enter the secret access key') }
+        // AWS SDK chỉ nạp khi thử kết nối (không làm chậm lúc mở app).
+        const { testConnection } = await import('../session-host/client')
+        return await testConnection({
+          endpoint: input.endpoint,
+          region: input.region,
+          accessKeyId: input.accessKeyId,
+          secretAccessKey,
+          forcePathStyle: input.forcePathStyle
+        })
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : String(error) }
+      }
+    })
     ctx.ipc.handle('delete', S3Ipc.delete, (id) => {
       accounts.delete(id)
       changed()
@@ -58,7 +78,9 @@ export const s3Main: MainModule = {
         const settings = S3Settings.parse(ctx.settings.get())
         return {
           connection: connection(params.accountId),
-          limits: { requests: settings.requests, transfers: settings.transfers }
+          limits: { requests: settings.requests, transfers: settings.transfers },
+          language: language(),
+          locale: locale()
         }
       },
       // Session Host xin kết nối của tài khoản khác (đích đồng bộ) — secret đi thẳng sang đó.

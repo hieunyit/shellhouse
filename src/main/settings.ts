@@ -1,4 +1,9 @@
-import { applyPatch, parseSettings, type AppSettings, type SettingsPatch } from '@shared/settings'
+import {
+  applyPatch,
+  parseSettings,
+  type AppSettings,
+  type MainSettingsPatch
+} from '@shared/settings'
 import type { Db } from './store/db'
 
 const KEY = 'app'
@@ -15,7 +20,8 @@ export class SettingsService {
     return this.cache
   }
 
-  update(patch: SettingsPatch): AppSettings {
+  /** Patch của renderer phải qua schema `SettingsPatch` trước (IPC router) — xem shared/settings. */
+  update(patch: MainSettingsPatch): AppSettings {
     const next = applyPatch(this.cache, patch)
     this.db
       .prepare(

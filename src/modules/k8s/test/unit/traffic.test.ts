@@ -4,6 +4,7 @@ import {
   BANDS,
   byPair,
   formatRate,
+  windowRates,
   mergeLinks,
   parseCaretta,
   trafficGraph,
@@ -124,5 +125,37 @@ describe('Caretta — parse, gộp, tốc độ, băng cố định', () => {
       }))
     )
     expect(ring.nodes).toHaveLength(30)
+  })
+
+  it('tốc độ trên cửa sổ: kết nối mới có số ngay, counter đặt lại không gây vọt / âm', () => {
+    const peer = (name: string) => ({ kind: 'Deployment', ns: 'a', name })
+    const link = (name: string, bytes: number) => ({
+      client: peer('c'),
+      server: peer(name),
+      port: '80',
+      bytes
+    })
+    const sample = (at: number, links: ReturnType<typeof link>[]): TrafficSample => ({
+      status: 'ok',
+      at,
+      agents: 1,
+      links
+    })
+    const rates = windowRates([
+      sample(0, [link('old', 0), link('reset', 50_000)]),
+      sample(10_000, [link('old', 10_240), link('reset', 1_000), link('new', 0)]),
+      sample(20_000, [link('old', 20_480), link('reset', 11_240), link('new', 5_120)])
+    ])
+    const by = new Map(rates.map((r) => [r.server.name, r.rate]))
+    // Cả cửa sổ: 20 KB / 20 s.
+    expect(by.get('old')).toBe(1024)
+    // Counter giảm ở mẫu 2 (agent khởi động lại): chỉ tính từ sau lần đặt lại.
+    expect(by.get('reset')).toBe(1024)
+    // Mới xuất hiện ở mẫu 2: có số ngay ở mẫu 3.
+    expect(by.get('new')).toBe(512)
+    expect(rates.every((r) => r.rate >= 0)).toBe(true)
+    // Một mẫu / hai mẫu quá sát nhau → chưa có tốc độ.
+    expect(windowRates([sample(0, [link('x', 1)])])).toEqual([])
+    expect(windowRates([sample(0, [link('x', 1)]), sample(500, [link('x', 9)])])).toEqual([])
   })
 })

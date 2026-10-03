@@ -1,5 +1,7 @@
 import { delimiter } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { z } from 'zod'
+import { t } from '@shared/i18n'
 import type { MainModule, MainModuleContext } from '../../registry/main-types'
 import { k8sManifest } from '../manifest'
 import {
@@ -18,7 +20,9 @@ import {
   listContexts,
   parseKubeconfig,
   resolveContext,
-  type KubeconfigDoc
+  setOidcTokens,
+  type KubeconfigDoc,
+  type ResolvedCluster
 } from './kubeconfig'
 
 interface SettingsRow {
@@ -36,6 +40,26 @@ const DEFAULTS: ContextSettings = {
   readOnly: false,
   color: null,
   hidden: false
+}
+
+/** Token OIDC vừa làm mới (Session Host → main, lưu vào kubeconfig / bản import). */
+const OidcPersist = z.object({
+  ref: ContextRef,
+  idToken: z
+    .string()
+    .min(1)
+    .max(64 * 1024),
+  refreshToken: z
+    .string()
+    .min(1)
+    .max(64 * 1024)
+    .optional()
+})
+
+/** "20261003-094512" — tên bản sao lưu không đè bản cũ. */
+function stamp(d = new Date()): string {
+  const p = (n: number): string => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
 }
 
 /** File trong ~/.kube không phải kubeconfig (khoá, cache…). */
@@ -138,7 +162,11 @@ class Kubeconfigs {
     for (const row of imported) {
       try {
         const doc = parseKubeconfig(this.open(row))
-        const contexts = listContexts(doc, `imported:${row.id}`, `Imported: ${row.name}`)
+        const contexts = listContexts(
+          doc,
+          `imported:${row.id}`,
+          t('Imported: {name}', { name: row.name })
+        )
         importedInfo.push({ id: row.id, name: row.name, contexts: contexts.length })
         infos.push(...contexts)
       } catch (error) {
@@ -182,7 +210,7 @@ class Kubeconfigs {
 
   importYaml(name: string, yaml: string): string {
     const doc = parseKubeconfig(yaml)
-    if (doc.contexts.length === 0) throw new Error('This kubeconfig has no contexts')
+    if (doc.contexts.length === 0) throw new Error(t('This kubeconfig has no contexts'))
     const id = randomUUID()
     const sealed = this.ctx.secrets.seal('k8s_kubeconfigs', id, 'yaml_enc', yaml)
     this.ctx.db
@@ -194,14 +222,14 @@ class Kubeconfigs {
   /** Chọn file kubeconfig, nhúng chứng chỉ tham chiếu, lưu vào vault. */
   async importFiles(): Promise<ImportResult> {
     const picked = await this.ctx.pickFiles({
-      title: 'Import kubeconfig files',
+      title: t('Import kubeconfig files'),
       multiple: true
     })
     const result: ImportResult = { imported: [], errors: [] }
     for (const file of picked) {
       try {
         const doc = parseKubeconfig(file.content)
-        if (doc.contexts.length === 0) throw new Error('no contexts — is this a kubeconfig?')
+        if (doc.contexts.length === 0) throw new Error(t('no contexts — is this a kubeconfig?'))
         const embedded = await embedReferences(file.content, (p) => file.readReferenced(p))
         const name = file.name.replace(/\.(ya?ml|conf|config)$/i, '') || file.name
         this.importYaml(name, embedded)
@@ -226,14 +254,14 @@ class Kubeconfigs {
   /**
    * Xoá một context: bản import → sửa bản trong vault (hết context thì xoá cả bản import); file
    * trong ~/.kube / KUBECONFIG → sửa file như `kubectl config delete-context`, giữ bản sao
-   * `<file>.bak` (nội dung trước khi xoá). Cài đặt riêng của context cũng bị xoá.
+   * `<file>.bak` (đã có → `<file>.<thời điểm>.bak`). Cài đặt riêng của context cũng bị xoá.
    */
   async deleteContext(ref: ContextRef): Promise<{ backup: string | null }> {
     let backup: string | null = null
     if (ref.source.startsWith('imported:')) {
       const id = ref.source.slice('imported:'.length)
       const row = this.imported().find((r) => r.id === id)
-      if (!row) throw new Error('This imported kubeconfig was removed')
+      if (!row) throw new Error(t('This imported kubeconfig was removed'))
       const { text, left } = deleteContextFromYaml(this.open(row), ref.context)
       if (left === 0) this.removeImported(id)
       else
@@ -243,39 +271,87 @@ class Kubeconfigs {
     } else if (ref.source.startsWith('file:')) {
       const path = this.expand(ref.source.slice('file:'.length))
       if (!(await this.files()).includes(path))
-        throw new Error('This kubeconfig is no longer in KUBECONFIG or ~/.kube')
+        throw new Error(t('This kubeconfig is no longer in KUBECONFIG or ~/.kube'))
       const original = await this.ctx.readFile(path)
       const { text } = deleteContextFromYaml(original, ref.context)
-      // Bản sao cạnh file (trong ~/.kube); file ở chỗ khác (KUBECONFIG) chỉ được ghi chính nó.
-      backup = await this.ctx.writeFile(`${path}.bak`, original).then(
-        () => `${path}.bak`,
+      // Bản sao cạnh file (trong ~/.kube): `<file>.bak`, đã có thì `<file>.<thời điểm>.bak` — không
+      // đè bản sao lần trước; file ở chỗ khác (KUBECONFIG) chỉ được ghi chính nó. ctx.writeFile ghi
+      // file tạm rồi đổi tên (không để lại file ghi dở).
+      const first = `${path}.bak`
+      const taken = await this.ctx.readFile(first).then(
+        () => true,
+        () => false
+      )
+      const bak = taken ? `${path}.${stamp()}.bak` : first
+      backup = await this.ctx.writeFile(bak, original).then(
+        () => bak,
         () => null
       )
       await this.ctx.writeFile(path, text)
-    } else throw new Error('Unknown kubeconfig source')
+    } else throw new Error(t('Unknown kubeconfig source'))
     this.ctx.db.prepare('DELETE FROM k8s_contexts WHERE key = ?').run(contextKey(ref))
     return { backup }
   }
 
-  /** Phân giải context cho Session Host (đọc file tham chiếu, giải mã bản import). */
-  async resolve(ref: ContextRef): Promise<unknown> {
+  /**
+   * Phân giải context cho Session Host (đọc file tham chiếu, giải mã bản import), kèm chế độ chỉ
+   * đọc lưu trong main — Session Host chặn theo đó, không tin renderer tự khai.
+   */
+  async resolve(ref: ContextRef): Promise<ResolvedCluster> {
+    const resolved = await this.resolveConfig(ref)
+    return { ...resolved, readOnly: this.settings().get(contextKey(ref))?.readOnly ?? false }
+  }
+
+  private writes = Promise.resolve()
+
+  /** Lưu token OIDC mới vào đúng user của context (file kubeconfig hoặc bản import trong vault). */
+  persistOidc(params: z.infer<typeof OidcPersist>): Promise<void> {
+    const { ref } = params
+    const tokens = {
+      idToken: params.idToken,
+      ...(params.refreshToken ? { refreshToken: params.refreshToken } : {})
+    }
+    // Nối tiếp: hai phiên cùng làm mới không ghi đè lẫn nhau giữa chừng.
+    const run = async (): Promise<void> => {
+      if (ref.source.startsWith('file:')) {
+        const path = this.expand(ref.source.slice('file:'.length))
+        if (!(await this.files()).includes(path)) return
+        const next = setOidcTokens(await this.ctx.readFile(path), ref.context, tokens)
+        if (next) await this.ctx.writeFile(path, next)
+      } else if (ref.source.startsWith('imported:')) {
+        const id = ref.source.slice('imported:'.length)
+        const row = this.imported().find((r) => r.id === id)
+        if (!row) return
+        const next = setOidcTokens(this.open(row), ref.context, tokens)
+        if (next)
+          this.ctx.db
+            .prepare('UPDATE k8s_kubeconfigs SET yaml_enc = ? WHERE id = ?')
+            .run(this.ctx.secrets.seal('k8s_kubeconfigs', id, 'yaml_enc', next), id)
+      }
+    }
+    const p = this.writes.then(run)
+    this.writes = p.catch(() => undefined)
+    return p
+  }
+
+  private async resolveConfig(ref: ContextRef): Promise<ResolvedCluster> {
     if (ref.source.startsWith('file:')) {
       const path = this.expand(ref.source.slice('file:'.length))
       if (!(await this.files()).includes(path))
-        throw new Error('This kubeconfig is no longer in KUBECONFIG or ~/.kube')
+        throw new Error(t('This kubeconfig is no longer in KUBECONFIG or ~/.kube'))
       const doc = await this.loadFile(path)
-      if (!doc) throw new Error(`${this.label(path)} was not found`)
+      if (!doc) throw new Error(t('{path} was not found', { path: this.label(path) }))
       return resolveContext(doc, ref, path, (p) => this.ctx.readFile(p))
     }
     if (ref.source.startsWith('imported:')) {
       const id = ref.source.slice('imported:'.length)
       const row = this.imported().find((r) => r.id === id)
-      if (!row) throw new Error('This imported kubeconfig was removed')
+      if (!row) throw new Error(t('This imported kubeconfig was removed'))
       return resolveContext(parseKubeconfig(this.open(row)), ref, null, () =>
-        Promise.reject(new Error('Imported kubeconfigs cannot reference files'))
+        Promise.reject(new Error(t('Imported kubeconfigs cannot reference files')))
       )
     }
-    throw new Error('Unknown kubeconfig source')
+    throw new Error(t('Unknown kubeconfig source'))
   }
 }
 
@@ -332,8 +408,15 @@ export const k8sMain: MainModule = {
       resolveSession: () => ({}),
       // Session Host xin thông tin kết nối của một context (có secret) — không qua renderer.
       onHostRequest: (name, params) => {
-        if (name !== 'resolve') throw new Error(`Unknown request ${name}`)
-        return configs.resolve(ContextRef.parse(params))
+        if (name === 'resolve') return configs.resolve(ContextRef.parse(params))
+        // Sửa YAML trong editor: chỉ file tạm do main cấp (files:prepareEdit), không phải đường
+        // dẫn bất kỳ renderer gửi qua thao tác `edit`.
+        if (name === 'editFile') {
+          const path = z.string().min(1).max(4096).parse(params)
+          return ctx.ownsEditFile?.(path) === true
+        }
+        if (name === 'persistOidc') return configs.persistOidc(OidcPersist.parse(params))
+        throw new Error(`Unknown request ${name}`)
       }
     }
   }

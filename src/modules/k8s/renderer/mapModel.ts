@@ -2,6 +2,7 @@
 import { type MapGrouping, workloadKindLabel, type MapNode, type MapTone } from '../shared/map'
 import type { K8sOp } from '../shared/ops'
 import { type TrafficPeer } from '../shared/traffic'
+import { t } from '../../registry/renderer-kit'
 
 export type Request = <T>(op: K8sOp) => Promise<T>
 
@@ -51,8 +52,10 @@ export interface Options {
   /** Nền tối riêng cho bản đồ (kể cả khi app dùng theme sáng). */
   darkCanvas: boolean
   grouping: MapGrouping
-  /** Bản đồ workload, theo node (hạ tầng), hay service map từ Caretta. */
-  view: 'workloads' | 'nodes' | 'traffic'
+  /** Topology tĩnh (mặc định), bản đồ workload, theo node (hạ tầng), hay service map từ Caretta. */
+  view: 'topology' | 'workloads' | 'nodes' | 'traffic'
+  /** Đã chuyển sang Topology làm mặc định (một lần — người dùng cũ cũng thấy Topology trước). */
+  topologyDefault?: boolean
 }
 
 export function loadOptions(): Options {
@@ -63,41 +66,86 @@ export function loadOptions(): Options {
     traffic: true,
     darkCanvas: false,
     grouping: 'purpose',
-    view: 'workloads'
+    view: 'topology',
+    topologyDefault: true
   }
   try {
     const raw = window.localStorage.getItem(OPTIONS_KEY)
-    if (raw) return { ...base, ...(JSON.parse(raw) as Partial<Options>) }
+    if (raw) {
+      const saved = JSON.parse(raw) as Partial<Options>
+      return {
+        ...base,
+        ...saved,
+        ...(saved.topologyDefault ? {} : { view: 'topology', topologyDefault: true })
+      }
+    }
   } catch {
     // Bỏ qua.
   }
   return base
 }
 
-export const KIND_TITLE: Record<MapNode['kind'], string> = {
-  region: 'Region',
-  namespace: 'Namespace',
-  workload: 'Workload',
-  pod: 'Pod',
-  service: 'Service',
-  route: 'Route',
-  gateway: 'Gateway',
-  pvc: 'Persistent volume claim',
-  policy: 'NetworkPolicy'
+/** Tên loại mục trên bản đồ (dịch lúc render). */
+export function kindTitle(kind: MapNode['kind']): string {
+  switch (kind) {
+    case 'region':
+      return t('Region')
+    case 'namespace':
+      return 'Namespace'
+    case 'workload':
+      return 'Workload'
+    case 'pod':
+      return 'Pod'
+    case 'service':
+      return 'Service'
+    case 'route':
+      return 'Route'
+    case 'gateway':
+      return 'Gateway'
+    case 'pvc':
+      return 'PersistentVolumeClaim'
+    case 'policy':
+      return 'NetworkPolicy'
+  }
 }
 
-/** Thứ tự chồng: vùng dưới cùng, thẻ trên cùng. */
+/** Tên vùng để hiện: vùng theo mục đích và "Other" / "System" được dịch; tên nhãn giữ nguyên. */
+export function regionTitle(label: string): string {
+  switch (label) {
+    case 'Applications':
+      return t('Applications')
+    case 'Ingress & networking':
+      return t('Ingress & networking')
+    case 'Platform':
+      return t('Platform')
+    case 'Monitoring':
+      return t('Monitoring')
+    case 'System':
+      return t('System')
+    case 'Other':
+      return t('Other')
+    default:
+      return label
+  }
+}
+
+/**
+ * Thứ tự chồng: vùng dưới cùng, rồi đảo namespace, rồi đường nối (z = EDGE_Z), thẻ trên cùng —
+ * đường nối luôn chạy sau thẻ, không đè chữ.
+ */
 export const Z: Record<MapNode['kind'], number> = {
   region: 0,
   namespace: 1,
-  gateway: 2,
-  route: 2,
-  service: 2,
-  pvc: 2,
-  policy: 2,
+  gateway: 3,
+  route: 3,
+  service: 3,
+  pvc: 3,
+  policy: 3,
   workload: 3,
   pod: 4
 }
+/** Lớp của đường nối: trên đảo namespace, dưới mọi thẻ. */
+export const EDGE_Z = 2
 
 export function routeTitle(kind: string): string {
   if (kind.startsWith('ingresses')) return 'Ingress'
@@ -111,10 +159,12 @@ export const titleOf = (n: MapNode): string =>
     ? routeTitle(n.ref?.kind ?? '')
     : n.kind === 'workload' && n.ref
       ? workloadKindLabel(n.ref.kind)
-      : KIND_TITLE[n.kind]
+      : kindTitle(n.kind)
 
 export const peerLabel = (p: TrafficPeer): string =>
-  p.kind === 'external' || !p.ns ? `${p.name} (${p.kind || 'external'})` : `${p.ns}/${p.name}`
+  p.kind === 'external' || !p.ns
+    ? `${p.name} (${p.kind && p.kind !== 'external' ? p.kind : t('external')})`
+    : `${p.ns}/${p.name}`
 
 /** Màu chấm trạng thái (Tailwind). */
 export const DOT: Record<MapTone, string> = {

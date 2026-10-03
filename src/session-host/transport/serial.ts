@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { SerialPort } from 'serialport'
 import type { SerialSettings } from '@shared/serial'
 import type { Transport, TransportCallbacks } from './types'
@@ -24,7 +25,9 @@ export class SerialTransport implements Transport {
       if (this.closed) return
       this.closed = true
       // Rút cáp USB-serial → 'close' kèm disconnected = true.
-      const reason = e?.disconnected ? 'The serial device was disconnected' : (error ?? e?.message)
+      const reason = e?.disconnected
+        ? t('The serial device was disconnected')
+        : (error ?? e?.message)
       callbacks.onExit({
         code: reason ? null : 0,
         signal: null,
@@ -82,11 +85,15 @@ export class SerialTransport implements Transport {
 /** Lỗi mở cổng thường gặp → câu dễ hiểu. */
 export function friendlyOpenError(path: string, message: string): string {
   if (/access denied|permission denied|EACCES/i.test(message))
-    return `Cannot open ${path}: permission denied. It may be in use by another program${
-      process.platform === 'linux' ? ', or your user is not in the "dialout" group' : ''
-    }.`
+    return process.platform === 'linux'
+      ? t(
+          'Cannot open {path}: permission denied. It may be in use by another program, or your user is not in the "dialout" group.',
+          { path }
+        )
+      : t('Cannot open {path}: permission denied. It may be in use by another program.', { path })
   if (/cannot find|no such file|ENOENT|file not found/i.test(message))
-    return `Serial port ${path} was not found. Check the cable and the port name.`
-  if (/busy|EBUSY/i.test(message)) return `Serial port ${path} is in use by another program.`
-  return `Cannot open ${path}: ${message}`
+    return t('Serial port {path} was not found. Check the cable and the port name.', { path })
+  if (/busy|EBUSY/i.test(message))
+    return t('Serial port {path} is in use by another program.', { path })
+  return t('Cannot open {path}: {error}', { path, error: message })
 }

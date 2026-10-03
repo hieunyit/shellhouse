@@ -37,7 +37,7 @@ test('workspace: lưu bố cục chia màn hình, đóng hết, mở lại đún
 
   // Xoá.
   await page.getByTestId('open-workspaces').click()
-  page.once('dialog', (d) => void d.accept())
   await dialog.getByTestId('workspace-delete').click()
+  await page.getByTestId('confirm-dialog').getByTestId('confirm-ok').click()
   await expect(dialog.getByTestId('workspace-row')).toHaveCount(0)
 })

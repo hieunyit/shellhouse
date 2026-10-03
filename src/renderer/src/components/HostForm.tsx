@@ -1,7 +1,8 @@
 import { toast } from '../stores/toasts'
 import { useMemo, useState, type SyntheticEvent } from 'react'
+import { t } from '@shared/i18n'
 import { inheritedDefaults } from '@shared/inherit'
-import { KeyRound, X, ChevronRight } from 'lucide-react'
+import { ArrowRight, KeyRound, X, ChevronRight } from 'lucide-react'
 import {
   ENCODINGS,
   HostInput,
@@ -16,8 +17,11 @@ type EncodingId = (typeof ENCODINGS)[number]['id']
 import { DEFAULT_SERIAL, type SerialSettings } from '@shared/serial'
 import { SerialFields } from './SerialFields'
 import { useHosts } from '../stores/hosts'
-import { ColorPicker } from './ColorPicker'
+import { ColorPicker, colorName } from './ColorPicker'
+import { PasswordInput } from './PasswordInput'
+import { TagInput } from './TagInput'
 import { GroupSelect } from './GroupSelect'
+import { DeleteHostsDialog } from './sidebar/dialogs'
 import {
   Button,
   Checkbox,
@@ -30,6 +34,30 @@ import {
   Segmented,
   Select
 } from './ui'
+
+/** Port gõ tay: trống = mặc định / kế thừa; có giá trị thì phải là số nguyên 1–65535. */
+export function portProblem(raw: string): string | null {
+  const text = raw.trim()
+  if (text === '') return null
+  if (!/^\d+$/.test(text)) return t('Port must be a number from 1 to 65535')
+  const n = Number(text)
+  return n >= 1 && n <= 65535 ? null : t('Port must be a number from 1 to 65535')
+}
+
+/** Lỗi ngay dưới ô nhập (role=alert: trình đọc màn hình đọc lên). */
+function FieldError({
+  children,
+  testId
+}: {
+  children: string
+  testId?: string
+}): React.JSX.Element {
+  return (
+    <span role="alert" className="text-xs text-danger" data-testid={testId}>
+      {children}
+    </span>
+  )
+}
 
 export function HostForm({
   host,
@@ -57,7 +85,7 @@ export function HostForm({
   const [keyId, setKeyId] = useState<string | null>(host?.keyId ?? keys[0]?.id ?? null)
   const [passphrase, setPassphrase] = useState('')
   const [groupId, setGroupId] = useState<string | null>(host?.groupId ?? defaultGroupId)
-  const [tags, setTags] = useState(host?.tags.join(', ') ?? '')
+  const [tags, setTags] = useState<string[]>(host?.tags ?? [])
   const [color, setColor] = useState<HostSummary['color']>(host?.color ?? null)
   const [jumpHostIds, setJumpHostIds] = useState<string[]>(host?.jumpHostIds ?? [])
   const [mode, setMode] = useState<HostMode>(host?.mode ?? 'builtin')
@@ -76,11 +104,23 @@ export function HostForm({
   )
   const groupTree = useHosts((s) => s.groupTree)
   const inherited = useMemo(() => inheritedDefaults(groupTree, groupId), [groupTree, groupId])
-  const from = (g: { groupName: string } | undefined): string => (g ? ` (from ${g.groupName})` : '')
+  const from = (g: { groupName: string } | undefined): string =>
+    g ? ` ${t('(from {group})', { group: g.groupName })}` : ''
   const [error, setError] = useState<string | null>(null)
+  /** Lỗi theo ô (hiện ngay dưới ô đó) — hostname / username trống khi bấm Save. */
+  const [fieldError, setFieldError] = useState<{
+    field: 'hostname' | 'username'
+    message: string
+  } | null>(null)
+  const portError = protocol === 'serial' ? null : portProblem(port)
+  /** Tag đã dùng ở các host khác — gợi ý cho ô Tags. */
+  const knownTags = useMemo(
+    () => [...new Set(hosts.flatMap((h) => h.tags))].sort((a, b) => a.localeCompare(b)),
+    [hosts]
+  )
   const [saving, setSaving] = useState(false)
 
-  const hostLabel = (id: string): string => hosts.find((h) => h.id === id)?.label ?? '(deleted)'
+  const hostLabel = (id: string): string => hosts.find((h) => h.id === id)?.label ?? t('(deleted)')
   const jumpChoices = hosts.filter((h) => h.id !== host?.id && !jumpHostIds.includes(h.id))
 
   const importKey = async (): Promise<void> => {
@@ -96,6 +136,12 @@ export function HostForm({
 
   const submit = async (event?: SyntheticEvent): Promise<void> => {
     event?.preventDefault()
+    setFieldError(null)
+    if (portError) return
+    if (protocol !== 'serial' && !hostname.trim()) {
+      setFieldError({ field: 'hostname', message: t('Enter a hostname or IP address') })
+      return
+    }
     // password/passphrase: undefined = keep the stored value (when editing without retyping).
     const keepPassword = host?.hasPassword && password === '' && !clearPassword
     if (!isSsh) {
@@ -116,24 +162,23 @@ export function HostForm({
         mode: 'builtin' as const,
         ...(protocol === 'serial' ? { serial } : {}),
         encoding: encoding === 'utf-8' ? null : encoding,
-        tags: tags
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean),
+        tags,
         color
       }
       const parsed = HostInput.safeParse(draft)
       if (!parsed.success) {
-        setError(parsed.error.issues[0]?.message ?? 'Invalid input')
+        setError(parsed.error.issues[0]?.message ?? t('Invalid input'))
         return
       }
-      setSaving(true)
-      const result = await window.shellhouse.saveHost(parsed.data)
-      setSaving(false)
+      const result = await save(parsed.data)
+      if (!result) return
       if (result.ok) {
-        toast.success(host ? `Saved ${parsed.data.label}` : `Added ${parsed.data.label}`, {
-          group: 'host-saved'
-        })
+        toast.success(
+          host
+            ? t('Saved {name}', { name: parsed.data.label })
+            : t('Added {name}', { name: parsed.data.label }),
+          { group: 'host-saved' }
+        )
         onClose()
       } else setError(result.message)
       return
@@ -157,65 +202,75 @@ export function HostForm({
       ...(legacy ? { legacyAlgorithms: true } : {}),
       ...(tmux && mode !== 'system' ? { tmux: true } : {}),
       encoding: encoding === 'utf-8' ? null : encoding,
-      tags: tags
-        .split(',')
-        .map((t) => t.trim())
-        .filter(Boolean),
+      tags,
       color
     }
     if (!draft.username && !inherited.username) {
-      setError('Enter a username')
+      setFieldError({ field: 'username', message: t('Enter a username') })
       return
     }
     const parsed = HostInput.safeParse(draft)
     if (!parsed.success) {
-      setError(parsed.error.issues[0]?.message ?? 'Invalid input')
+      setError(parsed.error.issues[0]?.message ?? t('Invalid input'))
       return
     }
-    setSaving(true)
-    const result = await window.shellhouse.saveHost(parsed.data)
-    setSaving(false)
+    const result = await save(parsed.data)
     setPassword('')
     setPassphrase('')
+    if (!result) return
     if (result.ok) {
-      toast.success(
-        host ? `Saved ${parsed.data.label || 'host'}` : `Added ${parsed.data.label || 'host'}`,
-        {
-          description: host ? undefined : 'Double-click it in the sidebar to connect.'
-        }
-      )
+      const name = parsed.data.label || t('host')
+      toast.success(host ? t('Saved {name}', { name }) : t('Added {name}', { name }), {
+        description: host ? undefined : t('Double-click it in the sidebar to connect.')
+      })
       onClose()
     } else setError(result.message)
   }
 
-  const remove = async (): Promise<void> => {
-    if (!host) return
-    await window.shellhouse.deleteHost(host.id)
-    toast.success(`Deleted ${host.label}`)
-    onClose()
+  /** Lưu host; IPC lỗi (reject) → báo lỗi, nút Save không bị kẹt ở trạng thái "đang lưu". */
+  const save = async (
+    data: HostInput
+  ): Promise<Awaited<ReturnType<typeof window.shellhouse.saveHost>> | null> => {
+    setSaving(true)
+    try {
+      return await window.shellhouse.saveHost(data)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      return null
+    } finally {
+      setSaving(false)
+    }
   }
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
     <Modal
-      title={host ? `Edit ${host.label}` : 'New host'}
+      title={host ? t('Edit {name}', { name: host.label }) : t('New host')}
       onClose={onClose}
       width="max-w-xl"
       testId="host-form"
       footer={
         <>
           {host && (
-            <Button variant="danger-ghost" className="mr-auto" onClick={() => void remove()}>
-              Delete host
+            <Button
+              variant="danger-ghost"
+              className="mr-auto"
+              data-testid="host-delete"
+              onClick={() => {
+                setConfirmDelete(true)
+              }}
+            >
+              {t('Delete host')}
             </Button>
           )}
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t('Cancel')}</Button>
           <Button
             variant="primary"
-            disabled={saving}
+            disabled={saving || portError !== null}
             data-testid="host-save"
             onClick={() => void submit()}
           >
-            Save
+            {t('Save')}
           </Button>
         </>
       }
@@ -231,37 +286,43 @@ export function HostForm({
           options={[
             { value: 'ssh', label: 'SSH' },
             { value: 'telnet', label: 'Telnet' },
-            { value: 'serial', label: 'Serial (COM)' }
+            { value: 'serial', label: t('Serial (COM)') }
           ]}
         />
         {protocol === 'telnet' && (
           <Notice tone="warning">
-            Telnet is not encrypted — passwords typed in the session travel in clear text. Use it
-            only for devices that have no SSH.
+            {t(
+              'Telnet is not encrypted — passwords typed in the session travel in clear text. Use it only for devices that have no SSH.'
+            )}
           </Notice>
         )}
         {protocol === 'serial' ? (
           <SerialFields value={serial} onChange={setSerial} />
         ) : (
           <div className="grid grid-cols-[1fr_6rem] gap-3">
-            <Field label="Hostname or IP">
+            <Field label={t('Hostname or IP')}>
               <Input
                 autoFocus
                 mono
                 spellCheck={false}
-                placeholder="server.example.com"
+                className="placeholder:font-sans"
+                placeholder={t('e.g. {example}', { example: 'server.example.com' })}
                 data-testid="host-hostname"
+                aria-invalid={fieldError?.field === 'hostname' || undefined}
                 value={hostname}
                 onChange={(e) => {
                   setHostname(e.target.value)
+                  if (fieldError?.field === 'hostname') setFieldError(null)
                 }}
               />
+              {fieldError?.field === 'hostname' && <FieldError>{fieldError.message}</FieldError>}
             </Field>
-            <Field label="Port">
+            <Field label={t('Port')}>
               <Input
                 mono
                 inputMode="numeric"
                 data-testid="host-port"
+                aria-invalid={portError !== null || undefined}
                 placeholder={
                   protocol === 'telnet'
                     ? '23'
@@ -269,43 +330,61 @@ export function HostForm({
                       ? String(inherited.port.value)
                       : '22'
                 }
-                title={inherited.port ? `From group ${inherited.port.groupName}` : undefined}
+                title={
+                  inherited.port
+                    ? t('From group {group}', { group: inherited.port.groupName })
+                    : undefined
+                }
                 value={port}
                 onChange={(e) => {
                   setPort(e.target.value)
                 }}
               />
             </Field>
+            {portError && (
+              <div className="col-span-2 -mt-1.5">
+                <FieldError testId="host-port-error">{portError}</FieldError>
+              </div>
+            )}
           </div>
         )}
         <div className={cx('grid gap-3', isSsh ? 'grid-cols-2' : 'grid-cols-1')}>
           {isSsh && (
             <Field
-              label="Username"
+              label={t('Username')}
               hint={
                 inherited.username && !username
-                  ? `Using “${inherited.username.value}”${from(inherited.username)}`
+                  ? t('Using “{value}”', { value: inherited.username.value }) +
+                    from(inherited.username)
                   : undefined
               }
             >
               <Input
                 mono
                 spellCheck={false}
-                placeholder={inherited.username ? inherited.username.value : 'root'}
+                className="placeholder:font-sans"
+                placeholder={
+                  inherited.username
+                    ? inherited.username.value
+                    : t('e.g. {example}', { example: 'root' })
+                }
                 data-testid="host-username"
+                aria-invalid={fieldError?.field === 'username' || undefined}
                 value={username}
                 onChange={(e) => {
                   setUsername(e.target.value)
+                  if (fieldError?.field === 'username') setFieldError(null)
                 }}
               />
+              {fieldError?.field === 'username' && <FieldError>{fieldError.message}</FieldError>}
             </Field>
           )}
-          <Field label="Label">
+          <Field label={t('Label')}>
             <Input
               placeholder={
                 protocol === 'serial'
-                  ? serial.path || 'Defaults to the port name'
-                  : hostname || 'Defaults to the hostname'
+                  ? serial.path || t('Defaults to the port name')
+                  : hostname || t('Defaults to the hostname')
               }
               data-testid="host-label"
               value={label}
@@ -319,34 +398,42 @@ export function HostForm({
         {isSsh && (
           <>
             <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
-              <span className="text-xs font-medium text-muted">Authentication</span>
+              <span className="text-xs font-medium text-muted">{t('Authentication')}</span>
               <Segmented
                 value={auth}
                 onChange={setAuth}
                 testIdPrefix="host-auth"
                 options={[
-                  { value: 'auto', label: 'Automatic' },
-                  { value: 'password', label: 'Password' },
-                  { value: 'key', label: 'SSH key' }
+                  { value: 'auto', label: t('Automatic') },
+                  { value: 'password', label: t('Password') },
+                  { value: 'key', label: t('SSH key') }
                 ]}
               />
               {auth === 'auto' && (
                 <p className="text-xs text-faint">
                   {inherited.keyId
-                    ? `Tries the group key “${keys.find((k) => k.id === inherited.keyId?.value)?.name ?? '?'}”${from(inherited.keyId)}, your SSH agent and default keys, then asks for a password.`
-                    : 'Tries your SSH agent and default keys (~/.ssh/id_*), then asks for a password.'}
+                    ? t(
+                        'Tries the group key “{key}”{from}, your SSH agent and default keys, then asks for a password.',
+                        {
+                          key: keys.find((k) => k.id === inherited.keyId?.value)?.name ?? '?',
+                          from: from(inherited.keyId)
+                        }
+                      )
+                    : t(
+                        'Tries your SSH agent and default keys (~/.ssh/id_*), then asks for a password.'
+                      )}
                 </p>
               )}
               {auth === 'password' && (
                 <div className="flex flex-col gap-2">
-                  <Input
-                    type="password"
-                    autoComplete="off"
+                  <PasswordInput
                     data-testid="host-password"
+                    aria-label={t('Password')}
+                    disabled={clearPassword}
                     placeholder={
                       host?.hasPassword
-                        ? 'Saved — leave empty to keep it'
-                        : 'Password (stored encrypted)'
+                        ? t('Saved — leave empty to keep it')
+                        : t('Password (stored encrypted)')
                     }
                     value={password}
                     onChange={(e) => {
@@ -355,7 +442,7 @@ export function HostForm({
                   />
                   {host?.hasPassword && (
                     <Checkbox
-                      label="Forget the saved password (ask every time)"
+                      label={t('Forget the saved password (ask every time)')}
                       checked={clearPassword}
                       onChange={(e) => {
                         setClearPassword(e.target.checked)
@@ -374,23 +461,24 @@ export function HostForm({
                         setKeyId(e.target.value || null)
                       }}
                     >
-                      {keys.length === 0 && <option value="">No keys in the vault yet</option>}
+                      {keys.length === 0 && (
+                        <option value="">{t('No keys in the vault yet')}</option>
+                      )}
                       {keys.map((k) => (
                         <option key={k.id} value={k.id}>
                           {k.name} ({k.type}
-                          {k.encrypted ? ', passphrase' : ''})
+                          {k.encrypted ? `, ${t('passphrase')}` : ''})
                         </option>
                       ))}
                     </Select>
                     <Button icon={<KeyRound size={14} />} onClick={() => void importKey()}>
-                      Import…
+                      {t('Import…')}
                     </Button>
                   </div>
                   {keys.find((k) => k.id === keyId)?.encrypted && (
-                    <Input
-                      type="password"
-                      autoComplete="off"
-                      placeholder="Passphrase (leave empty to be asked when connecting)"
+                    <PasswordInput
+                      aria-label={t('Passphrase')}
+                      placeholder={t('Passphrase (leave empty to be asked when connecting)')}
                       value={passphrase}
                       onChange={(e) => {
                         setPassphrase(e.target.value)
@@ -402,41 +490,54 @@ export function HostForm({
             </div>
 
             <div className="flex flex-col gap-2 rounded-lg border border-line p-3">
-              <span className="text-xs font-medium text-muted">Jump hosts (ProxyJump)</span>
+              <span className="text-xs font-medium text-muted">{t('Jump hosts (ProxyJump)')}</span>
               {jumpHostIds.length > 0 ? (
-                <ol className="flex flex-col gap-1" data-testid="jump-list">
+                // Chuỗi chip theo thứ tự đi qua: bastion → gw → (host này).
+                <ol
+                  className="flex flex-wrap items-center gap-1"
+                  data-testid="jump-list"
+                  aria-label={t('Connection path')}
+                >
                   {jumpHostIds.map((id, i) => (
-                    <li
-                      key={id}
-                      className="flex items-center gap-2 rounded-md bg-subtle px-2 py-1 text-[13px]"
-                    >
-                      <span className="text-xs text-faint">{i + 1}</span>
-                      <span className="flex-1">{hostLabel(id)}</span>
-                      <IconButton
-                        label={`Remove ${hostLabel(id)}`}
-                        size="sm"
-                        onClick={() => {
-                          setJumpHostIds(jumpHostIds.filter((j) => j !== id))
-                        }}
+                    <li key={id} className="flex items-center gap-1">
+                      {i > 0 && <ArrowRight size={12} className="text-faint" aria-hidden />}
+                      <span
+                        className="inline-flex h-6 items-center gap-1 rounded-full border border-line bg-subtle pr-0.5 pl-2.5 text-xs text-fg"
+                        data-testid="jump-chip"
                       >
-                        <X size={13} />
-                      </IconButton>
+                        {hostLabel(id)}
+                        <IconButton
+                          label={t('Remove {name}', { name: hostLabel(id) })}
+                          size="sm"
+                          className="size-5 rounded-full"
+                          onClick={() => {
+                            setJumpHostIds(jumpHostIds.filter((j) => j !== id))
+                          }}
+                        >
+                          <X size={11} />
+                        </IconButton>
+                      </span>
                     </li>
                   ))}
-                  <li className="px-2 text-xs text-faint">→ {label || hostname || 'this host'}</li>
+                  <li className="flex items-center gap-1 text-xs text-faint">
+                    <ArrowRight size={12} aria-hidden />
+                    <span className="max-w-48 truncate">{label || hostname || t('this host')}</span>
+                  </li>
                 </ol>
               ) : host?.proxyJump ? (
                 <p className="text-xs text-faint">
-                  Using ProxyJump from ~/.ssh/config: {host.proxyJump}
+                  {t('Using ProxyJump from ~/.ssh/config: {value}', { value: host.proxyJump })}
                 </p>
               ) : inherited.jumpHostIds ? (
                 <div className="flex flex-col gap-1.5" data-testid="jump-inherited">
                   <p className={cx('text-xs', direct ? 'text-faint line-through' : 'text-muted')}>
-                    Through {inherited.jumpHostIds.value.map(hostLabel).join(' → ')}
+                    {t('Through {hosts}', {
+                      hosts: inherited.jumpHostIds.value.map(hostLabel).join(' → ')
+                    })}
                     {from(inherited.jumpHostIds)}
                   </p>
                   <Checkbox
-                    label="Connect directly (ignore the group's jump hosts)"
+                    label={t("Connect directly (ignore the group's jump hosts)")}
                     data-testid="host-direct"
                     checked={direct}
                     onChange={(e) => {
@@ -445,7 +546,7 @@ export function HostForm({
                   />
                 </div>
               ) : (
-                <p className="text-xs text-faint">Direct connection.</p>
+                <p className="text-xs text-faint">{t('Direct connection.')}</p>
               )}
               {jumpHostIds.length < MAX_JUMPS && jumpChoices.length > 0 && (
                 <Select
@@ -455,7 +556,7 @@ export function HostForm({
                     if (e.target.value) setJumpHostIds([...jumpHostIds, e.target.value])
                   }}
                 >
-                  <option value="">Add a jump host…</option>
+                  <option value="">{t('Add a jump host…')}</option>
                   {jumpChoices.map((h) => (
                     <option key={h.id} value={h.id}>
                       {h.label} ({h.hostname})
@@ -468,38 +569,42 @@ export function HostForm({
         )}
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Group">
+          <Field label={t('Group')}>
             <GroupSelect
               testId="host-group"
               value={groupId}
               onChange={setGroupId}
-              noneLabel="No group"
+              noneLabel={t('No group')}
             />
           </Field>
-          <Field label="Tags" hint="Comma separated">
-            <Input
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted">{t('Tags')}</span>
+            <TagInput
               value={tags}
-              placeholder="prod, web"
-              onChange={(e) => {
-                setTags(e.target.value)
-              }}
+              onChange={setTags}
+              suggestions={knownTags}
+              placeholder={t('e.g. {example}', { example: 'prod, web' })}
+              testId="host-tags"
             />
-          </Field>
+            <span className="text-xs text-faint">{t('Enter or comma to add')}</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-muted">Color</span>
+          <span className="text-xs font-medium text-muted">{t('Color')}</span>
           <ColorPicker
             value={color}
             onChange={setColor}
             noneLabel={
-              inherited.color ? `Use the group color (${inherited.color.value})` : 'No color'
+              inherited.color
+                ? t('Use the group color ({color})', { color: colorName(inherited.color.value) })
+                : t('No color')
             }
             testIdPrefix="host-color"
           />
           {!color && inherited.color && (
             <span className="text-xs text-muted">
-              Using {inherited.color.value}
+              {t('Using {value}', { value: colorName(inherited.color.value) })}
               {from(inherited.color)}
             </span>
           )}
@@ -521,26 +626,28 @@ export function HostForm({
                 size={14}
                 className="text-faint transition-transform group-open:rotate-90"
               />
-              Advanced
-              <span className="text-xs font-normal text-faint">
+              {t('Advanced')}
+              <span className="min-w-0 truncate text-xs font-normal text-faint">
                 {legacy || tmux || mode === 'system' || encoding !== 'utf-8'
                   ? [
                       isSsh && tmux && mode !== 'system' && 'tmux',
                       encoding !== 'utf-8' && encoding,
-                      isSsh && legacy && 'legacy algorithms',
-                      isSsh && mode === 'system' && 'system ssh'
+                      isSsh && legacy && t('legacy algorithms'),
+                      isSsh && mode === 'system' && t('system ssh')
                     ]
                       .filter(Boolean)
                       .join(' · ')
                   : isSsh
-                    ? 'tmux, character encoding, legacy algorithms, system ssh'
-                    : 'Character encoding'}
+                    ? t('tmux, character encoding, legacy algorithms, system ssh')
+                    : t('Character encoding')}
               </span>
             </summary>
             <div className="flex flex-col gap-3 border-t border-line px-3 py-3">
               <Field
-                label="Character encoding"
-                hint="For old devices whose output looks garbled. Applies to what the server prints; text you type is sent as UTF-8."
+                label={t('Character encoding')}
+                hint={t(
+                  'For old devices whose output looks garbled. Applies to what the server prints; text you type is sent as UTF-8.'
+                )}
               >
                 <Select
                   value={encoding}
@@ -565,8 +672,10 @@ export function HostForm({
                     onChange={(e) => {
                       setTmux(e.target.checked)
                     }}
-                    label="Keep sessions alive with tmux"
-                    description="If the server has tmux, each tab runs inside its own tmux session (shellhouse-1, -2…). When Wi-Fi drops or the laptop sleeps, reconnecting brings you back to the same prompt with your programs still running. Type exit to end it."
+                    label={t('Keep sessions alive with tmux')}
+                    description={t(
+                      'If the server has tmux, each tab runs inside its own tmux session (shellhouse-1, -2…). When Wi-Fi drops or the laptop sleeps, reconnecting brings you back to the same prompt with your programs still running. Type exit to end it.'
+                    )}
                   />
                   <Checkbox
                     data-testid="host-legacy"
@@ -574,8 +683,10 @@ export function HostForm({
                     onChange={(e) => {
                       setLegacy(e.target.checked)
                     }}
-                    label="Allow legacy algorithms"
-                    description="For old switches, routers and servers that only offer ssh-rsa (SHA-1), SHA-1 key exchange or CBC ciphers. Weaker security — enable only for devices that need it."
+                    label={t('Allow legacy algorithms')}
+                    description={t(
+                      'For old switches, routers and servers that only offer ssh-rsa (SHA-1), SHA-1 key exchange or CBC ciphers. Weaker security — enable only for devices that need it.'
+                    )}
                   />
                   <Checkbox
                     data-testid="host-mode-system"
@@ -583,8 +694,10 @@ export function HostForm({
                     onChange={(e) => {
                       setMode(e.target.checked ? 'system' : 'builtin')
                     }}
-                    label="Compatibility mode: use the system ssh command"
-                    description="For GSSAPI/Kerberos, FIDO hardware keys or complex ssh_config setups. OpenSSH asks for passwords and host keys in the terminal. SFTP, port forwarding and passwords/keys stored in the vault are not available."
+                    label={t('Compatibility mode: use the system ssh command')}
+                    description={t(
+                      'For GSSAPI/Kerberos, FIDO hardware keys or complex ssh_config setups. OpenSSH asks for passwords and host keys in the terminal. SFTP, port forwarding and passwords/keys stored in the vault are not available.'
+                    )}
                   />
                 </>
               )}
@@ -593,7 +706,9 @@ export function HostForm({
         }
 
         {host?.keyFile && (
-          <p className="text-xs text-faint">IdentityFile from ~/.ssh/config: {host.keyFile}</p>
+          <p className="text-xs text-faint">
+            {t('IdentityFile from ~/.ssh/config: {value}', { value: host.keyFile })}
+          </p>
         )}
         {error && (
           <Notice tone="danger" testId="host-error">
@@ -602,6 +717,15 @@ export function HostForm({
         )}
         <button type="submit" hidden />
       </form>
+      {confirmDelete && host && (
+        <DeleteHostsDialog
+          hosts={[host]}
+          onDone={onClose}
+          onClose={() => {
+            setConfirmDelete(false)
+          }}
+        />
+      )}
     </Modal>
   )
 }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FolderOpen } from 'lucide-react'
 import type { ImportCandidate } from '@shared/hosts'
+import { t, tn } from '@shared/i18n'
+import { formatNumber } from '@shared/i18n/format'
 import { Button, Modal, Notice, Segmented } from './ui'
 
 type Source = 'ssh-config' | 'mobaxterm' | 'csv'
@@ -15,11 +17,19 @@ interface Scan {
   secretColumns?: string[]
 }
 
-const DESCRIPTION: Record<Source, string> = {
-  'ssh-config': 'Wildcard patterns are skipped. Nothing in the file is executed.',
-  mobaxterm:
-    'SSH sessions and their folders are imported. Saved passwords are never read from MobaXterm.',
-  csv: 'Termius or spreadsheet export. Columns are matched by name; passwords are never imported.'
+function description(source: Source): string {
+  switch (source) {
+    case 'ssh-config':
+      return t('Wildcard patterns are skipped. Nothing in the file is executed.')
+    case 'mobaxterm':
+      return t(
+        'SSH sessions and their folders are imported. Saved passwords are never read from MobaXterm.'
+      )
+    case 'csv':
+      return t(
+        'Termius or spreadsheet export. Columns are matched by name; passwords are never imported.'
+      )
+  }
 }
 
 function cleanError(e: unknown): string {
@@ -92,8 +102,8 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
             ? await window.shellhouse.importCsv(aliases)
             : await window.shellhouse.importMobaXterm(aliases)
       setResult(
-        `Imported ${imported} host${imported === 1 ? '' : 's'}.` +
-          (skipped.length ? ` Skipped: ${skipped.join(', ')}.` : '')
+        tn(imported, 'Imported {n} host.', 'Imported {n} hosts.') +
+          (skipped.length ? ' ' + t('Skipped: {names}.', { names: skipped.join(', ') }) : '')
       )
     } catch (e) {
       setError(cleanError(e))
@@ -104,26 +114,26 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
   const ignored = Object.entries(scan?.ignored ?? {})
   const footer = result ? (
     <Button variant="primary" onClick={onClose}>
-      Done
+      {t('Done')}
     </Button>
   ) : (
     <>
-      <Button onClick={onClose}>Cancel</Button>
+      <Button onClick={onClose}>{t('Cancel')}</Button>
       <Button
         variant="primary"
         disabled={!candidates?.length || selected.size === 0}
         data-testid="import-run"
         onClick={() => void run()}
       >
-        Import {selected.size} host{selected.size === 1 ? '' : 's'}
+        {tn(selected.size, 'Import {n} host', 'Import {n} hosts')}
       </Button>
     </>
   )
 
   return (
     <Modal
-      title="Import hosts"
-      description={DESCRIPTION[source]}
+      title={t('Import hosts')}
+      description={description(source)}
       onClose={onClose}
       width="max-w-2xl"
       testId="import-dialog"
@@ -161,13 +171,13 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                   load(source, true)
                 }}
               >
-                Choose file…
+                {t('Choose file…')}
               </Button>
             </>
           )}
         </div>
       )}
-      {scan === null && <p className="text-sm text-muted">Reading…</p>}
+      {scan === null && <p className="text-sm text-muted">{t('Reading…')}</p>}
       {error && (
         <Notice tone="danger" testId="import-error">
           {error}
@@ -176,23 +186,30 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
       {!error && !result && candidates?.length === 0 && (
         <p className="text-sm text-muted" data-testid="import-empty">
           {source === 'ssh-config'
-            ? 'No hosts found in ~/.ssh/config.'
+            ? t('No hosts found in ~/.ssh/config.')
             : scan?.file
-              ? 'No SSH sessions found in this file.'
+              ? t('No SSH sessions found in this file.')
               : source === 'csv'
-                ? 'Choose a CSV file. In Termius: export your hosts as CSV. A header row with Hostname (or Host / IP) is required; Label, Port, Username, Group and Tags are used when present.'
-                : 'MobaXterm.ini was not found in the usual place. Choose the file — portable MobaXterm keeps it next to MobaXterm.exe.'}
+                ? t(
+                    'Choose a CSV file. In Termius: export your hosts as CSV. A header row with Hostname (or Host / IP) is required; Label, Port, Username, Group and Tags are used when present.'
+                  )
+                : t(
+                    'MobaXterm.ini was not found in the usual place. Choose the file — portable MobaXterm keeps it next to MobaXterm.exe.'
+                  )}
         </p>
       )}
       {!result && ignored.length > 0 && (
         <p className="text-xs text-faint" data-testid="import-ignored">
-          Not imported (not SSH): {ignored.map(([kind, n]) => `${n} ${kind}`).join(', ')}.
+          {t('Not imported (not SSH): {list}.', {
+            list: ignored.map(([kind, n]) => `${formatNumber(n)} ${kind}`).join(', ')
+          })}
         </p>
       )}
       {!result && (scan?.secretColumns?.length ?? 0) > 0 && (
         <p className="text-xs text-faint" data-testid="import-secrets-skipped">
-          Ignored columns with secrets: {scan?.secretColumns?.join(', ')}. Add passwords or keys
-          after importing.
+          {t('Ignored columns with secrets: {columns}. Add passwords or keys after importing.', {
+            columns: scan?.secretColumns?.join(', ') ?? ''
+          })}
         </p>
       )}
       {candidates && candidates.length > 0 && !result && (
@@ -201,9 +218,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
             <thead className="sticky top-0 bg-subtle text-xs text-muted">
               <tr>
                 <th className="w-9 px-3 py-2" />
-                <th className="px-3 py-2 font-medium">Host</th>
-                <th className="px-3 py-2 font-medium">Target</th>
-                <th className="px-3 py-2 font-medium">Notes</th>
+                <th className="px-3 py-2 font-medium">{t('Host')}</th>
+                <th className="px-3 py-2 font-medium">{t('Target')}</th>
+                <th className="px-3 py-2 font-medium">{t('Notes')}</th>
               </tr>
             </thead>
             <tbody>
@@ -237,10 +254,12 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                   <td className="px-3 py-2 text-xs">
                     {c.problem && <span className="text-danger">{c.problem}</span>}
                     {!c.problem && c.duplicate && (
-                      <span className="text-warning">A host with this name already exists</span>
+                      <span className="text-warning">
+                        {t('A host with this name already exists')}
+                      </span>
                     )}
                     {!c.problem && c.proxyJump && (
-                      <span className="text-faint">via {c.proxyJump}</span>
+                      <span className="text-faint">{t('via {host}', { host: c.proxyJump })}</span>
                     )}
                   </td>
                 </tr>

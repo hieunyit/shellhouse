@@ -286,7 +286,7 @@ describe('SSH: xác thực', () => {
     })
     expect(h.prompts.map((p) => p.kind)).toEqual(['passphrase', 'passphrase'])
     await h.waitFor('welcome')
-  })
+  }, 30_000) // sinh khoá có passphrase + hai lượt bắt tay: chậm khi máy bận
 
   it('2FA: publickey rồi keyboard-interactive (OTP)', async () => {
     const key = generateTestKey()

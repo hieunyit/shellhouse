@@ -1,5 +1,6 @@
 import type { Readable } from 'node:stream'
 import {
+  AbortMultipartUploadCommand,
   CreateBucketCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
@@ -7,10 +8,12 @@ import {
   type S3Client
 } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
+import { t } from '@shared/i18n'
+import { formatNumber } from '@shared/i18n/format'
 import type { S3Op, S3SyncProgress } from '../shared/ops'
 import { normalizePrefix, planSync, syncOverlap, type SyncObject } from '../shared/sync'
 import { mapLimit } from '../../../node-shared/pool'
-import { errorText, isNotFound, scanObjects, serverCopy } from './client'
+import { createBucketInput, errorText, isNotFound, scanObjects, serverCopy } from './client'
 
 /** Mỗi bên tối đa chừng này object (map key → size/etag ~100 byte/object trong bộ nhớ). */
 export const MAX_SYNC_OBJECTS = 1_000_000
@@ -45,6 +48,8 @@ export class SyncJob {
     private readonly env: {
       source: S3Client
       dest: S3Client
+      /** Region của tài khoản đích (tạo bucket đích ngoài us-east-1). */
+      destRegion: string
       /** Cùng tài khoản: CopyObject trên server. */
       serverSide: boolean
       concurrency: number
@@ -105,7 +110,7 @@ export class SyncJob {
           { bucket: this.op.dest.bucket, prefix: this.destPrefix }
         )
       )
-        throw new Error('The source and destination overlap — pick a different folder or bucket')
+        throw new Error(t('The source and destination overlap — pick a different folder or bucket'))
       const destExists = await this.ensureDestBucket()
       const [source, dest] = await Promise.all([
         this.scan(this.env.source, this.op.bucket, this.sourcePrefix, 'source'),
@@ -123,6 +128,15 @@ export class SyncJob {
         if (it.action !== 'delete') p.plan.bytes += it.size
       }
       p.plan.same = same
+      // Kế hoạch lúc chạy thật xoá nhiều hơn bản đã xem trước (nguồn vừa bị xoá bớt / đổi chỗ…) →
+      // dừng hẳn, không chép cũng không xoá gì.
+      if (!this.op.dryRun && this.op.maxDelete !== undefined && p.plan.delete > this.op.maxDelete)
+        throw new Error(
+          t(
+            'The sync would now delete {n} objects, more than the {max} in the preview — preview again',
+            { n: formatNumber(p.plan.delete), max: formatNumber(this.op.maxDelete) }
+          )
+        )
       p.sample = items.slice(0, SAMPLE).map((it) => ({
         key: it.rel,
         action: it.action,
@@ -173,11 +187,16 @@ export class SyncJob {
     } catch (error) {
       if (!isNotFound(error)) throw error
       if (!this.op.createBucket)
-        throw new Error(`The destination bucket “${this.op.dest.bucket}” does not exist`, {
-          cause: error
-        })
+        throw new Error(
+          t('The destination bucket “{name}” does not exist', { name: this.op.dest.bucket }),
+          {
+            cause: error
+          }
+        )
       if (this.op.dryRun) return false
-      await this.env.dest.send(new CreateBucketCommand({ Bucket: this.op.dest.bucket }))
+      await this.env.dest.send(
+        new CreateBucketCommand(createBucketInput(this.op.dest.bucket, this.env.destRegion))
+      )
       return true
     }
   }
@@ -209,7 +228,9 @@ export class SyncJob {
           if (out.size > MAX_SYNC_OBJECTS)
             abort.abort(
               new Error(
-                `More than ${MAX_SYNC_OBJECTS.toLocaleString('en')} objects on one side — sync a smaller folder`
+                t('More than {n} objects on one side — sync a smaller folder', {
+                  n: formatNumber(MAX_SYNC_OBJECTS)
+                })
               )
             )
         },
@@ -227,7 +248,8 @@ export class SyncJob {
     const from = { bucket: this.op.bucket, key: this.sourcePrefix + rel }
     const to = { bucket: this.op.dest.bucket, key: this.destPrefix + rel }
     if (this.env.serverSide) {
-      await serverCopy(this.env.source, from, to, size, signal)
+      // CopyObject gửi tới region của bucket đích (cùng tài khoản: client của bucket đích).
+      await serverCopy(this.env.dest, from, to, size, signal)
       return
     }
     const got = await this.env.source.send(
@@ -241,6 +263,14 @@ export class SyncJob {
       entry.done += chunk.length
       this.count(chunk.length)
     })
+    // Mỗi object một AbortController con: lib-storage gán đè `signal.onabort`, dùng chung một
+    // controller thì chỉ lượt tạo sau cùng dừng ngay khi bấm Stop.
+    const child = new AbortController()
+    const stop = (): void => {
+      child.abort()
+    }
+    if (signal.aborted) child.abort()
+    else signal.addEventListener('abort', stop, { once: true })
     const upload = new Upload({
       client: this.env.dest,
       params: {
@@ -255,11 +285,23 @@ export class SyncJob {
       },
       queueSize: PART_QUEUE,
       partSize: Math.max(PART_SIZE, Math.ceil(size / 9000)),
-      abortController: this.abort
+      abortController: child
     })
     try {
       await upload.done()
+    } catch (error) {
+      // Dừng: done() trả lỗi ngay, AbortMultipartUpload của lib-storage chạy sau (client đích có thể
+      // đã đóng) — tự gửi để không để lại phần rác tính tiền ở bucket đích.
+      const uploadId = (upload as unknown as { uploadId?: string }).uploadId
+      if (child.signal.aborted && uploadId)
+        await this.env.dest
+          .send(
+            new AbortMultipartUploadCommand({ Bucket: to.bucket, Key: to.key, UploadId: uploadId })
+          )
+          .catch(() => undefined)
+      throw error
     } finally {
+      signal.removeEventListener('abort', stop)
       body.destroy()
     }
   }
@@ -279,7 +321,10 @@ export class SyncJob {
         )
         const failed = new Set((out.Errors ?? []).map((e) => e.Key ?? ''))
         for (const e of out.Errors ?? [])
-          this.fail((e.Key ?? '').slice(this.destPrefix.length), new Error(e.Message ?? 'Failed'))
+          this.fail(
+            (e.Key ?? '').slice(this.destPrefix.length),
+            new Error(e.Message ?? t('Failed'))
+          )
         this.progress.done.deleted += batch.length - failed.size
       } catch (error) {
         if (!this.stopped()) for (const rel of batch) this.fail(rel, error)

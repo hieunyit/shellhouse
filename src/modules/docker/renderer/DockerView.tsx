@@ -1,39 +1,56 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ArrowDownToLine,
   Boxes,
   Container,
   Copy,
-  Download,
   Eye,
   FileText,
+  FolderOpen,
+  Hammer,
   HardDrive,
+  KeyRound,
   LayoutDashboard,
   Layers,
+  MoreHorizontal,
   Network,
   Pause,
   Pencil,
   Play,
+  Plug,
   Plus,
   RefreshCw,
   RotateCw,
   Search,
   Square,
   SquareTerminal,
+  Tag,
   Terminal,
   Trash2,
+  Upload,
   X,
   Zap
 } from 'lucide-react'
 import { Button, cx, Notice } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
 import { FileTable, type FileColumn } from '../../../renderer/src/components/files/FileTable'
-import { Empty } from '../../../renderer/src/components/files/parts'
+import { Empty, ToolButton } from '../../../renderer/src/components/files/parts'
 import { KeyHints, Pill, TONE_TEXT } from '../../../renderer/src/components/panels'
 import type { SortState } from '../../../renderer/src/components/SortMenu'
-import { cleanError, formatSize, nameOrder } from '../../../renderer/src/lib/format'
-import { toast, ConnectionPrompt } from '../../registry/renderer-kit'
+import { cleanError } from '../../../renderer/src/lib/format'
+import {
+  ConnectionPrompt,
+  formatBytes,
+  formatDateTime,
+  formatPercent,
+  t,
+  tn,
+  toast
+} from '../../registry/renderer-kit'
 import type { ModuleTabProps } from '../../registry/renderer-types'
+import { wslDistroOf } from '../shared/ipc'
 import type {
+  BuildSpec,
   ComposeAction,
   ContainerAction,
   ContainerRow,
@@ -42,76 +59,126 @@ import type {
   EngineInfo,
   ImageRow,
   NetworkRow,
+  NetworkSpec,
   PruneResult,
   PruneTarget,
   RunSpec,
   StatsSample,
-  VolumeRow
+  VolumeRow,
+  VolumeSpec
 } from '../shared/ops'
-import { openLogs, openProjectLogs, openShell, publishHost } from './api'
-import { ContainerDetail, ImageDetail, stateTone, type DetailAction } from './ContainerDetail'
+import { keyLabel, openMenuBelow, RowActions, toMenu, type DetailAction } from './actions'
+import { dockerApi, openLogs, openProjectLogs, openShell, publishHost } from './api'
+import {
+  ContainerDetail,
+  HealthPill,
+  ImageDetail,
+  stateLabel,
+  stateTone,
+  type DetailTab
+} from './ContainerDetail'
 import { DockerOverview } from './DockerOverview'
 import {
+  ConfirmDialog,
   ExecDialog,
+  ImageTransferDialog,
   InspectDialog,
   PruneDialog,
-  PullDialog,
   RenameDialog,
-  RunDialog
+  RunDialog,
+  type ConfirmRequest,
+  type TransferProgress
 } from './dialogs'
+import {
+  BuildDialog,
+  ConnectNetworkDialog,
+  CreateNetworkDialog,
+  CreateVolumeDialog,
+  RegistriesDialog,
+  TagDialog
+} from './ResourceDialogs'
+import { useDocker } from './store'
 import { useDockerSession } from './useDockerSession'
+import {
+  ago,
+  confirmFor,
+  groupProjects,
+  imageName,
+  latestSample,
+  matches,
+  namesText,
+  portsText,
+  sortList as sortBy,
+  type ComposeProject,
+  type SortKey
+} from '../shared/view-model'
 
 type Section = 'overview' | 'containers' | 'images' | 'volumes' | 'networks' | 'compose'
-type StatusFilter = 'all' | 'running' | 'stopped'
+type StatusFilter = 'all' | 'running' | 'stopped' | 'unhealthy'
 
-const SECTIONS: { id: Section; label: string; icon: React.ReactNode }[] = [
-  { id: 'overview', label: 'Overview', icon: <LayoutDashboard size={14} /> },
-  { id: 'containers', label: 'Containers', icon: <Container size={14} /> },
-  { id: 'images', label: 'Images', icon: <Layers size={14} /> },
-  { id: 'volumes', label: 'Volumes', icon: <HardDrive size={14} /> },
-  { id: 'networks', label: 'Networks', icon: <Network size={14} /> },
-  { id: 'compose', label: 'Compose', icon: <Boxes size={14} /> }
+const SECTION_ICONS: Record<Section, React.ReactNode> = {
+  overview: <LayoutDashboard size={14} />,
+  containers: <Container size={14} />,
+  images: <Layers size={14} />,
+  volumes: <HardDrive size={14} />,
+  networks: <Network size={14} />,
+  compose: <Boxes size={14} />
+}
+
+function sectionLabel(s: Section): string {
+  switch (s) {
+    case 'overview':
+      return t('Overview')
+    case 'containers':
+      return t('Containers')
+    case 'images':
+      return t('Images')
+    case 'volumes':
+      return t('Volumes')
+    case 'networks':
+      return t('Networks')
+    case 'compose':
+      return t('Compose')
+  }
+}
+
+const SECTIONS: readonly Section[] = [
+  'overview',
+  'containers',
+  'images',
+  'volumes',
+  'networks',
+  'compose'
 ]
 
-const relative = new Intl.RelativeTimeFormat('en', { numeric: 'auto' })
-function ago(ms: number): string {
-  if (!ms) return ''
-  const s = Math.round((ms - Date.now()) / 1000)
-  const abs = Math.abs(s)
-  if (abs < 60) return relative.format(s, 'second')
-  if (abs < 3600) return relative.format(Math.round(s / 60), 'minute')
-  if (abs < 86400) return relative.format(Math.round(s / 3600), 'hour')
-  // Quá vài tuần: tháng / năm ("2,210 days ago" khó đọc).
-  if (abs < 86400 * 45) return relative.format(Math.round(s / 86400), 'day')
-  if (abs < 86400 * 365) return relative.format(Math.round(s / (86400 * 30)), 'month')
-  return relative.format(Math.round(s / (86400 * 365)), 'year')
-}
-
-export function portsText(c: ContainerRow): string {
-  return [
-    ...new Set(
-      c.ports.map((p) =>
-        p.publicPort ? `${p.publicPort}→${p.privatePort}/${p.type}` : `${p.privatePort}/${p.type}`
-      )
-    )
-  ].join(', ')
-}
-
-interface ComposeProject {
-  name: string
-  services: number
-  running: number
-  containers: ContainerRow[]
-}
-
 type Dialog =
-  | { kind: 'prune'; what: PruneTarget; preview: PruneResult | null; error: string | null }
-  | { kind: 'pull' }
+  | {
+      kind: 'prune'
+      what: PruneTarget
+      /** Volume: cả volume có tên; image: mọi image không dùng. */
+      all: boolean
+      preview: PruneResult | null
+      error: string | null
+    }
+  | { kind: 'confirm'; request: ConfirmRequest }
+  | { kind: 'transfer'; mode: 'pull' | 'push'; ref: string; refs?: string[] }
   | { kind: 'rename'; container: ContainerRow }
   | { kind: 'inspect'; title: string; data: unknown }
   | { kind: 'exec'; container: ContainerRow }
   | { kind: 'run'; image: string }
+  | { kind: 'volume' }
+  | { kind: 'network' }
+  | { kind: 'connect'; container?: ContainerRow; network?: NetworkRow }
+  | { kind: 'tag'; image: ImageRow }
+  | { kind: 'registries' }
+  | { kind: 'build' }
   | null
+
+interface TransferAttempt {
+  subscription: string
+  cancelled: boolean
+  done: boolean
+}
 
 type SectionData =
   | { section: 'containers'; data: ContainerRow[] }
@@ -148,6 +215,18 @@ const isTyping = (t: EventTarget | null): boolean =>
 const keyOf = (e: KeyboardEvent): string =>
   `${e.ctrlKey || e.metaKey ? 'ctrl+' : ''}${e.ctrlKey || e.metaKey ? e.key.toLowerCase() : e.key}`
 
+const COMPOSE_LABELS = (): Record<ComposeAction, { label: string; title: string }> => ({
+  up: { label: t('Up'), title: t('Create and start everything (docker compose up -d)') },
+  down: {
+    label: t('Down'),
+    title: t('Stop and remove the containers and networks (docker compose down)')
+  },
+  start: { label: t('Start'), title: t('Start the stopped containers') },
+  stop: { label: t('Stop'), title: t('Stop every container') },
+  restart: { label: t('Restart'), title: t('Restart every container') },
+  pull: { label: t('Pull'), title: t('Pull newer images (docker compose pull)') }
+})
+
 /** Tab Docker của một nguồn (máy này hoặc server qua SSH). */
 export function DockerTab({
   tabId,
@@ -166,51 +245,91 @@ export function DockerTab({
   const [filter, setFilter] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
-  const [sort, setSort] = useState<SortState<'name' | 'created' | 'size' | 'cpu' | 'mem'>>({
+  const [sort, setSort] = useState<SortState<SortKey>>({
     key: 'name',
     dir: 'asc'
   })
   const [dialog, setDialog] = useState<Dialog>(null)
+  const [detailTab, setDetailTab] = useState<DetailTab>('overview')
   const [helpOpen, setHelpOpen] = useState(false)
   const [reloadKey, setReloadKey] = useState(0)
-  const [pull, setPull] = useState<{
-    subscription: string
-    status: string
-    progress: number | null
-    done: boolean
-    error?: string
-  } | null>(null)
+  const [transfer, setTransfer] = useState<(TransferProgress & { subscription: string }) | null>(
+    null
+  )
+  const registries = useDocker((s) => s.registries)
   /** CPU / RAM của mọi container đang chạy (3 giây một mẫu) + lịch sử ngắn cho biểu đồ. */
   const [samples, setSamples] = useState<Record<string, StatsSample[]>>({})
+  /** Lỗi lấy CPU / RAM (Session Host báo thay vì im lặng). */
+  const [statsError, setStatsError] = useState<string | null>(null)
   const statsAllSub = useRef<string | null>(null)
+  /** Lần kéo / đẩy image đang chạy (huỷ được kể cả trước khi có id đăng ký). */
+  const transferRef = useRef<TransferAttempt | null>(null)
   const reloadTimer = useRef<number | null>(null)
   const filterRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  /** Người nghe sự kiện phiên khác (build). */
+  const listeners = useRef(new Set<(event: string, data: unknown) => void>())
   const { menu, open: openMenu } = useContextMenu()
 
   const reload = useRef<() => void>(() => undefined)
   const onEvent = useCallback((event: string, data: unknown) => {
     const d = data as { subscription?: string }
+    for (const l of listeners.current) l(event, data)
     if (event === 'engine') {
-      // Container đổi trạng thái → tải lại danh sách (gộp các sự kiện dồn dập).
-      if (reloadTimer.current) window.clearTimeout(reloadTimer.current)
+      // Container đổi trạng thái → tải lại danh sách. Gộp sự kiện dồn dập (compose up: hàng chục sự
+      // kiện) thành một lần tải mỗi 300 ms — không dời mãi khi sự kiện tới liên tục.
+      if (reloadTimer.current !== null) return
       reloadTimer.current = window.setTimeout(() => {
+        reloadTimer.current = null
         reload.current()
       }, 300)
     } else if (event === 'statsAll' && d.subscription === statsAllSub.current) {
-      const incoming = (data as { samples: Record<string, StatsSample> }).samples
+      const { samples: incoming, error } = data as {
+        samples: Record<string, StatsSample>
+        error?: string
+      }
+      setStatsError(error ?? null)
+      // Lỗi: giữ số liệu cũ (không vẽ lại cả bảng chỉ để xoá cột).
+      if (error) return
       setSamples((prev) => {
         const next: Record<string, StatsSample[]> = {}
         for (const [id, sample] of Object.entries(incoming))
           next[id] = [...(prev[id] ?? []).slice(-39), sample]
         return next
       })
-    } else if (event === 'pull') {
-      setPull((p) => (p && p.subscription === d.subscription ? { ...p, ...(data as object) } : p))
+    } else if (event === 'pull' || event === 'push') {
+      const attempt = transferRef.current
+      if (attempt && attempt.subscription === d.subscription && (data as { done?: boolean }).done)
+        attempt.done = true
+      setTransfer((p) =>
+        p && p.subscription === d.subscription ? { ...p, ...(data as object) } : p
+      )
+    }
+  }, [])
+  const subscribeEvents = useCallback((l: (event: string, data: unknown) => void) => {
+    listeners.current.add(l)
+    return () => {
+      listeners.current.delete(l)
     }
   }, [])
   const session = useDockerSession(tabId, hostId, onEvent)
   const { request, ready, readOnly } = session
+  useEffect(
+    () => () => {
+      if (reloadTimer.current !== null) window.clearTimeout(reloadTimer.current)
+      reloadTimer.current = null
+    },
+    []
+  )
+  // Registry đã lưu (chọn sẵn khi pull / push); đổi ở nơi khác → store tự tải lại.
+  useEffect(() => {
+    void dockerApi.registries().then(
+      (registries) => {
+        useDocker.setState({ registries })
+      },
+      () => undefined
+    )
+  }, [])
 
   const apply = useCallback((result: SectionData) => {
     if (result.section === 'images') setImages(result.data)
@@ -270,13 +389,17 @@ export function DockerTab({
     return subscribeOnce('events.subscribe')
   }, [ready, request, subscribeOnce])
 
-  // CPU / RAM mọi container — chỉ khi tab đang hiện (tab ẩn không tốn request).
+  // CPU / RAM mọi container — chỉ khi tab đang hiện VÀ đang xem danh sách container (cột CPU /
+  // RAM, bảng chi tiết). Mỗi lượt là một request stats cho từng container đang chạy → không hỏi
+  // khi xem image / volume / Compose.
+  const wantStats = ready && active && section === 'containers'
   useEffect(() => {
-    if (!ready || !active) return
+    if (!wantStats) return
     return subscribeOnce('statsAll.subscribe', (id) => {
       statsAllSub.current = id
+      if (id === null) setStatsError(null)
     })
-  }, [ready, active, subscribeOnce])
+  }, [wantStats, subscribeOnce])
 
   useEffect(() => {
     if (!ready) return
@@ -312,48 +435,155 @@ export function DockerTab({
     }
   }
 
-  const containerAction = (items: ContainerRow[], action: ContainerAction): void => {
-    if (action === 'remove' || action === 'kill') {
-      const names = items.map((c) => c.name).join(', ')
-      if (!window.confirm(`${action === 'remove' ? 'Remove' : 'Kill'} ${names}?`)) return
-    }
-    void run(`${action[0]?.toUpperCase() ?? ''}${action.slice(1)} failed`, () =>
-      Promise.all(
-        items.map((c) =>
-          request({
-            op: 'action',
-            id: c.id,
-            action,
-            ...(action === 'remove' ? { force: c.state === 'running' } : {})
-          })
-        )
-      )
-    )
+  /** Hỏi lại bằng hộp thoại của app (không dùng window.confirm). */
+  const confirm = (request: ConfirmRequest): void => {
+    setDialog({ kind: 'confirm', request })
   }
 
-  const openPrune = (what: PruneTarget): void => {
-    setDialog({ kind: 'prune', what, preview: null, error: null })
-    request<PruneResult>({ op: 'prune', what, dryRun: true }).then(
+  const actionFailed = (action: ContainerAction): string => {
+    switch (action) {
+      case 'start':
+        return t('Start failed')
+      case 'stop':
+        return t('Stop failed')
+      case 'restart':
+        return t('Restart failed')
+      case 'pause':
+        return t('Pause failed')
+      case 'unpause':
+        return t('Resume failed')
+      case 'kill':
+        return t('Kill failed')
+      case 'remove':
+        return t('Remove failed')
+    }
+  }
+
+  const containerAction = (
+    items: ContainerRow[],
+    action: ContainerAction,
+    viaShortcut = false
+  ): void => {
+    if (items.length === 0) return
+    const go = (volumes: boolean): void => {
+      void run(actionFailed(action), () =>
+        Promise.all(
+          items.map((c) =>
+            request({
+              op: 'action',
+              id: c.id,
+              action,
+              ...(action === 'remove'
+                ? { force: c.state === 'running', ...(volumes ? { volumes: true } : {}) }
+                : {})
+            })
+          )
+        )
+      )
+    }
+    const ask = confirmFor(action, items, viaShortcut)
+    if (!ask) {
+      go(false)
+      return
+    }
+    confirm({
+      title: ask.title,
+      message: ask.message,
+      confirmLabel: ask.confirmLabel,
+      danger: ask.danger,
+      ...(ask.volumesOption
+        ? { option: { label: t('Also remove anonymous volumes of the container (docker rm -v)') } }
+        : {}),
+      onConfirm: go
+    })
+  }
+
+  const loadPrunePreview = (what: PruneTarget, all: boolean): void => {
+    setDialog({ kind: 'prune', what, all, preview: null, error: null })
+    request<PruneResult>({ op: 'prune', what, dryRun: true, all }).then(
       (preview) => {
-        setDialog((d) => (d?.kind === 'prune' && d.what === what ? { ...d, preview } : d))
+        setDialog((d) =>
+          d?.kind === 'prune' && d.what === what && d.all === all ? { ...d, preview } : d
+        )
       },
       (e: unknown) => {
-        setDialog((d) => (d?.kind === 'prune' ? { ...d, error: cleanError(e) } : d))
+        setDialog((d) =>
+          d?.kind === 'prune' && d.what === what && d.all === all
+            ? { ...d, error: cleanError(e) }
+            : d
+        )
       }
     )
   }
+  const openPrune = (what: PruneTarget, all = false): void => {
+    loadPrunePreview(what, all)
+  }
 
   const compose = (p: ComposeProject, action: ComposeAction): void => {
-    if (
-      (action === 'down' || action === 'stop') &&
-      !window.confirm(`${action === 'down' ? 'Take down' : 'Stop'} the Compose project ${p.name}?`)
-    )
+    const label = COMPOSE_LABELS()[action].label
+    const go = (): void => {
+      void run(
+        t('Compose {action} failed', { action: label }),
+        () => request({ op: 'compose', project: p.name, action }),
+        t('Compose {action}: {project}', { action: label, project: p.name })
+      )
+    }
+    if (action !== 'down' && action !== 'stop') {
+      go()
       return
-    void run(
-      `Compose ${action} failed`,
-      () => request({ op: 'compose', project: p.name, action }),
-      `Compose ${action}: ${p.name}`
-    )
+    }
+    confirm({
+      title:
+        action === 'down'
+          ? t('Take down the Compose project {name}?', { name: p.name })
+          : t('Stop the Compose project {name}?', { name: p.name }),
+      message:
+        action === 'down'
+          ? t(
+              'Every container of {name} is stopped and removed, with its networks (docker compose down). Volumes are kept.',
+              { name: p.name }
+            )
+          : t('Every container of {name} is stopped.', { name: p.name }),
+      confirmLabel: action === 'down' ? t('Take down') : t('Stop'),
+      danger: action === 'down',
+      onConfirm: go
+    })
+  }
+
+  /** Xoá image / volume / network sau khi hỏi lại. */
+  const confirmRemove = (
+    kind: 'image' | 'volume' | 'network',
+    names: string[],
+    remove: () => Promise<unknown>
+  ): void => {
+    const plural = names.length > 1
+    const list = namesText(names)
+    confirm({
+      title: plural
+        ? kind === 'image'
+          ? t('Remove {n} images?', { n: names.length })
+          : kind === 'volume'
+            ? t('Remove {n} volumes?', { n: names.length })
+            : t('Remove {n} networks?', { n: names.length })
+        : t('Remove {name}?', { name: names[0] ?? '' }),
+      message:
+        kind === 'volume'
+          ? plural
+            ? t('{names} are deleted with all the data in them. This cannot be undone.', {
+                names: list
+              })
+            : t('{names} is deleted with all the data in it. This cannot be undone.', {
+                names: list
+              })
+          : plural
+            ? t('{names} are removed.', { names: list })
+            : t('{names} is removed.', { names: list }),
+      confirmLabel: t('Remove'),
+      danger: true,
+      onConfirm: () => {
+        void run(t('Remove failed'), remove)
+      }
+    })
   }
 
   const inspect = (
@@ -366,35 +596,61 @@ export function DockerTab({
         setDialog({ kind: 'inspect', title, data })
       },
       (e: unknown) => {
-        toast.error(`Could not inspect ${title}`, { description: cleanError(e) })
+        toast.error(t('Could not inspect {name}', { name: title }), { description: cleanError(e) })
       }
     )
   }
 
+  const copy = (text: string): void => {
+    void window.shellhouse.writeClipboard(text)
+    toast.success(t('Copied'))
+  }
+
+  const disconnect = (network: string, c: ContainerRow): void => {
+    confirm({
+      title: t('Disconnect {name} from {network}?', { name: c.name, network }),
+      message: t('{name} can no longer reach the other containers on {network}.', {
+        name: c.name,
+        network
+      }),
+      confirmLabel: t('Disconnect'),
+      danger: true,
+      onConfirm: () => {
+        void run(
+          t('Disconnect failed'),
+          () => request({ op: 'network.disconnect', network, container: c.id, force: false }),
+          t('Disconnected {name} from {network}', { name: c.name, network })
+        )
+      }
+    })
+  }
+
   // ——— Thao tác trên container (menu, phím tắt, thanh chi tiết) ———
-  const containerActions = (c: ContainerRow): DetailAction[] => {
+  /** `viaShortcut` = chạy bằng phím tắt một chữ (stop / restart hỏi lại). */
+  const containerActions = (c: ContainerRow, viaShortcut = false): DetailAction[] => {
     const running = c.state === 'running'
     const out: DetailAction[] = [
       {
         id: 'logs',
-        label: 'Logs',
+        label: t('Logs'),
         icon: <FileText size={14} />,
         key: 'l',
         run: () => openLogs(hostId, c)
       }
     ]
-    if (running) {
+    // Shell / exec chạy được mọi lệnh trong container → ẩn ở chế độ chỉ đọc (Session Host cũng chặn).
+    if (running && !readOnly) {
       out.push(
         {
           id: 'shell',
-          label: 'Shell',
+          label: t('Shell'),
           icon: <SquareTerminal size={14} />,
           key: 's',
           run: () => openShell(hostId, c)
         },
         {
           id: 'exec',
-          label: 'Exec…',
+          label: t('Exec…'),
           icon: <Terminal size={14} />,
           key: 'x',
           run: () => {
@@ -403,32 +659,46 @@ export function DockerTab({
         }
       )
     }
-    out.push({
-      id: 'inspect',
-      label: 'Inspect',
-      icon: <Search size={14} />,
-      key: 'i',
-      // Bảng chi tiết đã có tab Inspect → chỉ để trong menu.
-      secondary: true,
-      run: () => {
-        inspect('container', c.id, c.name)
-      }
-    })
-    // Chỉ trong menu (không thành nút chính của bảng chi tiết).
     out.push(
       {
+        id: 'files',
+        label: t('Files'),
+        icon: <FolderOpen size={14} />,
+        key: 'f',
+        run: () => {
+          setSelected(new Set([c.name]))
+          setDetailTab('files')
+        }
+      },
+      {
+        id: 'inspect',
+        label: t('Inspect'),
+        icon: <Search size={14} />,
+        key: 'i',
+        // Bảng chi tiết đã có tab Inspect → chỉ để trong menu.
+        secondary: true,
+        run: () => {
+          inspect('container', c.id, c.name)
+        }
+      },
+      // Chỉ trong menu (không thành nút chính của bảng chi tiết).
+      {
         id: 'copy-name',
-        label: 'Copy name',
+        label: t('Copy name'),
         icon: <Copy size={14} />,
         secondary: true,
-        run: () => void window.shellhouse.writeClipboard(c.name)
+        run: () => {
+          copy(c.name)
+        }
       },
       {
         id: 'copy-id',
-        label: 'Copy ID',
+        label: t('Copy ID'),
         icon: <Copy size={14} />,
         secondary: true,
-        run: () => void window.shellhouse.writeClipboard(c.id)
+        run: () => {
+          copy(c.id)
+        }
       }
     )
     if (readOnly) return out
@@ -436,25 +706,25 @@ export function DockerTab({
       out.push(
         {
           id: 'restart',
-          label: 'Restart',
+          label: t('Restart'),
           icon: <RotateCw size={14} />,
           key: 'r',
           run: () => {
-            containerAction([c], 'restart')
+            containerAction([c], 'restart', viaShortcut)
           }
         },
         {
           id: 'stop',
-          label: 'Stop',
+          label: t('Stop'),
           icon: <Square size={14} />,
           key: 't',
           run: () => {
-            containerAction([c], 'stop')
+            containerAction([c], 'stop', viaShortcut)
           }
         },
         {
           id: 'pause',
-          label: 'Pause',
+          label: t('Pause'),
           icon: <Pause size={14} />,
           key: 'p',
           run: () => {
@@ -465,7 +735,7 @@ export function DockerTab({
     else if (c.state === 'paused')
       out.push({
         id: 'unpause',
-        label: 'Resume',
+        label: t('Resume'),
         icon: <Play size={14} />,
         key: 'p',
         run: () => {
@@ -475,7 +745,7 @@ export function DockerTab({
     else
       out.push({
         id: 'start',
-        label: 'Start',
+        label: t('Start'),
         icon: <Play size={14} />,
         key: 't',
         run: () => {
@@ -485,16 +755,29 @@ export function DockerTab({
     out.push(
       {
         id: 'rename',
-        label: 'Rename…',
+        label: t('Rename…'),
         icon: <Pencil size={14} />,
+        key: 'F2',
+        secondary: true,
         run: () => {
           setDialog({ kind: 'rename', container: c })
         }
       },
       {
+        id: 'connect',
+        label: t('Connect to a network…'),
+        icon: <Plug size={14} />,
+        secondary: true,
+        run: () => {
+          void load('networks')
+          setDialog({ kind: 'connect', container: c })
+        }
+      },
+      {
         id: 'run-like',
-        label: 'Run another from this image…',
+        label: t('Run another from this image…'),
         icon: <Plus size={14} />,
+        secondary: true,
         run: () => {
           setDialog({ kind: 'run', image: c.image })
         }
@@ -503,7 +786,7 @@ export function DockerTab({
     if (running)
       out.push({
         id: 'kill',
-        label: 'Kill',
+        label: t('Kill'),
         icon: <Zap size={14} />,
         key: 'ctrl+k',
         danger: true,
@@ -513,7 +796,7 @@ export function DockerTab({
       })
     out.push({
       id: 'remove',
-      label: 'Remove',
+      label: t('Remove'),
       icon: <Trash2 size={14} />,
       key: 'ctrl+d',
       danger: true,
@@ -524,85 +807,238 @@ export function DockerTab({
     return out
   }
 
-  const toMenu = (actions: DetailAction[]): MenuEntry[] => {
-    const out: MenuEntry[] = []
-    let danger = false
-    for (const a of actions) {
-      if (a.danger && !danger && out.length) {
-        out.push('separator')
-        danger = true
-      }
-      out.push({
-        id: a.id,
-        label: a.label,
-        icon: a.icon,
-        ...(a.key ? { hint: a.key.replace('ctrl+', 'Ctrl+').toUpperCase() } : {}),
-        ...(a.danger ? { danger: true } : {}),
-        onSelect: () => {
-          a.run()
-        }
-      })
-    }
-    return out
+  const removeImages = (items: ImageRow[]): void => {
+    confirmRemove('image', items.map(imageName), () =>
+      Promise.all(items.map((i) => request({ op: 'image.remove', id: i.id })))
+    )
   }
 
-  // ——— Danh sách ———
-  const q = filter.trim().toLowerCase()
-  const match = (...parts: (string | null | undefined)[]): boolean =>
-    !q || parts.some((p) => p?.toLowerCase().includes(q))
-  const sampleOf = (c: ContainerRow): StatsSample | undefined =>
-    (samples[c.id] ?? samples[c.id.slice(0, 12)])?.at(-1)
-  const sortList = <T,>(
-    list: T[],
-    name: (x: T) => string,
-    created: (x: T) => number,
-    extra?: { size?: (x: T) => number; cpu?: (x: T) => number; mem?: (x: T) => number }
-  ): T[] => {
-    const dir = sort.dir === 'asc' ? 1 : -1
-    return [...list].sort((a, b) => {
-      if (sort.key === 'created') return (created(a) - created(b)) * dir
-      const f =
-        sort.key === 'size'
-          ? extra?.size
-          : sort.key === 'cpu'
-            ? extra?.cpu
-            : sort.key === 'mem'
-              ? extra?.mem
-              : undefined
-      if (f) return (f(a) - f(b)) * dir
-      return nameOrder.compare(name(a), name(b)) * dir
-    })
+  const imageActions = (i: ImageRow): DetailAction[] => [
+    ...(!readOnly
+      ? [
+          {
+            id: 'run',
+            label: t('Run…'),
+            icon: <Play size={14} />,
+            key: 'r',
+            run: () => {
+              setDialog({ kind: 'run', image: imageName(i) })
+            }
+          },
+          {
+            id: 'tag',
+            label: t('Tag…'),
+            icon: <Tag size={14} />,
+            key: 't',
+            run: () => {
+              setDialog({ kind: 'tag', image: i })
+            }
+          },
+          {
+            id: 'push',
+            label: t('Push…'),
+            icon: <Upload size={14} />,
+            key: 'u',
+            disabled: i.tags.length === 0,
+            run: () => {
+              if (i.tags.length)
+                setDialog({ kind: 'transfer', mode: 'push', ref: i.tags[0] ?? '', refs: i.tags })
+            }
+          }
+        ]
+      : []),
+    {
+      id: 'inspect',
+      label: t('Inspect'),
+      icon: <Search size={14} />,
+      key: 'i',
+      run: () => {
+        inspect('image', i.id, imageName(i))
+      }
+    },
+    {
+      id: 'copy-id',
+      label: t('Copy ID'),
+      icon: <Copy size={14} />,
+      secondary: true,
+      run: () => {
+        copy(i.id.replace(/^sha256:/, ''))
+      }
+    },
+    ...(!readOnly
+      ? [
+          {
+            id: 'remove',
+            label: t('Remove'),
+            icon: <Trash2 size={14} />,
+            key: 'ctrl+d',
+            danger: true,
+            run: () => {
+              removeImages([i])
+            }
+          }
+        ]
+      : [])
+  ]
+
+  const removeVolumes = (items: VolumeRow[]): void => {
+    confirmRemove(
+      'volume',
+      items.map((v) => v.name),
+      () => Promise.all(items.map((v) => request({ op: 'volume.remove', name: v.name })))
+    )
   }
-  const containerRows = sortList(
-    (containers ?? []).filter(
-      (c) =>
-        match(c.name, c.image, c.project, c.state, portsText(c)) &&
-        (status === 'all' || (status === 'running') === (c.state === 'running'))
-    ),
-    (c) => c.name,
-    (c) => c.created,
-    { cpu: (c) => sampleOf(c)?.cpuPercent ?? -1, mem: (c) => sampleOf(c)?.memUsage ?? -1 }
+
+  const volumeActions = (v: VolumeRow): DetailAction[] => [
+    {
+      id: 'inspect',
+      label: t('Inspect'),
+      icon: <Search size={14} />,
+      key: 'i',
+      run: () => {
+        inspect('volume', v.name, v.name)
+      }
+    },
+    {
+      id: 'copy-name',
+      label: t('Copy name'),
+      icon: <Copy size={14} />,
+      secondary: true,
+      run: () => {
+        copy(v.name)
+      }
+    },
+    ...(!readOnly
+      ? [
+          {
+            id: 'remove',
+            label: t('Remove'),
+            icon: <Trash2 size={14} />,
+            key: 'ctrl+d',
+            danger: true,
+            run: () => {
+              removeVolumes([v])
+            }
+          }
+        ]
+      : [])
+  ]
+
+  const removeNetworks = (items: NetworkRow[]): void => {
+    const removable = items.filter((n) => !n.builtin)
+    if (removable.length === 0) return
+    confirmRemove(
+      'network',
+      removable.map((n) => n.name),
+      () => Promise.all(removable.map((n) => request({ op: 'network.remove', id: n.id })))
+    )
+  }
+
+  const networkActions = (n: NetworkRow): DetailAction[] => [
+    {
+      id: 'inspect',
+      label: t('Inspect'),
+      icon: <Search size={14} />,
+      key: 'i',
+      run: () => {
+        inspect('network', n.id, n.name)
+      }
+    },
+    ...(!readOnly && n.name !== 'host' && n.name !== 'none'
+      ? [
+          {
+            id: 'connect',
+            label: t('Connect a container…'),
+            icon: <Plug size={14} />,
+            key: 'c',
+            run: () => {
+              setDialog({ kind: 'connect', network: n })
+            }
+          }
+        ]
+      : []),
+    {
+      id: 'copy-name',
+      label: t('Copy name'),
+      icon: <Copy size={14} />,
+      secondary: true,
+      run: () => {
+        copy(n.name)
+      }
+    },
+    ...(!readOnly && !n.builtin
+      ? [
+          {
+            id: 'remove',
+            label: t('Remove'),
+            icon: <Trash2 size={14} />,
+            key: 'ctrl+d',
+            danger: true,
+            run: () => {
+              removeNetworks([n])
+            }
+          }
+        ]
+      : [])
+  ]
+
+  // ——— Danh sách (memo: mẫu CPU / RAM tới mỗi 3 giây không lọc + sắp xếp lại mọi thứ) ———
+  const q = filter.trim().toLowerCase()
+  const sampleOf = (c: ContainerRow): StatsSample | undefined => latestSample(samples, c.id)
+  // Mẫu stats chỉ ảnh hưởng thứ tự khi sắp theo CPU / RAM.
+  const sortSamples = sort.key === 'cpu' || sort.key === 'mem' ? samples : null
+  const containerRows = useMemo(
+    () =>
+      sortBy(
+        (containers ?? []).filter(
+          (c) =>
+            matches(q, c.name, c.image, c.project, c.state, c.health, portsText(c)) &&
+            (status === 'all' ||
+              (status === 'unhealthy'
+                ? c.health === 'unhealthy' || c.state === 'restarting' || c.state === 'dead'
+                : (status === 'running') === (c.state === 'running')))
+        ),
+        sort,
+        (c) => c.name,
+        (c) => c.created,
+        {
+          cpu: (c) => (sortSamples ? latestSample(sortSamples, c.id)?.cpuPercent : undefined) ?? -1,
+          mem: (c) => (sortSamples ? latestSample(sortSamples, c.id)?.memUsage : undefined) ?? -1
+        }
+      ),
+    [containers, q, status, sort, sortSamples]
   )
-  const projects = ((): ComposeProject[] => {
-    const map = new Map<string, ContainerRow[]>()
-    for (const c of containers ?? [])
-      if (c.project) map.set(c.project, [...(map.get(c.project) ?? []), c])
-    return [...map.entries()]
-      .map(([name, list]) => ({
-        name,
-        containers: list,
-        services: new Set(list.map((c) => c.service ?? c.name)).size,
-        running: list.filter((c) => c.state === 'running').length
-      }))
-      .filter((p) => !q || p.name.toLowerCase().includes(q))
-      .sort((a, b) => nameOrder.compare(a.name, b.name))
-  })()
-  const imageName = (i: ImageRow): string => i.tags[0] ?? i.id.replace(/^sha256:/, '').slice(0, 12)
-  const imageRows = sortList(
-    (images ?? []).filter((i) => match(...i.tags, i.id)),
-    imageName,
-    (i) => i.created,
-    { size: (i) => i.size }
+  const projects = useMemo(() => groupProjects(containers ?? [], q), [containers, q])
+  const imageRows = useMemo(
+    () =>
+      sortBy(
+        (images ?? []).filter((i) => matches(q, ...i.tags, i.id)),
+        sort,
+        imageName,
+        (i) => i.created,
+        { size: (i) => i.size }
+      ),
+    [images, q, sort]
+  )
+  const volumeRows = useMemo(
+    () =>
+      sortBy(
+        (volumes ?? []).filter((v) => matches(q, v.name, v.project, v.driver)),
+        sort,
+        (v) => v.name,
+        (v) => v.created ?? 0
+      ),
+    [volumes, q, sort]
+  )
+  const networkRows = useMemo(
+    () =>
+      sortBy(
+        (networks ?? []).filter((n) => matches(q, n.name, n.driver)),
+        sort,
+        (n) => n.name,
+        () => 0
+      ),
+    [networks, q, sort]
   )
 
   const selectedContainers = containerRows.filter((c) => selected.has(c.name))
@@ -612,6 +1048,23 @@ export function DockerTab({
     section === 'images' && selected.size === 1
       ? imageRows.find((i) => selected.has(imageName(i)))
       : undefined
+  const oneVolume =
+    section === 'volumes' && selected.size === 1
+      ? volumeRows.find((v) => selected.has(v.name))
+      : undefined
+  const oneNetwork =
+    section === 'networks' && selected.size === 1
+      ? networkRows.find((n) => selected.has(n.name))
+      : undefined
+  const selectedActions: DetailAction[] | null = one
+    ? containerActions(one, true)
+    : oneImage
+      ? imageActions(oneImage)
+      : oneVolume
+        ? volumeActions(oneVolume)
+        : oneNetwork
+          ? networkActions(oneNetwork)
+          : null
 
   // ——— Phím tắt (nghe ở window khi tab đang hiện; bảng vừa tải lại vẫn nhận phím) ———
   const onKey = (e: KeyboardEvent): void => {
@@ -632,8 +1085,8 @@ export function DockerTab({
       else if (filter) setFilter('')
       return
     }
-    if (one) {
-      const a = containerActions(one).find((x) => x.key === k)
+    if (selectedActions) {
+      const a = selectedActions.find((x) => x.key === k && !x.disabled)
       if (a) {
         e.preventDefault()
         a.run()
@@ -657,116 +1110,110 @@ export function DockerTab({
     }
   }, [active])
 
-  const quick = (c: ContainerRow): React.JSX.Element => (
-    <span
-      className="inline-flex gap-0.5"
-      onClick={(e) => {
-        e.stopPropagation()
-      }}
-      onDoubleClick={(e) => {
-        e.stopPropagation()
-      }}
-    >
-      <QuickButton
-        label={`Logs of ${c.name}`}
-        testId="docker-row-logs"
-        onClick={() => openLogs(hostId, c)}
-      >
-        <FileText size={13} />
-      </QuickButton>
-      <QuickButton
-        label={`Shell in ${c.name}`}
-        testId="docker-row-shell"
-        disabled={c.state !== 'running'}
-        onClick={() => openShell(hostId, c)}
-      >
-        <SquareTerminal size={13} />
-      </QuickButton>
-      {!readOnly && (
-        <>
-          {c.state === 'running' ? (
-            <QuickButton
-              label={`Stop ${c.name}`}
-              testId="docker-row-stop"
-              onClick={() => {
-                containerAction([c], 'stop')
-              }}
-            >
+  /** Nút nhanh trên dòng container (cùng thao tác với menu; chú thích có phím tắt). */
+  const quick = (c: ContainerRow): React.JSX.Element => {
+    const actions = containerActions(c)
+    const pick = (id: string): DetailAction | undefined => actions.find((a) => a.id === id)
+    const shell = pick('shell')
+    const startStop = pick('stop') ?? pick('start') ?? pick('unpause')
+    const quickList = [
+      pick('logs'),
+      readOnly
+        ? undefined
+        : (shell ?? {
+            id: 'shell',
+            label: t('Shell'),
+            icon: <SquareTerminal size={14} />,
+            disabled: true,
+            run: () => undefined
+          }),
+      startStop,
+      pick('restart')
+    ].filter((a): a is DetailAction => Boolean(a))
+    return (
+      <RowActions
+        name={c.name}
+        quick={quickList.map((a) => ({
+          ...a,
+          icon:
+            a.id === 'stop' ? (
               <Square size={12} />
-            </QuickButton>
-          ) : (
-            <QuickButton
-              label={`Start ${c.name}`}
-              testId="docker-row-start"
-              onClick={() => {
-                containerAction([c], 'start')
-              }}
-            >
+            ) : a.id === 'start' || a.id === 'unpause' ? (
               <Play size={13} />
-            </QuickButton>
-          )}
-          <QuickButton
-            label={`Restart ${c.name}`}
-            testId="docker-row-restart"
-            onClick={() => {
-              containerAction([c], 'restart')
-            }}
-          >
-            <RotateCw size={13} />
-          </QuickButton>
-        </>
-      )}
-    </span>
-  )
+            ) : a.id === 'restart' ? (
+              <RotateCw size={13} />
+            ) : a.id === 'logs' ? (
+              <FileText size={13} />
+            ) : (
+              <SquareTerminal size={13} />
+            ),
+          testId: `docker-row-${a.id === 'unpause' ? 'start' : a.id}`
+        }))}
+        all={actions}
+        openMenu={openMenu}
+        testIdPrefix="docker-row"
+      />
+    )
+  }
 
   const containerColumns: FileColumn<ContainerRow, 'name' | 'created' | 'size' | 'cpu' | 'mem'>[] =
     [
       {
         id: 'state',
-        label: 'State',
+        label: t('State'),
         render: (c) => (
-          <span title={c.status}>
-            <Pill tone={stateTone(c.state)}>{c.state}</Pill>
+          // Container có healthcheck đang chạy: chip health (khoẻ ⇒ đang chạy); chú thích đủ cả hai.
+          <span title={c.status} className="inline-flex items-center gap-1">
+            {c.state === 'running' && c.health ? (
+              <HealthPill health={c.health} />
+            ) : (
+              <Pill tone={stateTone(c.state)}>{stateLabel(c.state)}</Pill>
+            )}
           </span>
         )
       },
       {
         id: 'image',
-        label: 'Image',
+        label: t('Image'),
         className: 'hidden @3xl:block',
         render: (c) => <span title={c.image}>{c.image}</span>
       },
       {
         id: 'cpu',
-        label: 'CPU',
+        label: t('CPU'),
         align: 'right',
-        sort: { key: 'cpu', label: 'CPU', kind: 'number' },
+        sort: { key: 'cpu', label: t('CPU'), kind: 'number' },
         className: 'hidden @xl:block',
         render: (c) => {
           const s = sampleOf(c)
           return c.state === 'running' && s && s.cpuPercent >= 0
-            ? `${s.cpuPercent.toFixed(1)}%`
+            ? formatPercent(s.cpuPercent / 100, 1)
             : '—'
         }
       },
       {
         id: 'mem',
-        label: 'Memory',
+        label: t('Memory'),
         align: 'right',
-        sort: { key: 'mem', label: 'Memory', kind: 'number' },
+        sort: { key: 'mem', label: t('Memory'), kind: 'number' },
         className: 'hidden @xl:block',
         render: (c) => {
           const s = sampleOf(c)
-          return c.state === 'running' && s ? formatSize(s.memUsage) : '—'
+          return c.state === 'running' && s ? formatBytes(s.memUsage) : '—'
         }
       },
-      { id: 'ports', label: 'Ports', className: 'hidden @4xl:block', render: (c) => portsText(c) },
+      {
+        id: 'ports',
+        label: t('Ports'),
+        className: 'hidden @4xl:block',
+        render: (c) => portsText(c)
+      },
       {
         id: 'created',
-        label: 'Created',
-        sort: { key: 'created', label: 'Created', kind: 'date' },
+        label: t('Created'),
+        sort: { key: 'created', label: t('Created'), kind: 'date' },
         className: 'hidden @2xl:block',
-        render: (c) => ago(c.created)
+        render: (c) => <span title={formatDateTime(c.created)}>{ago(c.created)}</span>
       },
       { id: 'quick', label: '', align: 'right', render: quick }
     ]
@@ -779,11 +1226,11 @@ export function DockerTab({
       >
         <div className="flex max-w-md flex-col items-center gap-3 text-center">
           <Container size={28} className="text-faint" />
-          <p className="text-sm text-fg" data-testid="docker-error">
+          <p className="text-sm text-fg" data-testid="docker-error" role="alert">
             {session.error}
           </p>
           <Button size="sm" icon={<RefreshCw size={13} />} onClick={session.retry}>
-            Try again
+            {t('Try again')}
           </Button>
         </div>
       </div>
@@ -798,6 +1245,10 @@ export function DockerTab({
           ? volumes
           : networks
   const runningCount = containers?.filter((c) => c.state === 'running').length ?? 0
+  const unhealthyCount =
+    containers?.filter(
+      (c) => c.health === 'unhealthy' || c.state === 'restarting' || c.state === 'dead'
+    ).length ?? 0
   const counts: Partial<Record<Section, number>> = {
     containers: containers?.length,
     images: images?.length,
@@ -806,41 +1257,233 @@ export function DockerTab({
     compose: projects.length
   }
   const hints: (readonly [string, string])[] = [
-    ['/', 'filter'],
-    ...(section === 'containers' && one
-      ? containerActions(one)
-          .filter((a) => a.key && !a.danger)
+    ['/', t('filter')],
+    ...(selectedActions
+      ? selectedActions
+          .filter((a) => a.key && !a.danger && !a.disabled)
           .slice(0, 3)
-          .map((a) => [a.key ?? '', a.label.replace(/…$/, '').toLowerCase()] as const)
+          .map((a) => [keyLabel(a.key ?? ''), a.label.replace(/…$/, '').toLowerCase()] as const)
       : []),
-    ['Esc', 'clear']
+    ['Esc', t('clear')]
   ]
   const allKeys = [
     {
-      title: 'Navigate',
+      title: t('Navigate'),
       keys: [
-        ['/', 'Filter the list'],
-        ['↑ ↓', 'Move'],
-        ['Enter', 'Logs of the container'],
-        ['Ctrl+A', 'Select all'],
-        ['Esc', 'Clear selection / filter']
+        ['/', t('Filter the list')],
+        ['↑ ↓', t('Move')],
+        ['Enter', t('Logs of the container')],
+        ['Ctrl+A', t('Select all')],
+        ['Del', t('Remove the selection')],
+        ['Esc', t('Clear selection / filter')]
       ] as const
     },
     {
-      title: 'Selected container',
+      title: t('Selected container'),
       keys: [
-        ['l', 'Logs'],
-        ['s', 'Open shell'],
-        ['x', 'Exec a command'],
-        ['i', 'Inspect'],
-        ['r', 'Restart'],
-        ['t', 'Start / stop'],
-        ['p', 'Pause / resume'],
-        ['Ctrl+K', 'Kill'],
-        ['Ctrl+D', 'Remove']
+        ['L', t('Logs')],
+        ['S', t('Open shell')],
+        ['X', t('Exec a command')],
+        ['F', t('Browse files')],
+        ['I', t('Inspect')],
+        ['R', t('Restart')],
+        ['T', t('Start / stop')],
+        ['P', t('Pause / resume')],
+        ['Ctrl+K', t('Kill')],
+        ['Ctrl+D', t('Remove')]
+      ] as const
+    },
+    {
+      title: t('Selected image'),
+      keys: [
+        ['R', t('Run…')],
+        ['T', t('Tag…')],
+        ['U', t('Push…')],
+        ['I', t('Inspect')]
       ] as const
     }
   ]
+
+  const clearFilterButton = (
+    <Button
+      size="sm"
+      variant="ghost"
+      icon={<X size={13} />}
+      onClick={() => {
+        setFilter('')
+        setStatus('all')
+      }}
+    >
+      {t('Clear filter')}
+    </Button>
+  )
+  const where = !hostId ? 'local' : wslDistroOf(hostId) ? 'wsl' : 'ssh'
+
+  const startTransfer = (mode: 'pull' | 'push', ref: string, registry: string | null): void => {
+    // Bấm đúp / Enter hai lần: chỉ một lượt (trạng thái đặt ngay, trước khi có id).
+    if (transferRef.current) return
+    const attempt: TransferAttempt = { subscription: '', cancelled: false, done: false }
+    transferRef.current = attempt
+    setTransfer({ subscription: '', status: t('Starting…'), progress: null, done: false })
+    request<{ subscription: string }>({
+      op: mode === 'pull' ? 'image.pull' : 'image.push',
+      ref,
+      registry
+    }).then(
+      (r) => {
+        attempt.subscription = r.subscription
+        if (attempt.cancelled) {
+          void request({ op: 'unsubscribe', subscription: r.subscription }).catch(() => undefined)
+          return
+        }
+        setTransfer((p) => (p ? { ...p, subscription: r.subscription } : p))
+      },
+      (e: unknown) => {
+        attempt.done = true
+        if (attempt.cancelled) return
+        setTransfer({
+          subscription: '',
+          status: cleanError(e),
+          progress: null,
+          done: true,
+          error: cleanError(e)
+        })
+      }
+    )
+  }
+
+  const toolbar = (
+    <>
+      {readOnly && (
+        <span
+          className="flex items-center gap-1 rounded bg-warning-soft px-1.5 py-px text-xs font-medium text-warning"
+          data-testid="docker-read-only"
+          title={t('Actions that change something are hidden')}
+        >
+          <Eye size={12} /> {t('Read-only')}
+        </span>
+      )}
+      {!readOnly && (section === 'containers' || section === 'images') && (
+        <ToolButton
+          primary
+          icon={<Play size={13} />}
+          label={t('Run')}
+          title={t('Run a container (like docker run -d)')}
+          labelAt="md"
+          testId="docker-run"
+          onClick={() => {
+            setDialog({ kind: 'run', image: oneImage ? imageName(oneImage) : '' })
+          }}
+        />
+      )}
+      {!readOnly && section === 'volumes' && (
+        <ToolButton
+          primary
+          icon={<Plus size={13} />}
+          label={t('New volume')}
+          labelAt="md"
+          testId="docker-new-volume"
+          onClick={() => {
+            setDialog({ kind: 'volume' })
+          }}
+        />
+      )}
+      {!readOnly && section === 'networks' && (
+        <ToolButton
+          primary
+          icon={<Plus size={13} />}
+          label={t('New network')}
+          labelAt="md"
+          testId="docker-new-network"
+          onClick={() => {
+            setDialog({ kind: 'network' })
+          }}
+        />
+      )}
+      {!readOnly && section === 'images' && (
+        <>
+          <ToolButton
+            icon={<ArrowDownToLine size={13} />}
+            label={t('Pull')}
+            title={t('Pull an image from a registry')}
+            labelAt="2xl"
+            testId="docker-pull"
+            onClick={() => {
+              setDialog({ kind: 'transfer', mode: 'pull', ref: '' })
+            }}
+          />
+          <ToolButton
+            icon={<Hammer size={13} />}
+            label={t('Build')}
+            title={t('Build an image from a Dockerfile')}
+            labelAt="2xl"
+            testId="docker-build"
+            onClick={() => {
+              setDialog({ kind: 'build' })
+            }}
+          />
+          <ToolButton
+            icon={<KeyRound size={13} />}
+            label={t('Registries')}
+            title={t('Logins for private registries')}
+            labelAt="4xl"
+            testId="docker-registries-open"
+            onClick={() => {
+              setDialog({ kind: 'registries' })
+            }}
+          />
+        </>
+      )}
+      {!readOnly &&
+        (section === 'containers' ||
+          section === 'images' ||
+          section === 'volumes' ||
+          section === 'networks') && (
+          <ToolButton
+            icon={<Trash2 size={13} />}
+            label={t('Clean up')}
+            title={
+              section === 'containers'
+                ? t('Remove stopped containers')
+                : section === 'images'
+                  ? t('Remove dangling images')
+                  : section === 'volumes'
+                    ? t('Remove unused anonymous volumes')
+                    : t('Remove unused networks')
+            }
+            labelAt="3xl"
+            testId="docker-prune"
+            onClick={() => {
+              openPrune(section)
+            }}
+          />
+        )}
+      <ToolButton
+        icon={<RefreshCw size={13} className={cx(busy && 'animate-spin')} />}
+        label={t('Refresh')}
+        labelAt="5xl"
+        testId="docker-refresh"
+        onClick={() => {
+          setReloadKey((n) => n + 1)
+        }}
+      />
+    </>
+  )
+
+  const emptyText = (
+    filtered: boolean,
+    icon: React.ReactNode,
+    title: string,
+    text: string,
+    action: React.ReactNode
+  ): React.JSX.Element => (
+    <Empty
+      icon={icon}
+      title={filtered ? t('Nothing matches') : title}
+      text={filtered ? t('Nothing matches “{filter}”.', { filter }) : text}
+      action={filtered ? clearFilterButton : action}
+    />
+  )
 
   return (
     <div
@@ -850,29 +1493,32 @@ export function DockerTab({
       data-ready={ready && list !== null}
     >
       <div className="flex min-h-0 flex-1">
-        <nav className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-line bg-subtle p-2">
+        <nav
+          className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-line bg-subtle p-2"
+          aria-label={t('Docker sections')}
+        >
           {SECTIONS.map((s) => (
             <button
-              key={s.id}
+              key={s}
               type="button"
-              data-testid={`docker-nav-${s.id}`}
-              aria-current={section === s.id}
+              data-testid={`docker-nav-${s}`}
+              aria-current={section === s}
               className={cx(
                 'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]',
-                section === s.id
+                section === s
                   ? 'bg-surface font-medium text-fg shadow-sm'
                   : 'text-muted hover:bg-hover hover:text-fg'
               )}
               onClick={() => {
-                setSection(s.id)
+                setSection(s)
                 setFilter('')
                 setSelected(new Set())
               }}
             >
-              {s.icon}
-              <span className="flex-1">{s.label}</span>
-              {counts[s.id] !== undefined && (
-                <span className="text-[11px] text-faint tabular-nums">{counts[s.id]}</span>
+              {SECTION_ICONS[s]}
+              <span className="flex-1">{sectionLabel(s)}</span>
+              {counts[s] !== undefined && (
+                <span className="text-[11px] text-faint tabular-nums">{counts[s]}</span>
               )}
             </button>
           ))}
@@ -884,8 +1530,17 @@ export function DockerTab({
               <>
                 <div className="text-muted">{info.version}</div>
                 <div>{info.os}</div>
-                {info.via === 'cli' && <div>via docker CLI</div>}
+                {info.via === 'cli' && <div>{t('via docker CLI')}</div>}
                 <div className="mt-1">{params.label}</div>
+                {statsError && (
+                  <div
+                    className="mt-1 text-warning"
+                    title={statsError}
+                    data-testid="docker-stats-error"
+                  >
+                    {t('CPU / memory unavailable')}
+                  </div>
+                )}
               </>
             ) : (
               session.status
@@ -900,7 +1555,8 @@ export function DockerTab({
                 <input
                   ref={filterRef}
                   type="search"
-                  placeholder="Filter…  ( / )"
+                  aria-label={t('Filter')}
+                  placeholder={t('Filter…  ( / )')}
                   data-testid="docker-filter"
                   className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint"
                   value={filter}
@@ -919,108 +1575,51 @@ export function DockerTab({
             {section === 'containers' && (
               <div
                 role="radiogroup"
+                aria-label={t('Show')}
                 className="inline-flex rounded-md border border-line bg-subtle p-0.5"
               >
-                {(['all', 'running', 'stopped'] as const).map((st) => (
-                  <button
-                    key={st}
-                    type="button"
-                    role="radio"
-                    aria-checked={status === st}
-                    data-testid={`docker-status-${st}`}
-                    className={cx(
-                      'h-7 rounded px-2 text-xs font-medium whitespace-nowrap capitalize',
-                      status === st ? 'bg-surface text-fg shadow-sm' : 'text-muted hover:text-fg'
-                    )}
-                    onClick={() => {
-                      setStatus(st)
-                    }}
-                  >
-                    {st}
-                    {st === 'running' && containers ? ` ${runningCount}` : ''}
-                  </button>
-                ))}
+                {(['all', 'running', 'stopped', 'unhealthy'] as const)
+                  .filter((st) => st !== 'unhealthy' || unhealthyCount > 0 || status === st)
+                  .map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      role="radio"
+                      aria-checked={status === st}
+                      data-testid={`docker-status-${st}`}
+                      className={cx(
+                        'h-7 rounded px-2 text-xs font-medium whitespace-nowrap',
+                        status === st ? 'bg-surface text-fg shadow-sm' : 'text-muted hover:text-fg',
+                        st === 'unhealthy' && status !== st && 'text-danger'
+                      )}
+                      onClick={() => {
+                        setStatus(st)
+                      }}
+                    >
+                      {st === 'all'
+                        ? t('All')
+                        : st === 'running'
+                          ? containers
+                            ? t('Running {n}', { n: runningCount })
+                            : t('Running')
+                          : st === 'stopped'
+                            ? t('Stopped')
+                            : t('Unhealthy {n}', { n: unhealthyCount })}
+                    </button>
+                  ))}
               </div>
             )}
             <div className="flex-1" />
-            {readOnly && (
-              <span
-                className="flex items-center gap-1 rounded bg-warning-soft px-1.5 py-px text-xs font-medium text-warning"
-                data-testid="docker-read-only"
-                title="Actions that change something are hidden"
-              >
-                <Eye size={12} /> Read-only
-              </span>
-            )}
-            {!readOnly && (section === 'containers' || section === 'images') && (
-              <Button
-                size="sm"
-                variant="primary"
-                icon={<Play size={13} />}
-                data-testid="docker-run"
-                onClick={() => {
-                  setDialog({ kind: 'run', image: oneImage ? imageName(oneImage) : '' })
-                }}
-              >
-                Run
-              </Button>
-            )}
-            {!readOnly && section === 'images' && (
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<Download size={13} />}
-                data-testid="docker-pull"
-                aria-label="Pull"
-                onClick={() => {
-                  setDialog({ kind: 'pull' })
-                }}
-              >
-                <span className="hidden @2xl:inline">Pull</span>
-              </Button>
-            )}
-            {!readOnly &&
-              (section === 'containers' ||
-                section === 'images' ||
-                section === 'volumes' ||
-                section === 'networks') && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  icon={<Trash2 size={13} />}
-                  data-testid="docker-prune"
-                  title={
-                    section === 'containers'
-                      ? 'Remove stopped'
-                      : section === 'images'
-                        ? 'Remove dangling'
-                        : 'Remove unused'
-                  }
-                  onClick={() => {
-                    openPrune(section)
-                  }}
-                  aria-label="Clean up"
-                >
-                  <span className="hidden @3xl:inline">Clean up</span>
-                </Button>
-              )}
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label="Refresh"
-              icon={<RefreshCw size={13} className={cx(busy && 'animate-spin')} />}
-              data-testid="docker-refresh"
-              onClick={() => {
-                setReloadKey((n) => n + 1)
-              }}
-            />
+            {toolbar}
           </div>
           {selectedContainers.length > 1 && section === 'containers' && !readOnly && (
             <div
               className="flex h-9 shrink-0 items-center gap-1 border-b border-line bg-accent-soft px-3 text-xs"
               data-testid="docker-bulk"
             >
-              <span className="mr-2 font-medium text-fg">{selectedContainers.length} selected</span>
+              <span className="mr-2 font-medium text-fg">
+                {t('{n} selected', { n: selectedContainers.length })}
+              </span>
               <Button
                 size="sm"
                 variant="ghost"
@@ -1029,7 +1628,7 @@ export function DockerTab({
                   containerAction(selectedContainers, 'start')
                 }}
               >
-                Start
+                {t('Start')}
               </Button>
               <Button
                 size="sm"
@@ -1042,7 +1641,7 @@ export function DockerTab({
                   )
                 }}
               >
-                Stop
+                {t('Stop')}
               </Button>
               <Button
                 size="sm"
@@ -1053,7 +1652,7 @@ export function DockerTab({
                   containerAction(selectedContainers, 'restart')
                 }}
               >
-                Restart
+                {t('Restart')}
               </Button>
               <Button
                 size="sm"
@@ -1063,11 +1662,12 @@ export function DockerTab({
                   containerAction(selectedContainers, 'remove')
                 }}
               >
-                Remove
+                {t('Remove')}
               </Button>
               <button
                 type="button"
-                aria-label="Clear selection"
+                aria-label={t('Clear selection')}
+                title={t('Clear selection (Esc)')}
                 className="ml-auto text-faint hover:text-fg"
                 onClick={() => {
                   setSelected(new Set())
@@ -1085,8 +1685,12 @@ export function DockerTab({
             </div>
           )}
           {!ready || list === null ? (
-            <div className="flex flex-1 items-center justify-center text-xs text-faint">
-              {session.status}
+            <div
+              className="flex flex-1 items-center justify-center gap-2 text-xs text-faint"
+              role="status"
+            >
+              <RefreshCw size={13} className="animate-spin" />
+              {ready ? t('Loading…') : session.status}
             </div>
           ) : section === 'overview' ? (
             <DockerOverview
@@ -1098,7 +1702,9 @@ export function DockerTab({
               onNavigate={(sec, f) => {
                 setSection(sec)
                 setSelected(new Set())
-                if (sec === 'containers' && (f === 'running' || f === 'stopped')) setStatus(f)
+                setFilter('')
+                if (sec === 'containers')
+                  setStatus(f === 'running' || f === 'stopped' || f === 'unhealthy' ? f : 'all')
               }}
               onPrune={openPrune}
             />
@@ -1115,13 +1721,23 @@ export function DockerTab({
                 ) : null
               }
               columns={containerColumns}
-              gridClass="grid-cols-[minmax(9rem,2fr)_5.5rem_7rem] @xl:grid-cols-[minmax(9rem,2fr)_5.5rem_4.5rem_5rem_7rem] @2xl:grid-cols-[minmax(9rem,2fr)_5.5rem_4.5rem_5rem_6.5rem_7rem] @3xl:grid-cols-[minmax(9rem,2fr)_5.5rem_minmax(7rem,1.5fr)_4.5rem_5rem_6.5rem_7rem] @4xl:grid-cols-[minmax(9rem,2fr)_5.5rem_minmax(7rem,1.5fr)_4.5rem_5rem_minmax(6rem,1fr)_6.5rem_7rem]"
-              nameSort={{ key: 'name', label: 'Name', kind: 'text' }}
+              gridClass="grid-cols-[minmax(9rem,2fr)_6.5rem_8rem] @xl:grid-cols-[minmax(9rem,2fr)_6.5rem_4.5rem_5rem_8rem] @2xl:grid-cols-[minmax(9rem,2fr)_6.5rem_4.5rem_5rem_6.5rem_8rem] @3xl:grid-cols-[minmax(9rem,2fr)_6.5rem_minmax(7rem,1.5fr)_4.5rem_5rem_6.5rem_8rem] @4xl:grid-cols-[minmax(9rem,2fr)_6.5rem_minmax(7rem,1.5fr)_4.5rem_5rem_minmax(6rem,1fr)_6.5rem_8rem]"
+              nameSort={{ key: 'name', label: t('Name'), kind: 'text' }}
               sort={sort}
               onSort={setSort}
               selected={selected}
               onSelect={setSelected}
               onOpen={(c) => openLogs(hostId, c)}
+              {...(!readOnly
+                ? {
+                    onDelete: (items: ContainerRow[]) => {
+                      containerAction(items, 'remove')
+                    },
+                    onRename: (c: ContainerRow) => {
+                      setDialog({ kind: 'rename', container: c })
+                    }
+                  }
+                : {})}
               onContextMenu={(e, items) => {
                 const first = items[0]
                 if (items.length === 1 && first) openMenu(e, toMenu(containerActions(first)))
@@ -1129,7 +1745,7 @@ export function DockerTab({
                   openMenu(e, [
                     {
                       id: 'start',
-                      label: `Start ${items.length}`,
+                      label: t('Start {n}', { n: items.length }),
                       icon: <Play size={14} />,
                       onSelect: () => {
                         containerAction(items, 'start')
@@ -1137,7 +1753,7 @@ export function DockerTab({
                     },
                     {
                       id: 'stop',
-                      label: `Stop ${items.length}`,
+                      label: t('Stop {n}', { n: items.length }),
                       icon: <Square size={14} />,
                       onSelect: () => {
                         containerAction(
@@ -1148,7 +1764,7 @@ export function DockerTab({
                     },
                     {
                       id: 'restart',
-                      label: `Restart ${items.length}`,
+                      label: t('Restart {n}', { n: items.length }),
                       icon: <RotateCw size={14} />,
                       onSelect: () => {
                         containerAction(items, 'restart')
@@ -1157,54 +1773,37 @@ export function DockerTab({
                     'separator',
                     {
                       id: 'remove',
-                      label: `Remove ${items.length}`,
+                      label: t('Remove {n}', { n: items.length }),
                       icon: <Trash2 size={14} />,
                       danger: true,
+                      hint: 'Del',
                       onSelect: () => {
                         containerAction(items, 'remove')
                       }
                     }
                   ])
               }}
-              ariaLabel="Containers"
+              ariaLabel={t('Containers')}
               rowTestId="docker-container"
             >
-              {containerRows.length === 0 && (
-                <Empty
-                  icon={<Container size={18} />}
-                  title={q || status !== 'all' ? 'Nothing matches' : 'No containers'}
-                  text={
-                    q || status !== 'all'
-                      ? 'Try another filter.'
-                      : 'Run one from an image, or with docker compose.'
-                  }
-                  action={
-                    q || status !== 'all' ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<X size={13} />}
-                        onClick={() => {
-                          setFilter('')
-                          setStatus('all')
-                        }}
-                      >
-                        Clear filter
-                      </Button>
-                    ) : !readOnly ? (
-                      <Button
-                        size="sm"
-                        icon={<Play size={13} />}
-                        onClick={() => {
-                          setDialog({ kind: 'run', image: '' })
-                        }}
-                      >
-                        Run a container
-                      </Button>
-                    ) : null
-                  }
-                />
-              )}
+              {containerRows.length === 0 &&
+                emptyText(
+                  Boolean(q) || status !== 'all',
+                  <Container size={18} />,
+                  t('No containers'),
+                  t('Run one from an image, or with docker compose.'),
+                  !readOnly ? (
+                    <Button
+                      size="sm"
+                      icon={<Play size={13} />}
+                      onClick={() => {
+                        setDialog({ kind: 'run', image: '' })
+                      }}
+                    >
+                      {t('Run a container')}
+                    </Button>
+                  ) : null
+                )}
             </FileTable>
           ) : section === 'images' ? (
             <FileTable
@@ -1213,38 +1812,64 @@ export function DockerTab({
               icon={() => <Layers size={14} className="text-muted" />}
               badge={(i) =>
                 i.dangling ? (
-                  <span className="rounded bg-subtle px-1 text-[10px] text-faint">dangling</span>
+                  <span className="rounded bg-subtle px-1 text-[10px] text-faint">
+                    {t('dangling')}
+                  </span>
+                ) : i.tags.length > 1 ? (
+                  <span
+                    className="rounded bg-subtle px-1 text-[10px] text-faint"
+                    title={i.tags.join('\n')}
+                  >
+                    {`+${String(i.tags.length - 1)}`}
+                  </span>
                 ) : null
               }
               columns={[
                 {
                   id: 'size',
-                  label: 'Size',
+                  label: t('Size'),
                   align: 'right',
-                  sort: { key: 'size', label: 'Size', kind: 'number' },
-                  render: (i) => formatSize(i.size)
+                  sort: { key: 'size', label: t('Size'), kind: 'number' },
+                  render: (i) => formatBytes(i.size)
                 },
                 {
                   id: 'created',
-                  label: 'Created',
-                  sort: { key: 'created', label: 'Created', kind: 'date' },
+                  label: t('Created'),
+                  sort: { key: 'created', label: t('Created'), kind: 'date' },
                   className: 'hidden @xl:block',
-                  render: (i) => ago(i.created)
+                  render: (i) => <span title={formatDateTime(i.created)}>{ago(i.created)}</span>
                 },
                 {
                   id: 'used',
-                  label: 'Used by',
+                  label: t('Used by'),
                   className: 'hidden @lg:block',
                   render: (i) =>
                     i.containers ? (
-                      <Pill tone="ok">{`${i.containers} container${i.containers > 1 ? 's' : ''}`}</Pill>
+                      <Pill tone="ok">{tn(i.containers, '{n} container', '{n} containers')}</Pill>
                     ) : (
-                      <span className="text-faint">unused</span>
+                      <span className="text-faint">{t('unused')}</span>
                     )
+                },
+                {
+                  id: 'actions',
+                  label: '',
+                  align: 'right',
+                  render: (i) => {
+                    const actions = imageActions(i)
+                    return (
+                      <RowActions
+                        name={imageName(i)}
+                        quick={actions.filter((a) => a.id === 'run' || a.id === 'push')}
+                        all={actions}
+                        openMenu={openMenu}
+                        testIdPrefix="docker-image-row"
+                      />
+                    )
+                  }
                 }
               ]}
-              gridClass="grid-cols-[minmax(10rem,2fr)_6rem] @lg:grid-cols-[minmax(10rem,2fr)_6rem_8rem] @xl:grid-cols-[minmax(10rem,2fr)_6rem_7rem_8rem]"
-              nameSort={{ key: 'name', label: 'Name', kind: 'text' }}
+              gridClass="grid-cols-[minmax(10rem,2fr)_6rem_5rem] @lg:grid-cols-[minmax(10rem,2fr)_6rem_8rem_5rem] @xl:grid-cols-[minmax(10rem,2fr)_6rem_7rem_8rem_5rem]"
+              nameSort={{ key: 'name', label: t('Name'), kind: 'text' }}
               sort={sort}
               onSort={setSort}
               selected={selected}
@@ -1252,110 +1877,89 @@ export function DockerTab({
               onOpen={(i) => {
                 if (!readOnly) setDialog({ kind: 'run', image: imageName(i) })
               }}
+              {...(!readOnly ? { onDelete: removeImages } : {})}
               onContextMenu={(e, items) => {
                 const first = items[0]
-                openMenu(e, [
-                  ...(items.length === 1 && first
-                    ? [
-                        ...(!readOnly
-                          ? [
-                              {
-                                id: 'run',
-                                label: 'Run…',
-                                icon: <Play size={14} />,
-                                onSelect: () => {
-                                  setDialog({ kind: 'run', image: imageName(first) })
-                                }
-                              }
-                            ]
-                          : []),
-                        {
-                          id: 'inspect',
-                          label: 'Inspect',
-                          icon: <Search size={14} />,
-                          onSelect: () => {
-                            inspect('image', first.id, imageName(first))
-                          }
-                        }
-                      ]
-                    : []),
-                  ...(readOnly
-                    ? []
-                    : [
-                        'separator' as const,
-                        {
-                          id: 'rmi',
-                          label:
-                            items.length > 1 ? `Remove ${items.length} images` : 'Remove image',
-                          icon: <Trash2 size={14} />,
-                          danger: true,
-                          onSelect: () => {
-                            if (window.confirm(`Remove ${items.map(imageName).join(', ')}?`))
-                              void run('Remove failed', () =>
-                                Promise.all(
-                                  items.map((i) => request({ op: 'image.remove', id: i.id }))
-                                )
-                              )
-                          }
-                        }
-                      ])
-                ])
+                if (items.length === 1 && first) openMenu(e, toMenu(imageActions(first)))
+                else if (items.length > 1 && !readOnly)
+                  openMenu(e, [
+                    {
+                      id: 'rmi',
+                      label: t('Remove {n} images', { n: items.length }),
+                      icon: <Trash2 size={14} />,
+                      danger: true,
+                      hint: 'Del',
+                      onSelect: () => {
+                        removeImages(items)
+                      }
+                    }
+                  ])
               }}
-              ariaLabel="Images"
+              ariaLabel={t('Images')}
               rowTestId="docker-image"
             >
-              {(images ?? []).length === 0 && (
-                <Empty
-                  icon={<Layers size={18} />}
-                  title={q ? 'Nothing matches' : 'No images'}
-                  text={
-                    q
-                      ? `Nothing matches “${filter}”.`
-                      : 'Images appear here after you pull or build them, or run a container.'
-                  }
-                  action={
-                    q ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<X size={13} />}
-                        onClick={() => {
-                          setFilter('')
-                        }}
-                      >
-                        Clear filter
-                      </Button>
-                    ) : null
-                  }
-                />
-              )}
+              {imageRows.length === 0 &&
+                emptyText(
+                  Boolean(q),
+                  <Layers size={18} />,
+                  t('No images'),
+                  t('Images appear here after you pull or build them, or run a container.'),
+                  !readOnly ? (
+                    <Button
+                      size="sm"
+                      icon={<ArrowDownToLine size={13} />}
+                      onClick={() => {
+                        setDialog({ kind: 'transfer', mode: 'pull', ref: '' })
+                      }}
+                    >
+                      {t('Pull an image')}
+                    </Button>
+                  ) : null
+                )}
             </FileTable>
           ) : section === 'volumes' ? (
             <FileTable
-              items={sortList(
-                (volumes ?? []).filter((v) => match(v.name, v.project)),
-                (v) => v.name,
-                (v) => v.created ?? 0
-              )}
+              items={volumeRows}
               getKey={(v) => v.name}
               icon={() => <HardDrive size={14} className="text-muted" />}
               columns={[
-                { id: 'driver', label: 'Driver', render: (v) => v.driver },
+                { id: 'driver', label: t('Driver'), render: (v) => v.driver },
                 {
                   id: 'project',
-                  label: 'Project',
+                  label: t('Project'),
                   className: 'hidden @lg:block',
                   render: (v) => v.project ?? '—'
                 },
                 {
                   id: 'mount',
-                  label: 'Mountpoint',
+                  label: t('Mountpoint'),
                   className: 'hidden @2xl:block',
-                  render: (v) => <span className="font-mono">{v.mountpoint}</span>
+                  render: (v) => (
+                    <span className="font-mono" title={v.mountpoint}>
+                      {v.mountpoint}
+                    </span>
+                  )
+                },
+                {
+                  id: 'actions',
+                  label: '',
+                  align: 'right',
+                  render: (v) => {
+                    const actions = volumeActions(v)
+                    return (
+                      <RowActions
+                        name={v.name}
+                        quick={actions.filter((a) => a.id === 'inspect')}
+                        all={actions}
+                        openMenu={openMenu}
+                        testIdPrefix="docker-volume-row"
+                      />
+                    )
+                  }
                 }
               ]}
-              gridClass="grid-cols-[minmax(10rem,2fr)_6rem] @lg:grid-cols-[minmax(10rem,2fr)_6rem_8rem] @2xl:grid-cols-[minmax(10rem,2fr)_6rem_8rem_minmax(10rem,2fr)]"
-              nameSort={{ key: 'name', label: 'Name', kind: 'text' }}
+              gridClass="grid-cols-[minmax(10rem,2fr)_6rem_4rem] @lg:grid-cols-[minmax(10rem,2fr)_6rem_8rem_4rem] @2xl:grid-cols-[minmax(10rem,2fr)_6rem_8rem_minmax(10rem,2fr)_4rem]"
+              nameSort={{ key: 'name', label: t('Name'), kind: 'text' }}
               sort={sort}
               onSort={setSort}
               selected={selected}
@@ -1363,88 +1967,86 @@ export function DockerTab({
               onOpen={(v) => {
                 inspect('volume', v.name, v.name)
               }}
+              {...(!readOnly ? { onDelete: removeVolumes } : {})}
               onContextMenu={(e, items) => {
-                openMenu(
-                  e,
-                  readOnly
-                    ? []
-                    : [
-                        {
-                          id: 'rmv',
-                          label:
-                            items.length > 1 ? `Remove ${items.length} volumes` : 'Remove volume',
-                          icon: <Trash2 size={14} />,
-                          danger: true,
-                          onSelect: () => {
-                            if (
-                              window.confirm(
-                                `Remove ${items.map((v) => v.name).join(', ')}? The data in them is deleted.`
-                              )
-                            )
-                              void run('Remove failed', () =>
-                                Promise.all(
-                                  items.map((v) => request({ op: 'volume.remove', name: v.name }))
-                                )
-                              )
-                          }
-                        }
-                      ]
-                )
+                const first = items[0]
+                if (items.length === 1 && first) openMenu(e, toMenu(volumeActions(first)))
+                else if (items.length > 1 && !readOnly)
+                  openMenu(e, [
+                    {
+                      id: 'rmv',
+                      label: t('Remove {n} volumes', { n: items.length }),
+                      icon: <Trash2 size={14} />,
+                      danger: true,
+                      hint: 'Del',
+                      onSelect: () => {
+                        removeVolumes(items)
+                      }
+                    }
+                  ])
               }}
-              ariaLabel="Volumes"
+              ariaLabel={t('Volumes')}
               rowTestId="docker-volume"
             >
-              {(volumes ?? []).length === 0 && (
-                <Empty
-                  icon={<HardDrive size={18} />}
-                  title={q ? 'Nothing matches' : 'No volumes'}
-                  text={
-                    q
-                      ? `Nothing matches “${filter}”.`
-                      : 'Named volumes keep data when containers are removed.'
-                  }
-                  action={
-                    q ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<X size={13} />}
-                        onClick={() => {
-                          setFilter('')
-                        }}
-                      >
-                        Clear filter
-                      </Button>
-                    ) : null
-                  }
-                />
-              )}
+              {volumeRows.length === 0 &&
+                emptyText(
+                  Boolean(q),
+                  <HardDrive size={18} />,
+                  t('No volumes'),
+                  t('Named volumes keep data when containers are removed.'),
+                  !readOnly ? (
+                    <Button
+                      size="sm"
+                      icon={<Plus size={13} />}
+                      onClick={() => {
+                        setDialog({ kind: 'volume' })
+                      }}
+                    >
+                      {t('New volume')}
+                    </Button>
+                  ) : null
+                )}
             </FileTable>
           ) : section === 'networks' ? (
             <FileTable
-              items={sortList(
-                (networks ?? []).filter((n) => match(n.name, n.driver)),
-                (n) => n.name,
-                () => 0
-              )}
+              items={networkRows}
               getKey={(n) => n.name}
               icon={() => <Network size={14} className="text-muted" />}
               badge={(n) =>
                 n.builtin ? (
-                  <span className="rounded bg-subtle px-1 text-[10px] text-faint">built-in</span>
+                  <span className="rounded bg-subtle px-1 text-[10px] text-faint">
+                    {t('built-in')}
+                  </span>
                 ) : null
               }
               columns={[
-                { id: 'driver', label: 'Driver', render: (n) => n.driver },
+                { id: 'driver', label: t('Driver'), render: (n) => n.driver },
                 {
                   id: 'scope',
-                  label: 'Scope',
+                  label: t('Scope'),
                   className: 'hidden @lg:block',
                   render: (n) => n.scope
+                },
+                {
+                  id: 'actions',
+                  label: '',
+                  align: 'right',
+                  render: (n) => {
+                    const actions = networkActions(n)
+                    return (
+                      <RowActions
+                        name={n.name}
+                        quick={actions.filter((a) => a.id === 'inspect' || a.id === 'connect')}
+                        all={actions}
+                        openMenu={openMenu}
+                        testIdPrefix="docker-network-row"
+                      />
+                    )
+                  }
                 }
               ]}
-              gridClass="grid-cols-[minmax(10rem,2fr)_6rem] @lg:grid-cols-[minmax(10rem,2fr)_6rem_6rem]"
-              nameSort={{ key: 'name', label: 'Name', kind: 'text' }}
+              gridClass="grid-cols-[minmax(10rem,2fr)_6rem_5rem] @lg:grid-cols-[minmax(10rem,2fr)_6rem_6rem_5rem]"
+              nameSort={{ key: 'name', label: t('Name'), kind: 'text' }}
               sort={sort}
               onSort={setSort}
               selected={selected}
@@ -1452,141 +2054,75 @@ export function DockerTab({
               onOpen={(n) => {
                 inspect('network', n.id, n.name)
               }}
+              {...(!readOnly ? { onDelete: removeNetworks } : {})}
               onContextMenu={(e, items) => {
+                const first = items[0]
                 const removable = items.filter((n) => !n.builtin)
-                openMenu(
-                  e,
-                  readOnly || removable.length === 0
-                    ? []
-                    : [
-                        {
-                          id: 'rmn',
-                          label:
-                            removable.length > 1
-                              ? `Remove ${removable.length} networks`
-                              : 'Remove network',
-                          icon: <Trash2 size={14} />,
-                          danger: true,
-                          onSelect: () => {
-                            if (
-                              window.confirm(`Remove ${removable.map((n) => n.name).join(', ')}?`)
-                            )
-                              void run('Remove failed', () =>
-                                Promise.all(
-                                  removable.map((n) => request({ op: 'network.remove', id: n.id }))
-                                )
-                              )
-                          }
-                        }
-                      ]
-                )
+                if (items.length === 1 && first) openMenu(e, toMenu(networkActions(first)))
+                else if (removable.length > 0 && !readOnly)
+                  openMenu(e, [
+                    {
+                      id: 'rmn',
+                      label: t('Remove {n} networks', { n: removable.length }),
+                      icon: <Trash2 size={14} />,
+                      danger: true,
+                      hint: 'Del',
+                      onSelect: () => {
+                        removeNetworks(removable)
+                      }
+                    }
+                  ])
               }}
-              ariaLabel="Networks"
+              ariaLabel={t('Networks')}
               rowTestId="docker-network"
             >
-              {(networks ?? []).length === 0 && (
-                <Empty
-                  icon={<Network size={18} />}
-                  title={q ? 'Nothing matches' : 'No networks'}
-                  text={
-                    q
-                      ? `Nothing matches “${filter}”.`
-                      : 'Networks connect containers to each other.'
-                  }
-                  action={
-                    q ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        icon={<X size={13} />}
-                        onClick={() => {
-                          setFilter('')
-                        }}
-                      >
-                        Clear filter
-                      </Button>
-                    ) : null
-                  }
-                />
-              )}
+              {networkRows.length === 0 &&
+                emptyText(
+                  Boolean(q),
+                  <Network size={18} />,
+                  t('No networks'),
+                  t('Networks connect containers to each other.'),
+                  !readOnly ? (
+                    <Button
+                      size="sm"
+                      icon={<Plus size={13} />}
+                      onClick={() => {
+                        setDialog({ kind: 'network' })
+                      }}
+                    >
+                      {t('New network')}
+                    </Button>
+                  ) : null
+                )}
             </FileTable>
           ) : (
             <div className="min-h-0 flex-1 overflow-auto p-3" data-testid="docker-compose">
               {projects.length === 0 ? (
-                <Empty
-                  icon={<Boxes size={18} />}
-                  title="No Compose projects"
-                  text="Containers started with docker compose are grouped here by project."
-                  action={null}
-                />
+                q ? (
+                  emptyText(true, <Boxes size={18} />, '', '', null)
+                ) : (
+                  <Empty
+                    icon={<Boxes size={18} />}
+                    title={t('No Compose projects')}
+                    text={t('Containers started with docker compose are grouped here by project.')}
+                    action={null}
+                  />
+                )
               ) : (
                 <div className="grid gap-3 @3xl:grid-cols-2">
                   {projects.map((p) => (
-                    <div
+                    <ComposeCard
                       key={p.name}
-                      className="rounded-lg border border-line"
-                      data-testid="docker-project"
-                      data-name={p.name}
-                    >
-                      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
-                        <Boxes size={15} className="text-accent" />
-                        <span className="flex-1 text-[13px] font-semibold text-fg">{p.name}</span>
-                        <Pill
-                          tone={
-                            p.running === p.containers.length ? 'ok' : p.running ? 'warn' : 'muted'
-                          }
-                        >
-                          {`${p.running}/${p.containers.length} running`}
-                        </Pill>
-                      </div>
-                      <div className="divide-y divide-line">
-                        {p.containers.map((c) => (
-                          <div key={c.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-                            <span
-                              className={cx(
-                                'size-1.5 shrink-0 rounded-full',
-                                c.state === 'running' ? 'bg-success' : 'bg-line-strong'
-                              )}
-                            />
-                            <span className="min-w-0 flex-1 truncate text-fg">
-                              {c.service ?? c.name}
-                            </span>
-                            <span className="truncate text-faint">{portsText(c)}</span>
-                            {quick(c)}
-                          </div>
-                        ))}
-                      </div>
-                      <div className="flex flex-wrap gap-1 border-t border-line px-2 py-1.5">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={<FileText size={12} />}
-                          data-testid="docker-compose-logs"
-                          onClick={() => openProjectLogs(hostId, p.name, p.containers)}
-                        >
-                          Logs
-                        </Button>
-                        {!readOnly &&
-                          (['up', 'restart', 'stop', 'start', 'pull', 'down'] as const).map((a) => (
-                            <Button
-                              key={a}
-                              size="sm"
-                              variant={a === 'down' ? 'danger-ghost' : 'ghost'}
-                              disabled={busy}
-                              data-testid={`docker-compose-${a}`}
-                              onClick={() => {
-                                compose(p, a)
-                              }}
-                            >
-                              {a === 'up'
-                                ? 'Up'
-                                : a === 'down'
-                                  ? 'Down'
-                                  : `${a[0]?.toUpperCase() ?? ''}${a.slice(1)}`}
-                            </Button>
-                          ))}
-                      </div>
-                    </div>
+                      project={p}
+                      busy={busy}
+                      readOnly={readOnly}
+                      openMenu={openMenu}
+                      onLogs={() => openProjectLogs(hostId, p.name, p.containers)}
+                      onAction={(a) => {
+                        compose(p, a)
+                      }}
+                      quick={quick}
+                    />
                   ))}
                 </div>
               )}
@@ -1601,6 +2137,16 @@ export function DockerTab({
             host={publishHost(hostId)}
             stats={samples[one.id] ?? samples[one.id.slice(0, 12)] ?? []}
             actions={containerActions(one)}
+            tab={detailTab}
+            onTabChange={setDetailTab}
+            readOnly={readOnly}
+            onConnect={() => {
+              void load('networks')
+              setDialog({ kind: 'connect', container: one })
+            }}
+            onDisconnect={(network) => {
+              disconnect(network, one)
+            }}
             onClose={() => {
               setSelected(new Set())
             }}
@@ -1615,44 +2161,7 @@ export function DockerTab({
             size={oneImage.size}
             created={oneImage.created}
             request={request}
-            actions={[
-              ...(!readOnly
-                ? [
-                    {
-                      id: 'run',
-                      label: 'Run…',
-                      icon: <Play size={14} />,
-                      run: () => {
-                        setDialog({ kind: 'run', image: imageName(oneImage) })
-                      }
-                    }
-                  ]
-                : []),
-              {
-                id: 'inspect',
-                label: 'Inspect',
-                icon: <Search size={14} />,
-                run: () => {
-                  inspect('image', oneImage.id, imageName(oneImage))
-                }
-              },
-              ...(!readOnly
-                ? [
-                    {
-                      id: 'remove',
-                      label: 'Remove',
-                      icon: <Trash2 size={14} />,
-                      danger: true,
-                      run: () => {
-                        if (window.confirm(`Remove ${imageName(oneImage)}?`))
-                          void run('Remove failed', () =>
-                            request({ op: 'image.remove', id: oneImage.id })
-                          )
-                      }
-                    }
-                  ]
-                : [])
-            ]}
+            actions={imageActions(oneImage)}
             onClose={() => {
               setSelected(new Set())
             }}
@@ -1673,50 +2182,73 @@ export function DockerTab({
       {dialog?.kind === 'prune' && (
         <PruneDialog
           what={dialog.what}
+          all={dialog.all}
           preview={dialog.preview}
           error={dialog.error}
+          onAllChange={(all) => {
+            loadPrunePreview(dialog.what, all)
+          }}
           onClose={() => {
             setDialog(null)
           }}
           onConfirm={() => {
-            const what = dialog.what
+            const { what, all } = dialog
             setDialog(null)
-            void run(
-              'Clean up failed',
-              () => request({ op: 'prune', what, dryRun: false }),
-              'Cleaned up'
-            )
+            void run(t('Clean up failed'), async () => {
+              const r = await request<PruneResult>({
+                op: 'prune',
+                what,
+                dryRun: false,
+                ...(what === 'volumes' || what === 'images' ? { all } : {})
+              })
+              toast.success(
+                r.reclaimed
+                  ? t('Cleaned up — {size} freed', { size: formatBytes(r.reclaimed) })
+                  : t('Cleaned up')
+              )
+              setReloadKey((n) => n + 1)
+            })
           }}
         />
       )}
-      {dialog?.kind === 'pull' && (
-        <PullDialog
-          pull={pull}
+      {dialog?.kind === 'confirm' && (
+        <ConfirmDialog
+          request={dialog.request}
           onClose={() => {
             setDialog(null)
-            setPull(null)
+          }}
+        />
+      )}
+      {dialog?.kind === 'transfer' && (
+        <ImageTransferDialog
+          mode={dialog.mode}
+          initialRef={dialog.ref}
+          {...(dialog.refs ? { refs: dialog.refs } : {})}
+          registries={registries}
+          progress={transfer}
+          onManageRegistries={() => {
+            if (transferRef.current && !transferRef.current.done) return
+            transferRef.current = null
+            setTransfer(null)
+            setDialog({ kind: 'registries' })
+          }}
+          onClose={() => {
+            // Đóng / Stop khi đang kéo / đẩy → huỷ thật ở Session Host (không để luồng chạy ngầm).
+            const current = transferRef.current
+            transferRef.current = null
+            if (current && !current.done) {
+              current.cancelled = true
+              if (current.subscription)
+                void request({ op: 'unsubscribe', subscription: current.subscription }).catch(
+                  () => undefined
+                )
+            }
+            setDialog(null)
+            setTransfer(null)
             void load('images')
           }}
-          onPull={(ref) => {
-            request<{ subscription: string }>({ op: 'image.pull', ref }).then(
-              (r) => {
-                setPull({
-                  subscription: r.subscription,
-                  status: 'Starting…',
-                  progress: null,
-                  done: false
-                })
-              },
-              (e: unknown) => {
-                setPull({
-                  subscription: '',
-                  status: cleanError(e),
-                  progress: null,
-                  done: true,
-                  error: cleanError(e)
-                })
-              }
-            )
+          onStart={(ref, registry) => {
+            startTransfer(dialog.mode, ref, registry)
           }}
         />
       )}
@@ -1729,7 +2261,7 @@ export function DockerTab({
           onRename={(name) => {
             const id = dialog.container.id
             setDialog(null)
-            void run('Rename failed', () => request({ op: 'rename', id, name }))
+            void run(t('Rename failed'), () => request({ op: 'rename', id, name }))
           }}
         />
       )}
@@ -1756,8 +2288,108 @@ export function DockerTab({
             await request({ op: 'run', spec })
             setDialog(null)
             setSection('containers')
-            toast.success(`Started ${spec.name || spec.image}`)
+            toast.success(t('Started {name}', { name: spec.name || spec.image }))
             void load('containers')
+          }}
+        />
+      )}
+      {dialog?.kind === 'volume' && (
+        <CreateVolumeDialog
+          onClose={() => {
+            setDialog(null)
+          }}
+          onCreate={async (spec: VolumeSpec) => {
+            const r = await request<{ name: string }>({ op: 'volume.create', spec })
+            setDialog(null)
+            toast.success(t('Created the volume {name}', { name: r.name }))
+            void load('volumes')
+          }}
+        />
+      )}
+      {dialog?.kind === 'network' && (
+        <CreateNetworkDialog
+          onClose={() => {
+            setDialog(null)
+          }}
+          onCreate={async (spec: NetworkSpec) => {
+            await request({ op: 'network.create', spec })
+            setDialog(null)
+            toast.success(t('Created the network {name}', { name: spec.name }))
+            void load('networks')
+          }}
+        />
+      )}
+      {dialog?.kind === 'connect' && (
+        <ConnectNetworkDialog
+          {...(dialog.container ? { container: dialog.container } : {})}
+          {...(dialog.network ? { network: dialog.network } : {})}
+          containers={containers ?? []}
+          networks={networks ?? []}
+          onClose={() => {
+            setDialog(null)
+          }}
+          onConnect={async (network, container, aliases, ipv4) => {
+            await request({
+              op: 'network.connect',
+              network,
+              container,
+              aliases,
+              ...(ipv4 ? { ipv4 } : {})
+            })
+            setDialog(null)
+            const n = networks?.find((x) => x.id === network)?.name ?? network
+            const c = containers?.find((x) => x.id === container)?.name ?? container
+            toast.success(t('Connected {name} to {network}', { name: c, network: n }))
+            void load('containers')
+          }}
+        />
+      )}
+      {dialog?.kind === 'tag' && (
+        <TagDialog
+          source={imageName(dialog.image)}
+          onClose={() => {
+            setDialog(null)
+          }}
+          onTag={async (target) => {
+            await request({ op: 'image.tag', id: dialog.image.id, target })
+            setDialog(null)
+            toast.success(t('Tagged as {tag}', { tag: target }))
+            void load('images')
+          }}
+        />
+      )}
+      {dialog?.kind === 'registries' && (
+        <RegistriesDialog
+          registries={registries}
+          onTest={(id) =>
+            request<{ status: string }>({ op: 'registry.check', registry: id }).then(
+              (r) => r.status
+            )
+          }
+          onClose={() => {
+            setDialog(null)
+          }}
+        />
+      )}
+      {dialog?.kind === 'build' && (
+        <BuildDialog
+          where={where}
+          storageKey={`docker-build:${hostId ?? 'local'}`}
+          start={(spec: BuildSpec) =>
+            request<{ subscription: string }>({ op: 'build', spec }).then((r) => r.subscription)
+          }
+          cancel={(subscription) => {
+            void request({ op: 'unsubscribe', subscription }).catch(() => undefined)
+          }}
+          subscribe={subscribeEvents}
+          onClose={() => {
+            setDialog(null)
+          }}
+          onBuilt={(tags) => {
+            toast.success(
+              tags.length ? t('Built {tags}', { tags: tags.join(', ') }) : t('Build finished')
+            )
+            void load('images')
           }}
         />
       )}
@@ -1766,30 +2398,133 @@ export function DockerTab({
   )
 }
 
-function QuickButton({
-  label,
-  testId,
-  disabled,
-  onClick,
-  children
+/** Thẻ một Compose project: thao tác chính có nhãn, phần còn lại trong menu "⋯". */
+function ComposeCard({
+  project: p,
+  busy,
+  readOnly,
+  openMenu,
+  onLogs,
+  onAction,
+  quick
 }: {
-  label: string
-  testId: string
-  disabled?: boolean
-  onClick: () => void
-  children: React.ReactNode
+  project: ComposeProject
+  busy: boolean
+  readOnly: boolean
+  openMenu: (
+    event: { clientX: number; clientY: number; preventDefault: () => void },
+    entries: MenuEntry[]
+  ) => void
+  onLogs: () => void
+  onAction: (a: ComposeAction) => void
+  quick: (c: ContainerRow) => React.JSX.Element
 }): React.JSX.Element {
+  const labels = COMPOSE_LABELS()
+  const anyRunning = p.running > 0
+  const anyStopped = p.running < p.containers.length
+  const primary: ComposeAction[] = [
+    'up',
+    'restart',
+    ...(anyRunning ? ['stop' as const] : ['start' as const])
+  ]
+  const icons: Record<ComposeAction, React.ReactNode> = {
+    up: <Play size={12} />,
+    down: <Trash2 size={12} />,
+    start: <Play size={12} />,
+    stop: <Square size={12} />,
+    restart: <RotateCw size={12} />,
+    pull: <ArrowDownToLine size={12} />
+  }
+  const more: ComposeAction[] = [
+    'pull',
+    ...(anyRunning && anyStopped ? ['start' as const] : []),
+    'down'
+  ]
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      data-testid={testId}
-      disabled={disabled}
-      className="inline-flex size-6 items-center justify-center rounded text-faint hover:bg-hover hover:text-fg disabled:pointer-events-none disabled:opacity-30"
-      onClick={onClick}
-    >
-      {children}
-    </button>
+    <div className="rounded-lg border border-line" data-testid="docker-project" data-name={p.name}>
+      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+        <Boxes size={15} className="text-accent" />
+        <span className="flex-1 text-[13px] font-semibold text-fg">{p.name}</span>
+        <Pill tone={p.running === p.containers.length ? 'ok' : p.running ? 'warn' : 'muted'}>
+          {t('{running}/{total} running', { running: p.running, total: p.containers.length })}
+        </Pill>
+      </div>
+      <div className="divide-y divide-line">
+        {p.containers.map((c) => (
+          <div key={c.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+            <span
+              className={cx(
+                'size-1.5 shrink-0 rounded-full',
+                c.state === 'running' ? 'bg-success' : 'bg-line-strong'
+              )}
+              title={stateLabel(c.state)}
+            />
+            <span className="min-w-0 flex-1 truncate text-fg" title={c.name}>
+              {c.service ?? c.name}
+            </span>
+            <HealthPill health={c.health} />
+            <span className="truncate text-faint">{portsText(c)}</span>
+            {quick(c)}
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-1 border-t border-line px-2 py-1.5">
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<FileText size={12} />}
+          data-testid="docker-compose-logs"
+          title={t('Logs of every service in one tab')}
+          onClick={onLogs}
+        >
+          {t('Logs')}
+        </Button>
+        {!readOnly &&
+          primary.map((a) => (
+            <Button
+              key={a}
+              size="sm"
+              variant="ghost"
+              icon={icons[a]}
+              disabled={busy}
+              title={labels[a].title}
+              data-testid={`docker-compose-${a}`}
+              onClick={() => {
+                onAction(a)
+              }}
+            >
+              {labels[a].label}
+            </Button>
+          ))}
+        {!readOnly && (
+          <button
+            type="button"
+            title={t('More actions')}
+            aria-label={t('More actions for {name}', { name: p.name })}
+            aria-haspopup="menu"
+            data-testid="docker-compose-more"
+            disabled={busy}
+            className="ml-auto inline-flex size-7 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-fg disabled:opacity-40"
+            onClick={(e) => {
+              openMenuBelow(
+                e.currentTarget,
+                openMenu,
+                more.map((a) => ({
+                  id: `compose-${a}`,
+                  label: labels[a].label,
+                  icon: icons[a],
+                  ...(a === 'down' ? { danger: true } : {}),
+                  onSelect: () => {
+                    onAction(a)
+                  }
+                }))
+              )
+            }}
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        )}
+      </div>
+    </div>
   )
 }

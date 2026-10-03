@@ -60,6 +60,7 @@ import {
 } from 'simple-icons'
 import { cx } from '../../../renderer/src/components/ui'
 import { TECH } from '../shared/map'
+import { t } from '../../registry/renderer-kit'
 import cm from './icons/k8s/cm.svg'
 import cronjob from './icons/k8s/cronjob.svg'
 import crb from './icons/k8s/crb.svg'
@@ -272,7 +273,7 @@ export function TechIcon({
 export function HelmBadge({ size = 14 }: { size?: number }): React.JSX.Element {
   return (
     <svg viewBox="0 0 24 24" width={size} height={size} aria-label="Helm" role="img">
-      <title>Installed with Helm</title>
+      <title>{t('Installed with Helm')}</title>
       <path d={HELM_LOGO.path} fill={`#${HELM_LOGO.hex}`} />
     </svg>
   )

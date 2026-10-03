@@ -10,6 +10,7 @@ import {
   type TextareaHTMLAttributes
 } from 'react'
 import { X } from 'lucide-react'
+import { t } from '@shared/i18n'
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ')
@@ -201,6 +202,40 @@ export function Field({
   )
 }
 
+/**
+ * Phím mũi tên / Home / End trong nhóm chọn một (radiogroup, tablist): chọn mục kế và chuyển focus
+ * tới nút của nó. Gắn vào onKeyDown của phần tử chứa; các nút là con trực tiếp theo thứ tự `values`.
+ */
+export function choiceKeyDown<T>(
+  e: React.KeyboardEvent<HTMLElement>,
+  values: readonly T[],
+  current: T,
+  onChange: (value: T) => void
+): void {
+  const i = values.indexOf(current)
+  const last = values.length - 1
+  const next =
+    e.key === 'ArrowRight' || e.key === 'ArrowDown'
+      ? i >= last
+        ? 0
+        : i + 1
+      : e.key === 'ArrowLeft' || e.key === 'ArrowUp'
+        ? i <= 0
+          ? last
+          : i - 1
+        : e.key === 'Home'
+          ? 0
+          : e.key === 'End'
+            ? last
+            : null
+  const value = next === null ? undefined : values[next]
+  if (next === null || value === undefined) return
+  e.preventDefault()
+  onChange(value)
+  const button = e.currentTarget.children[next]
+  if (button instanceof HTMLElement) button.focus()
+}
+
 /** Nhóm nút chọn một (segmented control). */
 export function Segmented<T extends string>({
   value,
@@ -214,13 +249,26 @@ export function Segmented<T extends string>({
   testIdPrefix?: string
 }): React.JSX.Element {
   return (
-    <div role="radiogroup" className="inline-flex rounded-md border border-line bg-subtle p-0.5">
+    <div
+      role="radiogroup"
+      className="inline-flex rounded-md border border-line bg-subtle p-0.5"
+      onKeyDown={(e) => {
+        choiceKeyDown(
+          e,
+          options.map((o) => o.value),
+          value,
+          onChange
+        )
+      }}
+    >
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
           role="radio"
           aria-checked={value === o.value}
+          // Roving tabindex: Tab vào nhóm dừng ở mục đang chọn, ←/→ để đổi.
+          tabIndex={value === o.value || !options.some((x) => x.value === value) ? 0 : -1}
           data-testid={testIdPrefix ? `${testIdPrefix}-${o.value}` : undefined}
           className={cx(
             'h-7 rounded px-3 text-xs font-medium transition-colors',
@@ -242,13 +290,29 @@ export function Segmented<T extends string>({
 export type ConnectionState =
   'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'exited'
 
-export const connectionLabel: Record<ConnectionState, string> = {
-  idle: 'Not connected',
-  connecting: 'Connecting…',
-  connected: 'Connected',
-  reconnecting: 'Reconnecting…',
-  disconnected: 'Disconnected',
-  exited: 'Session ended'
+/**
+ * Nhãn trạng thái kết nối — getter để dịch lúc đọc (lúc render), không phải lúc nạp module. Giữ
+ * dạng `connectionLabel[state]` cho nơi dùng.
+ */
+export const connectionLabel: Readonly<Record<ConnectionState, string>> = {
+  get idle() {
+    return t('Not connected')
+  },
+  get connecting() {
+    return t('Connecting…')
+  },
+  get connected() {
+    return t('Connected')
+  },
+  get reconnecting() {
+    return t('Reconnecting…')
+  },
+  get disconnected() {
+    return t('Disconnected')
+  },
+  get exited() {
+    return t('Session ended')
+  }
 }
 
 /** Chấm trạng thái kết nối; đang kết nối thì nhấp nháy nhẹ. */
@@ -333,8 +397,10 @@ const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
 function focusables(root: HTMLElement): HTMLElement[] {
+  // tabIndex < 0: mục không được chọn trong nhóm roving tabindex (Segmented, TabStrip) — vẫn khớp
+  // `button`, nhưng Tab bỏ qua; tính vào sẽ chọn sai phần tử đầu/cuối và focus thoát ra ngoài.
   return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(
-    (el) => el.offsetParent !== null || el === document.activeElement
+    (el) => el.tabIndex >= 0 && (el.offsetParent !== null || el === document.activeElement)
   )
 }
 
@@ -455,7 +521,7 @@ export function Modal({
             <h2 className="text-[15px] font-semibold text-fg">{title}</h2>
             {description && <p className="mt-0.5 text-xs text-muted">{description}</p>}
           </div>
-          <IconButton label="Close" size="sm" onClick={onClose}>
+          <IconButton label={t('Close')} size="sm" onClick={onClose}>
             <X size={15} />
           </IconButton>
         </header>

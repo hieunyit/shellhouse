@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import {
   connect as netConnect,
   createServer,
@@ -28,14 +29,19 @@ interface Runtime {
   channels: Set<Duplex>
   /** Cổng server đang nghe cho forward R (để huỷ). */
   remote: { addr: string; port: number } | null
+  /**
+   * stop / remove / dispose trong lúc đang mở (listen chờ tra DNS, forwardIn chờ server): khi mở
+   * xong phải đóng ngay, không được ghi đè thành 'active' (cổng rò mãi, kể cả sau dispose).
+   */
+  cancelled: boolean
 }
 
 function errorText(error: unknown): string {
   const code = (error as { code?: unknown } | null)?.code
-  if (code === 'EADDRINUSE') return 'The port is already in use by another program'
+  if (code === 'EADDRINUSE') return t('The port is already in use by another program')
   if (code === 'EACCES')
-    return 'Not allowed to open this port (ports below 1024 need administrator rights)'
-  if (code === 'EADDRNOTAVAIL') return 'The bind address does not exist on this machine'
+    return t('Not allowed to open this port (ports below 1024 need administrator rights)')
+  if (code === 'EADDRNOTAVAIL') return t('The bind address does not exist on this machine')
   return error instanceof Error ? error.message : String(error)
 }
 
@@ -84,19 +90,25 @@ export class ForwardManager {
       server: null,
       sockets: new Set(),
       channels: new Set(),
-      remote: null
+      remote: null,
+      cancelled: false
     }
+    if (existing) existing.cancelled = true
     this.forwards.set(spec.id, runtime)
     this.notify(true)
     try {
       if (spec.kind === 'R') await this.startRemote(runtime)
       else await this.startLocal(runtime)
-      if (this.disposed) {
+      if (runtime.cancelled || this.disposed) {
         this.teardown(runtime)
         return
       }
       runtime.status.state = 'active'
     } catch (error) {
+      if (runtime.cancelled || this.disposed) {
+        this.teardown(runtime)
+        return
+      }
       runtime.status.state = 'error'
       runtime.status.error = errorText(error)
       this.teardown(runtime)
@@ -107,6 +119,7 @@ export class ForwardManager {
   stop(id: string): void {
     const runtime = this.forwards.get(id)
     if (!runtime) return
+    runtime.cancelled = true
     this.teardown(runtime)
     runtime.status.state = 'stopped'
     runtime.status.activeConnections = 0
@@ -123,7 +136,10 @@ export class ForwardManager {
   dispose(): void {
     this.disposed = true
     this.client.removeListener('tcp connection', this.onTcpConnection)
-    for (const runtime of this.forwards.values()) this.teardown(runtime)
+    for (const runtime of this.forwards.values()) {
+      runtime.cancelled = true
+      this.teardown(runtime)
+    }
     if (this.notifyTimer) clearTimeout(this.notifyTimer)
   }
 
@@ -139,9 +155,20 @@ export class ForwardManager {
     runtime.server = server
     return new Promise((resolve, reject) => {
       server.once('error', reject)
+      // close() lúc đang tra DNS: Node bỏ luôn lượt listen (callback không bao giờ đến) → không
+      // để start() treo mãi.
+      server.once('close', () => {
+        if (runtime.cancelled) resolve()
+      })
       server.listen(spec.bindPort, spec.bindAddr, () => {
         server.removeListener('error', reject)
         server.on('error', () => undefined)
+        if (runtime.cancelled) {
+          // Đã dừng trong lúc listen (server.close() lúc đó chưa có tác dụng) → đóng ngay.
+          server.close()
+          resolve()
+          return
+        }
         runtime.status.actualPort = (server.address() as AddressInfo).port
         resolve()
       })
@@ -164,11 +191,13 @@ export class ForwardManager {
       port,
       (error, channel) => {
         if (error) {
-          onReady?.(
-            false,
-            /refused/i.test(error.message) ? REPLY.connectionRefused : REPLY.hostUnreachable
-          )
-          socket.destroy()
+          // SOCKS: onReady gửi mã lỗi rồi end() — destroy() ngay sẽ có thể bỏ mất câu trả lời.
+          if (onReady)
+            onReady(
+              false,
+              /refused/i.test(error.message) ? REPLY.connectionRefused : REPLY.hostUnreachable
+            )
+          else socket.destroy()
           return
         }
         if (socket.destroyed) {
@@ -217,9 +246,14 @@ export class ForwardManager {
       }
       const extra = buffer.subarray(request.consumed)
       this.openChannel(runtime, socket, request.host, request.port, (ok, code) => {
+        if (!ok) {
+          socket.end(replyBytes(code))
+          // Client không đóng phía nó → không giữ socket mãi.
+          setTimeout(() => socket.destroy(), SOCKS_HANDSHAKE_TIMEOUT_MS).unref()
+          return
+        }
         socket.write(replyBytes(code))
-        if (!ok) socket.end()
-        else if (extra.length > 0) socket.unshift(extra)
+        if (extra.length > 0) socket.unshift(extra)
       })
     }
     socket.on('data', onData)
@@ -232,10 +266,22 @@ export class ForwardManager {
     return new Promise((resolve, reject) => {
       this.client.forwardIn(spec.bindAddr, spec.bindPort, (error, port) => {
         if (error) {
-          reject(new Error(`The server refused to open the port: ${error.message}`))
+          reject(
+            new Error(t('The server refused to open the port: {error}', { error: error.message }))
+          )
           return
         }
         const actual = port || spec.bindPort
+        if (runtime.cancelled) {
+          // Đã dừng trong lúc chờ server → huỷ cổng vừa mở, không gắn vào runtime đã gỡ.
+          try {
+            this.client.unforwardIn(spec.bindAddr, actual)
+          } catch {
+            // Kết nối đã đóng.
+          }
+          resolve()
+          return
+        }
         runtime.remote = { addr: spec.bindAddr, port: actual }
         runtime.status.actualPort = actual
         resolve()

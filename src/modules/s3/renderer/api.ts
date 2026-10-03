@@ -7,6 +7,9 @@ import type { S3AccountInput, S3AccountSummary, S3Pin } from '../shared/ops'
 export const s3Api = {
   accounts: () => invokeModule<S3AccountSummary[]>('s3', 'accounts'),
   save: (input: S3AccountInput) => invokeModule<MutationResult>('s3', 'save', input),
+  /** Thử kết nối bằng thông tin trong form (chưa cần lưu). */
+  test: (input: S3AccountInput) =>
+    invokeModule<{ ok: boolean; message: string }>('s3', 'test', input),
   delete: (id: string) => invokeModule<undefined>('s3', 'delete', id),
   /** Ghim / bỏ ghim bucket hoặc thư mục lên thanh bên. */
   pin: (accountId: string, pin: S3Pin, pinned: boolean) =>

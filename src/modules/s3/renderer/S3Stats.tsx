@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { addStats, EMPTY_STATS, type S3Op, type S3Stats } from '../shared/ops'
 import { Button, cx, Modal } from '../../../renderer/src/components/ui'
+import { formatNumber, t } from '../../registry/renderer-kit'
 import { cleanError, formatSize } from './format'
 import { eachLimit, runStatsJob } from './stats-job'
 
@@ -97,8 +98,14 @@ export function S3StatsDialog({
 
   return (
     <Modal
-      title={targets.length > 1 ? 'Bucket statistics' : `Size of ${targets[0]?.label ?? ''}`}
-      description="Counts every current object (old versions and unfinished multipart uploads are not included)."
+      title={
+        targets.length > 1
+          ? t('Bucket statistics')
+          : t('Size of {name}', { name: targets[0]?.label ?? '' })
+      }
+      description={t(
+        'Counts every current object (old versions and unfinished multipart uploads are not included).'
+      )}
       onClose={onClose}
       width="max-w-2xl"
       testId="s3-stats"
@@ -111,7 +118,7 @@ export function S3StatsDialog({
                 stopRef.current = true
               }}
             >
-              Stop
+              {t('Stop')}
             </Button>
           ) : (
             <Button
@@ -121,32 +128,32 @@ export function S3StatsDialog({
                 setGeneration((g) => g + 1)
               }}
             >
-              Recalculate
+              {t('Recalculate')}
             </Button>
           )}
           <Button variant="primary" onClick={onClose}>
-            Close
+            {t('Close')}
           </Button>
         </>
       }
     >
-      <div className="max-h-[60vh] overflow-auto" role="table" aria-label="Statistics">
+      <div className="max-h-[60vh] overflow-auto" role="table" aria-label={t('Statistics')}>
         <div
           role="row"
           className="sticky top-0 grid grid-cols-[1fr_7rem_7rem_6rem] gap-2 border-b border-line bg-surface py-1.5 text-xs font-medium text-faint"
         >
-          <span role="columnheader">{targets.length > 1 ? 'Bucket' : 'Location'}</span>
+          <span role="columnheader">{targets.length > 1 ? t('Bucket') : t('Location')}</span>
           <span role="columnheader" className="text-right">
-            Objects
+            {t('Objects')}
           </span>
           <span role="columnheader" className="text-right">
-            Size
+            {t('Size')}
           </span>
           <span role="columnheader" className="text-right">
-            Status
+            {t('Status')}
           </span>
         </div>
-        {targets.map((t, i) => {
+        {targets.map((target, i) => {
           const row = rows[i]
           if (!row) return null
           const classes = Object.entries(row.total.byClass).sort((a, b) => b[1].bytes - a[1].bytes)
@@ -154,23 +161,23 @@ export function S3StatsDialog({
             classes.length > 1 || (classes.length === 1 && classes[0]?.[0] !== 'STANDARD')
           return (
             <div
-              key={`${t.bucket}/${t.prefix}`}
+              key={`${target.bucket}/${target.prefix}`}
               role="row"
               data-testid="s3-stats-row"
-              data-name={t.label}
+              data-name={target.label}
               data-state={row.state}
               className="border-b border-line/60 py-1.5 text-[13px]"
             >
               <div className="grid grid-cols-[1fr_7rem_7rem_6rem] items-center gap-2">
-                <span role="cell" className="truncate font-mono text-xs" title={t.label}>
-                  {t.label}
+                <span role="cell" className="truncate font-mono text-xs" title={target.label}>
+                  {target.label}
                 </span>
                 <span
                   role="cell"
                   className="text-right tabular-nums"
                   data-testid="s3-stats-objects"
                 >
-                  {row.total.objects.toLocaleString('en-US')}
+                  {formatNumber(row.total.objects)}
                 </span>
                 <span role="cell" className="text-right tabular-nums" data-testid="s3-stats-size">
                   {formatSize(row.total.bytes)}
@@ -182,19 +189,18 @@ export function S3StatsDialog({
                     row.state === 'error' ? 'text-danger' : 'text-faint'
                   )}
                 >
-                  {row.state === 'running' && 'Counting…'}
-                  {row.state === 'waiting' && 'Waiting'}
-                  {row.state === 'done' && 'Done'}
-                  {row.state === 'stopped' && 'Stopped'}
-                  {row.state === 'error' && 'Failed'}
+                  {row.state === 'running' && t('Counting…')}
+                  {row.state === 'waiting' && t('Waiting')}
+                  {row.state === 'done' && t('Done')}
+                  {row.state === 'stopped' && t('Stopped')}
+                  {row.state === 'error' && t('Failed')}
                 </span>
               </div>
               {showClasses && (
                 <p className="mt-0.5 text-xs text-faint">
                   {classes
                     .map(
-                      ([cls, v]) =>
-                        `${cls}: ${v.objects.toLocaleString('en-US')} · ${formatSize(v.bytes)}`
+                      ([cls, v]) => `${cls}: ${formatNumber(v.objects)} · ${formatSize(v.bytes)}`
                     )
                     .join('   ')}
                 </p>
@@ -208,8 +214,8 @@ export function S3StatsDialog({
             className="grid grid-cols-[1fr_7rem_7rem_6rem] gap-2 py-2 text-[13px] font-semibold"
             data-testid="s3-stats-total"
           >
-            <span>Total{partial ? ' (incomplete)' : ''}</span>
-            <span className="text-right tabular-nums">{sum.objects.toLocaleString('en-US')}</span>
+            <span>{partial ? t('Total (incomplete)') : t('Total')}</span>
+            <span className="text-right tabular-nums">{formatNumber(sum.objects)}</span>
             <span className="text-right tabular-nums">{formatSize(sum.bytes)}</span>
             <span />
           </div>

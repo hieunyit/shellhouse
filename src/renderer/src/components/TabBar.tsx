@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import {
   Activity,
   ChevronDown,
@@ -19,6 +19,7 @@ import {
   House,
   RotateCcw
 } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { parseQuickConnect } from '@shared/quick-connect'
 import { keybindingFor } from '@shared/commands'
 import { displayKeybinding, isMac } from '../lib/keybindings'
@@ -62,8 +63,8 @@ function QuickConnect(): React.JSX.Element {
           type="text"
           spellCheck={false}
           autoComplete="off"
-          placeholder="Quick connect: user@host:port"
-          aria-label="Quick connect"
+          placeholder={t('Quick connect: user@host:port')}
+          aria-label={t('Quick connect')}
           aria-invalid={invalid}
           data-testid="quick-connect"
           className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-faint"
@@ -78,7 +79,7 @@ function QuickConnect(): React.JSX.Element {
   )
 }
 
-export function TabBar({
+export const TabBar = memo(function TabBar({
   onOpenSnippets,
   onOpenSettings,
   onOpenDiagnostics,
@@ -103,7 +104,11 @@ export function TabBar({
   return (
     <nav className="@container flex h-11 min-w-0 shrink-0 items-center gap-1 overflow-hidden border-b border-line bg-surface px-2">
       <IconButton
-        label={`${sidebarHidden ? 'Show' : 'Hide'} sidebar (${displayKeybinding(keybindingFor('sidebar.toggle', overrides, isMac))})`}
+        label={
+          sidebarHidden
+            ? t('Show sidebar ({key})', { key: key('sidebar.toggle') })
+            : t('Hide sidebar ({key})', { key: key('sidebar.toggle') })
+        }
         data-testid="toggle-sidebar"
         aria-pressed={!sidebarHidden}
         onClick={() => void updateSettings({ appearance: { sidebarHidden: !sidebarHidden } })}
@@ -111,7 +116,7 @@ export function TabBar({
         {sidebarHidden ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
       </IconButton>
       <IconButton
-        label="Home"
+        label={t('Home')}
         data-testid="open-home"
         onClick={() => {
           useTabs.getState().openHome()
@@ -122,8 +127,8 @@ export function TabBar({
       <div className="mx-0.5 h-4 w-px bg-line" />
       <button
         type="button"
-        aria-label="New terminal"
-        title="New terminal"
+        aria-label={t('New terminal')}
+        title={t('New terminal')}
         data-testid="new-tab"
         className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted transition-colors duration-150 hover:bg-hover hover:text-fg"
         onClick={() => addLocal()}
@@ -131,7 +136,7 @@ export function TabBar({
         <Plus size={14} /> Terminal
       </button>
       <IconButton
-        label="Choose a shell"
+        label={t('Choose a shell')}
         size="sm"
         className="-ml-1 size-7"
         data-testid="new-tab-menu"
@@ -145,7 +150,7 @@ export function TabBar({
                 id: `shell-${s.id}`,
                 label: s.name,
                 icon: <SquareTerminal size={14} />,
-                ...(s.id === defaultId ? { hint: 'Default' } : {}),
+                ...(s.id === defaultId ? { hint: t('Default') } : {}),
                 onSelect: () => {
                   addLocal(s.id)
                 }
@@ -158,7 +163,7 @@ export function TabBar({
                   'separator' as const,
                   {
                     id: 'recent-header',
-                    label: 'Recently closed',
+                    label: t('Recently closed'),
                     disabled: true,
                     onSelect: () => undefined
                   },
@@ -178,7 +183,7 @@ export function TabBar({
               'separator',
               {
                 id: 'shell-refresh',
-                label: 'Refresh shell list',
+                label: t('Refresh shell list'),
                 icon: <RefreshCw size={14} />,
                 onSelect: () => void useShells.getState().load(true)
               }
@@ -195,7 +200,7 @@ export function TabBar({
       <span className="hidden @lg:contents">
         <ToolButton
           icon={<LayoutPanelLeft size={15} />}
-          label="Layout"
+          label={t('Layout')}
           labelAt="4xl"
           testId="layout-menu"
           trailing={<ChevronDown size={12} className="hidden text-faint @4xl:inline" />}
@@ -207,14 +212,14 @@ export function TabBar({
               [
                 {
                   id: 'split-right',
-                  label: 'Split right',
+                  label: t('Split right'),
                   icon: <Columns2 size={14} />,
                   hint: key('pane.splitRight'),
                   onSelect: () => split('right')
                 },
                 {
                   id: 'split-below',
-                  label: 'Split down',
+                  label: t('Split down'),
                   icon: <Rows2 size={14} />,
                   hint: key('pane.splitDown'),
                   onSelect: () => split('below')
@@ -227,14 +232,14 @@ export function TabBar({
       <span className="hidden @xl:contents">
         <ToolButton
           icon={<LayoutGrid size={15} />}
-          label="Workspaces"
+          label={t('Workspaces')}
           labelAt="4xl"
           testId="open-workspaces"
           onClick={onOpenWorkspaces}
         />
         <ToolButton
           icon={<ScrollText size={15} />}
-          label="Snippets"
+          label={t('Snippets')}
           labelAt="4xl"
           testId="open-snippets"
           onClick={onOpenSnippets}
@@ -242,13 +247,13 @@ export function TabBar({
       </span>
       <ToolButton
         icon={<Radio size={15} />}
-        label={broadcasting ? 'Exit MultiExec' : 'MultiExec'}
+        label={broadcasting ? t('Exit MultiExec') : 'MultiExec'}
         labelAt="4xl"
         testId="toggle-broadcast"
         title={
           broadcasting
-            ? 'Exit MultiExec'
-            : 'MultiExec: show all terminals and type into them at once'
+            ? t('Exit MultiExec')
+            : t('MultiExec: show all terminals and type into them at once')
         }
         pressed={broadcasting}
         tone={broadcasting ? 'warning' : undefined}
@@ -259,18 +264,22 @@ export function TabBar({
       <QuickConnect />
       <div className="mx-1 h-4 w-px bg-line" />
       <IconButton
-        label="Lock (sessions keep running)"
+        label={t('Lock (sessions keep running)')}
         data-testid="lock-vault"
         onClick={() => void window.shellhouse.lockVault()}
       >
         <Lock size={15} />
       </IconButton>
-      <IconButton label="Diagnostics" data-testid="toggle-diagnostics" onClick={onOpenDiagnostics}>
+      <IconButton
+        label={t('Diagnostics')}
+        data-testid="toggle-diagnostics"
+        onClick={onOpenDiagnostics}
+      >
         <Activity size={15} />
       </IconButton>
-      <IconButton label="Settings" data-testid="open-settings" onClick={onOpenSettings}>
+      <IconButton label={t('Settings')} data-testid="open-settings" onClick={onOpenSettings}>
         <Settings size={15} />
       </IconButton>
     </nav>
   )
-}
+})

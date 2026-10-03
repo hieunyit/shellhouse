@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { cx } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
+import { formatDateTime, formatPercent, formatTime, t } from '../../registry/renderer-kit'
 import type { K8sOp, MetricsRange, MetricsResult } from '../shared/ops'
 import { formatCpu, formatMemory } from '../shared/resources'
 
@@ -22,14 +23,37 @@ const RANGES = [
 const LIVE_MS = 10_000
 const LIVE_KEEP_MS = 60 * 60_000
 
-/** Mẫu trực tiếp theo nhóm pod — sống suốt phiên app, không mất khi đóng / mở tab. */
-const liveStore = new Map<string, { t: number; pods: Record<string, [number, number]> }[]>()
+type LiveSamples = { t: number; pods: Record<string, [number, number]> }[]
+/** Số nhóm pod giữ mẫu mỗi phiên (nhóm đổi khi rollout → khoá mới; bỏ nhóm lâu không xem). */
+const LIVE_GROUPS = 32
+/**
+ * Mẫu trực tiếp theo phiên cluster (`request`) rồi theo nhóm pod — không mất khi đóng / mở chi tiết,
+ * không lẫn giữa hai cluster; Map giữ thứ tự dùng gần nhất (LRU).
+ */
+const liveStores = new WeakMap<Request, Map<string, LiveSamples>>()
+function liveSamples(request: Request, key: string): LiveSamples {
+  let store = liveStores.get(request)
+  if (!store) {
+    store = new Map()
+    liveStores.set(request, store)
+  }
+  const list = store.get(key) ?? []
+  // Đưa lên cuối (mới dùng); vượt giới hạn → bỏ nhóm cũ nhất.
+  store.delete(key)
+  store.set(key, list)
+  while (store.size > LIVE_GROUPS) {
+    const oldest = store.keys().next().value
+    if (oldest === undefined) break
+    store.delete(oldest)
+  }
+  return list
+}
+function saveLiveSamples(request: Request, key: string, list: LiveSamples): void {
+  liveStores.get(request)?.set(key, list)
+}
 
-function fmtTime(t: number, span: number): string {
-  const d = new Date(t)
-  return span > 20 * 3600_000
-    ? d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-    : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+function fmtTime(ms: number, span: number): string {
+  return span > 20 * 3600_000 ? formatDateTime(ms) : formatTime(ms, false)
 }
 
 /** Biểu đồ theo thời gian: vùng + đường, trục giá trị lớn nhất / 0, mốc giờ, rê chuột xem điểm. */
@@ -54,7 +78,7 @@ export function TimeChart({
   if (points.length < 2)
     return (
       <div className="flex h-[96px] items-center justify-center text-[11px] text-faint">
-        Collecting samples…
+        {t('Collecting samples…')}
       </div>
     )
   const t0 = points[0]?.[0] ?? 0
@@ -72,7 +96,7 @@ export function TimeChart({
       <div className="flex justify-between text-[10px] text-faint tabular-nums">
         <span>{format(top / 1.15)}</span>
         {hidden.length > 0 && (
-          <span title="Above the chart's range">
+          <span title={t("Above the chart's range")}>
             {hidden.map((r) => `${r.label} ${format(r.value)}`).join(' · ')}
           </span>
         )}
@@ -83,14 +107,14 @@ export function TimeChart({
         preserveAspectRatio="none"
         className="block h-24 w-full text-accent"
         role="img"
-        aria-label="Usage over time"
+        aria-label={t('Usage over time')}
         onPointerMove={(e) => {
           const r = box.current?.getBoundingClientRect()
           if (!r) return
-          const t = t0 + ((e.clientX - r.left) / r.width) * (t1 - t0)
+          const at = t0 + ((e.clientX - r.left) / r.width) * (t1 - t0)
           let best = 0
           points.forEach((p, i) => {
-            if (Math.abs(p[0] - t) < Math.abs((points[best]?.[0] ?? 0) - t)) best = i
+            if (Math.abs(p[0] - at) < Math.abs((points[best]?.[0] ?? 0) - at)) best = i
           })
           setHover(best)
         }}
@@ -167,7 +191,7 @@ export function TimeChart({
             {fmtTime(hit[0], 0)} · {format(hit[1])}
           </span>
         ) : (
-          <span>now</span>
+          <span>{t('now')}</span>
         )}
       </div>
     </div>
@@ -196,9 +220,31 @@ function useUsage(
   minutes: number
 ): { data: Data | null; error: string | null; unavailable: boolean } {
   const key = `${namespace}|${pods.join(',')}`
-  const [data, setData] = useState<Data | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [unavailable, setUnavailable] = useState(false)
+  const [state, setState] = useState<{
+    key: string
+    data: Data | null
+    error: string | null
+    unavailable: boolean
+  }>({ key: '', data: null, error: null, unavailable: false })
+  // Kết quả của nhóm pod / khoảng thời gian trước không hiện cho nhóm mới.
+  const stateKey = `${key}|${minutes}`
+  const setData = (data: Data): void => {
+    setState((s) => ({ ...s, key: stateKey, data, error: null }))
+  }
+  const setError = (error: string | null): void => {
+    setState((s) =>
+      s.key === stateKey
+        ? { ...s, error }
+        : { key: stateKey, data: null, error, unavailable: false }
+    )
+  }
+  const setUnavailable = (): void => {
+    setState((s) => ({
+      ...(s.key === stateKey ? s : { data: null, error: null }),
+      key: stateKey,
+      unavailable: true
+    }))
+  }
   useEffect(() => {
     if (!pods.length) return
     let cancelled = false
@@ -209,18 +255,18 @@ function useUsage(
         (m) => {
           if (cancelled) return
           if (!m.available) {
-            setUnavailable(true)
+            setUnavailable()
             return
           }
           const now = Date.now()
-          const list = (liveStore.get(key) ?? []).filter((x) => now - x.t < LIVE_KEEP_MS)
+          const list = liveSamples(request, key).filter((x) => now - x.t < LIVE_KEEP_MS)
           const sample: Record<string, [number, number]> = {}
           for (const p of pods) {
             const u = m.items[`${namespace}/${p}`]
             if (u) sample[p] = [u.cpu, u.memory]
           }
           list.push({ t: now, pods: sample })
-          liveStore.set(key, list)
+          saveLiveSamples(request, key, list)
           const cpu: Record<string, Point[]> = {}
           const memory: Record<string, Point[]> = {}
           for (const s of list)
@@ -229,7 +275,6 @@ function useUsage(
               ;(memory[p] ??= []).push([s.t, mem])
             }
           setData({ source: 'live', since: list[0]?.t ?? now, cpu, memory })
-          setError(null)
         },
         (e: unknown) => {
           if (!cancelled) setError(cleanError(e))
@@ -256,25 +301,28 @@ function useUsage(
           const pick = (list: { pod: string; points: Point[] }[]): Record<string, Point[]> =>
             Object.fromEntries(list.map((s) => [s.pod, s.points]))
           setData({ source: 'prometheus', via: r.via, cpu: pick(r.cpu), memory: pick(r.memory) })
-          setError(null)
         },
         () => {
           if (cancelled) return
           // Prometheus lỗi giữa chừng → vẫn có số liệu trực tiếp.
           mode = 'live'
-          setError(null)
           live()
         }
       )
     }
     load()
-    const t = setInterval(load, LIVE_MS)
+    const timer = setInterval(load, LIVE_MS)
     return () => {
       cancelled = true
-      clearInterval(t)
+      clearInterval(timer)
     }
   }, [request, namespace, key, minutes]) // eslint-disable-line react-hooks/exhaustive-deps
-  return { data, error, unavailable }
+  const current = state.key === stateKey ? state : null
+  return {
+    data: current?.data ?? null,
+    error: current?.error ?? null,
+    unavailable: current?.unavailable ?? false
+  }
 }
 
 /** Bảng CPU / RAM cho một nhóm pod (workload) hoặc một pod. */
@@ -308,11 +356,13 @@ export function UsagePanel({
   if (unavailable)
     return (
       <p className="text-xs text-faint" data-testid="k8s-metrics-unavailable">
-        This cluster has no metrics-server or Prometheus — CPU and memory usage are not available.
+        {t(
+          'This cluster has no metrics-server or Prometheus — CPU and memory usage are not available.'
+        )}
       </p>
     )
   if (error) return <p className="text-xs text-danger">{error}</p>
-  if (!data || !totals) return <p className="text-xs text-faint">Loading usage…</p>
+  if (!data || !totals) return <p className="text-xs text-faint">{t('Loading usage…')}</p>
 
   const now = (p: Point[]): number => p.at(-1)?.[1] ?? 0
   const card = (
@@ -334,20 +384,23 @@ export function UsagePanel({
           points={points}
           format={format}
           refs={[
-            { label: 'request', value: req },
-            { label: 'limit', value: lim }
+            { label: t('request'), value: req },
+            { label: t('limit'), value: lim }
           ]}
           testId={testId}
         />
         <div className="mt-1.5 text-[11px] text-faint">
           {req > 0 ? (
             <span className={cx(cur > req && 'text-warning')}>
-              {Math.round((cur / req) * 100)}% of request {format(req)}
+              {t('{percent} of request {value}', {
+                percent: formatPercent(cur / req),
+                value: format(req)
+              })}
             </span>
           ) : (
-            <span className="text-warning">No request set</span>
+            <span className="text-warning">{t('No request set')}</span>
           )}
-          {lim > 0 && <span> · limit {format(lim)}</span>}
+          {lim > 0 && <span> · {t('limit {value}', { value: format(lim) })}</span>}
         </div>
       </div>
     )
@@ -366,7 +419,9 @@ export function UsagePanel({
         <span data-testid="k8s-metrics-source">
           {data.source === 'prometheus'
             ? `Prometheus · ${data.via ?? ''}`
-            : `Live samples every 10 s since ${new Date(data.since ?? 0).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} — no Prometheus in this cluster`}
+            : t('Live samples every 10 s since {time} — no Prometheus in this cluster', {
+                time: formatTime(data.since ?? 0, false)
+              })}
         </span>
         {data.source === 'prometheus' && (
           <div className="ml-auto flex rounded-md border border-line p-0.5" role="group">
@@ -393,7 +448,7 @@ export function UsagePanel({
       <div className="grid grid-cols-[repeat(auto-fit,minmax(15rem,1fr))] gap-2">
         {card('CPU', totals.cpu, formatCpu, requests.cpu, limits.cpu, 'k8s-metrics-cpu')}
         {card(
-          'Memory',
+          t('Memory'),
           totals.memory,
           formatMemory,
           requests.memory,
@@ -404,9 +459,9 @@ export function UsagePanel({
       {podRows.length > 1 && (
         <section>
           <div className="mb-1 grid grid-cols-[minmax(0,1fr)_8rem_8rem] gap-3 text-[11px] font-semibold tracking-wider text-faint uppercase">
-            <span>By pod</span>
+            <span>{t('By pod')}</span>
             <span>CPU</span>
-            <span>Memory</span>
+            <span>{t('Memory')}</span>
           </div>
           <div className="flex flex-col text-xs">
             {podRows.map((r) => (

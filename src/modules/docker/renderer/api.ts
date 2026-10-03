@@ -3,9 +3,16 @@ import {
   onModuleEvent,
   openModuleTab,
   openModuleTerminal,
-  savedHost
+  savedHost,
+  t
 } from '../../registry/renderer-kit'
-import { wslDistroOf, type DockerEndpoint, type WslDistroInfo } from '../shared/ipc'
+import {
+  wslDistroOf,
+  type DockerEndpoint,
+  type DockerRegistry,
+  type RegistryInput,
+  type WslDistroInfo
+} from '../shared/ipc'
 import type { DockerEngineParams, DockerLogsParams } from '../shared/ops'
 
 /** IPC `module:docker:*`. */
@@ -17,6 +24,14 @@ export const dockerApi = {
   setReadOnly: (hostId: string | null, readOnly: boolean) =>
     invokeModule<undefined>('docker', 'setReadOnly', hostId, readOnly),
   wslDistros: () => invokeModule<WslDistroInfo[]>('docker', 'wslDistros'),
+  registries: () => invokeModule<DockerRegistry[]>('docker', 'registries'),
+  saveRegistry: (input: RegistryInput) =>
+    invokeModule<{ ok: true; id: string } | { ok: false; message: string }>(
+      'docker',
+      'saveRegistry',
+      input
+    ),
+  deleteRegistry: (id: string) => invokeModule<undefined>('docker', 'deleteRegistry', id),
   onChanged: (listener: () => void) =>
     onModuleEvent('docker', 'changed', () => {
       listener()
@@ -25,10 +40,10 @@ export const dockerApi = {
 
 /** Tên nguồn: "This computer", "Ubuntu (WSL)" hoặc nhãn host. */
 export function sourceLabel(hostId: string | null | undefined): string {
-  if (!hostId) return 'This computer'
+  if (!hostId) return t('This computer')
   const wsl = wslDistroOf(hostId)
   if (wsl) return `${wsl} (WSL)`
-  return savedHost(hostId)?.label ?? 'Server'
+  return savedHost(hostId)?.label ?? t('Server')
 }
 
 /** Mở tab Docker của một nguồn (và thêm nguồn vào thanh bên nếu chưa có). */
@@ -78,12 +93,14 @@ export function openShell(
   const wsl = wslDistroOf(hostId)
   return openModuleTerminal(
     'docker',
-    `${container.name} (${options.command?.join(' ') ?? 'shell'})`,
+    `${container.name} (${options.command?.join(' ') ?? t('shell')})`,
     {
       container: container.id,
       ...(options.command ? { command: options.command } : {}),
       ...(options.user ? { user: options.user } : {}),
-      ...(wsl ? { wsl } : {})
+      ...(wsl ? { wsl } : {}),
+      // Host SSH: Session Host hỏi main cờ chỉ đọc (chặn shell ở chế độ chỉ đọc).
+      ...(hostId && !wsl ? { hostId } : {})
     },
     // WSL: phiên module trên máy này (không phải host SSH).
     wsl ? undefined : hostId

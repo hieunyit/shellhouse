@@ -3,6 +3,8 @@
  * `caretta_links_observed` = tổng byte đã thấy trên một kết nối client → server từ khi agent chạy.
  * Thuần (Session Host, renderer, test dùng chung): parse, gộp, tính tốc độ, băng lưu lượng cố định.
  */
+import { t } from '@shared/i18n'
+import { formatRate as formatBytesRate } from '@shared/i18n/format'
 
 export interface TrafficPeer {
   ns: string
@@ -120,6 +122,43 @@ export function trafficRates(prev: TrafficSample, cur: TrafficSample): TrafficRa
 }
 
 /**
+ * Tốc độ trung bình trên cả cửa sổ mẫu (cũ → mới): mỗi kết nối lấy từ mẫu SỚM NHẤT mà chuỗi
+ * counter của nó còn liền mạch (có mặt và không giảm tới mẫu mới nhất). Kết nối vừa xuất hiện có số
+ * ngay ở lượt sau (không đợi hết cửa sổ); counter bị đặt lại giữa chừng chỉ tính phần sau lần đặt lại
+ * — không bao giờ ra tốc độ âm hay vọt lên. Khoảng thời gian < 1 giây → bỏ (chia cho số quá nhỏ).
+ */
+export function windowRates(samples: readonly TrafficSample[]): TrafficRate[] {
+  const latest = samples.at(-1)
+  if (!latest || samples.length < 2) return []
+  const older = samples.slice(0, -1).map((x) => ({
+    at: x.at,
+    bytes: new Map(x.links.map((l) => [linkKey(l), l.bytes]))
+  }))
+  const out: TrafficRate[] = []
+  for (const l of latest.links) {
+    const key = linkKey(l)
+    let from: { at: number; bytes: number } | null = null
+    let next = l.bytes
+    for (let i = older.length - 1; i >= 0; i--) {
+      const b = older[i]?.bytes.get(key)
+      if (b === undefined || b > next) break
+      from = { at: older[i]?.at ?? 0, bytes: b }
+      next = b
+    }
+    if (!from) continue
+    const dt = (latest.at - from.at) / 1000
+    if (dt < 1) continue
+    out.push({
+      client: l.client,
+      server: l.server,
+      port: l.port,
+      rate: (l.bytes - from.bytes) / dt
+    })
+  }
+  return out
+}
+
+/**
  * Băng lưu lượng cố định (byte / giây, tuyệt đối — không co giãn theo cluster), nên độ dày / màu so
  * được giữa các cluster.
  */
@@ -137,11 +176,9 @@ export function bandOf(rate: number): number {
   return i < 0 ? BANDS.length - 1 : i
 }
 
+/** Tốc độ theo locale (1.2 MB/s · 1,2 MB/s); dưới 1 B/s là "idle". */
 export function formatRate(rate: number): string {
-  if (rate < 1) return 'idle'
-  if (rate < 1024) return `${rate.toFixed(0)} B/s`
-  if (rate < 1_048_576) return `${(rate / 1024).toFixed(rate < 10_240 ? 1 : 0)} KB/s`
-  return `${(rate / 1_048_576).toFixed(rate < 10_485_760 ? 1 : 0)} MB/s`
+  return rate < 1 ? t('idle') : formatBytesRate(rate)
 }
 
 /** Kind Caretta (Deployment…) → id loại của module (deployments.apps…). */
@@ -210,8 +247,13 @@ export function trafficGraph(rates: readonly TrafficRate[]): TrafficGraph {
     .filter((e) => e.from !== e.to)
   const out = new Map<string, string[]>()
   const indeg = new Map<string, number>([...peers.keys()].map((k) => [k, 0]))
+  const push = (m: Map<string, string[]>, k: string, v: string): void => {
+    const list = m.get(k)
+    if (list) list.push(v)
+    else m.set(k, [v])
+  }
   for (const e of edges) {
-    out.set(e.from, [...(out.get(e.from) ?? []), e.to])
+    push(out, e.from, e.to)
     indeg.set(e.to, (indeg.get(e.to) ?? 0) + 1)
   }
   // Cột = số bước gọi tính từ điểm vào (BFS từ các node không ai gọi tới). Không dùng đường dài
@@ -266,8 +308,8 @@ export function trafficGraph(rates: readonly TrafficRate[]): TrafficGraph {
   reindex()
   const neighbours = new Map<string, string[]>()
   for (const e of edges) {
-    neighbours.set(e.from, [...(neighbours.get(e.from) ?? []), e.to])
-    neighbours.set(e.to, [...(neighbours.get(e.to) ?? []), e.from])
+    push(neighbours, e.from, e.to)
+    push(neighbours, e.to, e.from)
   }
   for (let pass = 0; pass < 4; pass++) {
     for (const c of cols) {

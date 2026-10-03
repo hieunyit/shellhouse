@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { MIN_MASTER_PASSWORD, type VaultSecurity } from '@shared/ipc'
+import { t, tn } from '@shared/i18n'
 import { useSettings } from '../../stores/settings'
 import { Button, Checkbox, Field, Input, Notice, SectionTitle, Select } from '../ui'
 
@@ -14,6 +15,8 @@ export function SecuritySection(): React.JSX.Element {
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')
   const [restorePassword, setRestorePassword] = useState('')
+  /** Đang bật "nhớ trên máy": chờ nhập lại master password. */
+  const [rememberPassword, setRememberPassword] = useState<string | null>(null)
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
 
   useEffect(() => {
@@ -34,22 +37,22 @@ export function SecuritySection(): React.JSX.Element {
 
   const changePassword = async (): Promise<void> => {
     if (next.length < MIN_MASTER_PASSWORD) {
-      say(false, `The new password must be at least ${MIN_MASTER_PASSWORD} characters.`)
+      say(false, t('The new password must be at least {n} characters.', { n: MIN_MASTER_PASSWORD }))
       return
     }
     if (next !== confirm) {
-      say(false, 'The new passwords do not match.')
+      say(false, t('The new passwords do not match.'))
       return
     }
     const result = await window.shellhouse.changeMasterPassword(current, next)
     setCurrent('')
     setNext('')
     setConfirm('')
-    if (result.ok) say(true, 'Master password changed.')
+    if (result.ok) say(true, t('Master password changed.'))
     else
       say(
         false,
-        result.code === 'wrong-password' ? 'The current password is wrong.' : result.message
+        result.code === 'wrong-password' ? t('The current password is wrong.') : result.message
       )
   }
 
@@ -61,33 +64,37 @@ export function SecuritySection(): React.JSX.Element {
         </Notice>
       )}
       <section className="flex flex-col gap-3">
-        <SectionTitle description="Locking only clears the key from memory — open terminals and connections keep running.">
-          Auto-lock
+        <SectionTitle
+          description={t(
+            'Locking only clears the key from memory — open terminals and connections keep running.'
+          )}
+        >
+          {t('Auto-lock')}
         </SectionTitle>
-        <Field label="Lock after the computer is idle for">
+        <Field label={t('Lock after the computer is idle for')}>
           <Select
             className="w-48"
             data-testid="setting-autolock"
             value={s.autoLockMinutes}
             onChange={(e) => void update({ security: { autoLockMinutes: Number(e.target.value) } })}
           >
-            <option value={0}>Never</option>
+            <option value={0}>{t('Never')}</option>
             {[1, 5, 15, 30, 60, 120].map((m) => (
               <option key={m} value={m}>
-                {m} minute{m === 1 ? '' : 's'}
+                {tn(m, '{n} minute', '{n} minutes')}
               </option>
             ))}
           </Select>
         </Field>
         <Checkbox
-          label="Lock when the computer sleeps or the screen locks"
+          label={t('Lock when the computer sleeps or the screen locks')}
           checked={s.lockOnSuspend}
           onChange={(e) => void update({ security: { lockOnSuspend: e.target.checked } })}
         />
       </section>
 
       <section className="flex flex-col gap-3">
-        <SectionTitle>Remember on this device</SectionTitle>
+        <SectionTitle>{t('Remember on this device')}</SectionTitle>
         {security && !security.rememberAvailable && (
           <Notice tone="warning" testId="remember-unavailable">
             {security.rememberUnavailableReason}
@@ -98,25 +105,79 @@ export function SecuritySection(): React.JSX.Element {
           disabled={!security?.rememberAvailable}
           checked={rememberPending ?? security?.rememberEnabled ?? false}
           onChange={(e) => {
-            // Đổi ngay trên giao diện; lưu vào keychain chạy nền, lỗi thì trả lại như cũ.
             const next = e.target.checked
             setRememberPending(next)
-            void window.shellhouse.setRememberOnDevice(next).then((r) => {
+            // Bật: hỏi lại master password trước (main kiểm tra).
+            if (next) {
+              setRememberPassword('')
+              return
+            }
+            // Tắt: đổi ngay trên giao diện; xoá khỏi keychain chạy nền, lỗi thì trả lại như cũ.
+            setRememberPassword(null)
+            void window.shellhouse.setRememberOnDevice(false, null).then((r) => {
               if (!r.ok) say(false, r.message)
               setVersion((v) => v + 1)
             })
           }}
-          label="Open Shellhouse without the master password"
-          description="The vault key is kept in the operating system keychain."
+          label={t('Open Shellhouse without the master password')}
+          description={t('The vault key is kept in the operating system keychain.')}
         />
+        {rememberPassword !== null && (
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const password = rememberPassword
+              if (!password) return
+              setRememberPassword(null)
+              void window.shellhouse.setRememberOnDevice(true, password).then((r) => {
+                if (!r.ok)
+                  say(
+                    false,
+                    r.code === 'wrong-password' ? t('The master password is wrong.') : r.message
+                  )
+                setVersion((v) => v + 1)
+              })
+            }}
+          >
+            <Input
+              type="password"
+              autoFocus
+              autoComplete="current-password"
+              placeholder={t('Master password to confirm')}
+              data-testid="remember-password"
+              value={rememberPassword}
+              onChange={(e) => {
+                setRememberPassword(e.target.value)
+              }}
+            />
+            <Button
+              type="submit"
+              variant="primary"
+              data-testid="remember-confirm"
+              disabled={!rememberPassword}
+            >
+              {t('Turn on')}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setRememberPassword(null)
+                setRememberPending(null)
+              }}
+            >
+              {t('Cancel')}
+            </Button>
+          </form>
+        )}
       </section>
 
       <section className="flex flex-col gap-3">
-        <SectionTitle>Change master password</SectionTitle>
+        <SectionTitle>{t('Change master password')}</SectionTitle>
         <Input
           type="password"
           autoComplete="current-password"
-          placeholder="Current password"
+          placeholder={t('Current password')}
           data-testid="pw-current"
           value={current}
           onChange={(e) => {
@@ -127,7 +188,7 @@ export function SecuritySection(): React.JSX.Element {
           <Input
             type="password"
             autoComplete="new-password"
-            placeholder="New password"
+            placeholder={t('New password')}
             data-testid="pw-next"
             value={next}
             onChange={(e) => {
@@ -137,7 +198,7 @@ export function SecuritySection(): React.JSX.Element {
           <Input
             type="password"
             autoComplete="new-password"
-            placeholder="Confirm new password"
+            placeholder={t('Confirm new password')}
             data-testid="pw-confirm"
             value={confirm}
             onChange={(e) => {
@@ -152,29 +213,33 @@ export function SecuritySection(): React.JSX.Element {
           disabled={!current || !next}
           onClick={() => void changePassword()}
         >
-          Change password
+          {t('Change password')}
         </Button>
       </section>
 
       <section className="flex flex-col gap-3">
-        <SectionTitle description="Contains hosts, keys and snippets. Passwords and keys stay encrypted with the current master password.">
-          Backup
+        <SectionTitle
+          description={t(
+            'Contains hosts, keys and snippets. Passwords and keys stay encrypted with the current master password.'
+          )}
+        >
+          {t('Backup')}
         </SectionTitle>
         <Button
           className="self-start"
           data-testid="backup-export"
           onClick={() => {
             void window.shellhouse.exportBackup().then((r) => {
-              if (r) say(r.ok, r.ok ? `Saved to ${r.path}` : r.message)
+              if (r) say(r.ok, r.ok ? t('Saved to {path}', { path: r.path }) : r.message)
             })
           }}
         >
-          Export backup…
+          {t('Export backup…')}
         </Button>
         <div className="flex gap-2">
           <Input
             type="password"
-            placeholder="Master password of the backup"
+            placeholder={t('Master password of the backup')}
             value={restorePassword}
             onChange={(e) => {
               setRestorePassword(e.target.value)
@@ -189,7 +254,7 @@ export function SecuritySection(): React.JSX.Element {
               })
             }}
           >
-            Restore from file…
+            {t('Restore from file…')}
           </Button>
         </div>
       </section>

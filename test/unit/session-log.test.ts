@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import { safeFileName, sessionLogFor } from '../../src/main/session-log-path'
 import { AnsiStripper, SessionLog } from '../../src/session-host/session/session-log'
@@ -50,8 +50,10 @@ describe('SessionLog', () => {
     const log = new SessionLog({ path, stripAnsi: true, header: '=== start ===' }, () => undefined)
     log.write(bytes('\x1b[31mhello\x1b[0m\r\n'))
     log.close('=== end ===')
-    await new Promise((r) => setTimeout(r, 50))
-    expect(readFileSync(path, 'utf8')).toBe('=== start ===\nhello\n\n=== end ===\n')
+    // Chờ tới khi ghi xong (máy bận: 50 ms cố định không đủ).
+    await vi.waitFor(() => {
+      expect(readFileSync(path, 'utf8')).toBe('=== start ===\nhello\n\n=== end ===\n')
+    })
   })
 
   it('giữ nguyên byte khi không lọc', async () => {
@@ -59,8 +61,10 @@ describe('SessionLog', () => {
     const log = new SessionLog({ path, stripAnsi: false, header: 'h' }, () => undefined)
     log.write(bytes('\x1b[31mred\x1b[0m'))
     log.close('f')
-    await new Promise((r) => setTimeout(r, 50))
-    expect(readFileSync(path, 'utf8')).toBe('h\n\x1b[31mred\x1b[0m\nf\n')
+    // Chờ tới khi ghi xong (máy bận: 50 ms cố định không đủ).
+    await vi.waitFor(() => {
+      expect(readFileSync(path, 'utf8')).toBe('h\n\x1b[31mred\x1b[0m\nf\n')
+    })
   })
 })
 

@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { isAbsolute } from 'node:path'
 import { Hostname, Username } from '@shared/hosts'
 import type { SystemSshSessionSpec } from '@shared/stream-protocol'
@@ -7,10 +8,12 @@ function formatHost(host: string): string {
   return host.includes(':') ? `[${host}]` : host
 }
 
-function checkTarget(t: { host: string; username: string }): void {
+function checkTarget(target: { host: string; username: string }): void {
   // Kiểm tra lại dù zod đã kiểm ở main: đây là ranh giới cuối trước khi thành tham số dòng lệnh.
-  if (!Hostname.safeParse(t.host).success) throw new Error(`Invalid hostname: ${t.host}`)
-  if (!Username.safeParse(t.username).success) throw new Error(`Invalid username: ${t.username}`)
+  if (!Hostname.safeParse(target.host).success)
+    throw new Error(t('Invalid hostname: {value}', { value: target.host }))
+  if (!Username.safeParse(target.username).success)
+    throw new Error(t('Invalid username: {value}', { value: target.username }))
 }
 
 /**
@@ -24,7 +27,7 @@ export function buildSystemSshArgs(
   const args = ['-p', String(spec.target.port), '-l', spec.target.username]
   if (spec.keyFile) {
     if (!isAbsolute(spec.keyFile) || spec.keyFile.startsWith('-')) {
-      throw new Error(`IdentityFile must be an absolute path: ${spec.keyFile}`)
+      throw new Error(t('IdentityFile must be an absolute path: {path}', { path: spec.keyFile }))
     }
     args.push('-i', spec.keyFile)
   }

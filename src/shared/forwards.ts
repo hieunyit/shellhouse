@@ -86,13 +86,22 @@ export function isLoopback(addr: string): boolean {
   return addr === 'localhost' || addr === '::1' || /^127\./.test(addr)
 }
 
+/** Hai đầu của forward dạng chuỗi: `bind` = addr:port đang nghe, `dest` = host:port đích (D: null). */
+export function forwardEndpoints(
+  f: Pick<ForwardSpec, 'kind' | 'bindAddr' | 'bindPort' | 'destHost' | 'destPort'>,
+  actualPort?: number | null
+): { bind: string; dest: string | null } {
+  const port = actualPort ?? f.bindPort
+  const bind = `${f.bindAddr.includes(':') ? `[${f.bindAddr}]` : f.bindAddr}:${port}`
+  if (f.kind === 'D') return { bind, dest: null }
+  return { bind, dest: `${f.destHost ?? '?'}:${f.destPort ?? '?'}` }
+}
+
 export function describeForward(
   f: Pick<ForwardSpec, 'kind' | 'bindAddr' | 'bindPort' | 'destHost' | 'destPort'>,
   actualPort?: number | null
 ): string {
-  const port = actualPort ?? f.bindPort
-  const bind = `${f.bindAddr.includes(':') ? `[${f.bindAddr}]` : f.bindAddr}:${port}`
-  if (f.kind === 'D') return `SOCKS5 ${bind}`
-  const dest = `${f.destHost ?? '?'}:${f.destPort ?? '?'}`
+  const { bind, dest } = forwardEndpoints(f, actualPort)
+  if (f.kind === 'D' || dest === null) return `SOCKS5 ${bind}`
   return f.kind === 'L' ? `${bind} → ${dest}` : `server ${bind} → ${dest}`
 }

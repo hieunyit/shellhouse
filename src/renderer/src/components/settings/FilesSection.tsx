@@ -1,4 +1,5 @@
 import { FolderOpen } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { useSettings } from '../../stores/settings'
 import { Button, Checkbox, Field, Input, Notice, SectionTitle, Select } from '../ui'
 
@@ -10,19 +11,27 @@ export function FilesSection(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-4" data-testid="settings-files">
-      <SectionTitle description="Editing files on a server opens a local copy; every save is uploaded back.">
-        Remote files
+      <SectionTitle
+        description={t(
+          'Editing files on a server opens a local copy; every save is uploaded back.'
+        )}
+      >
+        {t('Remote files')}
       </SectionTitle>
       <Checkbox
-        label="Edit text files in Shellhouse"
-        description="Opens config files, scripts and other text in an editor tab with syntax highlighting; Ctrl+S saves straight to the server. Binary and very large files still open in the editor below."
+        label={t('Edit text files in Shellhouse')}
+        description={t(
+          'Opens config files, scripts and other text in an editor tab with syntax highlighting; Ctrl+S saves straight to the server. Binary and very large files still open in the editor below.'
+        )}
         data-testid="setting-editor-in-app"
         checked={files.inApp}
         onChange={(e) => void update({ files: { inApp: e.target.checked } })}
       />
       <Field
-        label="External editor"
-        hint="Leave empty to use the app your system opens the file type with."
+        label={t('External editor')}
+        hint={t(
+          'Pick a program with Choose…, or keep the system default (the app your system opens the file type with).'
+        )}
       >
         <div className="flex gap-2">
           <Input
@@ -30,27 +39,36 @@ export function FilesSection(): React.JSX.Element {
             readOnly
             className="min-w-0 flex-1"
             data-testid="setting-editor"
-            placeholder="System default"
+            placeholder={t('System default')}
             value={editor}
           />
           <Button
             data-testid="setting-editor-choose"
             onClick={() =>
-              void window.shellhouse.pickProgram().then((program) => {
-                if (program) void update({ files: { editor: program } })
+              // Main mở hộp thoại và tự lưu — renderer không đặt đường dẫn chương trình.
+              void window.shellhouse.chooseEditor().then((next) => {
+                if (next) useSettings.setState({ settings: next, loaded: true })
               })
             }
           >
-            Choose…
+            {t('Choose…')}
           </Button>
           {editor && (
-            <Button variant="ghost" onClick={() => void update({ files: { editor: '' } })}>
-              Use default
+            <Button
+              variant="ghost"
+              data-testid="setting-editor-reset"
+              onClick={() =>
+                void window.shellhouse.resetEditor().then((next) => {
+                  useSettings.setState({ settings: next, loaded: true })
+                })
+              }
+            >
+              {t('Use system default')}
             </Button>
           )}
         </div>
       </Field>
-      <Field label="Double-click a file in SFTP">
+      <Field label={t('Double-click a file in SFTP')}>
         <Select
           className="w-64"
           data-testid="setting-sftp-double-click"
@@ -59,16 +77,23 @@ export function FilesSection(): React.JSX.Element {
             void update({ files: { doubleClick: e.target.value as 'edit' | 'download' } })
           }
         >
-          <option value="edit">Open in editor</option>
-          <option value="download">Download</option>
+          <option value="edit">{t('Open in editor')}</option>
+          <option value="download">{t('Download')}</option>
         </Select>
       </Field>
 
-      <SectionTitle description="How many SFTP requests run at the same time. Higher is faster on fast links and big folders; lower is gentler on small servers. Applies to newly opened tabs. S3 has its own settings in Modules.">
-        Transfers &amp; performance
+      <SectionTitle
+        description={t(
+          'How many SFTP requests run at the same time. Higher is faster on fast links and big folders; lower is gentler on small servers. Applies to newly opened tabs. S3 has its own settings in Modules.'
+        )}
+      >
+        {t('Transfers & performance')}
       </SectionTitle>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="SFTP parallel requests" hint="Browsing, creating and deleting folders">
+        <Field
+          label={t('SFTP parallel requests')}
+          hint={t('Browsing, creating and deleting folders')}
+        >
           <Select
             data-testid="setting-sftp-requests"
             value={String(files.sftpRequests)}
@@ -76,13 +101,15 @@ export function FilesSection(): React.JSX.Element {
           >
             {[2, 4, 8, 12, 16].map((n) => (
               <option key={n} value={n}>
-                {n}
-                {n === 8 ? ' (default)' : ''}
+                {n === 8 ? t('{n} (default)', { n }) : n}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="SFTP files at once" hint="Each file is also sent in pipelined chunks">
+        <Field
+          label={t('SFTP files at once')}
+          hint={t('Each file is also sent in pipelined chunks')}
+        >
           <Select
             data-testid="setting-sftp-transfers"
             value={String(files.sftpTransfers)}
@@ -90,18 +117,19 @@ export function FilesSection(): React.JSX.Element {
           >
             {[1, 2, 3, 4, 6, 8].map((n) => (
               <option key={n} value={n}>
-                {n}
-                {n === 4 ? ' (default)' : ''}
+                {n === 4 ? t('{n} (default)', { n }) : n}
               </option>
             ))}
           </Select>
         </Field>
       </div>
 
-      <SectionTitle description="Save everything a session prints to a text file, one folder per host.">
-        Session logs
+      <SectionTitle
+        description={t('Save everything a session prints to a text file, one folder per host.')}
+      >
+        {t('Session logs')}
       </SectionTitle>
-      <Field label="Record sessions">
+      <Field label={t('Record sessions')}>
         <Select
           className="w-64"
           data-testid="setting-logging-mode"
@@ -110,12 +138,12 @@ export function FilesSection(): React.JSX.Element {
             void update({ logging: { mode: e.target.value as 'off' | 'ssh' | 'all' } })
           }
         >
-          <option value="off">Off</option>
-          <option value="ssh">SSH sessions</option>
-          <option value="all">All sessions (SSH and local)</option>
+          <option value="off">{t('Off')}</option>
+          <option value="ssh">{t('SSH sessions')}</option>
+          <option value="all">{t('All sessions (SSH and local)')}</option>
         </Select>
       </Field>
-      <Field label="Folder" hint="New sessions use the new folder.">
+      <Field label={t('Folder')} hint={t('New sessions use the new folder.')}>
         <div className="flex gap-2">
           <Input
             mono
@@ -128,13 +156,13 @@ export function FilesSection(): React.JSX.Element {
           <Button
             onClick={() =>
               void window.shellhouse
-                .pickFolder('Choose a folder for session logs', 'logs')
+                .pickFolder(t('Choose a folder for session logs'), 'logs')
                 .then((dir) => {
                   if (dir) void update({ logging: { directory: dir } })
                 })
             }
           >
-            Choose…
+            {t('Choose…')}
           </Button>
           <Button
             variant="ghost"
@@ -142,19 +170,20 @@ export function FilesSection(): React.JSX.Element {
             data-testid="open-log-folder"
             onClick={() => void window.shellhouse.openLogFolder()}
           >
-            Open
+            {t('Open')}
           </Button>
         </div>
       </Field>
       <Checkbox
-        label="Plain text (remove colors and terminal control codes)"
+        label={t('Plain text (remove colors and terminal control codes)')}
         checked={logging.stripAnsi}
         onChange={(e) => void update({ logging: { stripAnsi: e.target.checked } })}
       />
       {logging.mode !== 'off' && (
         <Notice tone="warning" testId="logging-warning">
-          Logs contain everything shown in the terminal, including secrets printed on screen. They
-          are stored unencrypted.
+          {t(
+            'Logs contain everything shown in the terminal, including secrets printed on screen. They are stored unencrypted.'
+          )}
         </Notice>
       )}
     </div>

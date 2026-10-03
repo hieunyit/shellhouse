@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { cx } from '../ui'
 import { defaultDir, type SortOption, type SortState } from '../SortMenu'
 
@@ -258,7 +259,7 @@ export function FileTable<T, K extends string>({
         )}
         style={gridStyle}
       >
-        {header(nameSort, 'Name')}
+        {header(nameSort, t('Name'))}
         {columns.map((c) =>
           c.sort ? (
             <Fragment key={c.id}>

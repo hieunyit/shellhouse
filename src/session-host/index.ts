@@ -3,6 +3,7 @@
  * Sẽ chứa mọi kết nối SSH, PTY, SFTP, forwarding. Crash ở đây không làm sập UI;
  * main sẽ tự khởi động lại process này.
  */
+import { dirname } from 'node:path'
 import type { MessagePortMain } from 'electron'
 import {
   HostRequest,
@@ -10,6 +11,7 @@ import {
   type HostKeyCheck,
   type NativeModuleStatus
 } from '@shared/session-host-protocol'
+import { setLanguage } from '@shared/i18n'
 import { checkSessionHostNativeModules } from './selfcheck'
 import { SessionRegistry } from './session/registry'
 import type { SessionPort } from './session/session'
@@ -20,6 +22,15 @@ const port = process.parentPort
 const appVersion =
   process.argv.find((a) => a.startsWith('--app-version='))?.slice('--app-version='.length) ??
   '0.0.0'
+/** Thư mục tạm của "sửa file trên server" (main cấp) — op `edit` chỉ nhận đường dẫn trong đó. */
+const editRoot = process.argv.find((a) => a.startsWith('--edit-dir='))?.slice('--edit-dir='.length)
+
+// Ngôn ngữ giao diện do main truyền (--lang / --locale): lỗi và trạng thái gửi lên UI dịch ở đây.
+function argValue(name: string): string | undefined {
+  return process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
+}
+const uiLanguage = argValue('lang')
+if (uiLanguage === 'vi' || uiLanguage === 'en') setLanguage(uiLanguage, argValue('locale'))
 
 function post(event: HostEvent): void {
   port.postMessage(event)
@@ -54,6 +65,8 @@ const mainRequests = new Map<
 
 const modules = new HostModuleRegistry(HOST_MODULES, {
   log,
+  // --edit-dir=<userData>/remote-edit (main truyền vào): thư mục cha là userData.
+  ...(editRoot ? { appData: dirname(editRoot) } : {}),
   requestMain: (module, name, params) =>
     new Promise((resolve, reject) => {
       const requestId = nextMainRequest++
@@ -72,6 +85,7 @@ const sessions = new SessionRegistry({
   log,
   appVersion,
   modules,
+  ...(editRoot ? { editRoot } : {}),
   hostKeys: {
     check: (host, portNumber, key) =>
       new Promise((resolve) => {

@@ -5,7 +5,7 @@ import { Notice, Select } from '../../../renderer/src/components/ui'
 import { ToolButton } from '../../../renderer/src/components/files/parts'
 import { LogViewer } from '../../../renderer/src/components/LogViewer'
 import { cleanError } from '../../../renderer/src/lib/format'
-import { ConnectionPrompt } from '../../registry/renderer-kit'
+import { ConnectionPrompt, formatNumber, t } from '../../registry/renderer-kit'
 import type { ModuleTabProps } from '../../registry/renderer-types'
 import type { DockerLogsParams, DockerOp, LogsEvent } from '../shared/ops'
 import { useDockerSession } from './useDockerSession'
@@ -26,7 +26,7 @@ export function LogsTab({ tabId, params }: ModuleTabProps<DockerLogsParams>): Re
       if (d.subscription !== subscription.current) return
       if (event === 'logs') feed.push(d.text, d.stream === 'stderr')
       else if (event === 'logs-end')
-        setEnded(d.error ?? 'The log stream ended (the container stopped).')
+        setEnded(d.error ?? t('The log stream ended (the container stopped).'))
     },
     [feed]
   )
@@ -74,7 +74,7 @@ export function LogsTab({ tabId, params }: ModuleTabProps<DockerLogsParams>): Re
         controls={
           <>
             <Select
-              aria-label="Lines to load"
+              aria-label={t('Lines to load')}
               className="h-7 w-28 text-xs"
               value={String(tail)}
               onChange={(e) => {
@@ -83,13 +83,13 @@ export function LogsTab({ tabId, params }: ModuleTabProps<DockerLogsParams>): Re
             >
               {[100, 500, 1000, 5000, 50_000].map((n) => (
                 <option key={n} value={n}>
-                  Last {n.toLocaleString('en')}
+                  {t('Last {n}', { n: formatNumber(n) })}
                 </option>
               ))}
             </Select>
             <ToolButton
               icon={<Clock size={13} />}
-              label="Timestamps"
+              label={t('Timestamps')}
               labelAt="3xl"
               pressed={timestamps}
               testId="docker-logs-timestamps"
@@ -109,7 +109,7 @@ export function LogsTab({ tabId, params }: ModuleTabProps<DockerLogsParams>): Re
               </div>
               <ToolButton
                 icon={<RefreshCw size={13} />}
-                label="Reconnect"
+                label={t('Reconnect')}
                 labelAt="md"
                 onClick={() => {
                   setRestart((r) => r + 1)

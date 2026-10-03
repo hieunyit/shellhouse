@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDownToLine, Copy, Download, Search } from 'lucide-react'
 import type { Line, LogFeed } from '@shared/log-buffer'
+import { t } from '@shared/i18n'
 import { ToolButton } from './files/parts'
 import { cx } from './ui'
 
@@ -130,7 +131,7 @@ export function LogViewer({
           <Search size={13} className="text-faint" />
           <input
             type="search"
-            placeholder="Find in logs…"
+            placeholder={t('Find in logs…')}
             data-testid={`${testIdPrefix}-logs-search`}
             className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint"
             value={query}
@@ -142,7 +143,7 @@ export function LogViewer({
         {controls}
         <ToolButton
           icon={<ArrowDownToLine size={13} />}
-          label={follow ? 'Following' : 'Follow'}
+          label={follow ? t('Following') : t('Follow')}
           labelAt="xl"
           pressed={follow}
           testId={`${testIdPrefix}-logs-follow`}
@@ -153,13 +154,13 @@ export function LogViewer({
         <div className="flex-1" />
         <ToolButton
           icon={<Copy size={13} />}
-          label="Copy"
+          label={t('Copy')}
           labelAt="4xl"
           onClick={() => void window.shellhouse.writeClipboard(feed.text())}
         />
         <ToolButton
           icon={<Download size={13} />}
-          label="Download"
+          label={t('Download')}
           labelAt="4xl"
           onClick={download}
         />
@@ -177,7 +178,7 @@ export function LogViewer({
                 key={name}
                 type="button"
                 aria-pressed={!off}
-                title={off ? `Show ${name}` : `Hide ${name}`}
+                title={off ? t('Show {name}', { name }) : t('Hide {name}', { name })}
                 data-testid={`${testIdPrefix}-log-source`}
                 data-name={name}
                 className={cx(
@@ -217,7 +218,7 @@ export function LogViewer({
                 setHidden(new Set())
               }}
             >
-              Show all
+              {t('Show all')}
             </button>
           )}
         </div>
@@ -234,6 +235,16 @@ export function LogViewer({
         }}
       >
         {snapshot.length === 0 && placeholder}
+        {snapshot.length > 0 && lines.length === 0 && (
+          <div
+            className="px-3 py-2 font-sans text-faint"
+            data-testid={`${testIdPrefix}-logs-empty`}
+          >
+            {q
+              ? t('No lines match “{query}”.', { query: query.trim() })
+              : t('All sources are hidden.')}
+          </div>
+        )}
         <div style={{ height: lines.length * LINE_HEIGHT }} className="relative">
           <div style={{ transform: `translateY(${first * LINE_HEIGHT}px)` }}>
             {lines.slice(first, last).map((l, i) => (

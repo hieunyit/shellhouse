@@ -1,3 +1,4 @@
+import { t, tn } from '@shared/i18n'
 import type { NativeModuleStatus } from '@shared/session-host-protocol'
 import { loadNative } from './native'
 
@@ -16,7 +17,7 @@ async function checkNodePty(): Promise<NativeModuleStatus> {
       const child = pty.spawn(file, args, { cols: 80, rows: 24, env: process.env })
       const timer = setTimeout(() => {
         child.kill()
-        reject(new Error('PTY did not exit within 5 s'))
+        reject(new Error(t('PTY did not exit within 5 s')))
       }, 5_000)
       child.onExit(({ exitCode: code }) => {
         clearTimeout(timer)
@@ -42,7 +43,7 @@ function checkSsh2(): NativeModuleStatus {
       name: 'ssh2',
       process: 'session-host',
       ok,
-      detail: ok ? 'Loaded (pure JS)' : 'Client not found'
+      detail: ok ? t('Loaded (pure JS)') : t('Client not found')
     }
   } catch (error) {
     return { name: 'ssh2', process: 'session-host', ok: false, detail: errorText(error) }
@@ -58,7 +59,7 @@ async function checkSerialport(): Promise<NativeModuleStatus> {
       name: 'serialport',
       process: 'session-host',
       ok: true,
-      detail: `${ports.length} serial port${ports.length === 1 ? '' : 's'} found`
+      detail: tn(ports.length, '{n} serial port found', '{n} serial ports found')
     }
   } catch (error) {
     return { name: 'serialport', process: 'session-host', ok: false, detail: errorText(error) }

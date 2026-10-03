@@ -1,3 +1,4 @@
+import { t, tn } from '@shared/i18n'
 import type { RelatedGroup, RelatedItem, RelatedResult } from '../shared/ops'
 import { selectorString, type K8sObject } from '../shared/resources'
 import { selectorMatches } from '../shared/map'
@@ -115,7 +116,9 @@ export function podSummary(p: K8sObject): string {
     .find((r) => r !== undefined)
   const phase = waiting ?? s(o(p.status)['phase']) ?? 'Pending'
   const restarts = statuses.reduce((n, c) => n + (Number(c['restartCount']) || 0), 0)
-  return `${phase} · ${ready}/${statuses.length || a(o(p.spec)['containers']).length} ready${restarts ? ` · ${restarts} restarts` : ''}`
+  const total = statuses.length || a(o(p.spec)['containers']).length
+  const base = `${phase} · ${t('{ready}/{total} ready', { ready, total })}`
+  return restarts ? `${base} · ${t('{n} restarts', { n: restarts })}` : base
 }
 
 export function serviceSummary(svc: K8sObject): string {
@@ -137,14 +140,14 @@ export function workloadSummary(
   const spec = o(w.spec)
   if (kindId === 'cronjobs.batch')
     return {
-      summary: `${s(spec['schedule']) ?? ''}${spec['suspend'] === true ? ' · suspended' : ''}`,
+      summary: `${s(spec['schedule']) ?? ''}${spec['suspend'] === true ? ` · ${t('suspended')}` : ''}`,
       tone: 'muted'
     }
   if (kindId === 'jobs.batch') {
     const ok = Number(st['succeeded']) || 0
     const want = Number(spec['completions']) || 1
     return {
-      summary: `${ok}/${want} completed`,
+      summary: t('{done}/{total} completed', { done: ok, total: want }),
       tone: ok >= want ? 'ok' : Number(st['failed']) ? 'bad' : 'warn'
     }
   }
@@ -153,7 +156,10 @@ export function workloadSummary(
       ? Number(st['desiredNumberScheduled']) || 0
       : Number(spec['replicas'] ?? 1)
   const ready = Number(kindId === 'daemonsets.apps' ? st['numberReady'] : st['readyReplicas']) || 0
-  return { summary: `${ready}/${want} ready`, tone: ready >= want ? 'ok' : ready ? 'warn' : 'bad' }
+  return {
+    summary: t('{ready}/{total} ready', { ready, total: want }),
+    tone: ready >= want ? 'ok' : ready ? 'warn' : 'bad'
+  }
 }
 
 export const KIND_LABEL: Record<string, string> = {
@@ -174,10 +180,42 @@ export async function listOr(
     return { items: (await client.json<List>('GET', path, signal ? { signal } : {})).items }
   } catch (error) {
     if (error instanceof KubeError && error.status === 403)
-      return { error: 'You are not allowed to list these' }
+      return { error: t('You are not allowed to list these') }
     if (error instanceof KubeError && error.status === 404) return { items: [] }
     return { error: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/**
+ * Đối tượng được tham chiếu theo tên: GET từng cái (vài request nhỏ) thay vì list cả loại trong
+ * namespace — list Secret có thể hàng chục MB (release Helm). Cùng dạng kết quả với listOr: thiếu
+ * quyền → error; không tồn tại → không có trong items.
+ */
+export async function getNamed(
+  client: KubeClient,
+  path: string,
+  names: Iterable<string>,
+  signal?: AbortSignal
+): Promise<{ items: K8sObject[] } | { error: string }> {
+  const results = await Promise.all(
+    [...names].map(async (name): Promise<K8sObject | null | { error: string }> => {
+      try {
+        return await client.json<K8sObject>(
+          'GET',
+          `${path}/${encodeURIComponent(name)}`,
+          signal ? { signal } : {}
+        )
+      } catch (error) {
+        if (error instanceof KubeError && error.status === 404) return null
+        if (error instanceof KubeError && error.status === 403)
+          return { error: t('You are not allowed to read these') }
+        return { error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+  )
+  const failed = results.find((r): r is { error: string } => r !== null && 'error' in r)
+  if (failed) return failed
+  return { items: results.filter((r): r is K8sObject => r !== null && !('error' in r)) }
 }
 
 function group(
@@ -210,7 +248,7 @@ function byName(
       const extra = note?.(name)
       return x
         ? { kind, name, summary: [summary(x), extra].filter(Boolean).join(' · '), tone: 'ok' }
-        : { kind, name, summary: 'Not found in this namespace', tone: 'bad', missing: true }
+        : { kind, name, summary: t('Not found in this namespace'), tone: 'bad', missing: true }
     })
   }
 }
@@ -264,7 +302,7 @@ async function usersOf(
           tone: podTone(p)
         })
   items.sort((x, y) => x.name.localeCompare(y.name))
-  return group('used-by', 'Used by', 'workloads', items, errors[0])
+  return group('used-by', t('Used by'), 'workloads', items, errors[0])
 }
 
 const GATEWAY_API = '/apis/gateway.networking.k8s.io/v1'
@@ -390,7 +428,7 @@ export async function related(
         })
       }
     })
-    groups.push(group('workloads', 'Workloads', 'workloads', workloads))
+    groups.push(group('workloads', t('Workloads'), 'workloads', workloads))
     groups.push(ingressGroup(ingresses, new Set([obj.metadata.name])))
     const routes = await routesWhere(
       client,
@@ -398,7 +436,7 @@ export async function related(
       (r) => routeBackends(r).has(obj.metadata.name),
       signal
     )
-    if (routes.length) groups.push(group('routes', 'Routes (Gateway API)', 'routes', routes))
+    if (routes.length) groups.push(group('routes', t('Routes (Gateway API)'), 'routes', routes))
     return { groups }
   }
 
@@ -409,7 +447,7 @@ export async function related(
       (r) => a(o(r.spec)['parentRefs']).some((p) => s(p['name']) === obj.metadata.name),
       signal
     )
-    groups.push(group('routes', 'Routes', 'routes', routes))
+    groups.push(group('routes', t('Routes'), 'routes', routes))
     return { groups }
   }
 
@@ -456,12 +494,13 @@ export async function related(
         : Promise.resolve(null),
       listOr(client, base('/api/v1', 'services'), signal),
       listOr(client, base('/apis/networking.k8s.io/v1', 'ingresses'), signal),
-      refs.configMaps.size
-        ? listOr(client, base('/api/v1', 'configmaps'), signal)
-        : Promise.resolve({ items: [] }),
-      refs.secrets.size || refs.pullSecrets.size
-        ? listOr(client, base('/api/v1', 'secrets'), signal)
-        : Promise.resolve({ items: [] }),
+      getNamed(client, base('/api/v1', 'configmaps'), refs.configMaps, signal),
+      getNamed(
+        client,
+        base('/api/v1', 'secrets'),
+        new Set([...refs.secrets, ...refs.pullSecrets]),
+        signal
+      ),
       refs.pvcs.size || kindId === 'statefulsets.apps'
         ? listOr(client, base('/api/v1', 'persistentvolumeclaims'), signal)
         : Promise.resolve({ items: [] }),
@@ -472,7 +511,7 @@ export async function related(
       ownerChain(client, namespace, obj, signal)
     ])
 
-  if (owners.length) groups.push(group('owners', 'Owned by', 'owners', owners))
+  if (owners.length) groups.push(group('owners', t('Owned by'), 'owners', owners))
   if (pods)
     groups.push(
       group(
@@ -509,11 +548,8 @@ export async function related(
     )
   )
   groups.push(ingressGroup(ingresses, new Set(matchedServices.map((x) => x.metadata.name))))
-  const cm = byName(
-    refs.configMaps,
-    configMaps,
-    'configmaps',
-    (x) => `${keysOf(x)} key${keysOf(x) === 1 ? '' : 's'}`
+  const cm = byName(refs.configMaps, configMaps, 'configmaps', (x) =>
+    tn(keysOf(x), '{n} key', '{n} keys')
   )
   groups.push(group('configmaps', 'ConfigMaps', 'configmaps', cm.items, cm.error))
   const secretNames = new Set([...refs.secrets, ...refs.pullSecrets])
@@ -521,20 +557,20 @@ export async function related(
     secretNames,
     secrets,
     'secrets',
-    (x) => `${s((x as Obj)['type']) ?? 'Opaque'} · ${keysOf(x)} key${keysOf(x) === 1 ? '' : 's'}`,
-    (name) => (refs.pullSecrets.has(name) && !refs.secrets.has(name) ? 'image pull' : undefined)
+    (x) => `${s((x as Obj)['type']) ?? 'Opaque'} · ${tn(keysOf(x), '{n} key', '{n} keys')}`,
+    (name) => (refs.pullSecrets.has(name) && !refs.secrets.has(name) ? t('image pull') : undefined)
   )
   groups.push(group('secrets', 'Secrets', 'secrets', sec.items, sec.error))
   // StatefulSet: PVC từ volumeClaimTemplates tên "<template>-<statefulset>-<số>".
   const claimTemplates = a(o(obj.spec)['volumeClaimTemplates'])
-    .map((t) => s(o(t['metadata'])['name']))
+    .map((tmpl) => s(o(tmpl['metadata'])['name']))
     .filter(Boolean) as string[]
   const pvcNames = new Set(refs.pvcs)
   if (claimTemplates.length && !('error' in pvcs))
     for (const p of pvcs.items)
       if (
-        claimTemplates.some((t) =>
-          new RegExp(`^${t}-${obj.metadata.name}-\\d+$`).test(p.metadata.name)
+        claimTemplates.some((tmpl) =>
+          new RegExp(`^${tmpl}-${obj.metadata.name}-\\d+$`).test(p.metadata.name)
         )
       )
         pvcNames.add(p.metadata.name)
@@ -544,7 +580,7 @@ export async function related(
     return [s(st['phase']), cap, s(o(x.spec)['storageClassName'])].filter(Boolean).join(' · ')
   })
   groups.push(
-    group('pvcs', 'Persistent volume claims', 'persistentvolumeclaims', pv.items, pv.error)
+    group('pvcs', t('Persistent volume claims'), 'persistentvolumeclaims', pv.items, pv.error)
   )
   if (!('error' in hpas)) {
     const target = obj.kind ?? ''
@@ -559,12 +595,16 @@ export async function related(
         return {
           kind: 'horizontalpodautoscalers.autoscaling',
           name: h.metadata.name,
-          summary: `${txt(spec['minReplicas']) || '1'}–${txt(spec['maxReplicas'])} replicas · now ${cur}`,
+          summary: t('{min}–{max} replicas · now {current}', {
+            min: txt(spec['minReplicas']) || '1',
+            max: txt(spec['maxReplicas']),
+            current: cur
+          }),
           tone: 'ok' as const
         }
       })
     if (items.length)
-      groups.push(group('hpas', 'Autoscalers', 'horizontalpodautoscalers.autoscaling', items))
+      groups.push(group('hpas', t('Autoscalers'), 'horizontalpodautoscalers.autoscaling', items))
   }
   if (!('error' in pdbs)) {
     const items = pdbs.items
@@ -575,20 +615,27 @@ export async function related(
         return {
           kind: 'poddisruptionbudgets.policy',
           name: p.metadata.name,
-          summary: `${spec['minAvailable'] !== undefined ? `min available ${txt(spec['minAvailable'])}` : `max unavailable ${txt(spec['maxUnavailable'])}`}${Number.isFinite(allowed) ? ` · ${allowed} disruptions allowed` : ''}`,
+          summary: [
+            spec['minAvailable'] !== undefined
+              ? t('min available {n}', { n: txt(spec['minAvailable']) })
+              : t('max unavailable {n}', { n: txt(spec['maxUnavailable']) }),
+            Number.isFinite(allowed) ? t('{n} disruptions allowed', { n: allowed }) : ''
+          ]
+            .filter(Boolean)
+            .join(' · '),
           tone: allowed === 0 ? ('warn' as const) : ('ok' as const)
         }
       })
     if (items.length)
-      groups.push(group('pdbs', 'Disruption budgets', 'poddisruptionbudgets.policy', items))
+      groups.push(group('pdbs', t('Disruption budgets'), 'poddisruptionbudgets.policy', items))
   }
   if (refs.serviceAccount && refs.serviceAccount !== 'default')
     groups.push(
-      group('sa', 'Service account', 'serviceaccounts', [
+      group('sa', t('Service account'), 'serviceaccounts', [
         {
           kind: 'serviceaccounts',
           name: refs.serviceAccount,
-          summary: 'Identity of the pods in the cluster',
+          summary: t('Identity of the pods in the cluster'),
           tone: 'muted'
         }
       ])
@@ -624,7 +671,7 @@ function ingressGroup(
       return {
         kind: 'ingresses.networking.k8s.io',
         name: i.metadata.name,
-        summary: hosts.length ? hosts.join(', ') : 'any host',
+        summary: hosts.length ? hosts.join(', ') : t('any host'),
         tone: 'ok' as const
       }
     })
@@ -670,7 +717,7 @@ async function ownerChain(
     out.push({
       kind: k.id,
       name: ref.name,
-      summary: sum ? `${ref.kind} · ${sum.summary}` : `${ref.kind} · not found`,
+      summary: sum ? `${ref.kind} · ${sum.summary}` : `${ref.kind} · ${t('not found')}`,
       tone: sum ? sum.tone : 'bad',
       ...(sum ? {} : { missing: true })
     })

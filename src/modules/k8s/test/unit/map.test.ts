@@ -262,7 +262,8 @@ describe('bản đồ cluster (Map)', () => {
       }
     const t = Date.now()
     const layout = layoutMap(big, { hideSystem: false })
-    expect(Date.now() - t).toBeLessThan(1000)
+    // Thường ~110 ms; trần rộng để không hỏng khi cả bộ test chạy song song trên máy bận.
+    expect(Date.now() - t).toBeLessThan(3000)
     expect(layout.nodes.filter((n) => n.kind === 'pod')).toHaveLength(15000)
     expect(layout.edges).toHaveLength(3000)
   })

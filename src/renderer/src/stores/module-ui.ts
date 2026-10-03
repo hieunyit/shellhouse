@@ -1,8 +1,10 @@
 import { create } from 'zustand'
+import { t, tn } from '@shared/i18n'
 import { manifestOf } from '../../../modules/registry/manifests'
 import { setModuleEnabled } from '../../../modules/registry/renderer-kit'
 import { useTabs } from './tabs'
 import { useSettings } from './settings'
+import { confirmAction } from './confirm'
 
 /**
  * Bật / tắt module từ giao diện (ADR-014 mục 3.12): lần đầu bật → hộp xác nhận liệt kê quyền;
@@ -51,12 +53,20 @@ export async function requestDisableModule(id: string): Promise<boolean> {
   const open = useTabs
     .getState()
     .tabs.filter(
-      (t) =>
-        (t.target.kind === 'module' || t.target.kind === 'module-terminal') &&
-        t.target.module === id
+      (tab) =>
+        (tab.target.kind === 'module' || tab.target.kind === 'module-terminal') &&
+        tab.target.module === id
     ).length
   const name = manifestOf(id)?.name ?? id
-  if (open > 0 && !window.confirm(`Turn off ${name}? Its ${open} open tab(s) will be closed.`))
+  if (
+    open > 0 &&
+    !(await confirmAction({
+      title: t('Turn off {name}?', { name }),
+      message: tn(open, 'Its {n} open tab will be closed.', 'Its {n} open tabs will be closed.'),
+      confirmLabel: t('Turn off'),
+      danger: true
+    }))
+  )
     return false
   await setModuleEnabled(id, false)
   return true

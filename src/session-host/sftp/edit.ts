@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { createHash } from 'node:crypto'
 import { unwatchFile, watch, watchFile, type FSWatcher } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -58,9 +59,9 @@ export class RemoteEdits {
   async open(remotePath: string, localPath: string): Promise<void> {
     // Mở lại cùng file: bỏ theo dõi cũ, tải bản mới nhất.
     this.stop(localPath)
-    const id = this.transfers.enqueue('download', localPath, remotePath, true)
+    const id = this.transfers.enqueue('download', localPath, remotePath, true, { noResume: true })
     const result = await this.transfers.settled(id)
-    if (result.state !== 'done') throw new Error(result.error ?? 'Download was cancelled')
+    if (result.state !== 'done') throw new Error(result.error ?? t('Download was cancelled'))
     const [stats, hash] = await Promise.all([this.sftp.stat(remotePath), hashFile(localPath)])
     if (this.disposed || hash === null) return
 

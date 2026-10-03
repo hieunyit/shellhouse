@@ -2,20 +2,25 @@ import { useRef, useState, type ReactNode, type SyntheticEvent } from 'react'
 import { Logo } from './Logo'
 import { KeyRound, LockKeyhole } from 'lucide-react'
 import { MIN_MASTER_PASSWORD, type VaultResult } from '@shared/ipc'
+import { t } from '@shared/i18n'
 import { useVault } from '../stores/vault'
 import { Button, Input, Notice } from './ui'
 
 function errorText(result: Exclude<VaultResult, { ok: true }>): string {
   switch (result.code) {
     case 'wrong-password':
-      return 'Wrong master password.'
+      return t('Wrong master password.')
     case 'too-short':
-      return `Master password must be at least ${MIN_MASTER_PASSWORD} characters.`
+      return tooShort()
     case 'busy':
-      return 'Still working, please wait.'
+      return t('Still working, please wait.')
     default:
       return result.message
   }
+}
+
+function tooShort(): string {
+  return t('Master password must be at least {n} characters.', { n: MIN_MASTER_PASSWORD })
 }
 
 /** Logo app (cùng kiểu với build/icon.png) kèm huy hiệu nhỏ cho biết đang tạo hay mở khoá. */
@@ -58,11 +63,11 @@ function CreateVault(): React.JSX.Element {
   const submit = async (event: SyntheticEvent): Promise<void> => {
     event.preventDefault()
     if (password.length < MIN_MASTER_PASSWORD) {
-      setError(`Master password must be at least ${MIN_MASTER_PASSWORD} characters.`)
+      setError(tooShort())
       return
     }
     if (password !== confirm) {
-      setError('The passwords do not match.')
+      setError(t('The passwords do not match.'))
       return
     }
     setPending(true)
@@ -77,19 +82,19 @@ function CreateVault(): React.JSX.Element {
   return (
     <Card
       icon={<KeyRound size={12} />}
-      title="Welcome to Shellhouse"
-      subtitle="Create a master password to protect your saved credentials."
+      title={t('Welcome to Shellhouse')}
+      subtitle={t('Create a master password to protect your saved credentials.')}
     >
       <form className="flex flex-col gap-3" onSubmit={(e) => void submit(e)}>
         <p className="text-xs leading-relaxed text-muted">
-          Your master password encrypts every password and SSH key stored in Shellhouse.{' '}
-          <strong className="text-warning">It cannot be recovered if you forget it.</strong>
+          {t('Your master password encrypts every password and SSH key stored in Shellhouse.')}{' '}
+          <strong className="text-warning">{t('It cannot be recovered if you forget it.')}</strong>
         </p>
         <Input
           type="password"
           autoFocus
           autoComplete="new-password"
-          placeholder="Master password"
+          placeholder={t('Master password')}
           data-testid="vault-password"
           value={password}
           onChange={(e) => {
@@ -99,7 +104,7 @@ function CreateVault(): React.JSX.Element {
         <Input
           type="password"
           autoComplete="new-password"
-          placeholder="Confirm password"
+          placeholder={t('Confirm password')}
           data-testid="vault-confirm"
           value={confirm}
           onChange={(e) => {
@@ -118,7 +123,7 @@ function CreateVault(): React.JSX.Element {
           data-testid="vault-submit"
           className="mt-1"
         >
-          {pending ? 'Creating…' : 'Create vault'}
+          {pending ? t('Creating…') : t('Create vault')}
         </Button>
       </form>
     </Card>
@@ -151,8 +156,8 @@ function UnlockVault(): React.JSX.Element {
   return (
     <Card
       icon={<LockKeyhole size={12} />}
-      title="Shellhouse is locked"
-      subtitle="Enter your master password to continue."
+      title={t('Shellhouse is locked')}
+      subtitle={t('Enter your master password to continue.')}
     >
       <form className="flex flex-col gap-3" onSubmit={(e) => void submit(e)}>
         <Input
@@ -160,7 +165,7 @@ function UnlockVault(): React.JSX.Element {
           type="password"
           autoFocus
           autoComplete="current-password"
-          placeholder="Master password"
+          placeholder={t('Master password')}
           data-testid="vault-password"
           value={password}
           onChange={(e) => {
@@ -175,9 +180,11 @@ function UnlockVault(): React.JSX.Element {
           </div>
         )}
         <Button type="submit" variant="primary" disabled={pending} data-testid="vault-submit">
-          {pending ? 'Unlocking…' : 'Unlock'}
+          {pending ? t('Unlocking…') : t('Unlock')}
         </Button>
-        <p className="text-center text-xs text-faint">Open sessions keep running while locked.</p>
+        <p className="text-center text-xs text-faint">
+          {t('Open sessions keep running while locked.')}
+        </p>
       </form>
     </Card>
   )

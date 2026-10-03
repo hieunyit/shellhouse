@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { openInEditor, RemoteEditFiles } from '../../src/main/remote-edit'
@@ -28,12 +28,20 @@ describe('RemoteEditFiles', () => {
     expect(files.owns('relative/path')).toBe(false)
   })
 
-  it('cleanup xoá bản sao của lần chạy trước', () => {
-    const root = join(tempDir(), 'edit')
+  it('cleanup xoá bản sao của lần chạy trước (cả thư mục .old-* sót lại), không đụng bản mới', async () => {
+    const parent = tempDir()
+    const root = join(parent, 'edit')
     const files = new RemoteEditFiles(root)
     const p = files.prepare('f')
-    files.cleanup()
+    mkdirSync(join(parent, 'edit.old-crashed', 'x'), { recursive: true })
+    const done = files.cleanup()
+    const fresh = files.prepare('g') // tạo ngay sau lời gọi, trong lúc đang xoá nền
+    writeFileSync(fresh, 'mới')
+    await done
     expect(existsSync(dirname(p))).toBe(false)
+    expect(existsSync(fresh)).toBe(true)
+    expect(readdirSync(parent)).toEqual(['edit'])
+    await new RemoteEditFiles(join(parent, 'không-có')).cleanup()
   })
 })
 

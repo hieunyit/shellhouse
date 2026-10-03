@@ -27,6 +27,10 @@ import { looksLikePrompt, MACRO_STEP_TIMEOUT_MS, type MacroStep } from '@shared/
 import { loadHistory, recordCommand, suggestRest } from './suggestions'
 import { windowsPty } from '../lib/platform'
 import { shouldProbe } from '../stores/module-ui'
+import { choose } from '../stores/confirm'
+import { t, tn } from '@shared/i18n'
+import { isMultiline, joinPasteLines, pasteLines } from './paste'
+import { createElement } from 'react'
 
 export interface ActivePrompt {
   id: number
@@ -86,6 +90,58 @@ export function terminalOptions(settings: AppSettings, dark: boolean): ITerminal
     scrollOnEraseInDisplay: true,
     theme: theme.colors
   }
+}
+
+const PASTE_PREVIEW_LINES = 8
+
+/**
+ * Hỏi trước khi dán văn bản có xuống dòng (chỉ gọi khi chương trình không bật bracketed paste —
+ * mỗi \n sẽ chạy lệnh). Một dòng có \n ở cuối vẫn hỏi: nó cũng chạy lệnh ngay, đó chính là rủi ro
+ * (copy cả dòng từ trang web) — chỉ đổi lời cho đúng. Focus mặc định ở Cancel: thói quen bấm Enter
+ * không được vô hiệu hoá lời cảnh báo.
+ */
+async function askMultilinePaste(text: string): Promise<string | null> {
+  const lines = pasteLines(text)
+  const single = lines.length === 1
+  const preview = lines.slice(0, PASTE_PREVIEW_LINES)
+  const more = lines.length - preview.length
+  const choice = await choose({
+    title: single
+      ? t('Paste and run this command?')
+      : tn(lines.length, 'Paste {n} line?', 'Paste {n} lines?'),
+    message: single
+      ? t('The text ends with a line break, so the command will run immediately when pasted.')
+      : t('The text contains line breaks. Each line may run as a command as soon as it is pasted.'),
+    details: createElement(
+      'pre',
+      {
+        className:
+          'sh-selectable max-h-48 overflow-auto rounded-md border border-line bg-subtle p-2 font-mono text-[11px] whitespace-pre-wrap break-all text-fg',
+        'data-testid': 'paste-preview'
+      },
+      preview.map((l) => (l.length > 300 ? `${l.slice(0, 300)}…` : l)).join('\n') +
+        (more > 0 ? `\n… ${tn(more, '{n} more line', '{n} more lines')}` : '')
+    ),
+    testId: 'paste-confirm',
+    width: 'max-w-lg',
+    choices: [
+      { value: 'cancel', label: t('Cancel'), autoFocus: true, testId: 'paste-cancel' },
+      {
+        value: 'join',
+        label: single ? t('Paste without running') : t('Paste as one line'),
+        testId: 'paste-join'
+      },
+      {
+        value: 'paste',
+        label: single ? t('Paste and run') : t('Paste'),
+        variant: 'primary',
+        testId: 'paste-ok'
+      }
+    ]
+  })
+  if (choice === 'paste') return text
+  if (choice === 'join') return joinPasteLines(text)
+  return null
 }
 
 /** Một tab terminal: xterm.js + session tới Session Host, tự nối lại khi host khởi động lại. */
@@ -223,32 +279,67 @@ export class TerminalController {
       this.handleHostStatus(s.status)
     })
     // Đổi cài đặt / chế độ sáng-tối của hệ thống → áp dụng ngay.
+    // Chỉ gán tuỳ chọn THỰC SỰ đổi: mọi thay đổi cài đặt (ẩn thanh bên, phím tắt…) đều gọi tới
+    // đây; gán lại `theme` (object mới sau mỗi lần nạp cài đặt) làm xterm dựng lại bảng màu và
+    // texture atlas WebGL của MỌI terminal.
     const apply = (): void => {
       const before = { cols: this.term.cols, rows: this.term.rows }
-      Object.assign(
-        this.term.options,
-        terminalOptions(useSettings.getState().settings, useAppearance.getState().dark)
-      )
-      this.safeFit()
+      const next = terminalOptions(useSettings.getState().settings, useAppearance.getState().dark)
+      const current = this.term.options as Record<string, unknown>
+      let changed = false
+      for (const [key, value] of Object.entries(next) as [string, unknown][]) {
+        const old = current[key]
+        const same =
+          key === 'theme' ? JSON.stringify(old ?? {}) === JSON.stringify(value) : old === value
+        if (same) continue
+        current[key] = value
+        changed = true
+      }
+      if (changed) this.safeFit()
       if (this.term.cols !== before.cols || this.term.rows !== before.rows)
         this.client?.resize(this.term.cols, this.term.rows)
       this.syncStats()
     }
     this.unsubscribeSettings = useSettings.subscribe(apply)
     this.disposables.push({ dispose: useAppearance.subscribe(apply) })
+    // Copy khi chọn: selection đổi liên tục lúc kéo chuột → chỉ ghi clipboard (IPC) khi đã ngừng chọn.
+    let copyTimer: number | null = null
     this.disposables.push(
       this.term.onSelectionChange(() => {
         if (!useSettings.getState().settings.terminal.copyOnSelect) return
-        const text = this.term.getSelection()
-        if (text) void window.shellhouse.writeClipboard(text)
-      })
+        if (copyTimer !== null) window.clearTimeout(copyTimer)
+        copyTimer = window.setTimeout(() => {
+          copyTimer = null
+          if (this.disposed) return
+          const text = this.term.getSelection()
+          if (text) void window.shellhouse.writeClipboard(text)
+        }, 150)
+      }),
+      {
+        dispose: () => {
+          if (copyTimer !== null) window.clearTimeout(copyTimer)
+        }
+      }
     )
+    // Dán từ menu Edit của hệ thống / sự kiện paste của trình duyệt cũng đi qua bước hỏi nhiều dòng.
+    const onPaste = (e: ClipboardEvent): void => {
+      const text = e.clipboardData?.getData('text/plain')
+      if (!text) return
+      e.preventDefault()
+      e.stopImmediatePropagation()
+      void this.pasteText(text)
+    }
+    term.element?.addEventListener('paste', onPaste, { capture: true })
+    this.disposables.push({
+      dispose: () => term.element?.removeEventListener('paste', onPaste, { capture: true })
+    })
     void this.connect()
   }
 
-  activate(): void {
+  /** Đo lại kích thước; `focus` = false khi terminal đang bị che (tab ở chế độ File manager). */
+  activate(focus = true): void {
     this.safeFit()
-    this.term.focus()
+    if (focus) this.term.focus()
   }
 
   /**
@@ -287,9 +378,26 @@ export class TerminalController {
   /** Dán như gõ phím (bracketed paste nếu shell bật) — cũng đi qua MultiExec nếu đang bật. */
   pasteFromClipboard(): void {
     void window.shellhouse.readClipboard().then((text) => {
-      if (text) this.term.paste(text)
-      this.term.focus()
+      if (text) void this.pasteText(text)
+      else this.term.focus()
     })
+  }
+
+  /**
+   * Dán văn bản; nhiều dòng mà chương trình không bật bracketed paste (mỗi dòng sẽ chạy như một
+   * lệnh) → hỏi trước (cài đặt "Warn before pasting multiple lines").
+   */
+  private async pasteText(text: string): Promise<void> {
+    let data: string | null = text
+    if (
+      isMultiline(text) &&
+      !this.term.modes.bracketedPasteMode &&
+      useSettings.getState().settings.terminal.warnMultilinePaste
+    )
+      data = await askMultilinePaste(text)
+    if (this.disposed) return
+    if (data) this.term.paste(data)
+    this.term.focus()
   }
 
   selectAll(): void {
@@ -317,6 +425,7 @@ export class TerminalController {
     for (const d of this.disposables) d.dispose()
     this.client?.close()
     this.client = null
+    this.releaseWebgl()
     this.term.dispose()
   }
 
@@ -627,14 +736,14 @@ export class TerminalController {
    * gửi dòng tiếp. Dừng khi Ctrl+C, mất kết nối, hoặc quá thời gian chờ một bước.
    */
   async runMacro(steps: readonly MacroStep[]): Promise<void> {
-    if (this.macro) throw new Error('A macro is already running in this tab')
+    if (this.macro) throw new Error(t('A macro is already running in this tab'))
     const run = { cancelled: false }
     this.macro = run
     // Đọc qua hàm: `cancelled` đổi từ nơi khác (Ctrl+C) trong lúc chờ — TS không được thu hẹp kiểu.
     const cancelled = (): boolean => run.cancelled
     const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
     const stop = (why: string): void => {
-      this.term.write(`\r\n${YELLOW}[Macro stopped: ${why}]${RESET}\r\n`)
+      this.term.write(`\r\n${YELLOW}[${t('Macro stopped: {reason}', { reason: why })}]${RESET}\r\n`)
     }
     const waitFor = async (done: () => boolean, what: string): Promise<boolean> => {
       const deadline = Date.now() + MACRO_STEP_TIMEOUT_MS
@@ -642,7 +751,12 @@ export class TerminalController {
         if (cancelled() || !this.client) return false
         if (done()) return true
         if (Date.now() > deadline) {
-          stop(`no ${what} after ${MACRO_STEP_TIMEOUT_MS / 1000} s`)
+          stop(
+            t('no {what} after {seconds} s', {
+              what,
+              seconds: String(MACRO_STEP_TIMEOUT_MS / 1000)
+            })
+          )
           return false
         }
         await sleep(100)
@@ -663,14 +777,14 @@ export class TerminalController {
         }
         // Chờ dấu nhắc TRƯỚC khi gửi (bước đầu: phiên có thể còn đang in banner).
         const quiet = (): boolean => performance.now() - this.lastOutputAt > 300
-        if (!(await waitFor(() => quiet() && looksLikePrompt(this.cursorLineText()), 'prompt')))
+        if (!(await waitFor(() => quiet() && looksLikePrompt(this.cursorLineText()), t('prompt'))))
           return
         this.client.input(`${step.line}\r`)
         // Chờ lệnh bắt đầu in (echo) trước khi xét dấu nhắc lần sau.
         await sleep(i === steps.length - 1 ? 0 : 150)
       }
     } finally {
-      if (cancelled()) stop('cancelled')
+      if (cancelled()) stop(t('cancelled'))
       this.macro = null
     }
   }
@@ -689,12 +803,12 @@ export class TerminalController {
   deployKey(
     publicKey: string
   ): Promise<{ status: 'added' | 'exists' | 'error'; message: string | null }> {
-    if (!this.client) return Promise.resolve({ status: 'error', message: 'Not connected' })
+    if (!this.client) return Promise.resolve({ status: 'error', message: t('Not connected') })
     return this.client.deployKey(publicKey)
   }
 
   sftp(op: SftpOp): Promise<unknown> {
-    if (!this.client) return Promise.reject(new Error('Not connected'))
+    if (!this.client) return Promise.reject(new Error(t('Not connected')))
     return this.client.sftp(op)
   }
 
@@ -774,17 +888,22 @@ export class TerminalController {
     if (this.disposed) return
     const wanted = this.visibleInPanel || this.inMultiExec
     if (wanted && !this.webgl && !this.webglUnavailable) this.loadWebgl()
-    else if (!wanted && this.webgl) {
-      // xterm không tự giải phóng WebGL context khi dispose → GPU giữ bộ nhớ tới lúc GC dọn canvas.
-      // Chủ động "lose context" để trả bộ nhớ GPU ngay.
-      const canvases = [...(this.term.element?.querySelectorAll('canvas') ?? [])]
-      this.webgl.dispose()
-      this.webgl = null
-      this.rendererKind = 'dom'
-      for (const canvas of canvases) {
-        const gl = canvas.getContext('webgl2')
-        gl?.getExtension('WEBGL_lose_context')?.loseContext()
-      }
+    else if (!wanted) this.releaseWebgl()
+  }
+
+  /**
+   * xterm không tự giải phóng WebGL context khi dispose → GPU giữ bộ nhớ tới lúc GC dọn canvas.
+   * Chủ động "lose context" để trả bộ nhớ GPU ngay (ẩn tab và đóng tab).
+   */
+  private releaseWebgl(): void {
+    if (!this.webgl) return
+    const canvases = [...(this.term.element?.querySelectorAll('canvas') ?? [])]
+    this.webgl.dispose()
+    this.webgl = null
+    this.rendererKind = 'dom'
+    for (const canvas of canvases) {
+      const gl = canvas.getContext('webgl2')
+      gl?.getExtension('WEBGL_lose_context')?.loseContext()
     }
   }
 
@@ -832,7 +951,7 @@ export class TerminalController {
         void window.shellhouse.closeSession(sessionId).catch(() => undefined)
         return
       }
-      if (this.hadSession) this.term.write(`${DIM}— new session —${RESET}\r\n`)
+      if (this.hadSession) this.term.write(`${DIM}— ${t('new session')} —${RESET}\r\n`)
       this.hadSession = true
       this.hostEpoch = host.restarts
       this.client = new SessionClient(sessionId, port, {
@@ -849,7 +968,7 @@ export class TerminalController {
           this.handleExit(code, reason)
         },
         error: (message) => {
-          this.term.write(`\r\n${YELLOW}Error: ${message}${RESET}\r\n`)
+          this.term.write(`\r\n${YELLOW}${t('Error: {message}', { message })}${RESET}\r\n`)
         },
         status: (phase, detail) => {
           this.term.write(`${DIM}${detail}${RESET}\r\n`)
@@ -909,12 +1028,17 @@ export class TerminalController {
       // Vault khoá (tự khoá khi máy rảnh) → không lấy được mật khẩu đã lưu. Chờ mở khoá rồi tự nối.
       if (/vault is locked/i.test(message)) {
         this.term.write(
-          `\r\n${YELLOW}[The vault is locked — unlock it and this tab reconnects]${RESET}\r\n`
+          `\r\n${YELLOW}[${t('The vault is locked — unlock it and this tab reconnects')}]${RESET}\r\n`
         )
         this.waitForUnlock()
         return
       }
-      this.term.write(`\r\n${YELLOW}Could not open the session: ${message}${RESET}\r\n`)
+      this.term.write(
+        `\r\n${YELLOW}${t('Could not open the session: {message}', { message })}${RESET}\r\n`
+      )
+      // Đang tự nối lại sau khi mất mạng mà mở phiên cũng hỏng → tiếp tục backoff, không dừng ở
+      // lần thử đầu tiên.
+      if (this.target.kind !== 'local' && this.everConnected) this.scheduleReconnect()
     }
   }
 
@@ -1026,8 +1150,8 @@ export class TerminalController {
     this.setState('exited')
     this.term.write(
       this.target.kind !== 'local'
-        ? `\r\n${YELLOW}[Disconnected — press Enter to reconnect]${RESET}\r\n`
-        : `\r\n${YELLOW}[Process exited (code ${code ?? '?'}) — press Enter to restart]${RESET}\r\n`
+        ? `\r\n${YELLOW}[${t('Disconnected — press Enter to reconnect')}]${RESET}\r\n`
+        : `\r\n${YELLOW}[${t('Process exited (code {code}) — press Enter to restart', { code: code ?? '?' })}]${RESET}\r\n`
     )
   }
 
@@ -1046,7 +1170,7 @@ export class TerminalController {
       this.events.onForwards([])
       this.hostEpoch = null
       this.setState('disconnected')
-      this.term.write(`\r\n${YELLOW}— session host is restarting —${RESET}\r\n`)
+      this.term.write(`\r\n${YELLOW}— ${t('session host is restarting')} —${RESET}\r\n`)
     }
     if (host.state === 'running' && this.state === 'disconnected') void this.connect()
   }
@@ -1057,8 +1181,10 @@ export class TerminalController {
     this.reconnectAttempt++
     this.setState('reconnecting')
     this.term.write(
-      `\r\n${YELLOW}[Connection lost — reconnecting in ${Math.round(delay / 1000)} s ` +
-        `(attempt ${this.reconnectAttempt}); press Enter to retry now]${RESET}\r\n`
+      `\r\n${YELLOW}[${t(
+        'Connection lost — reconnecting in {seconds} s (attempt {attempt}); press Enter to retry now',
+        { seconds: Math.round(delay / 1000), attempt: this.reconnectAttempt }
+      )}]${RESET}\r\n`
     )
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null
@@ -1118,8 +1244,9 @@ export class TerminalController {
     }
     const copyPaste = isMac ? event.metaKey && !event.shiftKey : event.ctrlKey && event.shiftKey
     if (!copyPaste) return true
-    if (event.code === 'KeyC' && this.term.hasSelection()) {
-      this.copySelection()
+    if (event.code === 'KeyC') {
+      // Không có vùng chọn: vẫn nuốt phím — không để xterm gửi ký tự lạ vào shell.
+      if (this.term.hasSelection()) this.copySelection()
       return handled()
     }
     if (event.code === 'KeyV') {

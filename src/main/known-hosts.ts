@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { fingerprintSha256, keyTypeOf } from '../node-shared/hostkey'
 import type { Db } from './store/db'
 
@@ -60,9 +60,16 @@ interface OpenSshEntries {
   revoked: Buffer[]
 }
 
-/** Đọc các dòng khớp host trong một file known_hosts dạng OpenSSH. */
-export function parseOpenSshKnownHosts(text: string, host: string, port: number): OpenSshEntries {
-  const result: OpenSshEntries = { normal: [], revoked: [] }
+/** Một dòng known_hosts đã tách trường (chưa so host). */
+interface OpenSshLine {
+  revoked: boolean
+  hosts: string
+  keyType: string
+  keyB64: string
+}
+
+function splitOpenSshKnownHosts(text: string): OpenSshLine[] {
+  const lines: OpenSshLine[] = []
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim()
     if (!line || line.startsWith('#')) continue
@@ -72,20 +79,47 @@ export function parseOpenSshKnownHosts(text: string, host: string, port: number)
     const [hosts, keyType, keyB64] = parts
     if (!hosts || !keyType || !keyB64) continue
     if (marker === '@cert-authority') continue // chưa hỗ trợ CA; bỏ qua thay vì tin nhầm
-    if (!hostFieldMatches(hosts, host, port)) continue
-    const blob = Buffer.from(keyB64, 'base64')
-    if (marker === '@revoked') result.revoked.push(blob)
-    else result.normal.push({ keyType, blob })
+    lines.push({ revoked: marker === '@revoked', hosts, keyType, keyB64 })
+  }
+  return lines
+}
+
+function matchOpenSshLines(
+  lines: readonly OpenSshLine[],
+  host: string,
+  port: number
+): OpenSshEntries {
+  const result: OpenSshEntries = { normal: [], revoked: [] }
+  for (const line of lines) {
+    if (!hostFieldMatches(line.hosts, host, port)) continue
+    const blob = Buffer.from(line.keyB64, 'base64')
+    if (line.revoked) result.revoked.push(blob)
+    else result.normal.push({ keyType: line.keyType, blob })
   }
   return result
 }
 
+/** Đọc các dòng khớp host trong một file known_hosts dạng OpenSSH. */
+export function parseOpenSshKnownHosts(text: string, host: string, port: number): OpenSshEntries {
+  return matchOpenSshLines(splitOpenSshKnownHosts(text), host, port)
+}
+
 /**
  * Kho host key của app (bảng `known_hosts`) + đọc thêm `~/.ssh/known_hosts` (chỉ đọc).
- * Khớp chính xác trong kho của app được ưu tiên: người dùng đã xác nhận thay key ở app
- * thì không bị file OpenSSH cũ báo động mãi.
+ * Key @revoked luôn bị từ chối, kể cả khi đã tin trong kho của app. Sau đó khớp chính xác trong
+ * kho của app được ưu tiên: người dùng đã xác nhận thay key ở app thì không bị file OpenSSH cũ
+ * báo động mãi.
  */
 export class KnownHosts {
+  /**
+   * File OpenSSH đã tách dòng, theo mtime + cỡ: mỗi lần kết nối hỏi nhiều lần (loại key của host
+   * và từng jump host, rồi kiểm key) — không đọc lại cả file trên main process mỗi lần.
+   */
+  private readonly fileCache = new Map<
+    string,
+    { mtimeMs: number; size: number; lines: OpenSshLine[] }
+  >()
+
   constructor(
     private readonly db: Db,
     private readonly openSshFiles: readonly string[] = []
@@ -93,11 +127,11 @@ export class KnownHosts {
 
   check(rawHost: string, port: number, blob: Buffer): HostKeyCheck {
     const host = rawHost.toLowerCase()
-    const app = this.appEntries(host, port)
-    if (app.some((e) => e.blob.equals(blob))) return { status: 'match' }
-
     const openssh = this.openSshEntries(host, port)
     if (openssh.revoked.some((r) => r.equals(blob))) return { status: 'revoked' }
+
+    const app = this.appEntries(host, port)
+    if (app.some((e) => e.blob.equals(blob))) return { status: 'match' }
     if (app.length === 0 && openssh.normal.some((e) => e.blob.equals(blob))) {
       return { status: 'match' }
     }
@@ -144,16 +178,26 @@ export class KnownHosts {
   private openSshEntries(host: string, port: number): OpenSshEntries {
     const all: OpenSshEntries = { normal: [], revoked: [] }
     for (const file of this.openSshFiles) {
-      let text: string
-      try {
-        text = readFileSync(file, 'utf8')
-      } catch {
-        continue
-      }
-      const found = parseOpenSshKnownHosts(text, host, port)
+      const lines = this.openSshLines(file)
+      if (!lines) continue
+      const found = matchOpenSshLines(lines, host, port)
       all.normal.push(...found.normal)
       all.revoked.push(...found.revoked)
     }
     return all
+  }
+
+  private openSshLines(file: string): OpenSshLine[] | null {
+    try {
+      const { mtimeMs, size } = statSync(file)
+      const cached = this.fileCache.get(file)
+      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.lines
+      const lines = splitOpenSshKnownHosts(readFileSync(file, 'utf8'))
+      this.fileCache.set(file, { mtimeMs, size, lines })
+      return lines
+    } catch {
+      this.fileCache.delete(file)
+      return null
+    }
   }
 }

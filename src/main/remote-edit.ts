@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
-import { isAbsolute, join, relative, resolve } from 'node:path'
-import { replaceUnsafeFileChars } from '@shared/file-names'
+import { existsSync, mkdirSync, renameSync, rmSync } from 'node:fs'
+import { readdir, rm } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { safeFileName } from '@shared/file-names'
+import { t } from '@shared/i18n'
 
 /**
  * Thư mục tạm cho "sửa file trên server". Mỗi file một thư mục con ngẫu nhiên (hai file cùng tên
@@ -12,13 +14,33 @@ import { replaceUnsafeFileChars } from '@shared/file-names'
 export class RemoteEditFiles {
   constructor(private readonly root: string) {}
 
-  /** Dọn bản sửa của lần chạy trước (phiên SSH đã đóng thì không còn ai theo dõi chúng). */
-  cleanup(): void {
-    rmSync(this.root, { recursive: true, force: true, maxRetries: 3 })
+  /**
+   * Dọn bản sửa của lần chạy trước (phiên SSH đã đóng thì không còn ai theo dõi chúng). Đổi tên
+   * thư mục ngay (tức thì) rồi xoá nền — không chặn main lúc khởi động với cây file lớn, và bản sửa
+   * mới tạo sau lời gọi này không bị xoá nhầm.
+   */
+  async cleanup(): Promise<void> {
+    const parent = dirname(this.root)
+    const prefix = `${basename(this.root)}.old-`
+    const old = join(parent, `${prefix}${randomUUID()}`)
+    try {
+      renameSync(this.root, old)
+    } catch (error) {
+      // Không có gì để dọn; hoặc Windows không cho đổi tên (editor còn giữ file) → xoá tại chỗ.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+        rmSync(this.root, { recursive: true, force: true, maxRetries: 3 })
+    }
+    // Kể cả thư mục .old-* sót lại từ lần chạy bị tắt ngang giữa chừng.
+    const leftovers = await readdir(parent).catch(() => [] as string[])
+    await Promise.all(
+      leftovers
+        .filter((name) => name.startsWith(prefix))
+        .map((name) => rm(join(parent, name), { recursive: true, force: true, maxRetries: 3 }))
+    )
   }
 
   prepare(remoteName: string): string {
-    const safe = replaceUnsafeFileChars(remoteName).replace(/^\.+$/, '_') || 'file'
+    const safe = safeFileName(remoteName)
     const dir = join(this.root, randomUUID())
     mkdirSync(dir, { recursive: true })
     return join(dir, safe.slice(0, 200))
@@ -46,12 +68,12 @@ export async function openInEditor(path: string, editor: string, deps: OpenDeps)
   const program = editor.trim()
   if (program) {
     if (!existsSync(program) && isAbsolute(program))
-      throw new Error(`The editor was not found: ${program}`)
+      throw new Error(t('The editor was not found: {program}', { program }))
     await new Promise<void>((resolveSpawn, reject) => {
       // Không qua shell: đường dẫn file (tên do server đặt) không bao giờ bị hiểu thành lệnh.
       const child = spawn(program, [path], { detached: true, stdio: 'ignore', shell: false })
       child.once('error', (error) => {
-        reject(new Error(`Could not start the editor: ${error.message}`))
+        reject(new Error(t('Could not start the editor: {error}', { error: error.message })))
       })
       child.once('spawn', () => {
         child.unref()

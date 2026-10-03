@@ -32,8 +32,13 @@ function directConnect(host: string, port: number): Promise<Duplex> {
 
 function service(ctx: HostModuleContext, rawConnect: RawConnect): K8sService {
   return new K8sService({
+    // Kiểm bằng schema trong K8sService.connect (ResolvedClusterSchema).
     resolve: async (ref) => (await ctx.fromMain('resolve', ref)) as ResolvedClusterConfig,
     rawConnect,
+    checkEditFile: async (path) => (await ctx.fromMain('editFile', path)) === true,
+    persistOidc: async (ref, tokens) => {
+      await ctx.fromMain('persistOidc', { ref, ...tokens })
+    },
     spawn: ctx.spawn,
     emit: (event, data) => {
       ctx.emit(event, data)

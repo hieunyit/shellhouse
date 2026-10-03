@@ -17,6 +17,8 @@ import { cx } from '../../../renderer/src/components/ui'
 import { fitLabel, podGrid, workloadKindLabel, type MapNode, type MapTone } from '../shared/map'
 import { BANDS, bandOf, formatRate } from '../shared/traffic'
 import { HelmBadge, KindIcon, TechIcon } from './icons'
+import { t, tn } from '../../registry/renderer-kit'
+import { regionTitle } from './mapModel'
 
 /**
  * Node / cạnh của bản đồ cluster trên React Flow. Trạng thái thay đổi thường (chọn, quan hệ, chỉ
@@ -63,6 +65,8 @@ export type MapFlowEdge = Edge<{
   cross?: boolean
   /** Nhãn khi được làm nổi (Ingress → Service: path). */
   label?: string
+  /** Traffic khác namespace: đi vòng sang phải chừng này px (cạnh phải → cạnh phải). */
+  loop?: number
 }>
 
 function dimmed(ctx: MapCtx, n: MapNode): boolean {
@@ -119,7 +123,8 @@ export const RegionNode = memo(function RegionNode({
   const n = data.node
   const { band } = useMap()
   const far = band === 'far'
-  const regionLabel = fitLabel(n.label, /\s/, n.w * 0.9, 0.8, 1, n.w * 0.06)
+  const title = regionTitle(n.label)
+  const regionLabel = fitLabel(title, /\s/, n.w * 0.9, 0.8, 1, n.w * 0.06)
   // Vùng không có viền: chỉ một mảng nền rất nhạt + nhãn — bớt "hộp lồng hộp".
   return (
     <div
@@ -150,7 +155,7 @@ export const RegionNode = memo(function RegionNode({
             className="text-[12px] font-semibold tracking-[0.16em] uppercase"
             style={{ color: 'var(--map-region-label)' }}
           >
-            {n.label}
+            {title}
           </span>
           <span className="text-[11.5px] text-faint">{n.sub}</span>
         </div>
@@ -164,15 +169,15 @@ function HealthPills({ n }: { n: MapNode }): React.JSX.Element | null {
   const st = n.stats
   if (!st || (!st.bad && !st.warn)) return null
   return (
-    <span className="flex shrink-0 items-center gap-1 text-[10.5px] font-medium tabular-nums">
+    <span className="flex shrink-0 items-center gap-1 text-[11px] font-medium tabular-nums">
       {st.bad > 0 && (
         <span className="rounded-full bg-danger-soft px-1.5 py-px text-danger">
-          {st.bad} failing
+          {tn(st.bad, '{n} failing', '{n} failing')}
         </span>
       )}
       {st.warn > 0 && (
         <span className="rounded-full bg-warning-soft px-1.5 py-px text-warning">
-          {st.warn} degraded
+          {tn(st.warn, '{n} degraded', '{n} degraded')}
         </span>
       )}
     </span>
@@ -215,7 +220,7 @@ export function DonutRing({
       className={cx('shrink-0 -rotate-90', className)}
       style={style}
       role="img"
-      aria-label={`${String(ok)} healthy, ${String(warn)} degraded, ${String(bad)} failing`}
+      aria-label={t('{ok} healthy, {warn} degraded, {bad} failing', { ok, warn, bad })}
       data-testid="k8s-map-health-ring"
     >
       <circle
@@ -370,7 +375,7 @@ export const NamespaceNode = memo(function NamespaceNode({
         data-ns={n.ns}
       >
         <div className="flex items-center gap-1.5">
-          {toggle('Expand', 15)}
+          {toggle(t('Expand'), 15)}
           <KindIcon kind="namespaces" size={16} />
           <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-fg">
             {n.label}
@@ -394,7 +399,7 @@ export const NamespaceNode = memo(function NamespaceNode({
   return (
     <div className={cx(island, 'rounded-[22px]')}>
       <div className="flex h-[34px] items-center gap-2 pr-3.5 pl-2.5">
-        {toggle('Collapse', 15)}
+        {toggle(t('Collapse'), 15)}
         <KindIcon kind="namespaces" size={16} />
         <span className="min-w-0 shrink-[0.15] truncate text-[13.5px] font-semibold tracking-tight text-fg">
           {n.label}
@@ -422,7 +427,7 @@ export const WorkloadNode = memo(function WorkloadNode({
   const g = podGrid(pods.length)
   const helm = n.badges?.includes('Helm')
   const badges = n.badges?.filter((b) => b !== 'Helm') ?? []
-  const kindLabel = n.ref ? workloadKindLabel(n.ref.kind) : 'Pods'
+  const kindLabel = n.ref ? workloadKindLabel(n.ref.kind) : t('Pods')
   const cron = n.ref?.kind === 'cronjobs.batch'
   const job = n.ref?.kind === 'jobs.batch'
   return (
@@ -444,18 +449,18 @@ export const WorkloadNode = memo(function WorkloadNode({
         {n.tech && <TechIcon tech={n.tech} size={16} />}
         {n.replicas && !cron && !job && (
           <span
-            className="shrink-0 rounded-md px-1.5 py-px font-mono text-[10.5px] font-semibold tabular-nums"
+            className="shrink-0 rounded-md px-1.5 py-px font-mono text-[11px] font-semibold tabular-nums"
             style={{
               color: LED[n.tone],
               background: `color-mix(in srgb, ${LED[n.tone]} 13%, transparent)`
             }}
-            title="Ready / desired pods"
+            title={t('Ready / desired pods')}
           >
             {n.replicas.ready}/{n.replicas.desired}
           </span>
         )}
       </div>
-      <div className="flex h-[16px] items-center gap-1 pr-2 pl-[26px] text-[10.5px] text-faint">
+      <div className="flex h-[16px] items-center gap-1 pr-2 pl-[26px] text-[11px] text-faint">
         <span className="shrink-0">{kindLabel}</span>
         {(cron || job || !n.replicas) && n.status && (
           <span className="min-w-0 truncate font-mono">· {n.status}</span>
@@ -465,7 +470,7 @@ export const WorkloadNode = memo(function WorkloadNode({
         {badges.map((b) => (
           <span
             key={b}
-            className="shrink-0 rounded border border-line px-1 text-[9.5px] font-medium text-muted"
+            className="shrink-0 rounded border border-line px-1 text-[11px] font-medium text-muted"
           >
             {b}
           </span>
@@ -537,7 +542,7 @@ export const PillNode = memo(function PillNode({
     >
       <KindIcon kind={n.ref?.kind ?? PILL_KIND[n.kind] ?? 'services'} size={15} />
       <span className="min-w-0 truncate text-[11.5px] font-medium text-fg">{n.label}</span>
-      <span className="min-w-0 flex-1 truncate text-right font-mono text-[9.5px] text-faint">
+      <span className="min-w-0 flex-1 truncate text-right font-mono text-[11px] text-faint">
         {n.sub}
       </span>
       <Handles />
@@ -569,8 +574,9 @@ export const MapEdgeComp = memo(function MapEdgeComp(
   const ctx = useMap()
   const d = props.data
   const traffic = d?.kind === 'traffic'
-  const [path, lx, ly] =
-    traffic || d?.cross
+  const [path, lx, ly] = d?.loop
+    ? loopPath(props.sourceX, props.sourceY, props.targetX, props.targetY, d.loop)
+    : traffic || d?.cross
       ? getBezierPath(props)
       : getSmoothStepPath({ ...props, borderRadius: 12, offset: 16 })
   const focusing = ctx.related.size > 0
@@ -634,7 +640,7 @@ export const MapEdgeComp = memo(function MapEdgeComp(
         {(hot || props.selected) && (
           <EdgeLabelRenderer>
             <div
-              className="pointer-events-none absolute rounded-md border px-1.5 py-0.5 text-[10px] font-semibold text-fg tabular-nums shadow"
+              className="pointer-events-none absolute rounded-md border px-1.5 py-0.5 text-[11px] font-semibold text-fg tabular-nums shadow"
               style={{
                 transform: `translate(-50%, -50%) translate(${String(lx)}px, ${String(ly)}px)`,
                 background: 'var(--map-card)',
@@ -667,7 +673,7 @@ export const MapEdgeComp = memo(function MapEdgeComp(
       {hot && d?.label && (
         <EdgeLabelRenderer>
           <div
-            className="pointer-events-none absolute max-w-56 truncate rounded-md border px-1.5 py-0.5 font-mono text-[10px] text-fg shadow"
+            className="pointer-events-none absolute max-w-56 truncate rounded-md border px-1.5 py-0.5 font-mono text-[11px] text-fg shadow"
             style={{
               transform: `translate(-50%, -50%) translate(${String(lx)}px, ${String(ly)}px)`,
               background: 'var(--map-card)',
@@ -684,5 +690,22 @@ export const MapEdgeComp = memo(function MapEdgeComp(
 })
 
 export const EDGE_TYPES = { map: MapEdgeComp }
+
+/** Đường cong đi vòng ra bên phải (cạnh phải nguồn → cạnh phải đích). */
+function loopPath(
+  sx: number,
+  sy: number,
+  tx: number,
+  ty: number,
+  loop: number
+): [string, number, number] {
+  // Đỉnh của đường cong (t = 0.5) nằm ở max(sx, tx) + loop: hai điểm điều khiển cùng hoành độ
+  // c → x(0.5) = (sx + tx) / 8 + 3c / 4.
+  const peak = Math.max(sx, tx) + loop
+  const cx = (peak - (sx + tx) / 8) / 0.75
+  const path = `M${String(sx)},${String(sy)} C${String(cx)},${String(sy)} ${String(cx)},${String(ty)} ${String(tx)},${String(ty)}`
+  // Điểm giữa của đường cong bậc ba (t = 0.5) — chỗ đặt nhãn tốc độ.
+  return [path, (sx + tx) / 8 + (3 * cx) / 4, (sy + ty) / 2]
+}
 
 export { workloadKindLabel }

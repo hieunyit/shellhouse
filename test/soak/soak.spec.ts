@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { startChaosProxy } from '../integration/chaos-proxy'
 import { startTestSshServer } from '../integration/ssh-test-server'
-import { launchApp } from '../e2e/fixtures'
+import { confirmTabClose, launchApp } from '../e2e/fixtures'
 
 const MINUTES = Number(process.env['SOAK_MINUTES'] ?? 5)
 const SAMPLE_EVERY_MS = Number(process.env['SOAK_SAMPLE_MS'] ?? 20_000)
@@ -190,6 +190,8 @@ test('soak: tải hỗn hợp liên tục, không rò rỉ bộ nhớ / handle',
         await page
           .locator(`[data-testid="tab"][data-tab-id="${churn}"] [data-testid="tab-close"]`)
           .click({ force: true })
+        // Đang kết nối thì hỏi xác nhận; qua proxy chập chờn có thể đã rớt → không hỏi.
+        await confirmTabClose(page, { optional: true })
       }
       await page.waitForTimeout(1_000)
 

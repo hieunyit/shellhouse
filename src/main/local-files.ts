@@ -35,3 +35,32 @@ export async function listLocal(path: string | null, home: string): Promise<Loca
     truncated: dirents.length > MAX_ENTRIES
   }
 }
+
+/** Giữ chừng này thư mục gần nhất (một phiên duyệt rất dài cũng không phình bộ nhớ). */
+const MAX_LISTED_DIRS = 2000
+
+/**
+ * Thư mục renderer đã liệt kê qua `local:list` trong phiên này. `local:trash` chỉ nhận mục nằm
+ * NGAY TRONG một thư mục như vậy — renderer bị chiếm quyền không xoá được file bất kỳ trên máy
+ * (người dùng đã xác nhận trong LocalPanel, main không hỏi lại).
+ */
+export class ListedDirs {
+  private readonly dirs = new Set<string>()
+
+  remember(dir: string): void {
+    this.dirs.delete(dir)
+    this.dirs.add(dir)
+    if (this.dirs.size > MAX_LISTED_DIRS) {
+      const oldest = this.dirs.values().next().value
+      if (oldest !== undefined) this.dirs.delete(oldest)
+    }
+  }
+
+  /** Mục con trực tiếp của một thư mục đã liệt kê (không phải chính thư mục / gốc ổ đĩa). */
+  allows(path: string): boolean {
+    if (!isAbsolute(path)) return false
+    const full = resolve(path)
+    const parent = dirname(full)
+    return parent !== full && this.dirs.has(parent)
+  }
+}

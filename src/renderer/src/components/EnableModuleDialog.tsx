@@ -1,4 +1,5 @@
 import { ShieldCheck } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { manifestOf } from '../../../modules/registry/manifests'
 import { ModuleIcon } from '../../../modules/registry/renderer-kit'
 import { confirmEnableModule, useModuleUi } from '../stores/module-ui'
@@ -15,21 +16,21 @@ export function EnableModuleDialog(): React.JSX.Element | null {
   }
   return (
     <Modal
-      title={`Enable ${manifest.name}?`}
-      description={manifest.summary}
+      title={t('Enable {name}?', { name: manifest.name })}
+      description={t(manifest.summary)}
       onClose={close}
       testId="module-enable-dialog"
       footer={
         <>
           <Button variant="ghost" onClick={close}>
-            Cancel
+            {t('Cancel')}
           </Button>
           <Button
             variant="primary"
             data-testid="module-enable-confirm"
             onClick={() => void confirmEnableModule(id)}
           >
-            Enable
+            {t('Enable')}
           </Button>
         </>
       }
@@ -41,7 +42,7 @@ export function EnableModuleDialog(): React.JSX.Element | null {
         </p>
         <div>
           <p className="mb-1 flex items-center gap-1.5 font-medium text-fg">
-            <ShieldCheck size={14} /> This module:
+            <ShieldCheck size={14} /> {t('This module:')}
           </p>
           <ul className="flex flex-col gap-1 text-fg">
             {permissionLines(manifest).map((line) => (

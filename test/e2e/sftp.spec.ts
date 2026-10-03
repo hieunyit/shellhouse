@@ -217,7 +217,7 @@ test('editor trong app: bấm đúp file cấu hình, tô màu, Ctrl+S lưu th�
   // Home của CodeMirror dừng sau phần thụt lề → chỉ thay phần chữ.
   await page.keyboard.press('Shift+Home')
   await page.keyboard.type('listen 8080;')
-  await expect(editor.getByTestId('editor-state')).toHaveText('Modified')
+  await expect(editor.getByTestId('editor-state')).toHaveText('Unsaved changes')
   await expect(
     page.locator(`[data-testid="tab"][data-tab-id]`).filter({ hasText: '● nginx.conf' })
   ).toBeVisible()
@@ -245,13 +245,13 @@ test('editor trong app: bấm đúp file cấu hình, tô màu, Ctrl+S lưu th�
   // Chưa lưu → đóng tab hỏi lại; chọn giữ thì tab còn.
   await editor.locator('.cm-line').nth(2).click()
   await page.keyboard.type('x')
-  await expect(editor.getByTestId('editor-state')).toHaveText('Modified')
+  await expect(editor.getByTestId('editor-state')).toHaveText('Unsaved changes')
   const editorTab = page.locator('[data-testid="tab"]').filter({ hasText: 'nginx.conf' })
-  page.once('dialog', (d) => void d.dismiss())
   await editorTab.getByTestId('tab-close').click()
+  await page.getByTestId('close-tab-confirm').getByTestId('confirm-cancel').click()
   await expect(editorTab).toHaveCount(1)
-  page.once('dialog', (d) => void d.accept())
   await editorTab.getByTestId('tab-close').click()
+  await page.getByTestId('close-tab-confirm').getByTestId('confirm-ok').click()
   await expect(editorTab).toHaveCount(0)
 
   // File nhị phân: không mở bằng editor của app (menu "Edit" vẫn báo rõ).

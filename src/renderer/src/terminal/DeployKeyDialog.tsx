@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { t } from '@shared/i18n'
 import { useHosts } from '../stores/hosts'
+import { cleanError } from '../lib/format'
 import { Button, Modal, Notice, Select } from '../components/ui'
 
 /** Thêm public key của một key trong vault vào ~/.ssh/authorized_keys của server đang kết nối. */
@@ -23,10 +25,13 @@ export function DeployKeyDialog({
       const line = await window.shellhouse.publicKey(keyId)
       const r = await deploy(line)
       if (r.status === 'added')
-        setResult({ ok: true, text: 'Key added to ~/.ssh/authorized_keys.' })
+        setResult({ ok: true, text: t('Key added to ~/.ssh/authorized_keys.') })
       else if (r.status === 'exists')
-        setResult({ ok: true, text: 'The key is already on the server.' })
-      else setResult({ ok: false, text: r.message ?? 'Failed' })
+        setResult({ ok: true, text: t('The key is already on the server.') })
+      else setResult({ ok: false, text: r.message ?? t('Could not add the key.') })
+    } catch (error) {
+      // Đọc public key hỏng (vault khoá, key bị xoá…) → báo trong hộp thoại, không nuốt lỗi.
+      setResult({ ok: false, text: cleanError(error) })
     } finally {
       setBusy(false)
     }
@@ -34,21 +39,23 @@ export function DeployKeyDialog({
 
   return (
     <Modal
-      title="Deploy key to server"
-      description="Like ssh-copy-id: no duplicates, ~/.ssh is 700 and authorized_keys is 600. Requires a POSIX shell on the server."
+      title={t('Deploy key to server')}
+      description={t(
+        'Like ssh-copy-id: no duplicates, ~/.ssh is 700 and authorized_keys is 600. Requires a POSIX shell on the server.'
+      )}
       onClose={onClose}
       width="max-w-md"
       testId="deploy-key-dialog"
       footer={
         <>
-          <Button onClick={onClose}>Close</Button>
+          <Button onClick={onClose}>{t('Close')}</Button>
           <Button
             variant="primary"
             disabled={!keyId || busy}
             data-testid="deploy-key-run"
             onClick={() => void run()}
           >
-            {busy ? 'Adding…' : 'Add key'}
+            {busy ? t('Adding…') : t('Add key')}
           </Button>
         </>
       }
@@ -56,14 +63,16 @@ export function DeployKeyDialog({
       <div className="flex flex-col gap-3">
         {keys.length === 0 ? (
           <p className="text-[13px] text-muted">
-            No keys in the vault yet. Create one in Settings → SSH keys.
+            {t('No keys in the vault yet. Create one in Settings → SSH keys.')}
           </p>
         ) : (
           <Select
             data-testid="deploy-key-select"
+            aria-label={t('SSH key')}
             value={keyId}
             onChange={(e) => {
               setKeyId(e.target.value)
+              setResult(null)
             }}
           >
             {keys.map((k) => (

@@ -13,12 +13,15 @@ export function createLimiter(concurrency: number): <R>(fn: () => Promise<R>) =>
   let active = 0
   const waiting: (() => void)[] = []
   const next = (): void => {
-    active--
-    waiting.shift()?.()
+    // Trao thẳng chỗ cho việc đang chờ (active giữ nguyên). Giảm rồi để việc chờ tự tăng thì giữa
+    // hai bước, một lời gọi mới thấy còn chỗ và chạy luôn → vượt trần.
+    const waiter = waiting.shift()
+    if (waiter) waiter()
+    else active--
   }
   return async <R>(fn: () => Promise<R>): Promise<R> => {
     if (active >= max) await new Promise<void>((resolve) => waiting.push(resolve))
-    active++
+    else active++
     try {
       return await fn()
     } finally {

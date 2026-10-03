@@ -5,6 +5,8 @@ import { S3AccountInput, S3Pin } from './ops'
 export const S3Ipc = {
   accounts: z.tuple([]),
   save: z.tuple([S3AccountInput]),
+  /** Thử kết nối bằng thông tin đang nhập (secret trống + có id = dùng secret đã lưu). */
+  test: z.tuple([S3AccountInput]),
   delete: z.tuple([z.string().max(64)]),
   pin: z.tuple([z.string().max(64), S3Pin, z.boolean()])
 } as const
@@ -29,6 +31,9 @@ export const S3SessionConfig = z.object({
   limits: z.object({
     requests: z.number().int().min(1).max(64),
     transfers: z.number().int().min(1).max(16)
-  })
+  }),
+  /** Ngôn ngữ giao diện (main) — thông báo lỗi từ Session Host hiện đúng ngôn ngữ. */
+  language: z.enum(['en', 'vi']).optional(),
+  locale: z.string().max(64).optional()
 })
 export type S3SessionConfig = z.infer<typeof S3SessionConfig>

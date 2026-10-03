@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 /**
  * Kiểu dùng chung cho khuôn module (ADR-014). File này chỉ chứa dữ liệu tĩnh / kiểu — dùng được ở
  * mọi tiến trình (main, Session Host, renderer) mà không kéo code nặng của module nào.
@@ -97,32 +98,35 @@ export function tablePrefix(moduleId: string): string {
 export function describePermission(p: ModulePermission): string {
   switch (p.kind) {
     case 'ssh-exec':
-      return p.detail
+      // Câu `detail` viết sẵn trong manifest — bản dịch nằm trong src/shared/i18n/vi/core.ts.
+      return t(p.detail)
     case 'ssh-socket':
-      return `Connects to ${p.path} on SSH hosts you open it for`
+      return t('Connects to {path} on SSH hosts you open it for', { path: p.path })
     case 'ssh-tunnel':
-      return 'Opens tunnels through SSH hosts you choose'
+      return t('Opens tunnels through SSH hosts you choose')
     case 'local-socket':
       return p.path === '$DOCKER_HOST'
-        ? 'Connects to the Docker socket set in DOCKER_HOST'
-        : `Connects to ${p.path} on this computer`
+        ? t('Connects to the Docker socket set in DOCKER_HOST')
+        : t('Connects to {path} on this computer', { path: p.path })
     case 'run-program':
       return p.binary === 'wsl'
-        ? 'May run commands inside your WSL distributions (Windows) — asks first'
-        : `May run \`${p.binary}\` on this computer — asks first`
+        ? t('May run commands inside your WSL distributions (Windows) — asks first')
+        : t('May run `{program}` on this computer — asks first', { program: p.binary })
     case 'read-file':
       return p.path === '$KUBECONFIG'
-        ? 'Reads the files listed in KUBECONFIG'
-        : `Reads ${p.path.replace(/\/\*\*$/, '/')}`
+        ? t('Reads the files listed in KUBECONFIG')
+        : t('Reads {path}', { path: p.path.replace(/\/\*\*$/, '/') })
     case 'write-file':
       return p.path === '$KUBECONFIG'
-        ? 'Changes the files listed in KUBECONFIG when you ask it to (a backup is kept)'
-        : `Changes files in ${p.path.replace(/\/\*\*$/, '/')} when you ask it to (a backup is kept)`
+        ? t('Changes the files listed in KUBECONFIG when you ask it to (a backup is kept)')
+        : t('Changes files in {path} when you ask it to (a backup is kept)', {
+            path: p.path.replace(/\/\*\*$/, '/')
+          })
     case 'network':
-      return `Connects to ${p.hosts}`
+      return t('Connects to {hosts}', { hosts: t(p.hosts) })
     case 'secrets':
     case 'pick-file':
-      return p.detail
+      return t(p.detail)
   }
 }
 

@@ -1,4 +1,4 @@
-import type { Client } from 'ssh2'
+import type { Client, ClientChannel } from 'ssh2'
 import { shellQuote } from '../../node-shared/shell-quote'
 import type { ModuleDetector } from '../../modules/registry/types'
 
@@ -24,8 +24,12 @@ export function probeCommand(
 
 export function runProbe(client: Client, command: string, timeoutMs = 10_000): Promise<string[]> {
   return new Promise((resolve) => {
+    let timedOut = false
+    let open: ClientChannel | null = null
     const timer = setTimeout(() => {
+      timedOut = true
       resolve([])
+      open?.close()
     }, timeoutMs)
     client.exec(command, (error, stream) => {
       if (error) {
@@ -33,6 +37,11 @@ export function runProbe(client: Client, command: string, timeoutMs = 10_000): P
         resolve([])
         return
       }
+      if (timedOut) {
+        stream.close()
+        return
+      }
+      open = stream
       let out = ''
       stream.on('data', (chunk: Buffer) => {
         if (out.length < 4096) out += chunk.toString('utf8')

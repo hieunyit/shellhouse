@@ -113,6 +113,55 @@ export const K8sOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('helm.releases'), namespaces: z.array(Namespace).max(64) }),
   /** Chi tiết một release: values, notes, manifest, lịch sử revision. */
   z.object({ op: z.literal('helm.release'), namespace: Namespace, name: Name }),
+  /** Một revision của release (values người dùng + values gộp với chart, manifest) — để xem / so sánh. */
+  z.object({
+    op: z.literal('helm.revision'),
+    namespace: Namespace,
+    name: Name,
+    revision: z.number().int().min(1)
+  }),
+  /**
+   * Như `helm rollback --no-hooks`: tạo revision mới từ manifest của revision đích, server-side apply
+   * (field manager "helm"), xoá tài nguyên không còn trong revision đích (trừ resource-policy keep).
+   */
+  z.object({
+    op: z.literal('helm.rollback'),
+    namespace: Namespace,
+    name: Name,
+    revision: z.number().int().min(1)
+  }),
+  /** Như `helm uninstall --no-hooks [--keep-history]`. */
+  z.object({
+    op: z.literal('helm.uninstall'),
+    namespace: Namespace,
+    name: Name,
+    keepHistory: z.boolean()
+  }),
+  /**
+   * Xem trước thay đổi (dry run phía server, không ghi gì): `replace` = PUT như lưu YAML đã sửa;
+   * `apply` = server-side apply (tạo / cập nhật, nhiều tài liệu). Trả bản trên cluster và kết quả.
+   */
+  z.object({
+    op: z.literal('diff'),
+    mode: z.enum(['replace', 'apply']),
+    yaml: z.string().max(4 * 1024 * 1024),
+    namespace: Namespace.optional()
+  }),
+  /** Container debug tạm thời (ephemeral) trong pod — như `kubectl debug -it --image … --target …`. */
+  z.object({
+    op: z.literal('debug.ephemeral'),
+    namespace: Namespace,
+    pod: Name,
+    image: z.string().min(1).max(512),
+    target: z.string().max(253).optional()
+  }),
+  /** Pod debug đặc quyền trên node (hostPID / hostNetwork, / của node ở /host) — `kubectl debug node/…`. */
+  z.object({
+    op: z.literal('debug.node'),
+    node: Name,
+    image: z.string().min(1).max(512),
+    namespace: Namespace
+  }),
   /** Số đối tượng mỗi loại (số trên thanh điều hướng, như Rancher). null = không đếm được. */
   z.object({
     op: z.literal('counts'),
@@ -143,8 +192,22 @@ export const K8sOp = z.discriminatedUnion('op', [
     revision: z.number().int().min(1)
   }),
   z.object({ op: z.literal('cordon'), node: Name, unschedulable: z.boolean() }),
-  /** Cordon + evict mọi pod (trừ DaemonSet / static pod). */
-  z.object({ op: z.literal('drain'), node: Name }),
+  /**
+   * Cordon + evict mọi pod (trừ DaemonSet / static pod) — như `kubectl drain --ignore-daemonsets`.
+   * Pod không có controller / dùng emptyDir → không evict gì cả (báo trong `failed`) trừ khi bật
+   * `force` / `deleteEmptyDirData`. PDB chặn (429) → thử lại tới `timeoutSeconds` (mặc định 300).
+   */
+  z.object({
+    op: z.literal('drain'),
+    node: Name,
+    /** Thời gian dừng pod (giây); không đặt = theo pod. */
+    gracePeriodSeconds: z.number().int().min(0).max(3600).optional(),
+    /** Evict cả pod dùng emptyDir (dữ liệu emptyDir mất). */
+    deleteEmptyDirData: z.boolean().optional(),
+    /** Evict cả pod không có controller (sẽ không được tạo lại). */
+    force: z.boolean().optional(),
+    timeoutSeconds: z.number().int().min(1).max(3600).optional()
+  }),
   z.object({ op: z.literal('cronTrigger'), namespace: Namespace, name: Name }),
   z.object({
     op: z.literal('cronSuspend'),
@@ -224,9 +287,15 @@ export const K8sOp = z.discriminatedUnion('op', [
 ])
 export type K8sOp = z.infer<typeof K8sOp>
 
-/** Thao tác thay đổi (bị chặn ở chế độ chỉ đọc). */
+/**
+ * Thao tác bị chặn ở chế độ chỉ đọc: thay đổi cluster, và mở đường vào trong cluster làm thay đổi
+ * được (port-forward — tới DB…; shell vào pod chặn ở openTerminal). Xem giá trị Secret
+ * (`secret.reveal`) vẫn được — chỉ đọc, quyền do RBAC quyết.
+ */
 export function isMutating(op: K8sOp): boolean {
   return [
+    'portForward',
+    'portForward.resume',
     'apply',
     'serverApply',
     'delete',
@@ -240,7 +309,11 @@ export function isMutating(op: K8sOp): boolean {
     'cronTrigger',
     'cronSuspend',
     'argoSync',
-    'argoRefresh'
+    'argoRefresh',
+    'helm.rollback',
+    'helm.uninstall',
+    'debug.ephemeral',
+    'debug.node'
   ].includes(op.op)
 }
 
@@ -303,6 +376,50 @@ export interface HelmRelease {
   /** ms, 0 = không rõ. */
   updated: number
   description: string
+}
+
+/** Một revision (helm get values / values --all / manifest --revision N). */
+export interface HelmRevisionDetail {
+  revision: number
+  status: string
+  chart: string
+  chartVersion: string
+  appVersion: string
+  updated: number
+  description: string
+  /** Values người dùng đặt — YAML ('' nếu không có). */
+  values: string
+  /** Values của chart gộp với values người dùng (như `helm get values --all`) — YAML. */
+  computedValues: string
+  manifest: string
+  notes: string
+  /** Hook của revision (tên + sự kiện) — không chạy khi rollback / uninstall từ Shellhouse. */
+  hooks: { name: string; kind: string; events: string[] }[]
+}
+
+/** Kết quả rollback / uninstall: đối tượng "kind/tên" (kèm namespace nếu có). */
+export interface HelmActionResult {
+  /** Revision mới (rollback); 0 với uninstall. */
+  revision: number
+  applied: string[]
+  deleted: string[]
+  /** Giữ lại do `helm.sh/resource-policy: keep`. */
+  kept: string[]
+  /** "đối tượng: lỗi". */
+  failed: string[]
+  /** Số hook bỏ qua (không chạy). */
+  hooksSkipped: number
+}
+
+/** Một tài liệu trong xem trước thay đổi (YAML đã bỏ managedFields / status / resourceVersion…). */
+export interface DiffItem {
+  /** "ns/kind/tên". */
+  object: string
+  /** null = chưa có trên cluster (sẽ tạo). */
+  live: string | null
+  /** null = lỗi (xem `error`). */
+  result: string | null
+  error?: string
 }
 
 export interface HelmReleaseDetail extends HelmRelease {
@@ -430,7 +547,34 @@ export interface OverviewResult {
     count: number
     last: string
   }[]
+  /** Cluster quá lớn — số liệu chỉ tính trên phần đầu (thiếu ở bản cũ). */
+  truncated?: boolean
+  /** Vấn đề cần xem, theo nhóm (thiếu ở bản cũ). */
+  problems?: Record<ProblemGroup, { total: number; items: OverviewProblem[] }>
 }
+
+/** Nhóm vấn đề của trang tổng quan. */
+export type ProblemGroup = 'failing' | 'imagePull' | 'pending' | 'nodes' | 'pvcs'
+
+export interface OverviewProblem {
+  /** Id loại để mở (pods, nodes, persistentvolumeclaims). */
+  kind: string
+  namespace?: string
+  name: string
+  /** CrashLoopBackOff, ImagePullBackOff, Unschedulable, NotReady… */
+  reason: string
+  message: string
+  /** Thời điểm bắt đầu (ISO) nếu biết — '' nếu không. */
+  since: string
+  /** Số lần khởi động lại (pod). */
+  restarts?: number
+}
+
+/**
+ * Kết quả `counts`: id loại → số (null = không đếm được). Loại có quá nhiều đối tượng để đếm hết
+ * có thêm khoá `${COUNT_CAPPED}${id}` = 1 — số khi đó là mức tối thiểu (hiện "10000+").
+ */
+export const COUNT_CAPPED = 'capped:'
 
 export interface RolloutRevision {
   revision: number
@@ -443,8 +587,15 @@ export interface RolloutRevision {
 
 export interface DrainResult {
   evicted: string[]
+  /** "ns/pod" bỏ qua (DaemonSet, static pod, đã xong). */
   skipped: string[]
+  /** "ns/pod: lý do" — không evict được (PDB tới hết giờ, lỗi…) hoặc chặn cả lượt drain. */
   failed: string[]
+  /**
+   * Pod chặn drain (không có controller / dùng emptyDir) khi chưa bật force / deleteEmptyDirData:
+   * không pod nào bị evict (như kubectl). Thiếu ở bản cũ.
+   */
+  blocked?: string[]
 }
 
 export interface ApplyResult {
@@ -521,6 +672,10 @@ export const K8sTerminalParams = z.object({
   namespace: Namespace,
   pod: Name,
   container: z.string().max(253).optional(),
-  command: z.array(z.string().max(1024)).max(32).optional()
+  command: z.array(z.string().max(1024)).max(32).optional(),
+  /** Gắn vào tiến trình chính của container (attach — container debug) thay vì chạy lệnh mới. */
+  attach: z.boolean().optional(),
+  /** Dòng hướng dẫn in ra đầu terminal (pod debug node: "chroot /host"…). */
+  banner: z.string().max(1024).optional()
 })
 export type K8sTerminalParams = z.infer<typeof K8sTerminalParams>

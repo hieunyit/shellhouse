@@ -3,6 +3,8 @@
  * (privileged, host namespace, chạy root…) và mức rủi ro của một quyền RBAC.
  */
 
+import { t } from '@shared/i18n'
+
 type Obj = Record<string, unknown>
 const o = (v: unknown): Obj => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : {})
 const a = (v: unknown): Obj[] => (Array.isArray(v) ? v.map(o) : [])
@@ -36,22 +38,22 @@ export function securityFindings(podSpec: unknown): SecurityFinding[] {
     out.push({
       severity: 'high',
       id: 'host-network',
-      title: 'Uses the host network',
-      detail: 'Pods see every interface of the node and can bind to its ports.'
+      title: t('Uses the host network'),
+      detail: t('Pods see every interface of the node and can bind to its ports.')
     })
   if (spec['hostPID'] === true)
     out.push({
       severity: 'high',
       id: 'host-pid',
-      title: 'Shares the host process namespace',
-      detail: 'Containers can see and signal every process on the node.'
+      title: t('Shares the host process namespace'),
+      detail: t('Containers can see and signal every process on the node.')
     })
   if (spec['hostIPC'] === true)
     out.push({
       severity: 'medium',
       id: 'host-ipc',
-      title: 'Shares the host IPC namespace',
-      detail: 'Containers can read shared memory of other processes on the node.'
+      title: t('Shares the host IPC namespace'),
+      detail: t('Containers can read shared memory of other processes on the node.')
     })
   for (const v of a(spec['volumes'])) {
     const hp = o(v['hostPath'])
@@ -60,17 +62,18 @@ export function securityFindings(podSpec: unknown): SecurityFinding[] {
     out.push({
       severity: SENSITIVE_HOST_PATHS.test(path) ? 'high' : 'medium',
       id: 'host-path',
-      title: `Mounts host path ${path || '(unknown)'}`,
-      detail: `Volume "${s(v['name'])}" exposes the node file system to the pod.`
+      title: t('Mounts host path {path}', { path: path || t('(unknown)') }),
+      detail: t('Volume "{name}" exposes the node file system to the pod.', { name: s(v['name']) })
     })
   }
   if (spec['automountServiceAccountToken'] !== false)
     out.push({
       severity: 'low',
       id: 'sa-token',
-      title: 'Service account token is mounted',
-      detail:
+      title: t('Service account token is mounted'),
+      detail: t(
         'The API token is available inside every container. Set automountServiceAccountToken: false if the app does not call the Kubernetes API.'
+      )
     })
 
   const containers = [
@@ -85,8 +88,8 @@ export function securityFindings(podSpec: unknown): SecurityFinding[] {
       out.push({
         severity: 'high',
         id: 'privileged',
-        title: 'Privileged container',
-        detail: 'Full access to the node devices and kernel — equivalent to root on the node.',
+        title: t('Privileged container'),
+        detail: t('Full access to the node devices and kernel — equivalent to root on the node.'),
         container: name
       })
     const added = (Array.isArray(caps['add']) ? (caps['add'] as unknown[]) : []).map(s)
@@ -95,16 +98,16 @@ export function securityFindings(podSpec: unknown): SecurityFinding[] {
       out.push({
         severity: 'high',
         id: 'capabilities',
-        title: `Adds capabilities ${critical.join(', ')}`,
-        detail: 'These Linux capabilities allow escaping or controlling the node.',
+        title: t('Adds capabilities {caps}', { caps: critical.join(', ') }),
+        detail: t('These Linux capabilities allow escaping or controlling the node.'),
         container: name
       })
     else if (added.length)
       out.push({
         severity: 'low',
         id: 'capabilities',
-        title: `Adds capabilities ${added.join(', ')}`,
-        detail: 'Extra Linux capabilities widen what a compromised process can do.',
+        title: t('Adds capabilities {caps}', { caps: added.join(', ') }),
+        detail: t('Extra Linux capabilities widen what a compromised process can do.'),
         container: name
       })
     const runAsNonRoot = sc['runAsNonRoot'] ?? podSc['runAsNonRoot']
@@ -113,32 +116,32 @@ export function securityFindings(podSpec: unknown): SecurityFinding[] {
       out.push({
         severity: 'medium',
         id: 'root',
-        title: 'Runs as root (UID 0)',
-        detail: 'A process escaping the container would be root.',
+        title: t('Runs as root (UID 0)'),
+        detail: t('A process escaping the container would be root.'),
         container: name
       })
     else if (runAsNonRoot !== true && runAsUser === undefined)
       out.push({
         severity: 'low',
         id: 'root',
-        title: 'May run as root',
-        detail: 'Neither runAsNonRoot nor runAsUser is set — the image decides (often root).',
+        title: t('May run as root'),
+        detail: t('Neither runAsNonRoot nor runAsUser is set — the image decides (often root).'),
         container: name
       })
     if (sc['allowPrivilegeEscalation'] !== false && sc['privileged'] !== true)
       out.push({
         severity: 'low',
         id: 'privilege-escalation',
-        title: 'Privilege escalation allowed',
-        detail: 'Set allowPrivilegeEscalation: false so setuid binaries cannot gain privileges.',
+        title: t('Privilege escalation allowed'),
+        detail: t('Set allowPrivilegeEscalation: false so setuid binaries cannot gain privileges.'),
         container: name
       })
     if (sc['readOnlyRootFilesystem'] !== true)
       out.push({
         severity: 'low',
         id: 'writable-root',
-        title: 'Writable root file system',
-        detail: 'An attacker can modify binaries inside the container.',
+        title: t('Writable root file system'),
+        detail: t('An attacker can modify binaries inside the container.'),
         container: name
       })
     const image = s(c['image'])
@@ -147,8 +150,8 @@ export function securityFindings(podSpec: unknown): SecurityFinding[] {
       out.push({
         severity: 'medium',
         id: 'latest-tag',
-        title: tag ? 'Image uses the :latest tag' : 'Image has no tag',
-        detail: `${image} — a restart can silently pull a different image.`,
+        title: tag ? t('Image uses the :latest tag') : t('Image has no tag'),
+        detail: t('{image} — a restart can silently pull a different image.', { image }),
         container: name
       })
     if (init) continue
@@ -157,24 +160,24 @@ export function securityFindings(podSpec: unknown): SecurityFinding[] {
       out.push({
         severity: 'medium',
         id: 'no-memory-limit',
-        title: 'No memory limit',
-        detail: 'One leaking container can push the whole node into memory pressure.',
+        title: t('No memory limit'),
+        detail: t('One leaking container can push the whole node into memory pressure.'),
         container: name
       })
     if (o(o(c['resources'])['requests'])['cpu'] === undefined)
       out.push({
         severity: 'low',
         id: 'no-cpu-request',
-        title: 'No CPU request',
-        detail: 'The scheduler cannot reserve CPU — the pod is first to be throttled.',
+        title: t('No CPU request'),
+        detail: t('The scheduler cannot reserve CPU — the pod is first to be throttled.'),
         container: name
       })
     if (c['readinessProbe'] === undefined)
       out.push({
         severity: 'low',
         id: 'no-readiness',
-        title: 'No readiness probe',
-        detail: 'Traffic is sent as soon as the container starts, before the app is ready.',
+        title: t('No readiness probe'),
+        detail: t('Traffic is sent as soon as the container starts, before the app is ready.'),
         container: name
       })
   }
@@ -194,30 +197,31 @@ export function rbacRisk(
   const any = v.has('*')
   const writes = any || [...v].some((x) => !READ.has(x))
   const base = resource.split('.')[0] ?? resource
-  if (resource === '*' && any) return { risk: 'high', reason: 'Full control (like cluster-admin)' }
+  if (resource === '*' && any)
+    return { risk: 'high', reason: t('Full control (like cluster-admin)') }
   if (
     [...v].some((x) => ESCALATE.has(x)) ||
     (any && /roles|rolebindings|serviceaccounts/.test(base))
   )
-    return { risk: 'high', reason: 'Can grant itself more permissions' }
+    return { risk: 'high', reason: t('Can grant itself more permissions') }
   if (
     (base === 'secrets' || resource === '*') &&
     (any || v.has('get') || v.has('list') || v.has('watch'))
   )
-    return { risk: 'high', reason: 'Can read secrets (tokens, passwords)' }
+    return { risk: 'high', reason: t('Can read secrets (tokens, passwords)') }
   if (/^pods\/(exec|attach|portforward)$/.test(base) || base === 'pods/ephemeralcontainers')
-    return { risk: 'high', reason: 'Can run commands inside other pods' }
+    return { risk: 'high', reason: t('Can run commands inside other pods') }
   if (base === 'nodes/proxy' || base === 'serviceaccounts/token')
-    return { risk: 'high', reason: 'Can act as the node or mint tokens' }
+    return { risk: 'high', reason: t('Can act as the node or mint tokens') }
   if (
     writes &&
     /^(pods|deployments|daemonsets|statefulsets|replicasets|jobs|cronjobs|\*)$/.test(base)
   )
-    return { risk: 'medium', reason: 'Can create or change workloads' }
+    return { risk: 'medium', reason: t('Can create or change workloads') }
   if (
     writes &&
     /^(configmaps|services|ingresses|networkpolicies|persistentvolumeclaims)$/.test(base)
   )
-    return { risk: 'medium', reason: 'Can change cluster configuration' }
+    return { risk: 'medium', reason: t('Can change cluster configuration') }
   return { risk: 'low' }
 }

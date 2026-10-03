@@ -15,11 +15,13 @@ import {
   Trash2,
   Unlock,
   Wind,
-  Zap
+  Zap,
+  Bug
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { MenuEntry } from '../../../renderer/src/components/ContextMenu'
 import type { K8sObject } from '../shared/resources'
+import { t } from '../../registry/renderer-kit'
 
 /**
  * Thao tác trên một tài nguyên — một nguồn cho menu chuột phải, phím tắt (kiểu k9s) và thanh công
@@ -44,6 +46,8 @@ export interface ActionHandlers {
   edit(obj: K8sObject): void
   editExternal(obj: K8sObject): void
   forward(obj: K8sObject): void
+  /** kubectl debug: container debug trong pod / pod debug trên node. */
+  debug(obj: K8sObject): void
   scale(obj: K8sObject): void
   restart(obj: K8sObject): void
   pause(obj: K8sObject, paused: boolean): void
@@ -86,7 +90,7 @@ export function actionsFor(
     const containers = containersOf(obj)
     out.push({
       id: 'logs',
-      label: 'Logs',
+      label: t('Logs'),
       icon: <FileText size={14} />,
       key: 'l',
       run: () => {
@@ -96,45 +100,58 @@ export function actionsFor(
     if (containers.length > 1)
       out.push({
         id: 'logs-all',
-        label: 'Logs (all containers)',
+        label: t('Logs (all containers)'),
         icon: <FileText size={14} />,
         run: () => {
           h.logs(obj, { allContainers: true })
         }
       })
-    out.push({
-      id: 'shell',
-      label: 'Open shell',
-      icon: <SquareTerminal size={14} />,
-      key: 's',
-      run: () => {
-        h.shell(obj)
-      }
-    })
-    for (const c of containers.length > 1 ? containers : [])
+    // Chỉ đọc: Session Host từ chối shell / port-forward (mở đường vào cluster) → không hiện.
+    if (!readOnly)
+      out.push({
+        id: 'shell',
+        label: t('Open shell'),
+        icon: <SquareTerminal size={14} />,
+        key: 's',
+        run: () => {
+          h.shell(obj)
+        }
+      })
+    for (const c of !readOnly && containers.length > 1 ? containers : [])
       out.push({
         id: `shell-${c}`,
-        label: `Shell in ${c}`,
+        label: t('Shell in {container}', { container: c }),
         icon: <SquareTerminal size={14} />,
         run: () => {
           h.shell(obj, c)
+        }
+      })
+    if (!readOnly)
+      out.push({
+        id: 'debug',
+        label: t('Debug…'),
+        icon: <Bug size={14} />,
+        key: 'b',
+        secondary: true,
+        run: () => {
+          h.debug(obj)
         }
       })
   }
   if (HAS_PODS.includes(kindId) && ns)
     out.push({
       id: 'logs',
-      label: 'Logs of all pods',
+      label: t('Logs of all pods'),
       icon: <FileText size={14} />,
       key: 'l',
       run: () => {
         h.logs(obj)
       }
     })
-  if ((kindId === 'pods' || kindId === 'services') && ns)
+  if ((kindId === 'pods' || kindId === 'services') && ns && !readOnly)
     out.push({
       id: 'forward',
-      label: 'Forward a port…',
+      label: t('Forward a port…'),
       icon: <ArrowLeftRight size={14} />,
       key: 'f',
       run: () => {
@@ -143,7 +160,7 @@ export function actionsFor(
     })
   out.push({
     id: 'yaml',
-    label: 'View YAML',
+    label: t('View YAML'),
     icon: <FileCode size={14} />,
     key: 'y',
     // Bảng chi tiết đã có tab YAML.
@@ -155,7 +172,7 @@ export function actionsFor(
   if (kindId === 'deployments.apps')
     out.push({
       id: 'history',
-      label: 'Rollout history',
+      label: t('Rollout history'),
       icon: <History size={14} />,
       key: 'h',
       run: () => {
@@ -166,7 +183,7 @@ export function actionsFor(
   if (kindId !== 'secrets') {
     out.push({
       id: 'edit',
-      label: 'Edit YAML',
+      label: t('Edit YAML'),
       icon: <Pencil size={14} />,
       key: 'e',
       run: () => {
@@ -175,7 +192,7 @@ export function actionsFor(
     })
     out.push({
       id: 'edit-external',
-      label: 'Edit in external editor',
+      label: t('Edit in external editor'),
       icon: <Pencil size={14} />,
       run: () => {
         h.editExternal(obj)
@@ -185,7 +202,7 @@ export function actionsFor(
   if (SCALABLE.includes(kindId))
     out.push({
       id: 'scale',
-      label: 'Scale…',
+      label: t('Scale…'),
       icon: <Scale size={14} />,
       key: 'S',
       run: () => {
@@ -195,7 +212,7 @@ export function actionsFor(
   if (WORKLOADS.includes(kindId))
     out.push({
       id: 'restart',
-      label: 'Rollout restart',
+      label: t('Rollout restart'),
       icon: <RotateCw size={14} />,
       key: 'r',
       run: () => {
@@ -206,7 +223,7 @@ export function actionsFor(
     const paused = obj.spec?.['paused'] === true
     out.push({
       id: 'pause',
-      label: paused ? 'Resume rollout' : 'Pause rollout',
+      label: paused ? t('Resume rollout') : t('Pause rollout'),
       icon: paused ? <Play size={14} /> : <Pause size={14} />,
       run: () => {
         h.pause(obj, !paused)
@@ -217,7 +234,7 @@ export function actionsFor(
     const cordoned = obj.spec?.['unschedulable'] === true
     out.push({
       id: 'cordon',
-      label: cordoned ? 'Uncordon' : 'Cordon',
+      label: cordoned ? t('Uncordon') : t('Cordon'),
       icon: cordoned ? <Unlock size={14} /> : <Ban size={14} />,
       key: 'c',
       run: () => {
@@ -225,8 +242,18 @@ export function actionsFor(
       }
     })
     out.push({
+      id: 'debug',
+      label: t('Debug node…'),
+      icon: <Bug size={14} />,
+      key: 'b',
+      secondary: true,
+      run: () => {
+        h.debug(obj)
+      }
+    })
+    out.push({
       id: 'drain',
-      label: 'Drain…',
+      label: t('Drain…'),
       icon: <Wind size={14} />,
       key: 'r',
       danger: true,
@@ -239,7 +266,7 @@ export function actionsFor(
     out.push(
       {
         id: 'argo-sync',
-        label: 'Sync',
+        label: t('Sync'),
         icon: <RefreshCcwDot size={14} />,
         run: () => {
           h.argoSync(obj, false)
@@ -247,7 +274,7 @@ export function actionsFor(
       },
       {
         id: 'argo-refresh',
-        label: 'Refresh',
+        label: t('Refresh'),
         icon: <RotateCw size={14} />,
         key: 'r',
         run: () => {
@@ -256,7 +283,7 @@ export function actionsFor(
       },
       {
         id: 'argo-hard-refresh',
-        label: 'Hard refresh',
+        label: t('Hard refresh'),
         icon: <RotateCw size={14} />,
         run: () => {
           h.argoRefresh(obj, true)
@@ -264,7 +291,7 @@ export function actionsFor(
       },
       {
         id: 'argo-sync-prune',
-        label: 'Sync and prune…',
+        label: t('Sync and prune…'),
         icon: <RefreshCcwDot size={14} />,
         danger: true,
         run: () => {
@@ -277,7 +304,7 @@ export function actionsFor(
     const suspended = obj.spec?.['suspend'] === true
     out.push({
       id: 'trigger',
-      label: 'Run now',
+      label: t('Run now'),
       icon: <PlayCircle size={14} />,
       key: 't',
       run: () => {
@@ -286,7 +313,7 @@ export function actionsFor(
     })
     out.push({
       id: 'suspend',
-      label: suspended ? 'Resume schedule' : 'Suspend schedule',
+      label: suspended ? t('Resume schedule') : t('Suspend schedule'),
       icon: suspended ? <Play size={14} /> : <Pause size={14} />,
       run: () => {
         h.suspend(obj, !suspended)
@@ -296,7 +323,7 @@ export function actionsFor(
   if (kindId !== 'nodes' && kindId !== 'namespaces' && kindId !== 'events') {
     out.push({
       id: 'delete',
-      label: 'Delete…',
+      label: t('Delete…'),
       icon: <Trash2 size={14} />,
       key: 'ctrl+d',
       danger: true,
@@ -307,7 +334,7 @@ export function actionsFor(
     if (kindId === 'pods')
       out.push({
         id: 'kill',
-        label: 'Kill (no grace period)',
+        label: t('Kill (no grace period)'),
         icon: <Zap size={14} />,
         key: 'ctrl+k',
         danger: true,

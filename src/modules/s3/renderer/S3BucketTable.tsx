@@ -3,8 +3,9 @@ import { ChevronDown, ChevronUp, Database, Pin, RefreshCw } from 'lucide-react'
 import type { S3Bucket } from '../shared/ops'
 import { cx } from '../../../renderer/src/components/ui'
 import type { SortOption, SortState } from '../../../renderer/src/components/SortMenu'
+import { formatDate, formatDateTime, formatNumber, t } from '../../registry/renderer-kit'
 import { formatSize } from './format'
-import { collator, dateFormat } from './parts'
+import { collator } from './parts'
 
 /** Thống kê một bucket, tính khi người dùng bấm (S3 không có API trả sẵn con số này). */
 export interface BucketStats {
@@ -16,20 +17,23 @@ export interface BucketStats {
 
 export type BucketSortKey = 'name' | 'region' | 'created' | 'objects' | 'size'
 
-export const BUCKET_SORT_OPTIONS = [
-  { key: 'name', label: 'Name', kind: 'text' },
-  { key: 'region', label: 'Region', kind: 'text' },
-  { key: 'created', label: 'Created', kind: 'date' },
-  { key: 'objects', label: 'Objects', kind: 'number' },
-  { key: 'size', label: 'Size', kind: 'number' }
-] as const satisfies readonly SortOption<BucketSortKey>[]
-export const BUCKET_SORT_KEYS: readonly BucketSortKey[] = BUCKET_SORT_OPTIONS.map((o) => o.key)
-
-const monthYear = new Intl.DateTimeFormat(undefined, {
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric'
-})
+/** Tuỳ chọn menu Sort của bảng bucket (dịch lúc vẽ). */
+export function bucketSortOptions(): SortOption<BucketSortKey>[] {
+  return [
+    { key: 'name', label: t('Name'), kind: 'text' },
+    { key: 'region', label: t('Region'), kind: 'text' },
+    { key: 'created', label: t('Created'), kind: 'date' },
+    { key: 'objects', label: t('Objects'), kind: 'number' },
+    { key: 'size', label: t('Size'), kind: 'number' }
+  ]
+}
+export const BUCKET_SORT_KEYS: readonly BucketSortKey[] = [
+  'name',
+  'region',
+  'created',
+  'objects',
+  'size'
+]
 
 /** Name, [Region], [Created], Objects, Size, ghim — Region / Created ẩn khi khung hẹp. */
 const COLUMNS = {
@@ -147,7 +151,7 @@ export function S3BucketTable({
       ref={listRef}
       className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset"
       role="grid"
-      aria-label="Buckets"
+      aria-label={t('Buckets')}
       tabIndex={0}
       data-testid="s3-buckets"
       onKeyDown={(e) => {
@@ -167,16 +171,16 @@ export function S3BucketTable({
           columns
         )}
       >
-        {header('name', 'Name')}
-        {withRegion && header('region', 'Region', 'hidden @3xl:flex')}
-        {header('created', 'Created', 'hidden @xl:flex')}
-        {header('objects', 'Objects')}
-        {header('size', 'Size')}
+        {header('name', t('Name'))}
+        {withRegion && header('region', t('Region'), 'hidden @3xl:flex')}
+        {header('created', t('Created'), 'hidden @xl:flex')}
+        {header('objects', t('Objects'))}
+        {header('size', t('Size'))}
         <span />
       </div>
       {rows.length === 0 && (
         <p className="px-4 py-10 text-center text-xs text-faint">
-          {filter ? `No bucket matches “${filter}”.` : 'No buckets.'}
+          {filter ? t('No bucket matches “{filter}”.', { filter }) : t('No buckets.')}
         </p>
       )}
       {rows.map((b) => {
@@ -221,9 +225,9 @@ export function S3BucketTable({
             <span
               role="gridcell"
               className="hidden truncate text-xs text-muted tabular-nums @xl:block"
-              title={b.createdAt ? dateFormat.format(new Date(b.createdAt)) : undefined}
+              title={b.createdAt ? formatDateTime(b.createdAt) : undefined}
             >
-              {b.createdAt ? monthYear.format(new Date(b.createdAt)) : '—'}
+              {b.createdAt ? formatDate(b.createdAt) : '—'}
             </span>
             <span
               role="gridcell"
@@ -234,7 +238,7 @@ export function S3BucketTable({
               {s?.state === 'running' && (
                 <RefreshCw size={11} className="animate-spin text-faint" />
               )}
-              {!s ? '—' : s.state === 'error' ? 'Failed' : s.objects.toLocaleString('en-US')}
+              {!s ? '—' : s.state === 'error' ? t('Failed') : formatNumber(s.objects)}
               {s?.state === 'stopped' && '+'}
             </span>
             <span
@@ -252,7 +256,7 @@ export function S3BucketTable({
                     onCalculate(b.name)
                   }}
                 >
-                  {s ? 'Retry' : 'Calculate'}
+                  {s ? t('Retry') : t('Calculate')}
                 </button>
               ) : (
                 `${formatSize(s.bytes)}${s.state === 'stopped' ? '+' : ''}`
@@ -260,7 +264,7 @@ export function S3BucketTable({
             </span>
             <span role="gridcell" className="flex justify-end">
               {pinned && (
-                <Pin size={12} className="text-accent" aria-label="Pinned to the sidebar" />
+                <Pin size={12} className="text-accent" aria-label={t('Pinned to the sidebar')} />
               )}
             </span>
           </div>

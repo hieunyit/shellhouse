@@ -5,7 +5,9 @@ import { Secret } from '../../src/node-shared/secret'
 import { DecryptError, open, seal, TEST_KDF } from '../../src/main/vault/crypto'
 import {
   InvalidDeviceKeyError,
+  parseKdfParams,
   Vault,
+  VaultLockedDuringUnlockError,
   VaultLockedError,
   WrongPasswordError
 } from '../../src/main/vault/vault'
@@ -198,5 +200,41 @@ describe('Vault: nhớ trên máy (khoá từ keychain)', () => {
     vault.lock()
     vault.unlockWithKey(exported)
     expect(vault.state()).toBe('unlocked')
+  })
+})
+
+describe('vault: khoá / mở chồng lên nhau', () => {
+  it('lock() trong lúc Argon2 của unlock đang chạy → vault vẫn khoá', async () => {
+    const { vault } = await freshVault()
+    await vault.create(pw('correct horse'))
+    vault.lock()
+    const pending = vault.unlock(pw('correct horse'))
+    vault.lock() // ví dụ máy ngủ đúng lúc đang mở khoá
+    await expect(pending).rejects.toBeInstanceOf(VaultLockedDuringUnlockError)
+    expect(vault.state()).toBe('locked')
+    await vault.unlock(pw('correct horse'))
+    expect(vault.state()).toBe('unlocked')
+  })
+
+  it('đổi master password khi đang khoá không mở vault', async () => {
+    const { vault } = await freshVault()
+    await vault.create(pw('old password'))
+    vault.lock()
+    await vault.changePassword(pw('old password'), pw('new password'))
+    expect(vault.state()).toBe('locked')
+    await vault.unlock(pw('new password'))
+    expect(vault.state()).toBe('unlocked')
+  })
+
+  it('tham số KDF ngoài giới hạn (file sao lưu lạ) bị từ chối', () => {
+    expect(parseKdfParams('{"ops":3,"mem":67108864}')).toEqual({ ops: 3, mem: 67108864 })
+    for (const raw of [
+      '{"ops":3,"mem":1e15}',
+      '{"ops":1000000,"mem":67108864}',
+      '{"ops":0,"mem":67108864}',
+      '{"ops":3.5,"mem":67108864}',
+      '{"ops":3}'
+    ])
+      expect(() => parseKdfParams(raw)).toThrow(/kdf_params/)
   })
 })

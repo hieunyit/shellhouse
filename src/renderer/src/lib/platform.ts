@@ -7,6 +7,11 @@ export function setAppInfo(value: AppInfo): void {
   info = value
 }
 
+/** Ngôn ngữ hệ điều hành (để ghi "Theo hệ thống (Tiếng Việt)" trong Cài đặt). */
+export function systemLanguage(): AppInfo['systemLanguage'] {
+  return info?.systemLanguage ?? 'en'
+}
+
 /** Tuỳ chọn ConPTY cho xterm.js — chỉ cho terminal local trên Windows. */
 export function windowsPty(): { backend: 'conpty'; buildNumber?: number } | undefined {
   if (info?.platform !== 'win32') return undefined

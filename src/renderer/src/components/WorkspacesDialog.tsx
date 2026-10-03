@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { LayoutGrid, Server, SquareTerminal, Trash2 } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { pruneItems, type Workspace, type WorkspaceItem } from '@shared/workspaces'
 import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
 import { useTabs } from '../stores/tabs'
 import { captureWorkspaceItems } from './Workspace'
 import { Button, IconButton, Input, Modal, Notice } from './ui'
+import { confirmAction } from '../stores/confirm'
 
 /** Mở workspace: bỏ host đã xoá, cập nhật tên host đã đổi. */
 export function openWorkspace(workspace: Workspace): void {
@@ -25,9 +27,9 @@ function summary(items: readonly WorkspaceItem[]): string {
   const remote = items.filter((i) => i.target.kind !== 'local').length
   const local = items.length - remote
   return [
-    remote && `${remote} SSH`,
-    local && `${local} local`,
-    items.some((i) => i.after !== null && i.direction !== 'within') && 'split'
+    remote && t('{n} SSH', { n: remote }),
+    local && t('{n} local', { n: local }),
+    items.some((i) => i.after !== null && i.direction !== 'within') && t('split')
   ]
     .filter(Boolean)
     .join(' · ')
@@ -46,7 +48,14 @@ export function WorkspacesDialog({ onClose }: { onClose: () => void }): React.JS
     const items = captureWorkspaceItems()
     if (!trimmed || items.length === 0) return
     const existing = workspaces.find((w) => w.name.toLowerCase() === trimmed.toLowerCase())
-    if (existing && !window.confirm(`Replace the workspace “${existing.name}”?`)) return
+    if (
+      existing &&
+      !(await confirmAction({
+        title: t('Replace the workspace “{name}”?', { name: existing.name }),
+        confirmLabel: t('Replace')
+      }))
+    )
+      return
     const next: Workspace = { id: existing?.id ?? crypto.randomUUID(), name: trimmed, items }
     try {
       await update({
@@ -63,8 +72,10 @@ export function WorkspacesDialog({ onClose }: { onClose: () => void }): React.JS
 
   return (
     <Modal
-      title="Workspaces"
-      description="A workspace reopens a set of tabs and splits in one step. Only connection targets are saved — no passwords."
+      title={t('Workspaces')}
+      description={t(
+        'A workspace reopens a set of tabs and splits in one step. Only connection targets are saved — no passwords.'
+      )}
       onClose={onClose}
       width="max-w-lg"
       testId="workspaces-dialog"
@@ -79,7 +90,7 @@ export function WorkspacesDialog({ onClose }: { onClose: () => void }): React.JS
         <Input
           autoFocus
           className="min-w-0 flex-1"
-          placeholder="Name for the current layout, e.g. Prod web + DB"
+          placeholder={t('Name for the current layout, e.g. Prod web + DB')}
           data-testid="workspace-name"
           value={name}
           maxLength={80}
@@ -92,15 +103,15 @@ export function WorkspacesDialog({ onClose }: { onClose: () => void }): React.JS
           variant="primary"
           data-testid="workspace-save"
           disabled={!name.trim() || tabCount === 0}
-          title={tabCount === 0 ? 'Open some tabs first' : undefined}
+          title={tabCount === 0 ? t('Open some tabs first') : undefined}
         >
-          Save current
+          {t('Save current')}
         </Button>
       </form>
       {error && <Notice tone="danger">{error}</Notice>}
       {workspaces.length === 0 ? (
         <p className="py-6 text-center text-xs text-faint">
-          No workspaces yet. Arrange your tabs and splits, then save them here.
+          {t('No workspaces yet. Arrange your tabs and splits, then save them here.')}
         </p>
       ) : (
         <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line">
@@ -131,15 +142,21 @@ export function WorkspacesDialog({ onClose }: { onClose: () => void }): React.JS
                   openWorkspace(w)
                 }}
               >
-                Open
+                {t('Open')}
               </Button>
               <IconButton
-                label={`Delete ${w.name}`}
+                label={t('Delete {name}', { name: w.name })}
                 size="sm"
                 data-testid="workspace-delete"
                 onClick={() => {
-                  if (window.confirm(`Delete the workspace “${w.name}”?`))
-                    void update({ workspaces: workspaces.filter((x) => x.id !== w.id) })
+                  void (async () => {
+                    const ok = await confirmAction({
+                      title: t('Delete the workspace “{name}”?', { name: w.name }),
+                      confirmLabel: t('Delete'),
+                      danger: true
+                    })
+                    if (ok) void update({ workspaces: workspaces.filter((x) => x.id !== w.id) })
+                  })()
                 }}
               >
                 <Trash2 size={13} />

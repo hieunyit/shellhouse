@@ -1,6 +1,8 @@
 import { create } from 'zustand'
+import { t } from '@shared/i18n'
 import type { WorkspaceItem } from '@shared/workspaces'
 import { shellName } from './shells'
+import { confirmAction } from './confirm'
 
 /**
  * Terminal của module (shell vào container / pod — ADR-014 mục 3.7). `hostId` = chạy trên kết nối
@@ -45,17 +47,31 @@ export interface EditorTarget {
 export type TabTarget = TerminalTarget | ModuleTabTarget | HomeTarget | EditorTarget
 
 /** Tab không mở lại / nhân bản / chia màn hình được (không có "phiên" để tạo lại). */
-const singular = (t: TabTarget): boolean => t.kind === 'home' || t.kind === 'editor'
+const singular = (target: TabTarget): boolean => target.kind === 'home' || target.kind === 'editor'
+
+/** Lý do phải hỏi trước khi đóng tab (editor chưa lưu, phiên SSH đang kết nối / đang truyền file). */
+export interface CloseConcern {
+  title: string
+  message: string
+  confirmLabel: string
+}
 
 /**
- * Chặn đóng tab (editor còn thay đổi chưa lưu): trả false = giữ tab. Đặt bởi chính view của tab.
+ * Hỏi trước khi đóng tab: guard trả lý do cần xác nhận, null = đóng luôn. Đặt bởi chính view của
+ * tab. Việc hỏi do store làm (hộp thoại của app) — "Close other tabs" chỉ hỏi một lần cho tất cả.
  */
-const closeGuards = new Map<string, () => boolean>()
-export function setCloseGuard(tabId: string, guard: (() => boolean) | null): void {
+const closeGuards = new Map<string, () => CloseConcern | null>()
+export function setCloseGuard(tabId: string, guard: (() => CloseConcern | null) | null): void {
   if (guard) closeGuards.set(tabId, guard)
   else closeGuards.delete(tabId)
 }
-const mayClose = (id: string): boolean => closeGuards.get(id)?.() ?? true
+const concernOf = (id: string): CloseConcern | null => closeGuards.get(id)?.() ?? null
+/**
+ * Tab đang chờ người dùng trả lời hộp thoại đóng (bấm đóng lần nữa không hỏi chồng). Giá trị = có
+ * lời gọi close() khác tới trong lúc hỏi (vd. shell thoát sạch tự đóng tab) — chọn Cancel mà tab
+ * không còn gì phải hỏi thì vẫn đóng theo lời gọi đó.
+ */
+const asking = new Map<string, boolean>()
 
 export interface Tab {
   id: string
@@ -124,6 +140,11 @@ interface TabsState {
 
 let localCounter = 0
 
+/** Tiêu đề tab local khi không biết tên shell: "Local 1", "Local 2"… */
+function localTitle(): string {
+  return t('Local {n}', { n: ++localCounter })
+}
+
 /** Nhớ tab vừa đóng (bỏ Home và terminal của module — mở lại không có nghĩa). */
 function remember(closed: ClosedTab[], tabs: Tab[]): ClosedTab[] {
   const add = tabs
@@ -157,6 +178,17 @@ export const useTabs = create<TabsState>((set, get) => {
     }))
     return id
   }
+  const closeNow = (id: string): void => {
+    set((s) => {
+      const index = s.tabs.findIndex((t) => t.id === id)
+      if (index === -1) return s
+      const tabs = s.tabs.filter((t) => t.id !== id)
+      let activeId = s.activeId
+      if (activeId === id) activeId = (tabs[index] ?? tabs[index - 1] ?? null)?.id ?? null
+      const gone = s.tabs[index]
+      return { tabs, activeId, closed: gone ? remember(s.closed, [gone]) : s.closed }
+    })
+  }
   return {
     tabs: [],
     activeId: null,
@@ -168,13 +200,11 @@ export const useTabs = create<TabsState>((set, get) => {
       if (!last) return null
       set((s) => ({ closed: s.closed.filter((_, i) => i !== at) }))
       const title =
-        last.target.kind === 'local'
-          ? (shellName(last.target.shellId) ?? `Local ${++localCounter}`)
-          : last.title
+        last.target.kind === 'local' ? (shellName(last.target.shellId) ?? localTitle()) : last.title
       return add(title, last.target, undefined, undefined, last.view)
     },
     addLocal: (shellId) => {
-      const title = shellName(shellId) ?? `Local ${++localCounter}`
+      const title = shellName(shellId) ?? localTitle()
       return add(title, shellId ? { kind: 'local', shellId } : { kind: 'local' })
     },
     openHome: () => {
@@ -183,7 +213,7 @@ export const useTabs = create<TabsState>((set, get) => {
         set({ activeId: existing.id })
         return existing.id
       }
-      return add('Home', { kind: 'home' })
+      return add(t('Home'), { kind: 'home' })
     },
     openEditor: (title, key) => {
       const existing = get().tabs.find((t) => t.target.kind === 'editor' && t.target.key === key)
@@ -193,8 +223,11 @@ export const useTabs = create<TabsState>((set, get) => {
       }
       return add(title, { kind: 'editor', key })
     },
-    addSsh: (t) =>
-      add(`${t.username}@${t.host}${t.port === 22 ? '' : `:${t.port}`}`, { kind: 'ssh', ...t }),
+    addSsh: (target) =>
+      add(`${target.username}@${target.host}${target.port === 22 ? '' : `:${target.port}`}`, {
+        kind: 'ssh',
+        ...target
+      }),
     addHost: (host, options) => {
       const active = get().activeId
       const splitFrom =
@@ -235,7 +268,7 @@ export const useTabs = create<TabsState>((set, get) => {
         const splitFrom = anchor ? { tabId: anchor, direction: item.direction } : undefined
         const title =
           item.target.kind === 'local'
-            ? (shellName(item.target.shellId) ?? `Local ${++localCounter}`)
+            ? (shellName(item.target.shellId) ?? localTitle())
             : item.title
         ids.push(add(title, item.target, splitFrom, undefined, item.view))
       }
@@ -247,7 +280,7 @@ export const useTabs = create<TabsState>((set, get) => {
       if (!source || singular(source.target)) return null
       const title =
         source.target.kind === 'local'
-          ? (shellName(source.target.shellId) ?? `Local ${++localCounter}`)
+          ? (shellName(source.target.shellId) ?? localTitle())
           : source.title
       return add(title, source.target, { tabId: source.id, direction })
     },
@@ -256,7 +289,7 @@ export const useTabs = create<TabsState>((set, get) => {
       if (!source || singular(source.target)) return null
       const title =
         source.target.kind === 'local'
-          ? (shellName(source.target.shellId) ?? `Local ${++localCounter}`)
+          ? (shellName(source.target.shellId) ?? localTitle())
           : source.title
       return add(
         title,
@@ -267,31 +300,68 @@ export const useTabs = create<TabsState>((set, get) => {
       )
     },
     closeOthers: (id) => {
-      // Tab còn việc chưa lưu (và người dùng chọn giữ) ở lại.
-      const keep = new Set(
-        get()
-          .tabs.filter((t) => t.id !== id && !mayClose(t.id))
-          .map((t) => t.id)
-      )
-      set((s) => ({
-        tabs: s.tabs.filter((t) => t.id === id || keep.has(t.id)),
-        activeId: id,
-        closed: remember(
-          s.closed,
-          s.tabs.filter((t) => t.id !== id && !keep.has(t.id))
-        )
-      }))
+      const others = get().tabs.filter((t) => t.id !== id)
+      const concerns = new Map<string, CloseConcern>()
+      for (const t of others) {
+        const c = concernOf(t.id)
+        if (c) concerns.set(t.id, c)
+      }
+      /** `focus` = chuyển sang tab `id`; không thì chỉ đổi tab active khi chính nó bị đóng. */
+      const drop = (ids: ReadonlySet<string>, focus: boolean): void => {
+        set((s) => {
+          const tabs = s.tabs.filter((t) => !ids.has(t.id))
+          const lost = s.activeId === null || ids.has(s.activeId)
+          const activeId =
+            focus || lost
+              ? tabs.some((t) => t.id === id)
+                ? id
+                : lost
+                  ? (tabs[0]?.id ?? null)
+                  : s.activeId
+              : s.activeId
+          return {
+            tabs,
+            activeId,
+            closed: remember(
+              s.closed,
+              s.tabs.filter((t) => ids.has(t.id))
+            )
+          }
+        })
+      }
+      // Tab không cần hỏi: đóng ngay. Tab cần hỏi: hỏi MỘT lần cho tất cả; chọn giữ thì chúng ở lại.
+      drop(new Set(others.filter((t) => !concerns.has(t.id)).map((t) => t.id)), true)
+      if (concerns.size === 0) return
+      const list = [...concerns.values()]
+      const only = list.length === 1 ? list[0] : undefined
+      void confirmAction({
+        title: only ? only.title : t('Close {n} more tabs?', { n: list.length }),
+        message: only ? only.message : list.map((c) => c.message).join('\n'),
+        confirmLabel: only ? only.confirmLabel : t('Close all'),
+        danger: true,
+        testId: 'close-tab-confirm'
+      }).then((ok) => {
+        // Trong lúc hỏi người dùng có thể đã sang tab khác — không kéo họ về tab `id`.
+        if (ok) drop(new Set(concerns.keys()), false)
+      })
     },
     close: (id) => {
-      if (!mayClose(id)) return
-      set((s) => {
-        const index = s.tabs.findIndex((t) => t.id === id)
-        if (index === -1) return s
-        const tabs = s.tabs.filter((t) => t.id !== id)
-        let activeId = s.activeId
-        if (activeId === id) activeId = (tabs[index] ?? tabs[index - 1] ?? null)?.id ?? null
-        const gone = s.tabs[index]
-        return { tabs, activeId, closed: gone ? remember(s.closed, [gone]) : s.closed }
+      if (asking.has(id)) {
+        asking.set(id, true)
+        return
+      }
+      const concern = concernOf(id)
+      if (!concern) {
+        closeNow(id)
+        return
+      }
+      asking.set(id, false)
+      void confirmAction({ ...concern, danger: true, testId: 'close-tab-confirm' }).then((ok) => {
+        const again = asking.get(id) === true
+        asking.delete(id)
+        // Cancel nhưng trong lúc hỏi có lời đóng khác (shell đã thoát…) và giờ không còn gì phải
+        // hỏi → đóng theo lời đó, không để lại tab đã kết thúc.
+        if (ok || (again && !concernOf(id))) closeNow(id)
       })
     },
     activate: (id) => {

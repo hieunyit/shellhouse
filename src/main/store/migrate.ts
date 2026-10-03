@@ -1,4 +1,5 @@
 import type { Db } from './db'
+import { t } from '@shared/i18n'
 
 export interface Migration {
   version: number
@@ -12,8 +13,10 @@ export class NewerSchemaError extends Error {
     readonly appVersion: number
   ) {
     super(
-      `The data uses schema v${dbVersion}, newer than this version of the app supports (v${appVersion}). ` +
-        'Update the app or restore a backup.'
+      t(
+        'The data uses schema v{db}, newer than this version of the app supports (v{app}). Update the app or restore a backup.',
+        { db: dbVersion, app: appVersion }
+      )
     )
     this.name = 'NewerSchemaError'
   }

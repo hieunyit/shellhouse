@@ -1,6 +1,7 @@
 import type { SnippetInput, SnippetSummary } from '@shared/snippets'
 import { uuidv7 } from '../node-shared/uuid'
 import type { Db } from './store/db'
+import { t } from '@shared/i18n'
 
 export class SnippetService {
   constructor(
@@ -48,7 +49,7 @@ export class SnippetService {
           'UPDATE snippets SET name = ?, body = ?, tags = ?, mode = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL'
         )
         .run(input.name, input.body, tags, mode, now, input.id)
-      if (result.changes === 0) throw new Error('Snippet not found')
+      if (result.changes === 0) throw new Error(t('Snippet not found'))
       return input.id
     }
     const id = uuidv7(now)

@@ -7,9 +7,12 @@ import { activeTab, expect, launchApp, test, waitForText } from '../e2e/fixtures
 
 /**
  * Chụp các màn hình chính ở cả sáng và tối để rà soát giao diện bằng mắt (không assert pixel).
- *   pnpm build && pnpm screens      → ảnh trong screens/<theme>-<tên>.png
+ *   pnpm build && pnpm screens                       → ảnh trong screens/<theme>-<tên>.png
+ *   SHELLHOUSE_LANG=vi pnpm screens                  → giao diện tiếng Việt: screens/vi-<theme>-<tên>.png
  */
 const OUT = 'screens'
+/** launchApp đọc SHELLHOUSE_LANG (mặc định en); ảnh tiếng Việt có tiền tố riêng, không đè ảnh tiếng Anh. */
+const PREFIX = process.env['SHELLHOUSE_LANG'] === 'vi' ? 'vi-' : ''
 test.setTimeout(180_000)
 
 async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
@@ -104,9 +107,15 @@ test('chụp màn hình giao diện', async () => {
       await setTheme(page, theme)
       const shot = async (name: string): Promise<void> => {
         await page.waitForTimeout(250)
-        await page.screenshot({ path: `${OUT}/${theme}-${name}.png` })
+        await page.screenshot({ path: `${OUT}/${PREFIX}${theme}-${name}.png` })
       }
       await shot('01-main')
+
+      // Trang chủ (Home): kết nối gần đây, yêu thích, thao tác bắt đầu.
+      await page.getByTestId('open-home').click()
+      await expect(page.getByTestId('welcome')).toBeVisible()
+      await shot('00-home')
+      await page.locator(`[data-testid="tab"][data-tab-id="${sshTab}"]`).click()
       const web1 = page.locator('[data-testid="host-row"][data-host-label="web-01"]')
       await web1.click({ button: 'right' })
       await shot('01b-context-menu')
@@ -147,6 +156,10 @@ test('chụp màn hình giao diện', async () => {
       await page.getByTestId('open-workspaces').click()
       await page.getByTestId('workspace-name').fill('Prod web + DB')
       await page.getByTestId('workspace-save').click()
+      // Lượt theme thứ hai: workspace đã có → hộp hỏi "Replace?" của app.
+      const replace = page.getByTestId('confirm-dialog')
+      if (await replace.isVisible().catch(() => false))
+        await replace.getByTestId('confirm-ok').click()
       await shot('03d-workspaces')
       await page.keyboard.press('Escape')
       await page.getByTestId('import-ssh-config').click()
@@ -159,9 +172,25 @@ test('chụp màn hình giao diện', async () => {
       await shot('03f-sidebar-hidden')
       await page.getByTestId('toggle-sidebar').click()
 
+      // Thanh bên gọn (thanh icon) + mở tạm khi rê chuột — mặc định ở tab module.
+      await page.getByTestId('sidebar-collapse').click()
+      await page.mouse.move(700, 400)
+      await shot('03g-sidebar-rail')
+      await page.getByTestId('rail-search').hover()
+      await expect(page.getByTestId('sidebar-panel')).toHaveAttribute('data-peek', 'open')
+      await shot('03h-sidebar-peek')
+      await page.getByTestId('sidebar-pin').click()
+      await page.mouse.move(700, 400)
+
       await page.getByTestId('add-host').click()
       await shot('04-host-form')
+      // Ô tag dạng chip + gợi ý từ tag đã dùng; lỗi port ngay dưới ô.
+      await page.getByTestId('host-tags-input').fill('we')
+      await page.getByTestId('host-port').fill('99999')
+      await page.getByTestId('host-auth-password').click()
+      await shot('04a-host-form-details')
       await page.keyboard.press('Escape')
+      await expect(page.getByTestId('host-form')).toHaveCount(0)
 
       const dbRow = page.locator('[data-testid="group-row"][data-group-name="Database"]')
       await dbRow.hover()
@@ -224,7 +253,7 @@ test('chụp màn hình giao diện', async () => {
       .click({ timeout: 3_000 })
       .catch(() => undefined)
     await page.waitForTimeout(1500)
-    await page.screenshot({ path: `${OUT}/light-10-multiexec.png` })
+    await page.screenshot({ path: `${OUT}/${PREFIX}light-10-multiexec.png` })
   } finally {
     await launched.close()
     await server.close()

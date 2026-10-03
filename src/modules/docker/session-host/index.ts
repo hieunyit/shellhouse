@@ -1,4 +1,7 @@
-import { homedir } from 'node:os'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { t } from '@shared/i18n'
 import type { HostModule, HostModuleContext, SshCapability } from '../../registry/host-types'
 import { dockerManifest } from '../manifest'
 import { ApiBackend } from './api-backend'
@@ -6,7 +9,8 @@ import type { DockerBackend, DockerCli } from './backend'
 import { CliBackend } from './cli-backend'
 import { EngineClient, type Connect } from './engine'
 import { DockerService } from './service'
-import { DockerSessionConfig } from '../shared/ops'
+import { DockerSessionConfig, type RegistryAuth } from '../shared/ops'
+import { DockerIpc, wslSource } from '../shared/ipc'
 
 /**
  * Phần Session Host của Docker (ADR-014 mục 6.2): nói chuyện với Engine API qua socket (máy này)
@@ -53,17 +57,65 @@ async function firstWorking(
   return { error }
 }
 
+/**
+ * Cờ chỉ đọc đã lưu ở main (bảng docker_endpoints) — Session Host không chỉ tin cờ renderer gửi.
+ * `source` = hostId của nguồn (null = máy này, "wsl:<distro>", id host SSH).
+ */
+async function storedReadOnly(ctx: HostModuleContext, source: string | null): Promise<boolean> {
+  return (await ctx.fromMain('readOnly', source)) === true
+}
+
+/** Thông tin đăng nhập registry đã lưu — main giải mã từ vault, chỉ tới Session Host. */
+async function registryAuth(ctx: HostModuleContext, id: string): Promise<RegistryAuth> {
+  const r = (await ctx.fromMain(
+    'registryAuth',
+    DockerIpc.registryAuthQuery.parse(id)
+  )) as Partial<RegistryAuth> | null
+  if (
+    !r ||
+    typeof r.server !== 'string' ||
+    typeof r.username !== 'string' ||
+    typeof r.password !== 'string'
+  )
+    throw new Error('Invalid registry credentials')
+  return { server: r.server, username: r.username, password: r.password }
+}
+
+/** `mktemp -d` trên server / trong WSL → thư mục tạm cho `docker --config`. */
+async function remoteTempDir(
+  exec: (argv: string[]) => Promise<{ code: number | null; stdout: string; stderr: string }>
+): Promise<{ path: string; remove(): Promise<void> }> {
+  const r = await exec(['mktemp', '-d'])
+  const path = r.stdout.trim()
+  if (r.code !== 0 || !/^\/[\w./-]+$/.test(path))
+    throw new Error(`mktemp failed: ${r.stderr.trim() || path}`)
+  return {
+    path,
+    remove: async () => {
+      await exec(['rm', '-rf', '--', path])
+    }
+  }
+}
+
 function localCli(ctx: HostModuleContext): DockerCli {
   return {
     exec: (args, options) => ctx.spawn.exec('docker', args, options),
-    spawn: (args, signal) => ctx.spawn.spawn('docker', args, signal)
+    spawn: (args, signal) => ctx.spawn.spawn('docker', args, signal),
+    tempDir: async () => {
+      const path = await mkdtemp(join(tmpdir(), 'shellhouse-docker-'))
+      return {
+        path,
+        remove: () => rm(path, { recursive: true, force: true })
+      }
+    }
   }
 }
 
 function sshCli(ssh: SshCapability): DockerCli {
   return {
     exec: (args, options) => ssh.exec(['docker', ...args], options),
-    spawn: (args, signal) => ssh.spawn(['docker', ...args], signal)
+    spawn: (args, signal) => ssh.spawn(['docker', ...args], signal),
+    tempDir: () => remoteTempDir((argv) => ssh.exec(argv, { timeoutMs: 15_000 }))
   }
 }
 
@@ -87,12 +139,16 @@ function localService(ctx: HostModuleContext): DockerService {
       }
       if (!ctx.spawn.available('docker'))
         throw new Error(
-          'Docker is not running on this computer (no Docker socket and no `docker` command found).'
+          t(
+            'Docker is not running on this computer (no Docker socket and no `docker` command found).'
+          )
         )
       ctx.log('info', `no local socket (${found.error}) — using the docker CLI`)
       return new CliBackend(cli)
     },
     openPty: (args, size, cb) => ctx.spawn.openPty('docker', args, size, cb),
+    storedReadOnly: () => storedReadOnly(ctx, null),
+    registryAuth: (id) => registryAuth(ctx, id),
     emit: (event, data) => {
       ctx.emit(event, data)
     },
@@ -107,7 +163,11 @@ function wslCli(ctx: HostModuleContext, distro: string): DockerCli {
   const wrap = (args: readonly string[]): string[] => ['-d', distro, '-e', 'docker', ...args]
   return {
     exec: (args, options) => ctx.spawn.exec('wsl', wrap(args), options),
-    spawn: (args, signal) => ctx.spawn.spawn('wsl', wrap(args), signal)
+    spawn: (args, signal) => ctx.spawn.spawn('wsl', wrap(args), signal),
+    tempDir: () =>
+      remoteTempDir((argv) =>
+        ctx.spawn.exec('wsl', ['-d', distro, '-e', ...argv], { timeoutMs: 15_000 })
+      )
   }
 }
 
@@ -120,15 +180,18 @@ function wslService(ctx: HostModuleContext, distro: string): DockerService {
   return new DockerService({
     cli,
     connect: async (signal): Promise<DockerBackend> => {
-      if (!ctx.spawn.available('wsl')) throw new Error('WSL is not installed on this computer.')
+      if (!ctx.spawn.available('wsl')) throw new Error(t('WSL is not installed on this computer.'))
       const backend = new CliBackend(cli)
       await backend.info(signal).catch((error: unknown) => {
         const text = error instanceof Error ? error.message : String(error)
         throw new Error(
           /not installed|not found/i.test(text)
-            ? `Docker is not installed in ${distro} (WSL).`
+            ? t('Docker is not installed in {distro} (WSL).', { distro })
             : /not running|cannot connect/i.test(text)
-              ? `Docker is installed in ${distro} (WSL) but not running — start it with \`sudo service docker start\`.`
+              ? t(
+                  'Docker is installed in {distro} (WSL) but not running — start it with `sudo service docker start`.',
+                  { distro }
+                )
               : text,
           { cause: error }
         )
@@ -138,6 +201,9 @@ function wslService(ctx: HostModuleContext, distro: string): DockerService {
     },
     openPty: (args, size, cb) =>
       ctx.spawn.openPty('wsl', ['-d', distro, '-e', 'docker', ...args], size, cb),
+    storedReadOnly: () => storedReadOnly(ctx, wslSource(distro)),
+    registryAuth: (id) => registryAuth(ctx, id),
+    reprobeCli: false,
     emit: (event, data) => {
       ctx.emit(event, data)
     },
@@ -181,6 +247,9 @@ function remoteService(ctx: HostModuleContext, ssh: SshCapability): DockerServic
       return backend
     },
     openPty: (args, size, cb) => ssh.openPty(['docker', ...args], size, cb),
+    // Phiên SSH không biết mình là host đã lưu nào → hostId do tab / terminal báo.
+    storedReadOnly: (hostId) => (hostId ? storedReadOnly(ctx, hostId) : Promise.resolve(false)),
+    registryAuth: (id) => registryAuth(ctx, id),
     emit: (event, data) => {
       ctx.emit(event, data)
     },

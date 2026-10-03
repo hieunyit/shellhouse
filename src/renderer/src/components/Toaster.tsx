@@ -9,6 +9,7 @@ import {
   X,
   XCircle
 } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { cx } from './ui'
 import { dismiss, hold, useToasts, type Toast, type ToastTone } from '../stores/toasts'
 
@@ -37,8 +38,8 @@ export function Toaster(): React.JSX.Element {
       aria-live="polite"
       data-testid="toaster"
     >
-      {toasts.map((t) => (
-        <ToastCard key={t.id} toast={t} />
+      {toasts.map((item) => (
+        <ToastCard key={item.id} toast={item} />
       ))}
     </div>
   )
@@ -109,7 +110,7 @@ function ToastCard({ toast }: { toast: Toast }): React.JSX.Element {
                   size={12}
                   className={cx('transition-transform', open && 'rotate-180')}
                 />
-                {open ? 'Less' : 'Details'}
+                {open ? t('Less') : t('Details')}
               </button>
             )}
             {toast.tone === 'error' && (
@@ -126,7 +127,7 @@ function ToastCard({ toast }: { toast: Toast }): React.JSX.Element {
                     })
                 }}
               >
-                <Copy size={11} /> {copied ? 'Copied' : 'Copy'}
+                <Copy size={11} /> {copied ? t('Copied') : t('Copy')}
               </button>
             )}
           </div>
@@ -134,7 +135,7 @@ function ToastCard({ toast }: { toast: Toast }): React.JSX.Element {
       </div>
       <button
         type="button"
-        aria-label="Dismiss"
+        aria-label={t('Dismiss')}
         className="h-5 shrink-0 rounded p-0.5 text-faint hover:bg-hover hover:text-fg"
         onClick={() => {
           dismiss(toast.id)

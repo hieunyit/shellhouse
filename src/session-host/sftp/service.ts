@@ -1,9 +1,26 @@
+import { t } from '@shared/i18n'
 import type { Client, SFTPWrapper, Stats } from 'ssh2'
 import type { SftpEntry, SftpListing, SftpPreview } from '@shared/sftp'
 import { FILE_CHANGED, MAX_WRITE_BYTES, joinRemote } from '@shared/sftp'
-import { createLimiter } from '../../node-shared/pool'
+import { randomBytes } from 'node:crypto'
+import { createLimiter, mapLimit } from '../../node-shared/pool'
 
 const MAX_RECURSIVE_DELETE = 10_000
+const WRITE_CHUNK_BYTES = 32 * 1024
+const WRITE_IN_FLIGHT = 16
+const READ_CHUNK_BYTES = 64 * 1024
+const READ_IN_FLIGHT = 16
+/** Mã SSH_FX_OP_UNSUPPORTED của giao thức SFTP. */
+const SFTP_OP_UNSUPPORTED = 8
+
+/** Server không hỗ trợ (ssh2 ném ngay khi server không quảng bá extension, hoặc server trả mã 8). */
+function isUnsupported(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code
+  if (code === SFTP_OP_UNSUPPORTED) return true
+  return error instanceof Error && /does not support this extended request/i.test(error.message)
+}
+/** Lưu từ editor: quá số mục này trong thư mục mà chưa thấy file → không đếm hard link, ghi tại chỗ. */
+const HARDLINK_SCAN_LIMIT = 2000
 /** Mặc định số yêu cầu SFTP cùng lúc khi duyệt / xoá thư mục (chỉnh trong Settings → Files). */
 export const DEFAULT_SFTP_PARALLEL = 8
 
@@ -38,7 +55,7 @@ export class SftpService implements LossGuard {
     readonly parallel = DEFAULT_SFTP_PARALLEL
   ) {
     const die = (): void => {
-      this.markLost(new Error('Connection lost'))
+      this.markLost(new Error(t('Connection lost')))
     }
     client.once('close', die)
     client.once('end', die)
@@ -75,13 +92,22 @@ export class SftpService implements LossGuard {
         settled = true
         reject(error)
       })
-      fn((err, value) => {
-        if (settled) return
+      try {
+        fn((err, value) => {
+          if (settled) return
+          settled = true
+          off()
+          if (err) reject(err)
+          else resolve(value)
+        })
+      } catch (error) {
+        // ssh2 ném đồng bộ (vd. ext_openssh_rename khi server không có extension) → vẫn gỡ
+        // listener, không thì mỗi lần lưu / đổi tên rò thêm một listener "lost". (Đã gọi cb rồi
+        // mới ném thì off / reject lặp lại là vô hại.)
         settled = true
         off()
-        if (err) reject(err)
-        else resolve(value)
-      })
+        reject(error instanceof Error ? error : new Error(String(error)))
+      }
     })
   }
 
@@ -163,22 +189,35 @@ export class SftpService implements LossGuard {
   async preview(path: string, maxBytes: number): Promise<SftpPreview> {
     const s = await this.channel()
     const st = await this.stat(path)
-    if (st.isDirectory()) throw new Error('This is a folder')
+    if (st.isDirectory()) throw new Error(t('This is a folder'))
     const want = Math.min(maxBytes, st.size)
     const handle = await this.guarded<Buffer>((cb) => {
       s.open(path, 'r', cb)
     })
     try {
       const buf = Buffer.alloc(want)
-      let read = 0
-      while (read < want) {
-        const n = await this.guarded<number>((cb) => {
-          s.read(handle, buf, read, Math.min(64 * 1024, want - read), read, (err, bytes) => {
-            cb(err, bytes)
+      // Đọc song song nhiều mảnh (mở file 8 MB trong editor: 128 lượt hỏi-đáp tuần tự = hàng chục
+      // giây trên đường xa). Mảnh đọc ngắn thì đọc nốt; file ngắn đi (EOF sớm) → lấy phần liền mạch.
+      const offsets: number[] = []
+      for (let at = 0; at < want; at += READ_CHUNK_BYTES) offsets.push(at)
+      const got = await mapLimit(offsets, READ_IN_FLIGHT, async (at) => {
+        const end = Math.min(at + READ_CHUNK_BYTES, want)
+        let pos = at
+        while (pos < end) {
+          const n = await this.guarded<number>((cb) => {
+            s.read(handle, buf, pos, end - pos, pos, (err, bytes) => {
+              cb(err, bytes)
+            })
           })
-        })
-        if (n <= 0) break
+          if (n <= 0) break
+          pos += n
+        }
+        return pos - at
+      })
+      let read = 0
+      for (const [i, n] of got.entries()) {
         read += n
+        if (n < Math.min(READ_CHUNK_BYTES, want - (offsets[i] ?? 0))) break
       }
       return {
         path,
@@ -192,43 +231,161 @@ export class SftpService implements LossGuard {
     }
   }
 
-  /** Ghi đè nội dung file tại chỗ (giữ owner / quyền / hard link) — xem op `write`. */
+  /**
+   * Lưu nội dung từ editor trong app — xem op `write`. Ghi ra file tạm cùng thư mục rồi đổi tên đè
+   * lên (posix-rename, nguyên tử): rớt mạng giữa chừng không bao giờ để lại file rỗng / dở dang.
+   * Giữ quyền; ghi vào đích thật nếu là symlink. Chỉ thay file khi chắc là an toàn — còn lại ghi
+   * tại chỗ như cũ: không phải file thường, owner không có quyền ghi (0444: server trả EACCES như
+   * trước, không lặng lẽ thay file chỉ-đọc), không biết chắc số hard link là 1 (thư mục quá lớn,
+   * longname không theo kiểu `ls -l`), owner khác mình, không tạo được file tạm.
+   * Đánh đổi đã biết của việc thay inode: mất xattr / ACL / nhãn SELinux của file cũ, và bind
+   * mount từng file (docker `-v ./app.conf:/etc/app.conf`) vẫn trỏ vào inode cũ. SFTP không có
+   * cách đọc / chép xattr nên không giữ được — chấp nhận đổi lấy việc không bao giờ để lại file
+   * dở dang khi rớt mạng.
+   */
   async write(
     path: string,
     data: Buffer,
     expect?: { mtime: number; size: number }
   ): Promise<{ size: number; mtime: number }> {
     if (data.length > MAX_WRITE_BYTES)
-      throw new Error('The file is too large to save from the editor')
+      throw new Error(t('The file is too large to save from the editor'))
     const s = await this.channel()
-    if (expect) {
-      const st = await this.statOrNull(path)
-      if (st && (st.mtime * 1000 !== expect.mtime || st.size !== expect.size))
-        throw new Error(FILE_CHANGED)
+    const st = await this.statOrNull(path)
+    if (expect && st && (st.mtime * 1000 !== expect.mtime || st.size !== expect.size))
+      throw new Error(FILE_CHANGED)
+    const target = st ? await this.realpath(path).catch(() => path) : path
+    const saved = await this.writeViaTemp(s, target, data, st)
+    if (!saved) await this.writeInPlace(s, target, data)
+    const after = await this.stat(target)
+    return { size: after.size, mtime: after.mtime * 1000 }
+  }
+
+  /** false = không dùng được cách này (chưa đụng tới file đích) → ghi tại chỗ. */
+  private async writeViaTemp(
+    s: SFTPWrapper,
+    target: string,
+    data: Buffer,
+    original: Stats | null
+  ): Promise<boolean> {
+    const slash = target.lastIndexOf('/')
+    const dir = slash < 0 ? '' : target.slice(0, slash + 1)
+    const name = target.slice(slash + 1)
+    if (original) {
+      if (!original.isFile() || (original.mode & 0o200) === 0) return false
+      if ((await this.linkCount(s, dir, name)) !== 1) return false
     }
+    const temp = `${dir}.${name}.shellhouse-save-${randomBytes(4).toString('hex')}`
+    let handle: Buffer
+    try {
+      handle = await this.guarded<Buffer>((cb) => {
+        s.open(temp, 'wx', original ? { mode: original.mode & 0o7777 } : {}, cb)
+      })
+    } catch (error) {
+      if (this.lost) throw error
+      return false
+    }
+    let ok = false
+    try {
+      if (original) {
+        const own = await this.guarded<Stats>((cb) => {
+          s.fstat(handle, cb)
+        })
+        if (own.uid !== original.uid || own.gid !== original.gid) {
+          // Thử giữ owner/group (được nếu cùng owner, chỉ khác group mà mình là thành viên).
+          const kept = await this.guarded<undefined>((cb) => {
+            s.fchown(handle, original.uid, original.gid, (err) => {
+              cb(err, undefined)
+            })
+          }).then(
+            () => true,
+            () => false
+          )
+          if (!kept) return false
+        }
+        // umask của server có thể đã bớt quyền lúc tạo → đặt lại đúng quyền gốc.
+        await this.guarded<undefined>((cb) => {
+          s.fchmod(handle, original.mode & 0o7777, (err) => {
+            cb(err, undefined)
+          })
+        })
+      }
+      await this.writeAll(s, handle, data)
+      ok = true
+    } finally {
+      await this.closeHandle(s, handle)
+      if (!ok) await this.unlinkIfExists(temp).catch(() => undefined)
+    }
+    try {
+      await this.rename(temp, target, true)
+    } catch (error) {
+      await this.unlinkIfExists(temp).catch(() => undefined)
+      throw error
+    }
+    return true
+  }
+
+  /**
+   * Số hard link — chỉ có trong `longname` của readdir (cột thứ hai kiểu `ls -l`). Đọc thư mục
+   * từng mẻ và dừng khi thấy file hoặc quá HARDLINK_SCAN_LIMIT mục (thư mục log / cache khổng lồ
+   * không bị đọc hết mỗi lần lưu). null = không biết (không thấy, quá nhiều, longname lạ, lỗi).
+   */
+  private async linkCount(s: SFTPWrapper, dir: string, name: string): Promise<number | null> {
+    const handle = await this.guarded<Buffer>((cb) => {
+      s.opendir(dir || '.', cb)
+    }).catch(() => null)
+    if (!handle) return null
+    try {
+      let seen = 0
+      while (seen <= HARDLINK_SCAN_LIMIT) {
+        const batch = await this.guarded<{ filename: string; longname: string }[]>((cb) => {
+          s.readdir(handle, cb)
+        }).catch(() => null)
+        // null = EOF hoặc lỗi.
+        if (!batch?.length) return null
+        const entry = batch.find((e) => e.filename === name)
+        if (entry) {
+          const links = /^[-dlcbps][-rwxsStTl@+.]{9}\S*\s+(\d+)\s/.exec(entry.longname)?.[1]
+          return links === undefined ? null : Number(links)
+        }
+        seen += batch.length
+      }
+      return null
+    } finally {
+      await this.closeHandle(s, handle)
+    }
+  }
+
+  private async writeInPlace(s: SFTPWrapper, path: string, data: Buffer): Promise<void> {
     const handle = await this.guarded<Buffer>((cb) => {
       s.open(path, 'w', cb)
     })
     try {
-      let written = 0
-      while (written < data.length) {
-        const len = Math.min(32 * 1024, data.length - written)
-        await this.guarded<undefined>((cb) => {
-          s.write(handle, data, written, len, written, (err) => {
-            cb(err, undefined)
-          })
-        })
-        written += len
-      }
+      await this.writeAll(s, handle, data)
     } finally {
-      await new Promise<void>((resolve) => {
-        s.close(handle, () => {
-          resolve()
+      await this.closeHandle(s, handle)
+    }
+  }
+
+  /** Ghi cả buffer: nhiều yêu cầu song song (server ghi theo thứ tự nhận), không chờ từng mảnh. */
+  private async writeAll(s: SFTPWrapper, handle: Buffer, data: Buffer): Promise<void> {
+    const offsets: number[] = []
+    for (let at = 0; at < data.length; at += WRITE_CHUNK_BYTES) offsets.push(at)
+    await mapLimit(offsets, WRITE_IN_FLIGHT, (at) =>
+      this.guarded<undefined>((cb) => {
+        s.write(handle, data, at, Math.min(WRITE_CHUNK_BYTES, data.length - at), at, (err) => {
+          cb(err, undefined)
         })
       })
-    }
-    const st = await this.stat(path)
-    return { size: st.size, mtime: st.mtime * 1000 }
+    )
+  }
+
+  private closeHandle(s: SFTPWrapper, handle: Buffer): Promise<void> {
+    return this.guarded<undefined>((cb) => {
+      s.close(handle, (err) => {
+        cb(err, undefined)
+      })
+    }).catch(() => undefined)
   }
 
   async mkdir(path: string): Promise<void> {
@@ -243,24 +400,42 @@ export class SftpService implements LossGuard {
   /** Đổi tên; ưu tiên posix-rename của OpenSSH (ghi đè nguyên tử) nếu server hỗ trợ. */
   async rename(from: string, to: string, overwrite = false): Promise<void> {
     const s = await this.channel()
-    if (overwrite) {
-      try {
-        await this.guarded<undefined>((cb) => {
-          s.ext_openssh_rename(from, to, (err) => {
-            cb(err, undefined)
-          })
+    const plain = (a: string, b: string): Promise<undefined> =>
+      this.guarded<undefined>((cb) => {
+        s.rename(a, b, (err) => {
+          cb(err, undefined)
         })
-        return
-      } catch {
-        // Server không có extension → xoá đích rồi đổi tên.
-        await this.unlinkIfExists(to)
-      }
-    }
-    await this.guarded<undefined>((cb) => {
-      s.rename(from, to, (err) => {
-        cb(err, undefined)
       })
-    })
+    if (!overwrite) {
+      await plain(from, to)
+      return
+    }
+    try {
+      await this.guarded<undefined>((cb) => {
+        s.ext_openssh_rename(from, to, (err) => {
+          cb(err, undefined)
+        })
+      })
+      return
+    } catch (error) {
+      // CHỈ khi server không có extension. Lỗi khác (không có quyền, đĩa đầy, mất mạng…) mà vẫn
+      // xoá đích thì lần đổi tên sau hỏng nốt = mất luôn file gốc.
+      if (!isUnsupported(error)) throw error
+    }
+    // Không có posix-rename: dời đích sang tên tạm, đổi tên, rồi mới xoá bản cũ — lỗi giữa chừng
+    // thì trả bản cũ về chỗ.
+    const backup = `${to}.shellhouse-old-${randomBytes(4).toString('hex')}`
+    const moved = await plain(to, backup).then(
+      () => true,
+      () => false
+    )
+    try {
+      await plain(from, to)
+    } catch (error) {
+      if (moved) await plain(backup, to).catch(() => undefined)
+      throw error
+    }
+    if (moved) await this.unlinkIfExists(backup)
   }
 
   async chmod(path: string, mode: number): Promise<void> {
@@ -320,7 +495,9 @@ export class SftpService implements LossGuard {
         budget -= children.length
         if (budget < 0)
           throw new Error(
-            `Folder is too large to delete recursively (> ${MAX_RECURSIVE_DELETE} entries)`
+            t('Folder is too large to delete recursively (more than {max} items)', {
+              max: MAX_RECURSIVE_DELETE
+            })
           )
         await Promise.all(
           children.map(async (e) => {

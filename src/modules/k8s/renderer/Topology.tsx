@@ -35,14 +35,17 @@ import {
 } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
+import { t, tn } from '../../registry/renderer-kit'
 import { KindIcon } from './icons'
 import { useTraffic } from './useTraffic'
+import { relabelLayout, topologyStructureKey } from '../shared/topologyView'
 import { formatRate } from '../shared/traffic'
 import type { K8sOp, TopologyEdge, TopologyNode, TopologyResult } from '../shared/ops'
 import type { K8sObject } from '../shared/resources'
 import {
-  CATEGORY_LABEL,
+  CATEGORIES,
   EDGE_CATEGORY,
+  categoryLabel,
   TOPO_NODE_H,
   TOPO_NODE_W,
   dependentsOf,
@@ -88,22 +91,40 @@ const STYLE: Record<TopologyCategory, { color: string; dash?: string }> = {
   rbac: { color: 'text-danger', dash: '8 3 2 3' }
 }
 
-const EDGE_TEXT: Record<TopologyEdge['type'], string> = {
-  owns: 'owns',
-  selects: 'selects',
-  routes: 'routes to',
-  attaches: 'attaches',
-  uses: 'uses',
-  mounts: 'mounts',
-  bound: 'bound to',
-  'runs-on': 'runs on',
-  scales: 'scales',
-  protects: 'protects',
-  isolates: 'isolates',
-  identity: 'runs as',
-  subject: 'bound by',
-  grants: 'grants',
-  calls: 'calls'
+/** Tên quan hệ (dịch lúc render). */
+function edgeText(type: TopologyEdge['type']): string {
+  switch (type) {
+    case 'owns':
+      return t('owns')
+    case 'selects':
+      return t('selects')
+    case 'routes':
+      return t('routes to')
+    case 'attaches':
+      return t('attaches')
+    case 'uses':
+      return t('uses')
+    case 'mounts':
+      return t('mounts')
+    case 'bound':
+      return t('bound to')
+    case 'runs-on':
+      return t('runs on')
+    case 'scales':
+      return t('scales')
+    case 'protects':
+      return t('protects')
+    case 'isolates':
+      return t('isolates')
+    case 'identity':
+      return t('runs as')
+    case 'subject':
+      return t('bound by')
+    case 'grants':
+      return t('grants')
+    case 'calls':
+      return t('calls')
+  }
 }
 
 /** Tỉ lệ nhỏ nhất khi vừa khung mà chữ còn đọc được. */
@@ -154,9 +175,12 @@ export function TopologyOf({
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [view, setView] = useState<View | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
+  /** Lần tải đồ thị — kết quả mở rộng (expand) của lần tải trước bị bỏ. */
+  const generation = useRef(0)
 
   useEffect(() => {
     let cancelled = false
+    generation.current += 1
     request<TopologyResult>({
       op: 'topology',
       kind: kindId,
@@ -167,6 +191,7 @@ export function TopologyOf({
         if (cancelled) return
         setGraph(g)
         setError(null)
+        setExpanding(null)
         setExpanded(new Set())
         setView(null)
       },
@@ -224,8 +249,13 @@ export function TopologyOf({
       ro.disconnect()
     }
   }, [graph])
-  /** Hướng cho chữ to nhất khi vừa khung (khung rộng → ngang, khung hẹp → dọc). */
-  const layout = useMemo(() => {
+  /**
+   * Hướng cho chữ to nhất khi vừa khung (khung rộng → ngang, khung hẹp → dọc). Chỉ xếp lại khi cấu
+   * trúc đồ thị đổi (node / cạnh) — số traffic mỗi lần đọc chỉ đổi nhãn, không xếp lại, không mất
+   * vị trí người dùng đã kéo.
+   */
+  const structure = useMemo(() => (filtered ? topologyStructureKey(filtered) : ''), [filtered])
+  const baseLayout = useMemo(() => {
     if (!filtered) return null
     const lr = layoutTopology(filtered.nodes, filtered.edges, 'lr')
     if (!size) return lr
@@ -233,7 +263,13 @@ export function TopologyOf({
     const scale = (l: { width: number; height: number }): number =>
       Math.min(size.w / l.width, size.h / l.height)
     return scale(tb) > scale(lr) * 1.15 ? tb : lr
-  }, [filtered, size])
+    // structure đại diện cho filtered (cùng cấu trúc → cùng vị trí).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [structure, size])
+  const layout = useMemo(
+    () => (baseLayout && filtered ? relabelLayout(baseLayout, filtered) : baseLayout),
+    [baseLayout, filtered]
+  )
   const byId = useMemo(() => new Map((layout?.nodes ?? []).map((n) => [n.id, n])), [layout])
   const selected = selectedRaw && byId.has(selectedRaw) ? selectedRaw : null
   const focus = selected ?? hover
@@ -309,6 +345,7 @@ export function TopologyOf({
 
   const expand = (n: TopologyNode): void => {
     if (!graph || !n.kind) return
+    const gen = generation.current
     setExpanding(n.id)
     request<TopologyResult>({
       op: 'topology',
@@ -317,11 +354,13 @@ export function TopologyOf({
       name: n.name
     }).then(
       (extra) => {
+        if (gen !== generation.current) return
         setGraph((g) => (g ? mergeTopology(g, extra) : g))
         setExpanded((s) => new Set([...s, n.id]))
         setExpanding(null)
       },
       (e: unknown) => {
+        if (gen !== generation.current) return
         setExpanding(null)
         setError(cleanError(e))
       }
@@ -333,20 +372,25 @@ export function TopologyOf({
   }
 
   // ——— React Flow ———
-  // Vị trí người dùng kéo (theo từng bố cục — bố cục mới thì về vị trí tự xếp).
+  // Vị trí người dùng kéo, theo id node — giữ qua các lần cập nhật traffic / mở rộng; đổi hướng
+  // bố cục hay tải lại đồ thị thì về vị trí tự xếp.
+  const movedKey = `${baseLayout?.direction ?? ''}|${graph?.root ?? ''}|${String(tick)}`
   const [movedRaw, setMoved] = useState<{
-    layout: unknown
+    key: string
     pos: Readonly<Record<string, { x: number; y: number }>>
-  }>({ layout: null, pos: {} })
-  const moved = useMemo(() => (movedRaw.layout === layout ? movedRaw.pos : {}), [movedRaw, layout])
+  }>({ key: '', pos: {} })
+  const moved = useMemo(() => (movedRaw.key === movedKey ? movedRaw.pos : {}), [movedRaw, movedKey])
   const onNodesChange = useCallback(
     (changes: NodeChange<TopoFlowNode>[]) => {
       const next: Record<string, { x: number; y: number }> = {}
       for (const c of changes) if (c.type === 'position' && c.position) next[c.id] = c.position
       if (Object.keys(next).length)
-        setMoved((m) => ({ layout, pos: { ...(m.layout === layout ? m.pos : {}), ...next } }))
+        setMoved((m) => ({
+          key: movedKey,
+          pos: { ...(m.key === movedKey ? m.pos : {}), ...next }
+        }))
     },
-    [layout]
+    [movedKey]
   )
   const flowNodes = useMemo<TopoFlowNode[]>(
     () =>
@@ -403,7 +447,7 @@ export function TopologyOf({
   )
 
   if (error && !graph) return <p className="text-xs text-danger">{error}</p>
-  if (!graph || !layout) return <p className="text-xs text-faint">Mapping relationships…</p>
+  if (!graph || !layout) return <p className="text-xs text-faint">{t('Mapping relationships…')}</p>
 
   const sel = selected ? byId.get(selected) : undefined
   const categories = [...new Set((withLive ?? graph).edges.map((e) => EDGE_CATEGORY[e.type]))]
@@ -412,48 +456,46 @@ export function TopologyOf({
   return (
     <div className="flex h-full min-h-[420px] flex-col gap-2" data-testid="k8s-topology">
       <div className="flex flex-wrap items-center gap-1">
-        {(Object.keys(CATEGORY_LABEL) as TopologyCategory[])
-          .filter((c) => categories.includes(c))
-          .map((c) => {
-            const on = !hidden.has(c)
-            return (
-              <button
-                key={c}
-                type="button"
-                aria-pressed={on}
-                data-testid="k8s-topology-filter"
-                data-category={c}
-                className={cx(
-                  'inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11px]',
-                  on ? 'border-line-strong text-fg' : 'border-line text-faint line-through'
-                )}
-                onClick={() => {
-                  setHidden((h) => {
-                    const next = new Set(h)
-                    if (next.has(c)) next.delete(c)
-                    else next.add(c)
-                    return next
-                  })
-                }}
-              >
-                <svg width="16" height="6" className={STYLE[c].color} aria-hidden>
-                  <line
-                    x1="0"
-                    y1="3"
-                    x2="16"
-                    y2="3"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeDasharray={STYLE[c].dash}
-                  />
-                </svg>
-                {CATEGORY_LABEL[c]}
-              </button>
-            )
-          })}
+        {CATEGORIES.filter((c) => categories.includes(c)).map((c) => {
+          const on = !hidden.has(c)
+          return (
+            <button
+              key={c}
+              type="button"
+              aria-pressed={on}
+              data-testid="k8s-topology-filter"
+              data-category={c}
+              className={cx(
+                'inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11px]',
+                on ? 'border-line-strong text-fg' : 'border-line text-faint line-through'
+              )}
+              onClick={() => {
+                setHidden((h) => {
+                  const next = new Set(h)
+                  if (next.has(c)) next.delete(c)
+                  else next.add(c)
+                  return next
+                })
+              }}
+            >
+              <svg width="16" height="6" className={STYLE[c].color} aria-hidden>
+                <line
+                  x1="0"
+                  y1="3"
+                  x2="16"
+                  y2="3"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeDasharray={STYLE[c].dash}
+                />
+              </svg>
+              {categoryLabel(c)}
+            </button>
+          )
+        })}
         <span className="ml-auto flex items-center gap-0.5">
           <IconButton
-            label="Zoom out"
+            label={t('Zoom out')}
             onClick={() => {
               zoom(1 / 1.25)
             }}
@@ -461,7 +503,7 @@ export function TopologyOf({
             <Minus size={13} />
           </IconButton>
           <IconButton
-            label="Zoom in"
+            label={t('Zoom in')}
             onClick={() => {
               zoom(1.25)
             }}
@@ -469,7 +511,7 @@ export function TopologyOf({
             <Plus size={13} />
           </IconButton>
           <IconButton
-            label="Fit"
+            label={t('Fit')}
             onClick={() => {
               fit(true)
             }}
@@ -483,14 +525,14 @@ export function TopologyOf({
               className="mr-1 rounded px-1.5 text-[11px] text-accent hover:bg-hover"
               data-testid="k8s-topology-reset"
               onClick={() => {
-                setMoved({ layout: null, pos: {} })
+                setMoved({ key: '', pos: {} })
               }}
             >
-              Reset layout
+              {t('Reset layout')}
             </button>
           )}
           <IconButton
-            label="Reload"
+            label={t('Reload')}
             onClick={() => {
               setTick((t) => t + 1)
             }}
@@ -501,13 +543,17 @@ export function TopologyOf({
       </div>
       {missing.length > 0 && (
         <p className="rounded-md bg-danger-soft px-2 py-1.5 text-xs text-danger">
-          {missing.length} referenced object{missing.length === 1 ? ' is' : 's are'} missing:{' '}
-          {missing.map((m) => `${m.kindLabel} ${m.name}`).join(', ')}
+          {tn(
+            missing.length,
+            '{n} referenced object is missing: {list}',
+            '{n} referenced objects are missing: {list}',
+            { list: missing.map((m) => `${m.kindLabel} ${m.name}`).join(', ') }
+          )}
         </p>
       )}
       <div
         ref={wrapRef}
-        className="k8s-topology-flow relative min-h-0 flex-1 overflow-hidden rounded-md border border-line bg-canvas"
+        className="k8s-topology-flow k8s-map relative min-h-0 flex-1 overflow-hidden rounded-md border border-line"
         data-testid="k8s-topology-canvas"
       >
         {view && (
@@ -578,8 +624,9 @@ export function TopologyOf({
         />
       ) : (
         <p className="text-[11px] text-faint">
-          {layout.nodes.length} objects · {layout.edges.length} relationships. Click an object to
-          trace it; double-click to open it.
+          {tn(layout.nodes.length, '{n} object', '{n} objects')} ·{' '}
+          {tn(layout.edges.length, '{n} relationship', '{n} relationships')}.{' '}
+          {t('Click an object to trace it; double-click to open it.')}
           {graph.notes.length > 0 && (
             <span className="text-warning"> {graph.notes.join(' · ')}</span>
           )}
@@ -665,7 +712,7 @@ const TopoEdgeComp = memo(function TopoEdgeComp(
         : props.targetPosition === Position.Top
           ? `M${x - 4},${y - 7} L${x},${y} L${x + 4},${y - 7} Z`
           : `M${x - 4},${y + 7} L${x},${y} L${x + 4},${y + 7} Z`
-  const label = edge.label ? `${EDGE_TEXT[edge.type]} · ${edge.label}` : EDGE_TEXT[edge.type]
+  const label = edge.label ? `${edgeText(edge.type)} · ${edge.label}` : edgeText(edge.type)
   return (
     <g
       opacity={ctx.lit ? (hot ? 1 : 0.15) : 0.8}
@@ -685,26 +732,19 @@ const TopoEdgeComp = memo(function TopoEdgeComp(
       {(hot || ctx.showLabels) && (
         <EdgeLabelRenderer>
           <div
-            className="pointer-events-none absolute rounded bg-canvas/90 px-1 text-[9.5px] whitespace-nowrap"
+            className="pointer-events-none absolute rounded border border-line bg-surface/95 px-1.5 py-px text-[11px] whitespace-nowrap shadow-xs"
             style={{
               transform: `translate(-50%, -50%) translate(${lx}px, ${ly}px)`,
               color
             }}
           >
-            {label.length > 34 ? `${label.slice(0, 33)}…` : label}
+            {label.length > 40 ? `${label.slice(0, 39)}…` : label}
           </div>
         </EdgeLabelRenderer>
       )}
     </g>
   )
 })
-
-const TONE_RING: Record<TopologyNode['tone'], string> = {
-  ok: 'border-l-success',
-  warn: 'border-l-warning',
-  bad: 'border-l-danger',
-  muted: 'border-l-line-strong'
-}
 
 const TopoNodeComp = memo(function TopoNodeComp({
   data
@@ -720,21 +760,27 @@ const TopoNodeComp = memo(function TopoNodeComp({
   return (
     <div
       className={cx(
-        'flex size-full items-center gap-2 rounded-lg border border-l-[3px] px-2 shadow-xs transition-opacity',
-        node.missing
-          ? 'border-dashed border-danger bg-danger-soft'
-          : root
-            ? 'bg-accent-soft'
-            : 'bg-surface',
-        !node.kind && 'border-dashed bg-subtle',
-        selected
-          ? 'border-accent ring-2 ring-accent/40'
-          : affected
-            ? 'border-warning ring-2 ring-warning/40'
-            : 'border-line-strong',
-        TONE_RING[node.tone],
+        'k8s-card relative flex size-full items-center gap-2.5 overflow-hidden rounded-[10px] pr-2 pl-3',
+        node.missing && '!border-dashed',
+        !node.kind && '!border-dashed !bg-transparent !shadow-none',
+        root && 'k8s-topo-root',
+        selected && 'k8s-focus',
         dim && 'opacity-30'
       )}
+      style={{
+        ...(root
+          ? { background: 'color-mix(in srgb, var(--map-accent) 9%, var(--map-card))' }
+          : {}),
+        ...(affected && !selected
+          ? {
+              borderColor: 'var(--map-warn)',
+              boxShadow: '0 0 0 3px color-mix(in srgb, var(--map-warn) 25%, transparent)'
+            }
+          : {})
+      }}
+      data-tone={
+        node.missing ? 'bad' : node.tone === 'ok' || node.tone === 'muted' ? undefined : node.tone
+      }
       data-testid="k8s-topology-node"
       data-kind={node.kind}
       data-name={node.name}
@@ -742,21 +788,46 @@ const TopoNodeComp = memo(function TopoNodeComp({
       data-affected={affected ? 'true' : undefined}
       title={`${node.kindLabel} ${node.name}${node.namespace ? ` (${node.namespace})` : ''} — ${node.summary}`}
     >
+      {/* Vạch trạng thái bên trái: chỉ khi xấu (bình thường thì im lặng). */}
+      {(node.tone === 'warn' || node.tone === 'bad') && (
+        <span
+          className="absolute inset-y-0 left-0 w-[3px]"
+          style={{ background: node.tone === 'bad' ? 'var(--map-bad)' : 'var(--map-warn)' }}
+        />
+      )}
       {node.kind ? (
         <KindIcon kind={node.kind} size={26} />
       ) : (
         <UnfoldHorizontal size={18} className="text-faint" />
       )}
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1 text-[10px] text-faint">
+        <div className="flex items-center gap-1 text-[11px] leading-4 text-faint">
           <span className="truncate">{node.kindLabel}</span>
           {node.namespace && <span className="ml-auto truncate">{node.namespace}</span>}
         </div>
-        <div className="truncate text-[12px] leading-tight font-semibold text-fg">{node.name}</div>
-        <div className="truncate text-[10px] text-muted">{node.summary}</div>
+        <div
+          className={cx(
+            'truncate text-[13px] leading-5 font-semibold',
+            node.missing ? 'text-danger' : 'text-fg'
+          )}
+        >
+          {node.name}
+        </div>
+        <div
+          className={cx(
+            'truncate text-[11px] leading-4',
+            node.tone === 'bad'
+              ? 'text-danger'
+              : node.tone === 'warn'
+                ? 'text-warning'
+                : 'text-muted'
+          )}
+        >
+          {node.summary}
+        </div>
       </div>
       {node.expandable && !expanded && (
-        <span className="shrink-0 text-[13px] text-faint" title="Can be expanded">
+        <span className="shrink-0 text-[13px] text-faint" title={t('Can be expanded')}>
           {ctx.expanding === node.id ? '…' : '+'}
         </span>
       )}
@@ -805,7 +876,7 @@ function SelectionBar({
     .map((e) => {
       const other = byId.get(e.from === node.id ? e.to : e.from)
       return other
-        ? `${e.from === node.id ? EDGE_TEXT[e.type] : `← ${EDGE_TEXT[e.type]}`} ${other.kindLabel} ${other.name}`
+        ? `${e.from === node.id ? edgeText(e.type) : `← ${edgeText(e.type)}`} ${other.kindLabel} ${other.name}`
         : ''
     })
     .filter(Boolean)
@@ -824,25 +895,25 @@ function SelectionBar({
           <BarButton
             on={impact}
             testId="k8s-topology-impact"
-            title="Highlight everything affected if this object changes or fails"
+            title={t('Highlight everything affected if this object changes or fails')}
             onClick={() => {
               onImpact(!impact)
             }}
           >
-            <Zap size={12} /> Blast radius
+            <Zap size={12} /> {t('Blast radius')}
           </BarButton>
           {node.expandable && !expanded && !root && (
             <BarButton
               testId="k8s-topology-expand"
               onClick={onExpand}
-              title="Show its relationships too"
+              title={t('Show its relationships too')}
             >
-              <Target size={12} /> {busy ? 'Expanding…' : 'Expand'}
+              <Target size={12} /> {busy ? t('Expanding…') : t('Expand')}
             </BarButton>
           )}
           {onOpen && (
             <BarButton testId="k8s-topology-open" onClick={onOpen}>
-              <ExternalLink size={12} /> Open
+              <ExternalLink size={12} /> {t('Open')}
             </BarButton>
           )}
         </span>
@@ -851,8 +922,12 @@ function SelectionBar({
       {impact && affected && (
         <div className="mt-1 text-warning" data-testid="k8s-topology-impact-summary">
           {affected.size === 0
-            ? 'Nothing else in this graph depends on it.'
-            : `Affects ${[...counts.entries()].map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`).join(', ')}`}
+            ? t('Nothing else in this graph depends on it.')
+            : t('Affects {list}', {
+                list: [...counts.entries()]
+                  .map(([k, n]) => `${String(n)} ${k}${n === 1 ? '' : 's'}`)
+                  .join(', ')
+              })}
         </div>
       )}
       {!impact && links.length > 0 && (

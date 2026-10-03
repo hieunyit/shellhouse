@@ -9,6 +9,7 @@ import {
   type ModuleCategory,
   type ModuleManifest
 } from '../../../../modules/registry/types'
+import { t } from '@shared/i18n'
 import { appRelease } from '../../lib/platform'
 import { requestDisableModule, requestEnableModule, useModuleUi } from '../../stores/module-ui'
 import { useSettings } from '../../stores/settings'
@@ -27,21 +28,44 @@ function isNew(m: ModuleManifest, seen: boolean): boolean {
 export function describeContributions(m: ModuleManifest): string {
   const c = m.contributes
   const parts: string[] = []
-  if (c.sidebarSection) parts.push(`a ${m.name} section to the sidebar`)
-  if (c.hostActions?.length) parts.push(`a “${m.name}…” item to host menus`)
-  if (c.tabKinds?.length) parts.push(c.tabKinds.length > 1 ? `${m.name} tabs` : `a ${m.name} tab`)
-  if (c.commands?.length) parts.push('commands to the command palette')
-  if (c.settings) parts.push('a settings page here')
+  const name = m.name
+  if (c.sidebarSection) parts.push(t('a {name} section to the sidebar', { name }))
+  if (c.hostActions?.length) parts.push(t('a “{name}…” item to host menus', { name }))
+  if (c.tabKinds?.length)
+    parts.push(c.tabKinds.length > 1 ? t('{name} tabs', { name }) : t('a {name} tab', { name }))
+  if (c.commands?.length) parts.push(t('commands to the command palette'))
+  if (c.settings) parts.push(t('a settings page here'))
   if (parts.length === 0) return ''
-  const last = parts.pop()
-  return `Adds ${parts.length ? `${parts.join(', ')} and ${last ?? ''}` : (last ?? '')}.`
+  const last = parts.pop() ?? ''
+  const items = parts.length ? t('{list} and {last}', { list: parts.join(', '), last }) : last
+  return t('Adds {items}.', { items })
+}
+
+/** Tên nhóm module đã dịch (MODULE_CATEGORIES giữ tiếng Anh). */
+export function categoryTitle(id: ModuleCategory | 'all'): string {
+  switch (id) {
+    case 'all':
+      return t('All')
+    case 'cloud':
+      return t('Cloud')
+    case 'containers':
+      return t('Containers')
+    case 'servers':
+      return t('Servers')
+    case 'databases':
+      return t('Databases')
+    case 'network':
+      return t('Network')
+    case 'other':
+      return t('Other')
+  }
 }
 
 /** Câu quyền hiển thị cho người dùng (3.12.3). */
 export function permissionLines(m: ModuleManifest): string[] {
   const lines = m.permissions.map(describePermission)
   if (m.contributes.attachToSsh)
-    lines.push('Never sees your SSH passwords or keys — it uses the connection Shellhouse opens')
+    lines.push(t('Never sees your SSH passwords or keys — it uses the connection Shellhouse opens'))
   return lines
 }
 
@@ -106,8 +130,12 @@ export function ModulesSection(): React.JSX.Element {
 
   return (
     <div className="flex flex-col gap-4" data-testid="settings-modules">
-      <SectionTitle description="Modules add tools to Shellhouse. They ship with the app and are reviewed like the rest of it; turn on the ones you need.">
-        Modules
+      <SectionTitle
+        description={t(
+          'Modules add tools to Shellhouse. They ship with the app and are reviewed like the rest of it; turn on the ones you need.'
+        )}
+      >
+        {t('Modules')}
       </SectionTitle>
       <div className="flex flex-col gap-2">
         <div className="flex h-8 items-center gap-2 rounded-md border border-line bg-subtle px-2 focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/20">
@@ -116,7 +144,7 @@ export function ModulesSection(): React.JSX.Element {
             type="search"
             autoFocus
             spellCheck={false}
-            placeholder="Search modules…"
+            placeholder={t('Search modules…')}
             data-testid="module-search"
             className="min-w-0 flex-1 bg-transparent text-[13px] text-fg outline-none placeholder:text-faint"
             value={query}
@@ -126,8 +154,8 @@ export function ModulesSection(): React.JSX.Element {
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap gap-1" role="group" aria-label="Category">
-            {[{ id: 'all' as const, title: 'All' }, ...categories].map((c) => (
+          <div className="flex flex-wrap gap-1" role="group" aria-label={t('Category')}>
+            {[{ id: 'all' as const }, ...categories].map((c) => (
               <button
                 key={c.id}
                 type="button"
@@ -143,7 +171,7 @@ export function ModulesSection(): React.JSX.Element {
                   setCategory(c.id)
                 }}
               >
-                {c.title}
+                {categoryTitle(c.id)}
               </button>
             ))}
           </div>
@@ -153,9 +181,9 @@ export function ModulesSection(): React.JSX.Element {
             onChange={setStatus}
             testIdPrefix="module-status"
             options={[
-              { value: 'all', label: 'All' },
-              { value: 'enabled', label: 'Enabled' },
-              { value: 'off', label: 'Off' }
+              { value: 'all', label: t('All') },
+              { value: 'enabled', label: t('Enabled') },
+              { value: 'off', label: t('Off') }
             ]}
           />
         </div>
@@ -163,14 +191,16 @@ export function ModulesSection(): React.JSX.Element {
 
       {shown.length === 0 ? (
         <div className="rounded-lg border border-dashed border-line p-6 text-center text-[13px] text-muted">
-          {query.trim() ? `No module matches “${query.trim()}”.` : 'No modules in this view.'}{' '}
+          {query.trim()
+            ? t('No module matches “{query}”.', { query: query.trim() })
+            : t('No modules in this view.')}{' '}
           <a
             href={DISCUSSIONS}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-accent hover:underline"
           >
-            Tell us what you need <ExternalLink size={12} />
+            {t('Tell us what you need')} <ExternalLink size={12} />
           </a>
         </div>
       ) : (
@@ -204,18 +234,17 @@ export function ModulesSection(): React.JSX.Element {
                           className="rounded bg-accent-solid px-1 py-px text-[10px] font-semibold text-accent-fg"
                           data-testid="module-new"
                         >
-                          NEW
+                          {t('NEW')}
                         </span>
                       )}
                     </div>
                     <div className="text-xs text-faint">
-                      {MODULE_CATEGORIES.find((c) => c.id === m.category)?.title} ·{' '}
-                      {enabled ? 'Enabled' : 'Off'}
+                      {categoryTitle(m.category)} · {enabled ? t('Enabled') : t('Off')}
                     </div>
                   </div>
                   {enabled && rendererModule(m.id)?.SettingsPage && (
                     <IconButton
-                      label={`${m.name} settings`}
+                      label={t('{name} settings', { name: m.name })}
                       size="sm"
                       data-testid={`module-settings-${m.id}`}
                       onClick={(e) => {
@@ -228,7 +257,7 @@ export function ModulesSection(): React.JSX.Element {
                   )}
                   <ModuleSwitch id={m.id} name={m.name} enabled={enabled} />
                 </div>
-                <p className="text-xs text-muted">{m.summary}</p>
+                <p className="text-xs text-muted">{t(m.summary)}</p>
               </div>
             )
           })}
@@ -236,8 +265,10 @@ export function ModulesSection(): React.JSX.Element {
       )}
 
       <Checkbox
-        label="Suggest modules"
-        description="When Shellhouse sees Docker on a server or a Kubernetes config on this computer, show a one-line suggestion. Nothing is sent anywhere."
+        label={t('Suggest modules')}
+        description={t(
+          'When Shellhouse sees Docker on a server or a Kubernetes config on this computer, show a one-line suggestion. Nothing is sent anywhere.'
+        )}
         checked={suggest}
         data-testid="module-suggest"
         onChange={(e) => void update({ moduleOptions: { suggest: e.target.checked } })}
@@ -271,7 +302,7 @@ function ModuleSwitch({
         type="button"
         role="switch"
         aria-checked={enabled}
-        aria-label={`${enabled ? 'Turn off' : 'Enable'} ${name}`}
+        aria-label={enabled ? t('Turn off {name}', { name }) : t('Enable {name}', { name })}
         data-testid={`module-toggle-${id}`}
         className={cx(
           'relative h-5 w-9 rounded-full transition-colors',
@@ -319,7 +350,7 @@ function ModuleDetail({
     <div className="flex flex-col gap-4" data-testid={`module-detail-${m.id}`}>
       <div>
         <Button variant="ghost" size="sm" icon={<ArrowLeft size={13} />} onClick={onBack}>
-          All modules
+          {t('All modules')}
         </Button>
       </div>
       <div className="flex items-start gap-3">
@@ -329,22 +360,25 @@ function ModuleDetail({
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-fg">{m.name}</h3>
           <p className="text-xs text-faint">
-            {MODULE_CATEGORIES.find((c) => c.id === m.category)?.title} · Official · since
-            Shellhouse {m.since} · data format v{m.version}
+            {categoryTitle(m.category)} ·{' '}
+            {t('Official · since Shellhouse {since} · data format v{version}', {
+              since: m.since,
+              version: m.version
+            })}
           </p>
         </div>
         <ModuleSwitch id={m.id} name={m.name} enabled={enabled} />
       </div>
       <div className="flex flex-col gap-2 text-[13px] text-muted">
         {m.description.split(/\n\s*\n/).map((p) => (
-          <p key={p.slice(0, 40)}>{p}</p>
+          <p key={p.slice(0, 40)}>{t(p)}</p>
         ))}
         {contributes && <p>{contributes}</p>}
       </div>
 
       <div>
         <h4 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold tracking-wider text-faint uppercase">
-          <ShieldCheck size={13} /> Permissions
+          <ShieldCheck size={13} /> {t('Permissions')}
         </h4>
         <ul className="flex flex-col gap-1 text-[13px] text-fg" data-testid="module-permissions">
           {permissionLines(m).map((line) => (
@@ -363,15 +397,16 @@ function ModuleDetail({
       )}
 
       <div className="flex flex-col gap-2 border-t border-line pt-4">
-        <h4 className="text-xs font-semibold tracking-wider text-faint uppercase">Data</h4>
+        <h4 className="text-xs font-semibold tracking-wider text-faint uppercase">{t('Data')}</h4>
         {removed ? (
-          <Notice tone="success">All {m.name} data was removed.</Notice>
+          <Notice tone="success">{t('All {name} data was removed.', { name: m.name })}</Notice>
         ) : (
           <>
             <p className="text-xs text-muted">
-              Turning a module off keeps its data. Remove data deletes everything it saved on this
-              computer (accounts, keys, settings for its connections).
-              {enabled && ' Turn the module off first.'}
+              {t(
+                'Turning a module off keeps its data. Remove data deletes everything it saved on this computer (accounts, keys, settings for its connections).'
+              )}
+              {enabled && ` ${t('Turn the module off first.')}`}
             </p>
             <div className="flex gap-2">
               <Button
@@ -397,7 +432,9 @@ function ModuleDetail({
                   )
                 }}
               >
-                {confirmRemove ? `Yes, remove all ${m.name} data` : 'Remove data…'}
+                {confirmRemove
+                  ? t('Yes, remove all {name} data', { name: m.name })
+                  : t('Remove data…')}
               </Button>
               {confirmRemove && (
                 <Button
@@ -407,7 +444,7 @@ function ModuleDetail({
                     setConfirmRemove(false)
                   }}
                 >
-                  Cancel
+                  {t('Cancel')}
                 </Button>
               )}
             </div>

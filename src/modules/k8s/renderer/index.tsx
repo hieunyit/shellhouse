@@ -1,6 +1,6 @@
 import { FileText, Ship } from 'lucide-react'
 import { defineTab, type RendererModule } from '../../registry/renderer-types'
-import { lazyModuleComponent } from '../../registry/renderer-kit'
+import { lazyModuleComponent, t } from '../../registry/renderer-kit'
 import { k8sManifest } from '../manifest'
 import { K8sClusterParams, K8sLogsParams } from '../shared/ops'
 import { k8sApi } from './api'
@@ -20,13 +20,13 @@ export const k8sRenderer: RendererModule = {
       component: lazyModuleComponent(() => import('./LogsView').then((m) => m.PodLogsTab)),
       params: K8sLogsParams,
       icon: FileText,
-      title: (p) => `${p.pod ?? p.title ?? 'pods'} (logs)`
+      title: (p) => t('{name} (logs)', { name: p.pod ?? p.title ?? 'pods' })
     })
   },
   commands: () => [
     {
       id: 'import',
-      title: 'Import kubeconfig files',
+      title: t('Import kubeconfig files'),
       run: () => {
         k8sApi.importFiles().then(
           (r) => {

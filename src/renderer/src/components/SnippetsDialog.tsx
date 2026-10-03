@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { confirmAction } from '../stores/confirm'
 import { Pencil, Plus, Search } from 'lucide-react'
 import { bestScore } from '@shared/fuzzy'
+import { t } from '@shared/i18n'
 import {
   renderSnippet,
   SnippetInput,
@@ -47,8 +49,14 @@ export function SnippetsDialog({
       .map((r) => r.s)
   }, [snippets, query])
 
+  // Phím ↑/↓ đưa con trỏ ra ngoài vùng nhìn thấy → cuộn danh sách theo.
+  const listRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    listRef.current?.children[cursor]?.scrollIntoView({ block: 'nearest' })
+  }, [cursor])
+
   return (
-    <Modal title="Snippets" onClose={onClose} width="max-w-3xl" testId="snippets-dialog">
+    <Modal title={t('Snippets')} onClose={onClose} width="max-w-3xl" testId="snippets-dialog">
       <div className="flex h-[26rem] gap-4">
         <div className="flex w-64 shrink-0 flex-col gap-2">
           <div className="flex h-8 items-center gap-2 rounded-md border border-line bg-subtle px-2 transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/20">
@@ -56,7 +64,7 @@ export function SnippetsDialog({
             <input
               autoFocus
               className="min-w-0 flex-1 bg-transparent text-[13px] text-fg outline-none placeholder:text-faint"
-              placeholder="Search snippets…"
+              placeholder={t('Search snippets…')}
               data-testid="snippet-search"
               value={query}
               onChange={(e) => {
@@ -64,7 +72,8 @@ export function SnippetsDialog({
                 setCursor(0)
               }}
               onKeyDown={(e) => {
-                if (e.key === 'ArrowDown') setCursor((c) => Math.min(c + 1, results.length - 1))
+                if (e.key === 'ArrowDown')
+                  setCursor((c) => Math.max(0, Math.min(c + 1, results.length - 1)))
                 if (e.key === 'ArrowUp') setCursor((c) => Math.max(c - 1, 0))
                 if (e.key === 'Enter') {
                   // Otherwise this same Enter would submit the variables form that appears next
@@ -77,6 +86,7 @@ export function SnippetsDialog({
             />
           </div>
           <div
+            ref={listRef}
             className="min-h-0 flex-1 overflow-auto rounded-md border border-line"
             role="listbox"
           >
@@ -101,7 +111,11 @@ export function SnippetsDialog({
                 <span className="block truncate font-mono text-xs text-faint">{s.body}</span>
               </button>
             ))}
-            {results.length === 0 && <p className="p-3 text-xs text-faint">No snippets yet.</p>}
+            {results.length === 0 && (
+              <p className="p-3 text-xs text-faint">
+                {snippets.length === 0 ? t('No snippets yet.') : t('No matching snippets.')}
+              </p>
+            )}
           </div>
           <Button
             icon={<Plus size={14} />}
@@ -110,7 +124,7 @@ export function SnippetsDialog({
               setMode({ kind: 'edit', snippet: null })
             }}
           >
-            New snippet
+            {t('New snippet')}
           </Button>
         </div>
         <div className="min-w-0 flex-1">
@@ -141,10 +155,23 @@ export function SnippetsDialog({
           {!mode && (
             <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-line p-6 text-center text-xs text-muted">
               <p>
-                Pick a snippet to insert it into the active terminal.
+                {t('Pick a snippet to insert it into the active terminal.')}
                 <br />
-                Use <code className="text-fg">{'{{name}}'}</code> for a required variable or{' '}
-                <code className="text-fg">{'{{name:default}}'}</code> for one with a default.
+                {t('Use {required} for a required variable or {optional} for one with a default.')
+                  .split(/(\{required\}|\{optional\})/)
+                  .map((part, i) =>
+                    part === '{required}' ? (
+                      <code key={i} className="text-fg">
+                        {'{{name}}'}
+                      </code>
+                    ) : part === '{optional}' ? (
+                      <code key={i} className="text-fg">
+                        {'{{name:default}}'}
+                      </code>
+                    ) : (
+                      part
+                    )
+                  )}
               </p>
             </div>
           )}
@@ -195,7 +222,7 @@ function RunForm({
       <div className="flex items-center">
         <h3 className="flex-1 text-sm font-semibold">{snippet.name}</h3>
         <Button size="sm" variant="ghost" icon={<Pencil size={13} />} onClick={onEdit}>
-          Edit
+          {t('Edit')}
         </Button>
       </div>
       {vars.map((v, i) => (
@@ -213,8 +240,9 @@ function RunForm({
       ))}
       {snippet.mode === 'macro' && (
         <Notice testId="snippet-macro-note">
-          Macro: each line is sent after the previous one returns to the prompt. In MultiExec it
-          runs in every selected terminal. Press Ctrl+C in a terminal to stop it there.
+          {t(
+            'Macro: each line is sent after the previous one returns to the prompt. In MultiExec it runs in every selected terminal. Press Ctrl+C in a terminal to stop it there.'
+          )}
         </Notice>
       )}
       <pre
@@ -224,7 +252,7 @@ function RunForm({
         {preview}
       </pre>
       {error && <Notice tone="danger">{error}</Notice>}
-      {!canInsert && <Notice tone="warning">No connected terminal tab.</Notice>}
+      {!canInsert && <Notice tone="warning">{t('No connected terminal tab.')}</Notice>}
       <div className="flex justify-end gap-2">
         {snippet.mode !== 'macro' && (
           <Button
@@ -234,11 +262,11 @@ function RunForm({
               submit(false)
             }}
           >
-            Insert
+            {t('Insert')}
           </Button>
         )}
         <Button type="submit" variant="primary" disabled={!canInsert} data-testid="snippet-run">
-          {snippet.mode === 'macro' ? 'Run macro' : 'Insert and run'}
+          {snippet.mode === 'macro' ? t('Run macro') : t('Insert and run')}
         </Button>
       </div>
     </form>
@@ -268,12 +296,12 @@ function EditForm({
           body,
           tags: tags
             .split(',')
-            .map((t) => t.trim())
+            .map((tag) => tag.trim())
             .filter(Boolean),
           mode: macro ? 'macro' : 'paste'
         })
         if (!parsed.success) {
-          setError(parsed.error.issues[0]?.message ?? 'Invalid input')
+          setError(parsed.error.issues[0]?.message ?? t('Invalid input'))
           return
         }
         void window.shellhouse.saveSnippet(parsed.data).then((result) => {
@@ -292,7 +320,7 @@ function EditForm({
     >
       <Input
         autoFocus
-        placeholder="Name"
+        placeholder={t('Name')}
         data-testid="snippet-name"
         value={name}
         onChange={(e) => {
@@ -301,7 +329,7 @@ function EditForm({
       />
       <TextArea
         className="min-h-0 flex-1"
-        placeholder={'e.g. tail -n {{lines:100}} -f {{file}}'}
+        placeholder={t('e.g. {example}', { example: 'tail -n {{lines:100}} -f {{file}}' })}
         spellCheck={false}
         data-testid="snippet-body"
         value={body}
@@ -310,15 +338,17 @@ function EditForm({
         }}
       />
       <Input
-        placeholder="Tags, comma separated"
+        placeholder={t('Tags, comma separated')}
         value={tags}
         onChange={(e) => {
           setTags(e.target.value)
         }}
       />
       <Checkbox
-        label="Macro: send line by line, waiting for the prompt"
-        description="For multi-step jobs on several servers (MultiExec). Special lines: “# wait 5” pauses 5 s, “# expect Password:” waits for that text."
+        label={t('Macro: send line by line, waiting for the prompt')}
+        description={t(
+          'For multi-step jobs on several servers (MultiExec). Special lines: “# wait 5” pauses 5 s, “# expect Password:” waits for that text.'
+        )}
         checked={macro}
         data-testid="snippet-macro"
         onChange={(e) => {
@@ -330,13 +360,21 @@ function EditForm({
         {snippet && (
           <Button
             variant="danger-ghost"
+            data-testid="snippet-delete"
             onClick={() =>
-              void window.shellhouse.deleteSnippet(snippet.id).then(() => {
+              void confirmAction({
+                title: t('Delete “{name}”?', { name: snippet.name }),
+                message: t('The snippet is removed for good.'),
+                confirmLabel: t('Delete'),
+                danger: true
+              }).then(async (ok) => {
+                if (!ok) return
+                await window.shellhouse.deleteSnippet(snippet.id)
                 onDone(null)
               })
             }
           >
-            Delete
+            {t('Delete')}
           </Button>
         )}
         <div className="flex-1" />
@@ -345,10 +383,10 @@ function EditForm({
             onDone(snippet)
           }}
         >
-          Cancel
+          {t('Cancel')}
         </Button>
         <Button type="submit" variant="primary" data-testid="snippet-save">
-          Save
+          {t('Save')}
         </Button>
       </div>
     </form>

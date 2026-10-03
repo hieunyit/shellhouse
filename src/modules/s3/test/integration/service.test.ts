@@ -1,9 +1,17 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { addStats, S3_OBJECT_CHANGED, type S3Listing, type S3StatsProgress } from '../../shared/ops'
+import {
+  addStats,
+  S3_OBJECT_CHANGED,
+  type S3JobProgress,
+  type S3Listing,
+  type S3StatsProgress,
+  type S3TransferDelta,
+  type S3UploadConflict
+} from '../../shared/ops'
 import type { TransferStatus } from '@shared/sftp'
 import { S3Service } from '../../session-host/service'
 import { tempDir } from '../../../../../test/unit/helpers'
@@ -20,7 +28,7 @@ afterEach(async () => {
 
 const sha = (b: Buffer): string => createHash('sha256').update(b).digest('hex')
 
-async function setup() {
+async function setup(onTransfers: (delta: S3TransferDelta) => void = () => undefined) {
   server = await startS3TestServer(['demo'])
   const s = new S3Service(
     {
@@ -30,7 +38,7 @@ async function setup() {
       secretAccessKey: server.secretAccessKey,
       forcePathStyle: true
     },
-    () => undefined
+    onTransfers
   )
   service = s
   const settled = async (): Promise<TransferStatus[]> => {
@@ -44,6 +52,27 @@ async function setup() {
     }
   }
   return { s, settled }
+}
+
+/** Client S3 thô (ngoài S3Service) để chuẩn bị dữ liệu / kiểm tra kết quả. */
+function rawClient(): S3Client {
+  const srv = server
+  if (!srv) throw new Error('server')
+  return new S3Client({
+    endpoint: srv.endpoint,
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: srv.accessKeyId, secretAccessKey: srv.secretAccessKey }
+  })
+}
+
+/** Chạy việc nền (xoá / copy / đổi tên) và hỏi tiến độ tới khi xong. */
+async function jobOf(s: S3Service, id: string): Promise<S3JobProgress> {
+  for (;;) {
+    const p = (await s.run({ op: 'jobPoll', id })) as S3JobProgress
+    if (p.phase !== 'running') return p
+    await new Promise((r) => setTimeout(r, 20))
+  }
 }
 
 /** Chạy thống kê nền và hỏi tiến độ tới khi xong. */
@@ -369,10 +398,275 @@ describe('S3', () => {
       expect(readFileSync(join(out, 'tree', 'a', 'b', 'c', 'a', 'f4.txt'), 'utf8')).toBe('xxxxx')
 
       // Xoá cả cây (xoá theo lô song song).
-      expect(await s.run({ op: 'delete', bucket: 'demo', keys: ['tree/'] })).toBe(files + 1)
+      expect(await s.run({ op: 'delete', bucket: 'demo', keys: ['tree/'] })).toBe(files)
       expect((await statsOf(s, 'demo', '')).objects).toBe(0)
     }
   )
+
+  it(
+    'tải lên: kiểm tra trùng, bỏ qua file đã có; tải về thư mục với tên an toàn; Transfers chỉ gửi phần đổi',
+    { timeout: 60_000 },
+    async () => {
+      const deltas: S3TransferDelta[] = []
+      const { s, settled } = await setup((d) => deltas.push(d))
+      const local = tempDir()
+      mkdirSync(join(local, 'site'), { recursive: true })
+      writeFileSync(join(local, 'site', 'index.html'), 'v1')
+      writeFileSync(join(local, 'site', 'a.css'), 'a')
+      writeFileSync(join(local, 'note.txt'), 'n1')
+      await s.run({ op: 'upload', bucket: 'demo', prefix: '', localPath: join(local, 'site') })
+      await s.run({ op: 'upload', bucket: 'demo', prefix: '', localPath: join(local, 'note.txt') })
+      await settled()
+
+      writeFileSync(join(local, 'site', 'index.html'), 'v2')
+      writeFileSync(join(local, 'site', 'b.css'), 'b')
+      writeFileSync(join(local, 'new.txt'), 'x')
+      const check = (await s.run({
+        op: 'uploadCheck',
+        bucket: 'demo',
+        prefix: '',
+        localPaths: [join(local, 'site'), join(local, 'note.txt'), join(local, 'new.txt')]
+      })) as S3UploadConflict[]
+      expect(check.map((c) => [c.name, c.isFolder, c.files, c.existing])).toEqual([
+        ['site', true, 3, 2],
+        ['note.txt', false, 1, 1],
+        ['new.txt', false, 1, 0]
+      ])
+      // Bỏ qua file đã có: chỉ b.css được tải lên, index.html trên bucket giữ bản cũ.
+      expect(
+        await s.run({
+          op: 'upload',
+          bucket: 'demo',
+          prefix: '',
+          localPath: join(local, 'site'),
+          overwrite: false
+        })
+      ).toBe(1)
+      await settled()
+      const raw = rawClient()
+      const text = async (key: string): Promise<string | undefined> =>
+        (
+          await raw.send(new GetObjectCommand({ Bucket: 'demo', Key: key }))
+        ).Body?.transformToString()
+      expect(await text('site/index.html')).toBe('v1')
+      expect(await text('site/b.css')).toBe('b')
+
+      // Tải nhiều file về một thư mục: Session Host tự đặt tên an toàn từ key.
+      await raw.send(new PutObjectCommand({ Bucket: 'demo', Key: 'x/..\\..\\evil.txt', Body: 'e' }))
+      const out = tempDir()
+      for (const key of ['x/..\\..\\evil.txt', 'site/a.css'])
+        await s.run({
+          op: 'download',
+          bucket: 'demo',
+          key,
+          localPath: out,
+          overwrite: false,
+          intoFolder: true
+        })
+      await settled()
+      expect(readFileSync(join(out, '.._.._evil.txt'), 'utf8')).toBe('e')
+      expect(readFileSync(join(out, 'a.css'), 'utf8')).toBe('a')
+
+      // Hai key ra cùng tên an toàn, tải cùng lúc vào một thư mục → không ghi chung file (.part).
+      await raw.send(new PutObjectCommand({ Bucket: 'demo', Key: 'same/r:1.txt', Body: 'colon' }))
+      await raw.send(new PutObjectCommand({ Bucket: 'demo', Key: 'same/r_1.txt', Body: 'under' }))
+      const both = tempDir()
+      await Promise.all(
+        ['same/r_1.txt', 'same/r:1.txt'].map((key) =>
+          s.run({
+            op: 'download',
+            bucket: 'demo',
+            key,
+            localPath: both,
+            overwrite: true,
+            intoFolder: true
+          })
+        )
+      )
+      await settled()
+      expect(
+        [
+          readFileSync(join(both, 'r_1.txt'), 'utf8'),
+          readFileSync(join(both, 'r_1 (2).txt'), 'utf8')
+        ].sort()
+      ).toEqual(['colon', 'under'])
+      raw.destroy()
+
+      // Ghép các tin "phần thay đổi" lại = đúng danh sách đầy đủ; Clear finished gửi danh sách xoá.
+      const rebuild = (): Map<string, TransferStatus> => {
+        const m = new Map<string, TransferStatus>()
+        for (const d of deltas) {
+          for (const id of d.remove) m.delete(id)
+          for (const t of d.upsert) m.set(t.id, t)
+        }
+        return m
+      }
+      await expect.poll(() => [...rebuild().values()]).toEqual(s.transfers())
+      expect(deltas.length).toBeLessThan(s.transfers().length * 4)
+      await s.run({ op: 'clearDone' })
+      expect(s.transfers()).toEqual([])
+      expect(rebuild().size).toBe(0)
+    }
+  )
+
+  it(
+    'việc nền: đếm, copy / đổi tên / xoá thư mục, trùng tên, dừng giữa chừng',
+    { timeout: 120_000 },
+    async () => {
+      const { s } = await setup()
+      const raw = rawClient()
+      // s3rver hỏng khi danh sách bị cắt trang (token dùng DES — OpenSSL 3 không còn): ở đây dưới
+      // 1000 object; phân trang + xoá trong lúc liệt kê kiểm tra ở test/unit/bulk.test.ts.
+      const N = 600
+      const keys = Array.from({ length: N }, (_, i) => `big/d${i % 3}/f${i}.txt`)
+      for (let i = 0; i < keys.length; i += 50)
+        await Promise.all(
+          keys
+            .slice(i, i + 50)
+            .map((Key) => raw.send(new PutObjectCommand({ Bucket: 'demo', Key, Body: 'x' })))
+        )
+      raw.destroy()
+
+      expect(
+        await s.run({ op: 'countObjects', bucket: 'demo', keys: ['big/'], limit: 500 })
+      ).toEqual({ count: 500, more: true })
+      expect(
+        await s.run({ op: 'countObjects', bucket: 'demo', keys: ['big/', 'x.txt'], limit: 5000 })
+      ).toEqual({ count: N + 1, more: false })
+
+      const copy = await jobOf(
+        s,
+        (await s.run({
+          op: 'jobStart',
+          job: {
+            kind: 'copy',
+            bucket: 'demo',
+            keys: ['big/'],
+            destBucket: 'demo',
+            destPrefix: 'copy',
+            move: false,
+            overwrite: false
+          }
+        })) as string
+      )
+      expect(copy).toMatchObject({ phase: 'done', found: N, done: N, failed: 0, error: null })
+
+      // Trùng tên → lỗi chặn trước khi làm gì (file: s3rver hỏng với MaxKeys khi kiểm tra thư mục).
+      const dup = await jobOf(
+        s,
+        (await s.run({
+          op: 'jobStart',
+          job: {
+            kind: 'copy',
+            bucket: 'demo',
+            keys: ['big/d0/f0.txt'],
+            destBucket: 'demo',
+            destPrefix: 'copy/big/d0',
+            move: false,
+            overwrite: false
+          }
+        })) as string
+      )
+      expect(dup).toMatchObject({ phase: 'error', done: 0 })
+      expect(dup.error).toMatch(/already exists/)
+
+      const renamed = await jobOf(
+        s,
+        (await s.run({
+          op: 'jobStart',
+          job: { kind: 'rename', bucket: 'demo', key: 'copy/big/', name: 'moved', overwrite: false }
+        })) as string
+      )
+      expect(renamed).toMatchObject({ phase: 'done', done: N, failed: 0 })
+      expect((await statsOf(s, 'demo', 'copy/moved/')).objects).toBe(N)
+      expect((await statsOf(s, 'demo', 'copy/big/')).objects).toBe(0)
+
+      // Dừng ngay: không treo, báo "stopped".
+      const stopId = (await s.run({
+        op: 'jobStart',
+        job: {
+          kind: 'copy',
+          bucket: 'demo',
+          keys: ['big/'],
+          destBucket: 'demo',
+          destPrefix: 'c2',
+          move: false,
+          overwrite: false
+        }
+      })) as string
+      await s.run({ op: 'jobStop', id: stopId })
+      const stopped = await jobOf(s, stopId)
+      expect(stopped.phase).toBe('stopped')
+      expect(stopped.done).toBeLessThan(N)
+
+      const removed = await jobOf(
+        s,
+        (await s.run({
+          op: 'jobStart',
+          job: { kind: 'delete', bucket: 'demo', keys: ['big/', 'copy/', 'c2/'] }
+        })) as string
+      )
+      expect(removed).toMatchObject({ phase: 'done', failed: 0 })
+      expect(removed.done).toBeGreaterThanOrEqual(2 * N)
+      expect((await statsOf(s, 'demo', '')).objects).toBe(0)
+      await expect(s.run({ op: 'jobPoll', id: stopId })).rejects.toThrow(/stopped/)
+      // s3rver không có versioning: không lỗi, trả về trạng thái hoặc null.
+      expect([null, 'Off', 'Enabled', 'Suspended']).toContain(
+        await s.run({ op: 'versioning', bucket: 'demo' })
+      )
+    }
+  )
+
+  it(
+    'sửa bằng editor trên máy: tải lên đè giữ Content-Type + metadata',
+    { timeout: 60_000 },
+    async () => {
+      const { s } = await setup()
+      const raw = rawClient()
+      await raw.send(
+        new PutObjectCommand({
+          Bucket: 'demo',
+          Key: 'conf/app.yaml',
+          Body: 'a: 1\n',
+          ContentType: 'application/yaml',
+          CacheControl: 'no-cache',
+          Metadata: { owner: 'ops' }
+        })
+      )
+      const editPath = join(tempDir(), 'app.yaml')
+      await s.run({ op: 'edit', bucket: 'demo', key: 'conf/app.yaml', localPath: editPath })
+      writeFileSync(editPath, 'a: 2\n')
+      await expect
+        .poll(
+          async () =>
+            (
+              await raw.send(new GetObjectCommand({ Bucket: 'demo', Key: 'conf/app.yaml' }))
+            ).Body?.transformToString(),
+          { timeout: 10_000 }
+        )
+        .toBe('a: 2\n')
+      const head = await raw.send(new HeadObjectCommand({ Bucket: 'demo', Key: 'conf/app.yaml' }))
+      expect(head.ContentType).toBe('application/yaml')
+      expect(head.CacheControl).toBe('no-cache')
+      expect(head.Metadata).toEqual({ owner: 'ops' })
+      raw.destroy()
+    }
+  )
+
+  it('gốc bucket chỉ có thư mục lồng nhau (không có object ở gốc) vẫn liệt kê được', async () => {
+    const { s } = await setup()
+    const raw = rawClient()
+    await raw.send(
+      new PutObjectCommand({ Bucket: 'demo', Key: 'a/b/c/d/e/report.txt', Body: 'hello' })
+    )
+    raw.destroy()
+    // Hỏi vùng của bucket trước (như khi mở bucket trong app) rồi mới liệt kê.
+    await s.run({ op: 'listBuckets' })
+    const root = (await s.run({ op: 'list', bucket: 'demo', prefix: '' })) as S3Listing
+    expect(root.entries.map((e) => [e.name, e.key, e.isFolder])).toEqual([['a', 'a/', true]])
+    const deep = (await s.run({ op: 'list', bucket: 'demo', prefix: 'a/b/c/d/e/' })) as S3Listing
+    expect(deep.entries.map((e) => e.name)).toEqual(['report.txt'])
+  })
 
   it('access key sai → lỗi dễ hiểu', async () => {
     server = await startS3TestServer()

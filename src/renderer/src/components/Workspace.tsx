@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import {
   DockviewReact,
   type DockviewApi,
@@ -8,6 +8,7 @@ import {
 } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
 import { Columns2, Copy, RotateCcw, RotateCw, Rows2, X } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { useContextMenu } from './ContextMenu'
 import { controllers } from '../terminal/registry'
 import { useTabStatus } from '../stores/tab-status'
@@ -18,10 +19,10 @@ import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useSettings } from '../stores/settings'
 import { connectionLabel, cx, StatusDot } from './ui'
 import { HomeView } from './Home'
-import { EditorTabView } from '../editor/EditorTab'
+import { EditorTabView, TerminalView } from '../lazy'
+import { ErrorBoundary } from './ErrorBoundary'
 import { HostAvatar } from './HostAvatar'
-import { useTabs } from '../stores/tabs'
-import { TerminalView } from '../terminal/TerminalView'
+import { useTabs, type TabTarget } from '../stores/tabs'
 import { ModuleTabView, TabIcon } from './ModuleTabView'
 import { layoutToItems, type WorkspaceItem } from '@shared/workspaces'
 
@@ -32,7 +33,9 @@ interface PanelParams {
 /** Một panel của dockview = một tab terminal. */
 function TerminalPanel(props: IDockviewPanelProps<PanelParams>): React.JSX.Element | null {
   const { tabId } = props.params
-  const tab = useTabs((s) => s.tabs.find((t) => t.id === tabId))
+  // Chỉ lấy `target` (giữ nguyên tham chiếu khi đổi tiêu đề) — tiêu đề đổi liên tục theo shell,
+  // không được vẽ lại cả terminal / module mỗi lần.
+  const target = useTabs((s) => s.tabs.find((t) => t.id === tabId)?.target)
   const [active, setActive] = useState(props.api.isActive)
   const [visible, setVisible] = useState(props.api.isVisible)
 
@@ -49,13 +52,23 @@ function TerminalPanel(props: IDockviewPanelProps<PanelParams>): React.JSX.Eleme
     }
   }, [props.api])
 
-  if (!tab) return null
-  if (tab.target.kind === 'home') return <HomeView />
-  if (tab.target.kind === 'editor')
-    return <EditorTabView tabId={tab.id} docKey={tab.target.key} active={active} />
-  if (tab.target.kind === 'module')
-    return <ModuleTabView tabId={tab.id} target={tab.target} active={active} visible={visible} />
-  return <TerminalView tabId={tab.id} target={tab.target} active={active} visible={visible} />
+  if (!target) return null
+  // Lỗi render của một tab chỉ hỏng tab đó — không gỡ cả cây (mất mọi terminal / phiên).
+  return <ErrorBoundary label="tab">{panelContent(tabId, target, active, visible)}</ErrorBoundary>
+}
+
+function panelContent(
+  tabId: string,
+  target: TabTarget,
+  active: boolean,
+  visible: boolean
+): React.JSX.Element {
+  if (target.kind === 'home') return <HomeView />
+  if (target.kind === 'editor')
+    return <EditorTabView tabId={tabId} docKey={target.key} active={active} />
+  if (target.kind === 'module')
+    return <ModuleTabView tabId={tabId} target={target} active={active} visible={visible} />
+  return <TerminalView tabId={tabId} target={target} active={active} visible={visible} />
 }
 
 /** Tab trong thanh tab của dockview (giữ data-testid cũ cho E2E). */
@@ -79,8 +92,8 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
   const kind = target?.kind ?? 'local'
   const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
   const hostId = useTabs((s) => {
-    const t = s.tabs.find((x) => x.id === tabId)?.target
-    return t?.kind === 'host' ? t.hostId : null
+    const found = s.tabs.find((x) => x.id === tabId)?.target
+    return found?.kind === 'host' ? found.hostId : null
   })
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
   const hostLabel = useHosts((s) =>
@@ -110,7 +123,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
       menuOf([
         {
           id: 'tab-reconnect',
-          label: kind === 'local' ? 'Restart shell' : 'Reconnect',
+          label: kind === 'local' ? t('Restart shell') : t('Reconnect'),
           icon: <RotateCw size={14} />,
           hint: key('tab.reconnect'),
           onSelect: () => {
@@ -120,7 +133,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         },
         {
           id: 'tab-duplicate',
-          label: 'Duplicate tab',
+          label: t('Duplicate tab'),
           icon: <Copy size={14} />,
           onSelect: () => {
             tabs.duplicate(tabId)
@@ -128,7 +141,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         },
         {
           id: 'tab-split-right',
-          label: 'Split right',
+          label: t('Split right'),
           icon: <Columns2 size={14} />,
           onSelect: () => {
             tabs.activate(tabId)
@@ -137,7 +150,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         },
         {
           id: 'tab-split-below',
-          label: 'Split down',
+          label: t('Split down'),
           icon: <Rows2 size={14} />,
           onSelect: () => {
             tabs.activate(tabId)
@@ -149,7 +162,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
           ? [
               {
                 id: 'tab-reopen',
-                label: `Reopen “${tabs.closed.at(-1)?.title ?? ''}”`,
+                label: t('Reopen “{name}”', { name: tabs.closed.at(-1)?.title ?? '' }),
                 icon: <RotateCcw size={14} />,
                 hint: key('tab.reopen'),
                 onSelect: () => {
@@ -160,7 +173,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
           : []),
         {
           id: 'tab-close',
-          label: 'Close tab',
+          label: t('Close tab'),
           icon: <X size={14} />,
           hint: key('tab.close'),
           onSelect: () => {
@@ -169,7 +182,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         },
         {
           id: 'tab-close-others',
-          label: 'Close other tabs',
+          label: t('Close other tabs'),
           disabled: !others,
           onSelect: () => {
             tabs.closeOthers(tabId)
@@ -229,7 +242,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         <span className="min-w-0 flex-1 truncate">{title}</span>
         <button
           type="button"
-          aria-label="Close tab"
+          aria-label={t('Close tab')}
           data-testid="tab-close"
           className={cx(
             'flex size-5 shrink-0 items-center justify-center rounded text-faint transition-opacity duration-100 hover:bg-hover hover:text-fg',
@@ -280,7 +293,7 @@ const tabComponents = { tab: TabHeader }
  * Bố cục tab + chia màn hình bằng dockview. Store `useTabs` là nguồn sự thật về tab nào đang mở;
  * dockview chỉ giữ vị trí. Hai chiều đồng bộ qua sự kiện.
  */
-export function Workspace(): React.JSX.Element {
+export const Workspace = memo(function Workspace(): React.JSX.Element {
   const apiRef = useRef<DockviewApi | null>(null)
   const [api, setApi] = useState<DockviewApi | null>(null)
 
@@ -347,4 +360,4 @@ export function Workspace(): React.JSX.Element {
       }}
     />
   )
-}
+})

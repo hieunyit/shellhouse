@@ -4,7 +4,8 @@ import { indentWithTab } from '@codemirror/commands'
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
-import { tags as t } from '@lezer/highlight'
+import { tags } from '@lezer/highlight'
+import { language as uiLanguage, t } from '@shared/i18n'
 
 /**
  * Editor mã (CodeMirror 6) theo màu của app (biến CSS — tự đổi khi đổi theme sáng / tối).
@@ -103,32 +104,73 @@ const theme = EditorView.theme({
 
 const highlight = HighlightStyle.define([
   {
-    tag: [t.keyword, t.operatorKeyword, t.modifier, t.controlKeyword],
+    tag: [tags.keyword, tags.operatorKeyword, tags.modifier, tags.controlKeyword],
     color: 'var(--sh-syn-keyword)'
   },
-  { tag: [t.string, t.special(t.string), t.regexp, t.inserted], color: 'var(--sh-syn-string)' },
-  { tag: [t.number, t.bool, t.null, t.atom], color: 'var(--sh-syn-number)' },
   {
-    tag: [t.comment, t.lineComment, t.blockComment],
+    tag: [tags.string, tags.special(tags.string), tags.regexp, tags.inserted],
+    color: 'var(--sh-syn-string)'
+  },
+  { tag: [tags.number, tags.bool, tags.null, tags.atom], color: 'var(--sh-syn-number)' },
+  {
+    tag: [tags.comment, tags.lineComment, tags.blockComment],
     color: 'var(--sh-syn-comment)',
     fontStyle: 'italic'
   },
   {
-    tag: [t.function(t.variableName), t.definition(t.variableName), t.labelName],
+    tag: [tags.function(tags.variableName), tags.definition(tags.variableName), tags.labelName],
     color: 'var(--sh-syn-name)'
   },
-  { tag: [t.typeName, t.className, t.namespace, t.tagName], color: 'var(--sh-syn-type)' },
   {
-    tag: [t.propertyName, t.attributeName, t.definition(t.propertyName)],
+    tag: [tags.typeName, tags.className, tags.namespace, tags.tagName],
+    color: 'var(--sh-syn-type)'
+  },
+  {
+    tag: [tags.propertyName, tags.attributeName, tags.definition(tags.propertyName)],
     color: 'var(--sh-syn-property)'
   },
-  { tag: [t.meta, t.processingInstruction, t.annotation], color: 'var(--sh-syn-meta)' },
-  { tag: [t.heading], fontWeight: '600', color: 'var(--sh-syn-name)' },
-  { tag: [t.deleted, t.invalid], color: 'var(--sh-danger)' },
-  { tag: t.link, textDecoration: 'underline' },
-  { tag: t.strong, fontWeight: '600' },
-  { tag: t.emphasis, fontStyle: 'italic' }
+  { tag: [tags.meta, tags.processingInstruction, tags.annotation], color: 'var(--sh-syn-meta)' },
+  { tag: [tags.heading], fontWeight: '600', color: 'var(--sh-syn-name)' },
+  { tag: [tags.deleted, tags.invalid], color: 'var(--sh-danger)' },
+  { tag: tags.link, textDecoration: 'underline' },
+  { tag: tags.strong, fontWeight: '600' },
+  { tag: tags.emphasis, fontStyle: 'italic' }
 ])
+
+/**
+ * Chữ trong giao diện của CodeMirror (ô tìm / thay, đi tới dòng, gập code). Tính lúc dựng editor
+ * (không ở cấp module) để theo ngôn ngữ đang dùng; tiếng Anh thì để mặc định của CodeMirror.
+ */
+function phrases(): Extension {
+  if (uiLanguage() === 'en') return []
+  return EditorState.phrases.of({
+    Find: t('Find'),
+    Replace: t('Replace'),
+    next: t('next'),
+    previous: t('previous'),
+    all: t('all'),
+    'match case': t('match case'),
+    regexp: t('regexp'),
+    'by word': t('by word'),
+    replace: t('replace'),
+    'replace all': t('replace all'),
+    close: t('close'),
+    'Go to line': t('Go to line'),
+    go: t('go'),
+    'current match': t('current match'),
+    'on line': t('on line'),
+    'replaced match on line $': t('replaced match on line $'),
+    'replaced $ matches': t('replaced $ matches'),
+    'Folded lines': t('Folded lines'),
+    'Unfolded lines': t('Unfolded lines'),
+    'folded code': t('folded code'),
+    unfold: t('unfold'),
+    'Fold line': t('Fold line'),
+    'Unfold line': t('Unfold line'),
+    'Selection deleted': t('Selection deleted'),
+    Completions: t('Completions')
+  })
+}
 
 export const CodeEditor = forwardRef<
   CodeEditorHandle,
@@ -180,6 +222,7 @@ export const CodeEditor = forwardRef<
           ]),
           EditorState.lineSeparator.of(lineSeparator),
           theme,
+          phrases(),
           syntaxHighlighting(highlight),
           langSlot.current.of([]),
           wrapSlot.current.of([]),

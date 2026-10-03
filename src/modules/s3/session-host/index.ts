@@ -1,3 +1,4 @@
+import { setLanguage } from '@shared/i18n'
 import type { HostModule } from '../../registry/host-types'
 import { s3Manifest } from '../manifest'
 import { S3SessionConfig } from '../shared/ipc'
@@ -9,10 +10,14 @@ export const s3Host: HostModule = {
   manifest: s3Manifest,
   createSession(_kind, raw, ctx) {
     const config = S3SessionConfig.parse(raw)
+    // Session Host không tự biết ngôn ngữ giao diện: lấy theo main (cố định từ lúc khởi động app).
+    if (config.language) setLanguage(config.language, config.locale)
     const service = new S3Service(
       config.connection,
-      (list) => {
-        ctx.transfers(list)
+      // Chỉ gửi phần thay đổi (sự kiện module `transfers`): hàng nghìn lượt đang chờ không phải
+      // gửi lại cả danh sách mỗi 250 ms. Renderer ghép lại (s3-client.ts).
+      (delta) => {
+        ctx.emit('transfers', delta)
       },
       config.limits,
       // Đồng bộ sang tài khoản khác: main giải mã secret của tài khoản đó (không qua renderer).

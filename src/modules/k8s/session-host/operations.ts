@@ -1,17 +1,20 @@
 import { randomBytes } from 'node:crypto'
 import { gunzipSync } from 'node:zlib'
 import { parseAllDocuments, stringify as toYamlText } from 'yaml'
+import { COUNT_CAPPED } from '../shared/ops'
 import type {
   HelmRelease,
   HelmReleaseDetail,
   ApplyResult,
   DrainResult,
   MetricsResult,
+  OverviewProblem,
   OverviewResult,
   RolloutRevision,
   Usage
 } from '../shared/ops'
 import {
+  MASKED_KEYS_ANNOTATION,
   parseCpu,
   parseMemory,
   podRequests,
@@ -26,6 +29,8 @@ import { KubeError, type KubeClient } from './client'
 
 type List = { items: K8sObject[] }
 const ns = (n: string): string => `/namespaces/${encodeURIComponent(n)}`
+/** `{ signal }` nếu có (exactOptionalPropertyTypes không nhận `signal: undefined`). */
+const sig = (signal?: AbortSignal): { signal?: AbortSignal } => (signal ? { signal } : {})
 
 /** CPU / RAM từ metrics-server; cluster không có → available = false. */
 export async function metrics(
@@ -74,33 +79,99 @@ export async function metrics(
   }
 }
 
+/** Header Accept: chỉ metadata (PartialObjectMetadataList) — server cũ không hỗ trợ thì JSON thường. */
+export const METADATA_ONLY =
+  'application/json;as=PartialObjectMetadataList;g=meta.k8s.io;v=v1,application/json'
+
+export interface PagedOptions {
+  query?: Record<string, string | number | boolean | undefined>
+  signal?: AbortSignal | undefined
+  /** Tối đa chừng này đối tượng (quá → truncated). */
+  max?: number
+  page?: number
+  accept?: string
+}
+
+/** List có phân trang (limit + continue) tới hết hoặc tới `max` đối tượng. */
+export async function listPaged(
+  client: KubeClient,
+  path: string,
+  options: PagedOptions = {}
+): Promise<{ items: K8sObject[]; truncated: boolean }> {
+  const max = options.max ?? 50_000
+  const page = options.page ?? 500
+  const items: K8sObject[] = []
+  let cont: string | undefined
+  do {
+    const r = await client.json<{ items: K8sObject[]; metadata?: { continue?: string } }>(
+      'GET',
+      path,
+      {
+        query: { ...options.query, limit: page, continue: cont },
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.accept ? { accept: options.accept } : {})
+      }
+    )
+    for (const it of r.items) items.push(it)
+    cont = r.metadata?.continue || undefined
+    if (cont && items.length >= max) return { items, truncated: true }
+  } while (cont)
+  return { items, truncated: false }
+}
+
 async function listIn(
   client: KubeClient,
   path: (n?: string) => string,
-  namespaces: readonly string[]
-): Promise<K8sObject[]> {
-  if (namespaces.length === 0) return (await client.json<List>('GET', path())).items
-  const lists = await Promise.all(namespaces.map((n) => client.json<List>('GET', path(n))))
-  return lists.flatMap((l) => l.items)
+  namespaces: readonly string[],
+  options: PagedOptions = {}
+): Promise<{ items: K8sObject[]; truncated: boolean }> {
+  const lists = await Promise.all(
+    (namespaces.length ? namespaces : [undefined]).map((n) => listPaged(client, path(n), options))
+  )
+  return { items: lists.flatMap((l) => l.items), truncated: lists.some((l) => l.truncated) }
 }
 
 /** Tổng quan cluster: node, pod theo trạng thái, workload sẵn sàng, cảnh báo gần đây, tài nguyên. */
 export async function overview(
   client: KubeClient,
-  namespaces: readonly string[]
+  namespaces: readonly string[],
+  signal?: AbortSignal
 ): Promise<OverviewResult> {
-  const [version, nodes, pods, deploys, sets, daemons, events, usage] = await Promise.all([
-    client.json<{ gitVersion?: string }>('GET', '/version'),
-    client.json<List>('GET', '/api/v1/nodes').catch(() => ({ items: [] as K8sObject[] })),
-    listIn(client, (n) => `/api/v1${n ? ns(n) : ''}/pods`, namespaces),
-    listIn(client, (n) => `/apis/apps/v1${n ? ns(n) : ''}/deployments`, namespaces).catch(() => []),
-    listIn(client, (n) => `/apis/apps/v1${n ? ns(n) : ''}/statefulsets`, namespaces).catch(
-      () => []
-    ),
-    listIn(client, (n) => `/apis/apps/v1${n ? ns(n) : ''}/daemonsets`, namespaces).catch(() => []),
-    listIn(client, (n) => `/api/v1${n ? ns(n) : ''}/events`, namespaces).catch(() => []),
-    metrics(client, 'nodes', undefined).catch(() => ({ available: false, items: {} }))
-  ])
+  const opts = { signal }
+  const none = { items: [] as K8sObject[], truncated: false }
+  const [version, nodeList, podList, deployList, setList, daemonList, eventList, usage, pvcList] =
+    await Promise.all([
+      client.json<{ gitVersion?: string }>('GET', '/version', opts),
+      listPaged(client, '/api/v1/nodes', opts).catch(() => none),
+      listIn(client, (n) => `/api/v1${n ? ns(n) : ''}/pods`, namespaces, opts),
+      listIn(client, (n) => `/apis/apps/v1${n ? ns(n) : ''}/deployments`, namespaces, opts).catch(
+        () => none
+      ),
+      listIn(client, (n) => `/apis/apps/v1${n ? ns(n) : ''}/statefulsets`, namespaces, opts).catch(
+        () => none
+      ),
+      listIn(client, (n) => `/apis/apps/v1${n ? ns(n) : ''}/daemonsets`, namespaces, opts).catch(
+        () => none
+      ),
+      // Chỉ cảnh báo (lọc ở server) — cluster lớn có hàng chục nghìn event Normal.
+      listIn(client, (n) => `/api/v1${n ? ns(n) : ''}/events`, namespaces, {
+        ...opts,
+        query: { fieldSelector: 'type=Warning' },
+        max: 5000
+      }).catch(() => none),
+      metrics(client, 'nodes', undefined, signal).catch(() => ({ available: false, items: {} })),
+      // PVC chờ bound — chỉ để liệt kê vấn đề; không đọc được (thiếu quyền) thì bỏ qua.
+      listIn(client, (n) => `/api/v1${n ? ns(n) : ''}/persistentvolumeclaims`, namespaces, {
+        ...opts,
+        max: 5000
+      }).catch(() => none)
+    ])
+  const nodes = nodeList
+  const pods = podList.items
+  const deploys = deployList.items
+  const sets = setList.items
+  const daemons = daemonList.items
+  const events = eventList.items
   const capacity: Usage = { cpu: 0, memory: 0 }
   let ready = 0
   let cordoned = 0
@@ -202,23 +273,188 @@ export async function overview(
         )
       }
     ],
-    warnings
+    warnings,
+    problems: findProblems(nodes.items, pods, pvcList.items),
+    ...([nodeList, podList, deployList, setList, daemonList].some((l) => l.truncated)
+      ? { truncated: true }
+      : {})
   }
+}
+
+/** Mỗi nhóm vấn đề giữ tối đa chừng này mục (tổng vẫn đếm đủ). */
+const PROBLEMS_MAX = 50
+/** Pod Pending lâu hơn chừng này mới là vấn đề (vừa tạo thì Pending là bình thường). */
+const PENDING_GRACE_MS = 2 * 60_000
+
+const IMAGE_PULL = new Set(['ErrImagePull', 'ImagePullBackOff', 'InvalidImageName'])
+const FAILING = new Set([
+  'CrashLoopBackOff',
+  'CreateContainerConfigError',
+  'CreateContainerError',
+  'RunContainerError',
+  'OOMKilled',
+  'Error',
+  'ContainerCannotRun'
+])
+
+interface PodContainerStatus {
+  name: string
+  ready?: boolean
+  restartCount?: number
+  state?: {
+    waiting?: { reason?: string; message?: string }
+    terminated?: { reason?: string; message?: string; exitCode?: number; finishedAt?: string }
+    running?: { startedAt?: string }
+  }
+  lastState?: { terminated?: { reason?: string; exitCode?: number; finishedAt?: string } }
+}
+
+/**
+ * Vấn đề cần xem (trang tổng quan, kiểu Lens / k9s pulses): pod lỗi / kéo image hỏng / Pending lâu,
+ * node không Ready, PVC chưa bound. Pod đã xong (Succeeded) hay đang bị xoá không tính.
+ */
+export function findProblems(
+  nodes: readonly K8sObject[],
+  pods: readonly K8sObject[],
+  pvcs: readonly K8sObject[],
+  now = Date.now()
+): NonNullable<OverviewResult['problems']> {
+  const groups: NonNullable<OverviewResult['problems']> = {
+    failing: { total: 0, items: [] },
+    imagePull: { total: 0, items: [] },
+    pending: { total: 0, items: [] },
+    nodes: { total: 0, items: [] },
+    pvcs: { total: 0, items: [] }
+  }
+  const add = (group: keyof typeof groups, item: OverviewProblem): void => {
+    const g = groups[group]
+    g.total++
+    if (g.items.length < PROBLEMS_MAX) g.items.push(item)
+  }
+  for (const p of pods) {
+    if (p.metadata.deletionTimestamp) continue
+    const phase = (p.status?.['phase'] as string | undefined) ?? 'Unknown'
+    if (phase === 'Succeeded') continue
+    const statuses = [
+      ...((p.status?.['initContainerStatuses'] as PodContainerStatus[] | undefined) ?? []),
+      ...((p.status?.['containerStatuses'] as PodContainerStatus[] | undefined) ?? [])
+    ]
+    const restarts = statuses.reduce((n, c) => n + (c.restartCount ?? 0), 0)
+    const base = {
+      kind: 'pods',
+      ...(p.metadata.namespace ? { namespace: p.metadata.namespace } : {}),
+      name: p.metadata.name,
+      restarts
+    }
+    const pull = statuses.find((c) => IMAGE_PULL.has(c.state?.waiting?.reason ?? ''))
+    if (pull) {
+      add('imagePull', {
+        ...base,
+        reason: pull.state?.waiting?.reason ?? '',
+        message: pull.state?.waiting?.message ?? '',
+        since: p.metadata.creationTimestamp ?? ''
+      })
+      continue
+    }
+    const bad = statuses.find(
+      (c) =>
+        FAILING.has(c.state?.waiting?.reason ?? '') ||
+        (c.state?.terminated && (c.state.terminated.exitCode ?? 0) !== 0 && phase !== 'Running')
+    )
+    if (bad || phase === 'Failed') {
+      const reason =
+        bad?.state?.waiting?.reason ??
+        bad?.state?.terminated?.reason ??
+        (p.status?.['reason'] as string | undefined) ??
+        'Failed'
+      const message =
+        bad?.state?.waiting?.message ??
+        bad?.state?.terminated?.message ??
+        (p.status?.['message'] as string | undefined) ??
+        ''
+      add('failing', {
+        ...base,
+        reason,
+        message,
+        since:
+          bad?.lastState?.terminated?.finishedAt ??
+          bad?.state?.terminated?.finishedAt ??
+          p.metadata.creationTimestamp ??
+          ''
+      })
+      continue
+    }
+    if (phase === 'Pending') {
+      const created = Date.parse(p.metadata.creationTimestamp ?? '')
+      if (Number.isFinite(created) && now - created < PENDING_GRACE_MS) continue
+      const conds =
+        (p.status?.['conditions'] as
+          { type: string; status: string; reason?: string; message?: string }[] | undefined) ?? []
+      const sched = conds.find((c) => c.type === 'PodScheduled' && c.status !== 'True')
+      const waiting = statuses.find((c) => c.state?.waiting?.reason)?.state?.waiting
+      add('pending', {
+        ...base,
+        reason: sched?.reason ?? waiting?.reason ?? 'Pending',
+        message: sched?.message ?? waiting?.message ?? '',
+        since: p.metadata.creationTimestamp ?? ''
+      })
+    }
+  }
+  for (const n of nodes) {
+    const conds =
+      (n.status?.['conditions'] as
+        | {
+            type: string
+            status: string
+            reason?: string
+            message?: string
+            lastTransitionTime?: string
+          }[]
+        | undefined) ?? []
+    const ready = conds.find((c) => c.type === 'Ready')
+    if (ready?.status === 'True') continue
+    add('nodes', {
+      kind: 'nodes',
+      name: n.metadata.name,
+      reason: ready ? (ready.status === 'Unknown' ? 'NodeStatusUnknown' : 'NotReady') : 'NotReady',
+      message: ready?.message ?? ready?.reason ?? '',
+      since: ready?.lastTransitionTime ?? ''
+    })
+  }
+  for (const c of pvcs) {
+    const phase = c.status?.['phase'] as string | undefined
+    if (phase === 'Bound') continue
+    add('pvcs', {
+      kind: 'persistentvolumeclaims',
+      ...(c.metadata.namespace ? { namespace: c.metadata.namespace } : {}),
+      name: c.metadata.name,
+      reason: phase ?? 'Pending',
+      message:
+        typeof c.spec?.['storageClassName'] === 'string'
+          ? `storageClassName: ${c.spec['storageClassName']}`
+          : '',
+      since: c.metadata.creationTimestamp ?? ''
+    })
+  }
+  return groups
 }
 
 /** ReplicaSet của deployment theo revision (mới nhất trước) — như `kubectl rollout history`. */
 export async function rolloutHistory(
   client: KubeClient,
   namespace: string,
-  name: string
+  name: string,
+  signal?: AbortSignal
 ): Promise<RolloutRevision[]> {
   const deploy = await client.json<K8sObject>(
     'GET',
-    `/apis/apps/v1${ns(namespace)}/deployments/${encodeURIComponent(name)}`
+    `/apis/apps/v1${ns(namespace)}/deployments/${encodeURIComponent(name)}`,
+    sig(signal)
   )
   const selector = selectorString(deploy.spec?.['selector'])
   const sets = await client.json<List>('GET', `/apis/apps/v1${ns(namespace)}/replicasets`, {
-    query: { labelSelector: selector ?? undefined }
+    query: { labelSelector: selector ?? undefined },
+    ...sig(signal)
   })
   const current = Number(deploy.metadata.annotations?.['deployment.kubernetes.io/revision'] ?? 0)
   return sets.items
@@ -246,13 +482,15 @@ export async function rollback(
   client: KubeClient,
   namespace: string,
   name: string,
-  revision: number
+  revision: number,
+  signal?: AbortSignal
 ): Promise<void> {
   const path = `/apis/apps/v1${ns(namespace)}/deployments/${encodeURIComponent(name)}`
-  const deploy = await client.json<K8sObject>('GET', path)
+  const deploy = await client.json<K8sObject>('GET', path, sig(signal))
   const selector = selectorString(deploy.spec?.['selector'])
   const sets = await client.json<List>('GET', `/apis/apps/v1${ns(namespace)}/replicasets`, {
-    query: { labelSelector: selector ?? undefined }
+    query: { labelSelector: selector ?? undefined },
+    ...sig(signal)
   })
   const target = sets.items.find(
     (rs) =>
@@ -264,42 +502,106 @@ export async function rollback(
     metadata?: { labels?: Record<string, string> }
   }
   delete template.metadata?.labels?.['pod-template-hash']
-  await client.json('PUT', path, { body: { ...deploy, spec: { ...deploy.spec, template } } })
+  await client.json('PUT', path, {
+    body: { ...deploy, spec: { ...deploy.spec, template } },
+    ...sig(signal)
+  })
 }
 
 export async function cordon(
   client: KubeClient,
   node: string,
-  unschedulable: boolean
+  unschedulable: boolean,
+  signal?: AbortSignal
 ): Promise<void> {
   await client.json('PATCH', `/api/v1/nodes/${encodeURIComponent(node)}`, {
     body: { spec: { unschedulable } },
-    contentType: 'application/merge-patch+json'
+    contentType: 'application/merge-patch+json',
+    ...sig(signal)
   })
 }
 
-/** Drain: cordon rồi evict mọi pod (bỏ qua pod của DaemonSet và static pod) — như `kubectl drain`. */
-export async function drain(client: KubeClient, node: string): Promise<DrainResult> {
-  await cordon(client, node, true)
-  const pods = await client.json<List>('GET', '/api/v1/pods', {
-    query: { fieldSelector: `spec.nodeName=${node}` }
+export interface DrainOptions {
+  gracePeriodSeconds?: number | undefined
+  deleteEmptyDirData?: boolean | undefined
+  force?: boolean | undefined
+  timeoutSeconds?: number | undefined
+}
+
+/** Thời gian chờ giữa các lần thử evict bị PDB chặn (test rút ngắn được). */
+export const drainRetry = { ms: 5000 }
+
+const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Cancelled'))
+      return
+    }
+    const t = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    const onAbort = (): void => {
+      clearTimeout(t)
+      reject(new Error('Cancelled'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+
+/**
+ * Drain như `kubectl drain --ignore-daemonsets`: cordon, rồi evict pod (tối đa 8 cùng lúc). Bỏ qua
+ * pod DaemonSet / static pod / đã xong. Pod không có controller hoặc dùng emptyDir chặn cả lượt
+ * (không evict gì) trừ khi bật force / deleteEmptyDirData. PDB chặn (429) → thử lại mỗi 5 giây tới
+ * hết `timeoutSeconds`.
+ */
+export async function drain(
+  client: KubeClient,
+  node: string,
+  options: DrainOptions = {},
+  signal?: AbortSignal
+): Promise<DrainResult> {
+  await cordon(client, node, true, signal)
+  const { items: pods } = await listPaged(client, '/api/v1/pods', {
+    query: { fieldSelector: `spec.nodeName=${node}` },
+    signal
   })
   const result: DrainResult = { evicted: [], skipped: [], failed: [] }
-  await Promise.all(
-    pods.items.map(async (p) => {
-      const key = `${p.metadata.namespace ?? ''}/${p.metadata.name}`
-      const owners = p.metadata.ownerReferences ?? []
-      const mirror = p.metadata.annotations?.['kubernetes.io/config.mirror'] !== undefined
-      const phase = p.status?.['phase']
-      if (
-        owners.some((o) => o.kind === 'DaemonSet') ||
-        mirror ||
-        phase === 'Succeeded' ||
-        phase === 'Failed'
-      ) {
-        result.skipped.push(key)
-        return
-      }
+  const blocked: string[] = []
+  const targets: K8sObject[] = []
+  for (const p of pods) {
+    const key = `${p.metadata.namespace ?? ''}/${p.metadata.name}`
+    const owners = p.metadata.ownerReferences ?? []
+    const mirror = p.metadata.annotations?.['kubernetes.io/config.mirror'] !== undefined
+    const phase = p.status?.['phase']
+    if (
+      owners.some((o) => o.kind === 'DaemonSet') ||
+      mirror ||
+      phase === 'Succeeded' ||
+      phase === 'Failed' ||
+      p.metadata.deletionTimestamp
+    ) {
+      result.skipped.push(key)
+      continue
+    }
+    if (!owners.some((o) => o.controller === true) && !options.force)
+      blocked.push(`${key}: not managed by a controller (it would not come back) — use force`)
+    else if (
+      !options.deleteEmptyDirData &&
+      ((p.spec?.['volumes'] as { emptyDir?: unknown }[] | undefined) ?? []).some((v) => v.emptyDir)
+    )
+      blocked.push(`${key}: uses emptyDir (its data would be lost) — allow deleting emptyDir data`)
+    else targets.push(p)
+  }
+  if (blocked.length) {
+    // Như kubectl: không evict nửa chừng — node đã cordon, người dùng chọn rồi chạy lại.
+    result.failed.push(...blocked)
+    result.blocked = blocked.map((b) => b.slice(0, b.indexOf(':')))
+    return result
+  }
+  const deadline = Date.now() + (options.timeoutSeconds ?? 300) * 1000
+  await pool(targets, 8, async (p) => {
+    const key = `${p.metadata.namespace ?? ''}/${p.metadata.name}`
+    for (;;) {
       try {
         await client.json(
           'POST',
@@ -308,16 +610,45 @@ export async function drain(client: KubeClient, node: string): Promise<DrainResu
             body: {
               apiVersion: 'policy/v1',
               kind: 'Eviction',
-              metadata: { name: p.metadata.name, namespace: p.metadata.namespace }
-            }
+              metadata: { name: p.metadata.name, namespace: p.metadata.namespace },
+              ...(options.gracePeriodSeconds !== undefined
+                ? { deleteOptions: { gracePeriodSeconds: options.gracePeriodSeconds } }
+                : {})
+            },
+            ...(signal ? { signal } : {})
           }
         )
         result.evicted.push(key)
+        return
       } catch (error) {
-        result.failed.push(`${key}: ${error instanceof Error ? error.message : String(error)}`)
+        if (error instanceof KubeError && error.status === 404) {
+          // Đã bị xoá trong lúc drain.
+          result.evicted.push(key)
+          return
+        }
+        // 429 = PodDisruptionBudget chưa cho phép (đang chờ pod khác sẵn sàng) → thử lại.
+        if (
+          error instanceof KubeError &&
+          error.status === 429 &&
+          Date.now() + drainRetry.ms < deadline &&
+          !signal?.aborted
+        ) {
+          await sleep(drainRetry.ms, signal).catch(() => undefined)
+          continue
+        }
+        result.failed.push(
+          `${key}: ${
+            error instanceof KubeError && error.status === 429
+              ? `still blocked by a PodDisruptionBudget after ${options.timeoutSeconds ?? 300} s`
+              : error instanceof Error
+                ? error.message
+                : String(error)
+          }`
+        )
+        return
       }
-    })
-  )
+    }
+  })
   return result
 }
 
@@ -325,11 +656,13 @@ export async function drain(client: KubeClient, node: string): Promise<DrainResu
 export async function cronTrigger(
   client: KubeClient,
   namespace: string,
-  name: string
+  name: string,
+  signal?: AbortSignal
 ): Promise<string> {
   const cron = await client.json<K8sObject>(
     'GET',
-    `/apis/batch/v1${ns(namespace)}/cronjobs/${encodeURIComponent(name)}`
+    `/apis/batch/v1${ns(namespace)}/cronjobs/${encodeURIComponent(name)}`,
+    sig(signal)
   )
   const template = (cron.spec?.['jobTemplate'] ?? {}) as {
     metadata?: { labels?: Record<string, string>; annotations?: Record<string, string> }
@@ -359,7 +692,8 @@ export async function cronTrigger(
         ]
       },
       spec: template.spec
-    }
+    },
+    ...sig(signal)
   })
   return jobName
 }
@@ -368,16 +702,60 @@ export async function cronSuspend(
   client: KubeClient,
   namespace: string,
   name: string,
-  suspend: boolean
+  suspend: boolean,
+  signal?: AbortSignal
 ): Promise<void> {
   await client.json(
     'PATCH',
     `/apis/batch/v1${ns(namespace)}/cronjobs/${encodeURIComponent(name)}`,
     {
       body: { spec: { suspend } },
-      contentType: 'application/merge-patch+json'
+      contentType: 'application/merge-patch+json',
+      ...sig(signal)
     }
   )
+}
+
+/**
+ * Secret trong YAML lấy từ Shellhouse có giá trị bị ẩn (chuỗi rỗng — xem hideSecretValuesForEdit),
+ * khoá bị ẩn ghi trong annotation MASKED_KEYS_ANNOTATION. Ghi nguyên như vậy sẽ XOÁ giá trị thật →
+ * khoá bị ẩn còn rỗng mà trên cluster đang có giá trị thì giữ giá trị đang có. Khoá không bị ẩn (hoặc
+ * YAML không có annotation) để rỗng là người dùng muốn rỗng thật. Annotation luôn bị bỏ trước khi gửi.
+ * Muốn đổi giá trị: ghi giá trị mới (base64) vào data hoặc dùng stringData; muốn bỏ khoá: xoá dòng.
+ */
+export async function keepHiddenSecretValues(
+  client: KubeClient,
+  kind: ResourceKind,
+  namespace: string | undefined,
+  o: K8sObject,
+  signal?: AbortSignal
+): Promise<void> {
+  if (kind.id !== 'secrets') return
+  const annotations = o.metadata.annotations
+  const marker = annotations?.[MASKED_KEYS_ANNOTATION]
+  if (annotations && marker !== undefined) {
+    const rest = Object.fromEntries(
+      Object.entries(annotations).filter(([k]) => k !== MASKED_KEYS_ANNOTATION)
+    )
+    if (Object.keys(rest).length) o.metadata.annotations = rest
+    else delete o.metadata.annotations
+  }
+  if (!o.data || typeof marker !== 'string') return
+  const masked = new Set(marker.split(',').filter(Boolean))
+  const empty = Object.entries(o.data).filter(([k, v]) => v === '' && masked.has(k))
+  if (!empty.length) return
+  const current = await client
+    .json<K8sObject>('GET', resourcePath(kind, namespace, o.metadata.name), sig(signal))
+    .catch((error: unknown) => {
+      if (error instanceof KubeError && error.status === 404) return null
+      throw error
+    })
+  const data = { ...o.data }
+  for (const [k] of empty) {
+    const v = current?.data?.[k]
+    if (v) data[k] = v
+  }
+  o.data = data
 }
 
 /**
@@ -388,7 +766,8 @@ export async function serverApply(
   client: KubeClient,
   text: string,
   defaultNamespace: string,
-  findKind: (apiVersion: string, kind: string) => Promise<ResourceKind | undefined>
+  findKind: (apiVersion: string, kind: string) => Promise<ResourceKind | undefined>,
+  signal?: AbortSignal
 ): Promise<ApplyResult[]> {
   const docs = parseAllDocuments(text)
   const out: ApplyResult[] = []
@@ -412,10 +791,12 @@ export async function serverApply(
       const namespace = kind.namespaced ? (o.metadata.namespace ?? defaultNamespace) : undefined
       if (namespace) o.metadata.namespace = namespace
       delete o.metadata.resourceVersion
+      await keepHiddenSecretValues(client, kind, namespace, o, signal)
       await client.json('PATCH', resourcePath(kind, namespace, o.metadata.name), {
         body: o,
         contentType: 'application/apply-patch+yaml',
-        query: { fieldManager: 'shellhouse', force: false }
+        query: { fieldManager: 'shellhouse', force: false },
+        ...sig(signal)
       })
       out.push({ object: namespace ? `${namespace}/${label}` : label, action: 'configured' })
     } catch (error) {
@@ -438,7 +819,8 @@ export async function logTargets(
     selector?: string | undefined
     container?: string | undefined
     allContainers?: boolean | undefined
-  }
+  },
+  signal?: AbortSignal
 ): Promise<{ pod: string; container: string | undefined }[]> {
   const containersOf = (p: K8sObject): string[] =>
     ((p.spec?.['containers'] as { name: string }[] | undefined) ?? []).map((c) => c.name)
@@ -447,12 +829,14 @@ export async function logTargets(
     ? [
         await client.json<K8sObject>(
           'GET',
-          `/api/v1${ns(namespace)}/pods/${encodeURIComponent(op.pod)}`
+          `/api/v1${ns(namespace)}/pods/${encodeURIComponent(op.pod)}`,
+          sig(signal)
         )
       ]
     : (
         await client.json<List>('GET', `/api/v1${ns(namespace)}/pods`, {
-          query: { labelSelector: op.selector }
+          query: { labelSelector: op.selector },
+          ...sig(signal)
         })
       ).items
   if (pods.length === 0) throw new Error('No pods match')
@@ -467,49 +851,77 @@ export async function logTargets(
     )
 }
 
+/** Chạy `fn` cho từng phần tử, tối đa `limit` cùng lúc (không dồn hàng trăm request một lúc). */
+export async function pool<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++
+        out[i] = await fn(items[i] as T, i)
+      }
+    })
+  )
+  return out
+}
+
+/** Đếm theo trang tối đa chừng này đối tượng mỗi loại / namespace (quá → "N+"). */
+const COUNT_MAX = 10_000
+
 /**
  * Đếm đối tượng: `limit=1` + `metadata.remainingItemCount` (một request nhỏ mỗi loại / namespace);
- * server không trả số → đếm theo trang (tối đa 5000). Lỗi / không có quyền → null.
+ * server không trả số → đếm theo trang (chỉ metadata) tới COUNT_MAX — quá thì đánh dấu
+ * `${COUNT_CAPPED}<id>`. Lỗi / không có quyền → null.
  */
 export async function counts(
   client: KubeClient,
   kinds: readonly ResourceKind[],
-  namespaces: readonly string[]
+  namespaces: readonly string[],
+  signal?: AbortSignal
 ): Promise<Record<string, number | null>> {
-  const countPath = async (path: string): Promise<number> => {
+  const countPath = async (path: string): Promise<{ n: number; capped: boolean }> => {
     let total = 0
     let cont: string | undefined
-    for (let page = 0; page < 10; page++) {
+    for (let page = 0; ; page++) {
       const r = await client.json<{
         items: unknown[]
         metadata?: { remainingItemCount?: number; continue?: string }
-      }>('GET', path, { query: { limit: page === 0 ? 1 : 500, continue: cont } })
+      }>('GET', path, {
+        query: { limit: page === 0 ? 1 : 1000, continue: cont },
+        accept: METADATA_ONLY,
+        ...(signal ? { signal } : {})
+      })
       total += r.items.length
       if (page === 0 && typeof r.metadata?.remainingItemCount === 'number')
-        return total + r.metadata.remainingItemCount
+        return { n: total + r.metadata.remainingItemCount, capped: false }
       cont = r.metadata?.continue || undefined
-      if (!cont) return total
+      if (!cont) return { n: total, capped: false }
+      if (total >= COUNT_MAX) return { n: total, capped: true }
     }
-    return total
   }
   const out: Record<string, number | null> = {}
-  const jobs = kinds.map((k) => async () => {
+  // 6 loại cùng lúc — đủ nhanh, không dồn API server.
+  await pool(kinds, 6, async (k) => {
     try {
       const scope = k.namespaced && namespaces.length > 0 ? namespaces : [undefined]
       let n = 0
-      for (const ns of scope) n += await countPath(resourcePath(k, ns))
+      let capped = false
+      for (const ns of scope) {
+        const c = await countPath(resourcePath(k, ns))
+        n += c.n
+        capped ||= c.capped
+      }
       out[k.id] = n
+      if (capped) out[`${COUNT_CAPPED}${k.id}`] = 1
     } catch {
       out[k.id] = null
     }
   })
-  // 6 loại cùng lúc — đủ nhanh, không dồn API server.
-  let next = 0
-  await Promise.all(
-    Array.from({ length: Math.min(6, jobs.length) }, async () => {
-      while (next < jobs.length) await jobs[next++]?.()
-    })
-  )
   return out
 }
 
@@ -527,9 +939,10 @@ export async function argoSync(
   version: string,
   namespace: string,
   name: string,
-  prune: boolean
+  prune: boolean,
+  signal?: AbortSignal
 ): Promise<void> {
-  const app = await client.json<K8sObject>('GET', argoPath(version, namespace, name))
+  const app = await client.json<K8sObject>('GET', argoPath(version, namespace, name), sig(signal))
   const running = (app as { operation?: unknown }).operation
   if (running) throw new Error(`${name} is already syncing — wait for it to finish`)
   const source = (app.spec?.['source'] ?? {}) as { targetRevision?: string }
@@ -544,7 +957,8 @@ export async function argoSync(
         }
       }
     },
-    contentType: 'application/merge-patch+json'
+    contentType: 'application/merge-patch+json',
+    ...sig(signal)
   })
 }
 
@@ -554,34 +968,52 @@ export async function argoRefresh(
   version: string,
   namespace: string,
   name: string,
-  hard: boolean
+  hard: boolean,
+  signal?: AbortSignal
 ): Promise<void> {
   await client.json('PATCH', argoPath(version, namespace, name), {
     body: { metadata: { annotations: { 'argocd.argoproj.io/refresh': hard ? 'hard' : 'normal' } } },
-    contentType: 'application/merge-patch+json'
+    contentType: 'application/merge-patch+json',
+    ...sig(signal)
   })
 }
 
 // ——— Helm 3 ———
 
-interface HelmSecret {
-  metadata: { name: string; namespace?: string; labels?: Record<string, string> }
+export interface HelmSecret {
+  metadata: {
+    name: string
+    namespace?: string
+    labels?: Record<string, string>
+    resourceVersion?: string
+  }
   data?: Record<string, string>
+  type?: string
 }
 
-interface HelmRecord {
+export interface HelmRecord {
   name?: string
   namespace?: string
   version?: number
   info?: {
     status?: string
+    first_deployed?: string
     last_deployed?: string
+    deleted?: string
     description?: string
     notes?: string
+    [key: string]: unknown
   }
-  chart?: { metadata?: { name?: string; version?: string; appVersion?: string } }
+  chart?: {
+    metadata?: { name?: string; version?: string; appVersion?: string }
+    values?: Record<string, unknown> | null
+    [key: string]: unknown
+  }
   config?: Record<string, unknown> | null
   manifest?: string
+  hooks?: { name?: string; kind?: string; events?: string[] }[] | null
+  /** Các trường khác của Helm (labels…) — giữ nguyên khi ghi lại. */
+  [key: string]: unknown
 }
 
 /** Secret của Helm: data.release = base64(base64(gzip(JSON))). */
@@ -591,7 +1023,7 @@ export function decodeHelmRelease(data: string): HelmRecord {
   return JSON.parse(json.toString('utf8')) as HelmRecord
 }
 
-function summary(r: HelmRecord, fallback: HelmSecret): HelmRelease {
+export function summary(r: HelmRecord, fallback: HelmSecret): HelmRelease {
   const labels = fallback.metadata.labels ?? {}
   return {
     name: r.name ?? labels['name'] ?? '',
@@ -606,27 +1038,37 @@ function summary(r: HelmRecord, fallback: HelmSecret): HelmRelease {
   }
 }
 
-async function helmSecrets(
+export async function helmSecrets(
   client: KubeClient,
   namespaces: readonly string[],
-  selector: string
+  selector: string,
+  signal?: AbortSignal,
+  accept?: string
 ): Promise<HelmSecret[]> {
-  const path = (n?: string): string => `/api/v1${n ? ns(n) : ''}/secrets`
   const query = { labelSelector: selector, fieldSelector: 'type=helm.sh/release.v1' }
-  if (namespaces.length === 0)
-    return (await client.json<{ items: HelmSecret[] }>('GET', path(), { query })).items
   const lists = await Promise.all(
-    namespaces.map((n) => client.json<{ items: HelmSecret[] }>('GET', path(n), { query }))
+    (namespaces.length ? namespaces : [undefined]).map((n) =>
+      listPaged(client, `/api/v1${n ? ns(n) : ''}/secrets`, {
+        query,
+        signal,
+        max: 20_000,
+        ...(accept ? { accept } : {})
+      })
+    )
   )
-  return lists.flatMap((l) => l.items)
+  return lists.flatMap((l) => l.items as HelmSecret[])
 }
 
-/** Mọi release (revision mới nhất của mỗi tên) — chỉ giải mã đúng revision đó. */
+/**
+ * Mọi release (revision mới nhất của mỗi tên): list chỉ metadata (nhãn name / version / status —
+ * không tải dữ liệu nén của mọi revision, có thể hàng chục MB), rồi chỉ GET đúng revision mới nhất.
+ */
 export async function helmReleases(
   client: KubeClient,
-  namespaces: readonly string[]
+  namespaces: readonly string[],
+  signal?: AbortSignal
 ): Promise<HelmRelease[]> {
-  const secrets = await helmSecrets(client, namespaces, 'owner=helm')
+  const secrets = await helmSecrets(client, namespaces, 'owner=helm', signal, METADATA_ONLY)
   const latest = new Map<string, HelmSecret>()
   for (const sec of secrets) {
     const labels = sec.metadata.labels ?? {}
@@ -635,16 +1077,25 @@ export async function helmReleases(
     if (!cur || Number(labels['version'] ?? 0) > Number(cur.metadata.labels?.['version'] ?? 0))
       latest.set(key, sec)
   }
-  const out: HelmRelease[] = []
-  for (const sec of latest.values()) {
+  const out = await pool([...latest.values()], 8, async (meta) => {
     let record: HelmRecord = {}
     try {
-      if (sec.data?.['release']) record = decodeHelmRelease(sec.data['release'])
+      // Server không hỗ trợ list chỉ metadata → đã có data, khỏi GET lại.
+      const data =
+        meta.data?.['release'] ??
+        (
+          await client.json<HelmSecret>(
+            'GET',
+            `/api/v1${ns(meta.metadata.namespace ?? 'default')}/secrets/${encodeURIComponent(meta.metadata.name)}`,
+            signal ? { signal } : {}
+          )
+        ).data?.['release']
+      if (data) record = decodeHelmRelease(data)
     } catch {
-      // Hỏng / định dạng lạ: vẫn hiện theo nhãn.
+      // Hỏng / định dạng lạ / vừa bị xoá: vẫn hiện theo nhãn.
     }
-    out.push(summary(record, sec))
-  }
+    return summary(record, meta)
+  })
   return out.sort((a, b) => a.namespace.localeCompare(b.namespace) || a.name.localeCompare(b.name))
 }
 
@@ -652,9 +1103,10 @@ export async function helmReleases(
 export async function helmRelease(
   client: KubeClient,
   namespace: string,
-  name: string
+  name: string,
+  signal?: AbortSignal
 ): Promise<HelmReleaseDetail> {
-  const secrets = await helmSecrets(client, [namespace], `owner=helm,name=${name}`)
+  const secrets = await helmSecrets(client, [namespace], `owner=helm,name=${name}`, signal)
   if (secrets.length === 0) throw new Error(`Helm release ${name} was not found`)
   const records = secrets
     .map((sec) => {

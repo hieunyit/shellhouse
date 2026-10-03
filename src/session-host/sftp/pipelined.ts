@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { promises as fs } from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
 import type { SFTPWrapper } from 'ssh2'
@@ -145,7 +146,7 @@ export async function pipelinedDownload(
             return
           }
           if (bytesRead === 0) {
-            fail(new Error('The source file is shorter than expected (was it modified?)'))
+            fail(new Error(t('The source file is shorter than expected (was it modified?)')))
             return
           }
           ready.set(position, buf.subarray(0, bytesRead))
@@ -236,7 +237,7 @@ export async function pipelinedUpload(
           reading = false
           if (done) return
           if (bytesRead !== length) {
-            fail(new Error('The local file changed during the upload'))
+            fail(new Error(t('The local file changed during the upload')))
             return
           }
           inFlight++
@@ -260,6 +261,11 @@ export async function pipelinedUpload(
   }
 }
 
-export async function openLocal(path: string, flags: 'r' | 'r+' | 'w'): Promise<FileHandle> {
-  return fs.open(path, flags)
+/** `mode` chỉ có tác dụng khi file được tạo mới. */
+export async function openLocal(
+  path: string,
+  flags: 'r' | 'r+' | 'w',
+  mode?: number
+): Promise<FileHandle> {
+  return fs.open(path, flags, mode)
 }

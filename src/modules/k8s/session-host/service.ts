@@ -1,8 +1,12 @@
 import { findPrometheus, podRange, type PromTarget } from './prometheus'
 import { randomUUID } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { lstat, open, readFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { createServer, type Server, type Socket } from 'node:net'
 import { parse as parseYaml, stringify as toYaml } from 'yaml'
+import { z } from 'zod'
+import { t } from '@shared/i18n'
 import type WebSocket from 'ws'
 import type { HostModuleSession, TerminalSize } from '../../registry/host-types'
 import type { Transport, TransportCallbacks } from '../../../session-host/transport/types'
@@ -19,15 +23,18 @@ import {
   BUILTIN_GROUPS,
   BUILTIN_KINDS,
   hideSecretValues,
+  hideSecretValuesForEdit,
   resourcePath,
   slim,
   type K8sObject,
   type ResourceKind
 } from '../shared/resources'
-import { KubeClient, KubeError, type RawConnect } from './client'
-import { credentialProvider, type AuthConfig } from './auth'
+import { KubeClient, KubeError, KubeTimeoutError, type RawConnect } from './client'
+import { credentialProvider, type AuthConfig, type OidcTokens } from './auth'
 import {
   cordon,
+  keepHiddenSecretValues,
+  pool,
   cronSuspend,
   cronTrigger,
   drain,
@@ -43,6 +50,9 @@ import {
   rolloutHistory,
   serverApply
 } from './operations'
+import { debugEphemeral, debugNode } from './debug'
+import { diffObjects } from './diff'
+import { helmRevision, helmRollback, helmUninstall } from './helm'
 import { mapData } from './map'
 import { related } from './related'
 import { rbacReach, topology } from './topology'
@@ -56,8 +66,51 @@ export interface ResolvedClusterConfig {
   insecure: boolean
   tlsServerName?: string
   namespace: string
+  /** Chế độ chỉ đọc lưu trong main (renderer không tắt được). */
+  readOnly?: boolean
   auth: AuthConfig
 }
+
+const Pem = z.string().max(256 * 1024)
+const Secret = z.string().max(64 * 1024)
+/** Kiểm kết quả `resolve` từ main trước khi dùng (không tin cast). */
+export const ResolvedClusterSchema = z.object({
+  name: z.string().max(253),
+  server: z
+    .string()
+    .max(2048)
+    .refine((v) => URL.canParse(v), 'Invalid server address'),
+  ca: Pem.optional(),
+  insecure: z.boolean(),
+  tlsServerName: z.string().max(253).optional(),
+  namespace: z.string().max(63),
+  readOnly: z.boolean().optional(),
+  auth: z.object({
+    token: Secret.optional(),
+    cert: Pem.optional(),
+    key: Pem.optional(),
+    username: z.string().max(1024).optional(),
+    password: Secret.optional(),
+    exec: z
+      .object({
+        command: z.string().max(4096),
+        args: z.array(z.string().max(4096)).max(128),
+        env: z.record(z.string().max(1024), z.string().max(64 * 1024)),
+        apiVersion: z.string().max(253)
+      })
+      .optional(),
+    oidc: z
+      .object({
+        idToken: Secret.optional(),
+        refreshToken: Secret.optional(),
+        issuer: z.string().max(2048).optional(),
+        clientId: z.string().max(1024).optional(),
+        clientSecret: Secret.optional(),
+        idpCa: Pem.optional()
+      })
+      .optional()
+  })
+})
 
 export interface K8sServiceDeps {
   resolve(ref: ContextRef): Promise<ResolvedClusterConfig>
@@ -65,6 +118,10 @@ export interface K8sServiceDeps {
   spawn: import('../../registry/host-types').LimitedSpawn
   emit(event: string, data: unknown): void
   log(level: 'info' | 'warn' | 'error', message: string): void
+  /** Đường dẫn có phải file tạm "sửa trong editor" do main cấp không (thiếu → không cho sửa). */
+  checkEditFile?(path: string): Promise<boolean>
+  /** Lưu token OIDC vừa làm mới vào kubeconfig / bản import (refresh token xoay vòng). */
+  persistOidc?(ref: ContextRef, tokens: OidcTokens): Promise<void>
 }
 
 /** Nhóm API có sẵn của Kubernetes — tài nguyên nhóm khác là CRD ("Custom resources"). */
@@ -74,6 +131,8 @@ function isBuiltinGroup(group: string): boolean {
 }
 
 const WATCH_FLUSH_MS = 100
+/** Watch không nhận byte nào chừng này → coi kết nối đã chết, nối lại (test chỉnh được). */
+export const watchIdle = { ms: 360_000 }
 /** Danh mục loại / quyền list được nhớ chừng này (CRD mới cài hiện sau tối đa 5 phút / Reload). */
 const DISCOVERY_TTL_MS = 5 * 60_000
 /** Chờ trước khi nối lại watch sau lỗi: base × 2^lần, tối đa max (test rút ngắn được). */
@@ -86,11 +145,25 @@ export const DEFAULT_POD_SHELL = [
 ]
 
 interface SharedWatch {
+  /** Khoá trong `watches`. */
+  key: string
+  /** resourceVersion bắt đầu; `advanced` = đã nhận sự kiện (người đến sau không dùng chung được). */
+  startRv: string
+  advanced: boolean
   subscribers: Set<string>
   controller: AbortController
   pending: { type: 'ADDED' | 'MODIFIED' | 'DELETED'; object: unknown }[]
   timer: NodeJS.Timeout | null
 }
+
+/** Port-forward: dừng đọc phía bên kia khi bộ đệm gửi vượt mức này (byte). */
+const FORWARD_HIGH_WATER = 1024 * 1024
+/** Sửa trong editor: hỏi file mỗi 500 ms; lâu không đổi thì thưa dần, rất lâu thì thôi theo dõi. */
+const EDIT_POLL_MS = 500
+const EDIT_SLOW_POLL_MS = 3000
+const EDIT_SLOW_AFTER_MS = 10 * 60_000
+const EDIT_STOP_AFTER_MS = 8 * 60 * 60_000
+const MAX_EDITS = 20
 
 interface Forward {
   info: PortForwardInfo
@@ -104,6 +177,39 @@ interface Forward {
 
 /** Không thấy Prometheus → dò lại sau chừng này (có thể vừa được cài). */
 const PROM_RETRY_MS = 5 * 60_000
+/** Prometheus đã thấy → dò lại sau chừng này (bị gỡ / đổi tên / chuyển namespace). */
+const PROM_TTL_MS = 10 * 60_000
+
+/**
+ * File sửa phải là file thường (hoặc chưa có) trong thư mục thật — không phải symlink trỏ ra chỗ
+ * khác (đường dẫn đã được main xác nhận nằm trong thư mục tạm của nó).
+ */
+async function assertEditTarget(path: string): Promise<void> {
+  const dir = await lstat(dirname(path))
+  if (!dir.isDirectory() || dir.isSymbolicLink())
+    throw new Error('This file cannot be used for editing')
+  const file = await lstat(path).catch((error: unknown) => {
+    if ((error as { code?: string }).code === 'ENOENT') return null
+    throw error
+  })
+  if (file && (!file.isFile() || file.isSymbolicLink() || file.nlink > 1))
+    throw new Error('This file cannot be used for editing')
+}
+
+/** Ghi file, không đi theo symlink (O_NOFOLLOW nơi có), quyền 0600. */
+async function writeNoFollow(path: string, text: string): Promise<void> {
+  const flags =
+    fsConstants.O_WRONLY |
+    fsConstants.O_CREAT |
+    fsConstants.O_TRUNC |
+    ((fsConstants as { O_NOFOLLOW?: number }).O_NOFOLLOW ?? 0)
+  const handle = await open(path, flags, 0o600)
+  try {
+    await handle.writeFile(text, 'utf8')
+  } finally {
+    await handle.close()
+  }
+}
 
 export class K8sService implements HostModuleSession {
   private client: KubeClient | null = null
@@ -117,21 +223,44 @@ export class K8sService implements HostModuleSession {
   private prom: { target: PromTarget | null; at: number } | null = null
   /** Agent Caretta / Service → workload đã dò (dùng lại 60 s). */
   private readonly trafficCache: TrafficCache = {}
-  private readonly edits = new Map<string, () => void>()
+  private readonly edits = new Map<string, { name: string; stop: () => void }>()
   private disposed = false
 
   constructor(private readonly deps: K8sServiceDeps) {}
 
   private async connect(ref: ContextRef): Promise<KubeClient> {
-    const cluster = await this.deps.resolve(ref)
+    const cluster: ResolvedClusterConfig = ResolvedClusterSchema.parse(await this.deps.resolve(ref))
+    // Kết nối lại (đổi chế độ chỉ đọc…): đóng kết nối giữ lại của client cũ (watch / log / forward
+    // đang chạy giữ kết nối riêng, không ảnh hưởng).
+    this.client?.close()
     this.cluster = cluster
+    this.prom = null
     this.client = new KubeClient(
       cluster,
       this.deps.rawConnect,
-      credentialProvider(cluster.auth, this.deps.spawn, cluster.server)
+      credentialProvider(cluster.auth, this.deps.spawn, cluster.server, Date.now, {
+        log: (message) => {
+          this.deps.log('warn', message)
+        },
+        reloadOidc: async () =>
+          ResolvedClusterSchema.parse(await this.deps.resolve(ref)).auth.oidc ?? null,
+        onOidcRefreshed: (tokens) => {
+          void this.deps.persistOidc?.(ref, tokens).catch((error: unknown) => {
+            this.deps.log(
+              'warn',
+              `could not save the refreshed OIDC token: ${error instanceof Error ? error.message : String(error)}`
+            )
+          })
+        }
+      })
     )
     this.deps.log('info', `context ${cluster.name} → ${cluster.server}`)
     return this.client
+  }
+
+  /** Chỉ đọc: renderer bật, HOẶC cài đặt của context trong main bật (renderer không tắt được). */
+  private get locked(): boolean {
+    return this.readOnly || this.cluster?.readOnly === true
   }
 
   private require(): KubeClient {
@@ -156,10 +285,14 @@ export class K8sService implements HostModuleSession {
       this.readOnly = op.readOnly
       const client = await this.connect(op.ref)
       const version = await client.json<{ gitVersion?: string }>('GET', '/version', { signal })
-      return { version: version.gitVersion ?? '', namespace: this.cluster?.namespace ?? 'default' }
+      return {
+        version: version.gitVersion ?? '',
+        namespace: this.cluster?.namespace ?? 'default',
+        readOnly: this.locked
+      }
     }
-    if (this.readOnly && isMutating(op))
-      throw new Error('Read-only mode is on for this context — turn it off to make changes')
+    if (this.locked && isMutating(op))
+      throw new Error(t('Read-only mode is on for this context — turn it off to make changes'))
     const client = this.require()
     switch (op.op) {
       case 'namespaces': {
@@ -215,14 +348,17 @@ export class K8sService implements HostModuleSession {
         let o = slim(
           await client.json<K8sObject>('GET', resourcePath(kind, op.namespace, op.name), { signal })
         )
-        if (kind.id === 'secrets') o = hideSecretValues(o)
+        // YAML (để sửa / áp lại) ghi kèm khoá bị ẩn → lưu lại thì chỉ giữ giá trị của đúng các khoá đó.
+        if (kind.id === 'secrets')
+          o = op.format === 'yaml' ? hideSecretValuesForEdit(o) : hideSecretValues(o)
         return op.format === 'yaml' ? toYaml(o) : o
       }
       case 'apply':
-        return this.apply(client, op.yaml)
+        return this.apply(client, op.yaml, signal)
       case 'delete':
         await client.json('DELETE', resourcePath(this.kind(op.kind), op.namespace, op.name), {
-          ...(op.force ? { query: { gracePeriodSeconds: 0 } } : {})
+          ...(op.force ? { query: { gracePeriodSeconds: 0 } } : {}),
+          signal
         })
         return null
       case 'serverApply':
@@ -230,7 +366,8 @@ export class K8sService implements HostModuleSession {
           client,
           op.yaml,
           op.namespace ?? this.cluster?.namespace ?? 'default',
-          (v, k) => this.findKind(client, v, k)
+          (v, k) => this.findKind(client, v, k),
+          signal
         )
       case 'metrics':
         return metrics(client, op.scope, op.namespace, signal)
@@ -241,28 +378,69 @@ export class K8sService implements HostModuleSession {
             source: 'none',
             reason: 'No Prometheus found in the cluster (or not allowed to use services/proxy)'
           } satisfies MetricsRange
-        return podRange(client, target, op.namespace, op.pods, op.minutes, signal)
+        try {
+          return await podRange(client, target, op.namespace, op.pods, op.minutes, signal)
+        } catch (error) {
+          // Prometheus đã gỡ / đổi chỗ → lần sau dò lại.
+          if (error instanceof KubeError) this.prom = null
+          throw error
+        }
       }
       case 'overview':
-        return overview(client, op.namespaces)
+        return overview(client, op.namespaces, signal)
       case 'argoSync':
       case 'argoRefresh': {
         const version = this.kinds.get('applications.argoproj.io')?.version ?? 'v1alpha1'
-        if (op.op === 'argoSync') await argoSync(client, version, op.namespace, op.name, op.prune)
-        else await argoRefresh(client, version, op.namespace, op.name, op.hard)
+        if (op.op === 'argoSync')
+          await argoSync(client, version, op.namespace, op.name, op.prune, signal)
+        else await argoRefresh(client, version, op.namespace, op.name, op.hard, signal)
         return null
       }
       case 'map':
         return mapData(client, op.namespaces, signal)
       case 'helm.releases':
-        return helmReleases(client, op.namespaces)
+        return helmReleases(client, op.namespaces, signal)
       case 'helm.release':
-        return helmRelease(client, op.namespace, op.name)
+        return helmRelease(client, op.namespace, op.name, signal)
+      case 'helm.revision':
+        return helmRevision(client, op.namespace, op.name, op.revision, signal)
+      case 'helm.rollback':
+        return helmRollback(
+          client,
+          op.namespace,
+          op.name,
+          op.revision,
+          (v, k) => this.findKind(client, v, k),
+          signal
+        )
+      case 'helm.uninstall':
+        return helmUninstall(
+          client,
+          op.namespace,
+          op.name,
+          op.keepHistory,
+          (v, k) => this.findKind(client, v, k),
+          signal
+        )
+      case 'diff':
+        return diffObjects(
+          client,
+          op.mode,
+          op.yaml,
+          op.namespace ?? this.cluster?.namespace ?? 'default',
+          (v, k) => this.findKind(client, v, k),
+          signal
+        )
+      case 'debug.ephemeral':
+        return debugEphemeral(client, op.namespace, op.pod, op.image, op.target, signal)
+      case 'debug.node':
+        return debugNode(client, op.node, op.image, op.namespace, signal)
       case 'counts':
         return counts(
           client,
           op.kinds.map((id) => this.kinds.get(id)).filter((k) => k !== undefined),
-          op.namespaces
+          op.namespaces,
+          signal
         )
       case 'related': {
         const kind = this.kind(op.kind)
@@ -283,19 +461,29 @@ export class K8sService implements HostModuleSession {
       case 'rbacReach':
         return rbacReach(client, op.namespace, op.serviceAccount, signal)
       case 'rolloutHistory':
-        return rolloutHistory(client, op.namespace, op.name)
+        return rolloutHistory(client, op.namespace, op.name, signal)
       case 'rollback':
-        await rollback(client, op.namespace, op.name, op.revision)
+        await rollback(client, op.namespace, op.name, op.revision, signal)
         return null
       case 'cordon':
-        await cordon(client, op.node, op.unschedulable)
+        await cordon(client, op.node, op.unschedulable, signal)
         return null
       case 'drain':
-        return drain(client, op.node)
+        return drain(
+          client,
+          op.node,
+          {
+            gracePeriodSeconds: op.gracePeriodSeconds,
+            deleteEmptyDirData: op.deleteEmptyDirData,
+            force: op.force,
+            timeoutSeconds: op.timeoutSeconds
+          },
+          signal
+        )
       case 'cronTrigger':
-        return cronTrigger(client, op.namespace, op.name)
+        return cronTrigger(client, op.namespace, op.name, signal)
       case 'cronSuspend':
-        await cronSuspend(client, op.namespace, op.name, op.suspend)
+        await cronSuspend(client, op.namespace, op.name, op.suspend, signal)
         return null
       case 'scale':
         await client.json(
@@ -303,7 +491,8 @@ export class K8sService implements HostModuleSession {
           resourcePath(this.kind(op.kind), op.namespace, op.name, 'scale'),
           {
             body: { spec: { replicas: op.replicas } },
-            contentType: 'application/merge-patch+json'
+            contentType: 'application/merge-patch+json',
+            signal
           }
         )
         return null
@@ -318,7 +507,8 @@ export class K8sService implements HostModuleSession {
               }
             }
           },
-          contentType: 'application/strategic-merge-patch+json'
+          contentType: 'application/strategic-merge-patch+json',
+          signal
         })
         return null
       case 'rolloutPause':
@@ -327,12 +517,13 @@ export class K8sService implements HostModuleSession {
           resourcePath(this.kind('deployments.apps'), op.namespace, op.name),
           {
             body: { spec: { paused: op.paused } },
-            contentType: 'application/merge-patch+json'
+            contentType: 'application/merge-patch+json',
+            signal
           }
         )
         return null
       case 'logs.subscribe': {
-        const targets = await logTargets(client, op.namespace, op)
+        const targets = await logTargets(client, op.namespace, op, signal)
         const prefixed = targets.length > 1
         return this.subscribe('logs', async (id, s) => {
           let buffer = ''
@@ -410,7 +601,7 @@ export class K8sService implements HostModuleSession {
         })
       }
       case 'portForward':
-        return this.portForward(client, op.namespace, op.target, op.ports)
+        return this.portForward(client, op.namespace, op.target, op.ports, signal)
       case 'portForward.stop': {
         const f = this.forwards.get(op.id)
         if (f) this.stopForward(f)
@@ -439,7 +630,7 @@ export class K8sService implements HostModuleSession {
         return Buffer.from(value, 'base64').toString('utf8')
       }
       case 'edit':
-        return this.edit(client, this.kind(op.kind), op.namespace, op.name, op.localPath)
+        return this.edit(client, this.kind(op.kind), op.namespace, op.name, op.localPath, signal)
     }
   }
 
@@ -485,25 +676,6 @@ export class K8sService implements HostModuleSession {
   /** Quyền list theo loại + namespace — nhớ 5 phút (đổi namespace không hỏi lại từ đầu). */
   private readonly access = new Map<string, { at: number; allowed: boolean }>()
 
-  /** Chạy `fn` cho từng phần tử, tối đa `limit` cùng lúc (không dồn hàng trăm request một lúc). */
-  private static async pool<T, R>(
-    items: readonly T[],
-    limit: number,
-    fn: (item: T) => Promise<R>
-  ): Promise<R[]> {
-    const out = new Array<R>(items.length)
-    let next = 0
-    await Promise.all(
-      Array.from({ length: Math.min(limit, items.length) }, async () => {
-        while (next < items.length) {
-          const i = next++
-          out[i] = await fn(items[i] as T)
-        }
-      })
-    )
-    return out
-  }
-
   private async catalogOf(client: KubeClient, signal: AbortSignal): Promise<ResourceKind[]> {
     if (this.catalog && Date.now() - this.catalog.at < DISCOVERY_TTL_MS) return this.catalog.kinds
     const custom: ResourceKind[] = []
@@ -512,7 +684,7 @@ export class K8sService implements HostModuleSession {
         groups: { name: string; preferredVersion: { groupVersion: string; version: string } }[]
       }>('GET', '/apis', { signal })
       const others = groups.groups.filter((g) => !isBuiltinGroup(g.name))
-      await K8sService.pool(others.slice(0, 200), 12, async (g) => {
+      await pool(others.slice(0, 200), 12, async (g) => {
         const list = await client
           .json<{
             resources: { name: string; kind: string; namespaced: boolean; verbs: string[] }[]
@@ -547,7 +719,7 @@ export class K8sService implements HostModuleSession {
       )
     ]
     const served = new Map<string, Set<string> | null>()
-    await K8sService.pool(groupVersions, 12, async (gv) => {
+    await pool(groupVersions, 12, async (gv) => {
       const list = await client
         .json<{ resources: { name: string }[] }>('GET', gv, { signal })
         .catch((error: unknown) =>
@@ -580,7 +752,7 @@ export class K8sService implements HostModuleSession {
     const all = await this.catalogOf(client, signal)
     const now = Date.now()
     const keyOf = (k: ResourceKind): string => `${k.id}|${k.namespaced ? (namespace ?? '') : ''}`
-    const allowed = await K8sService.pool(all, 16, async (k) => {
+    const allowed = await pool(all, 16, async (k) => {
       const cached = this.access.get(keyOf(k))
       if (cached && now - cached.at < DISCOVERY_TTL_MS) return cached.allowed
       const ok = await client
@@ -663,28 +835,39 @@ export class K8sService implements HostModuleSession {
     fieldSelector?: string
   ): { subscription: string } {
     const kind = this.kind(kindId)
-    const key = `${kindId}|${namespace ?? ''}|${selector ?? ''}|${fieldSelector ?? ''}`
+    const base = `${kindId}|${namespace ?? ''}|${selector ?? ''}|${fieldSelector ?? ''}`
     const id = randomUUID()
-    let shared = this.watches.get(key)
-    if (!shared) {
-      const created: SharedWatch = {
+    const existing = this.watches.get(base)
+    // Dùng chung chỉ khi watch đó bắt đầu từ cùng resourceVersion và chưa nhận sự kiện nào: người
+    // đến sau list ở thời điểm khác — dùng chung sẽ mất (hoặc lặp) sự kiện giữa hai mốc.
+    let w: SharedWatch
+    if (existing && !existing.advanced && existing.startRv === resourceVersion) w = existing
+    else {
+      const key = existing ? `${base}#${id}` : base
+      w = {
+        key,
+        startRv: resourceVersion,
+        advanced: false,
         subscribers: new Set(),
         controller: new AbortController(),
         pending: [],
         timer: null
       }
-      shared = created
-      this.watches.set(key, created)
-      void this.runWatch(created, kind, namespace, selector, resourceVersion, fieldSelector)
+      this.watches.set(key, w)
+      void this.runWatch(w, kind, namespace, selector, resourceVersion, fieldSelector).finally(
+        () => {
+          // Watch đã dừng (410 Gone…): bỏ khỏi danh sách — người đến sau không nhập vào watch chết.
+          if (this.watches.get(w.key) === w) this.watches.delete(w.key)
+        }
+      )
     }
-    const w = shared
     w.subscribers.add(id)
     this.subscriptions.set(id, () => {
       w.subscribers.delete(id)
       if (w.subscribers.size === 0) {
         w.controller.abort()
         if (w.timer) clearTimeout(w.timer)
-        this.watches.delete(key)
+        if (this.watches.get(w.key) === w) this.watches.delete(w.key)
       }
     })
     return { subscription: id }
@@ -735,6 +918,9 @@ export class K8sService implements HostModuleSession {
               fieldSelector: fieldSelector || undefined,
               timeoutSeconds: 300
             },
+            // Kết nối chết im lặng (NAT / bastion rớt) không bao giờ báo đóng → quá 6 phút không có
+            // byte nào (server tự đóng sau 5 phút) thì bỏ và nối lại từ resourceVersion.
+            idleMs: watchIdle.ms,
             signal
           },
           (chunk) => {
@@ -764,6 +950,7 @@ export class K8sService implements HostModuleSession {
                 continue
               }
               if (e.object.metadata.resourceVersion) rv = e.object.metadata.resourceVersion
+              w.advanced = true
               if (e.type === 'BOOKMARK') continue
               if (e.type !== 'ADDED' && e.type !== 'MODIFIED' && e.type !== 'DELETED') continue
               const obj = kind.id === 'secrets' ? hideSecretValues(slim(e.object)) : slim(e.object)
@@ -778,9 +965,13 @@ export class K8sService implements HostModuleSession {
       } catch (error) {
         if (aborted()) return
         if (error instanceof KubeError && error.status === 410) gone = true
-        else if (!(error instanceof KubeError) && (seen.data || Date.now() - started > 10_000)) {
+        else if (
+          error instanceof KubeTimeoutError ||
+          (!(error instanceof KubeError) && (seen.data || Date.now() - started > 10_000))
+        ) {
           // Proxy / load balancer (Rancher, ingress, NAT…) cắt luồng watch đang chạy ("aborted",
-          // ECONNRESET): như server đóng luồng — nối lại ngay từ resourceVersion, không phải lỗi.
+          // ECONNRESET), hoặc hết giờ chờ (kết nối chết im lặng): như server đóng luồng — nối lại
+          // ngay từ resourceVersion, không phải lỗi.
           failures = 0
         } else {
           failures++
@@ -808,8 +999,14 @@ export class K8sService implements HostModuleSession {
     }
   }
 
-  /** Replace (PUT) có kiểm resourceVersion — ai đó đã sửa trước → báo, không ghi đè. */
-  private async apply(client: KubeClient, text: string): Promise<K8sObject> {
+  /**
+   * Replace (PUT) có kiểm resourceVersion — ai đó đã sửa trước → báo, không ghi đè. Secret: khoá bị
+   * ẩn (đánh dấu trong YAML) còn rỗng giữ nguyên giá trị trên cluster (xem keepHiddenSecretValues).
+   */
+  private async apply(client: KubeClient, text: string, signal?: AbortSignal): Promise<K8sObject> {
+    // Kiểm lại ở đây: lưu từ editor (edit) chạy ngoài run() — bật chỉ đọc giữa chừng cũng chặn.
+    if (this.locked)
+      throw new Error(t('Read-only mode is on for this context — turn it off to make changes'))
     const o = parseYaml(text) as K8sObject | null
     const meta = (o as { metadata?: K8sObject['metadata'] } | null)?.metadata
     if (!o || typeof o !== 'object' || !meta?.name || !o.kind || !o.apiVersion)
@@ -819,19 +1016,20 @@ export class K8sService implements HostModuleSession {
     )
     if (!kind) throw new Error(`Unknown kind ${o.kind} (${o.apiVersion})`)
     if (!o.metadata.resourceVersion)
-      throw new Error('metadata.resourceVersion is missing — reload the object before saving')
+      throw new Error(t('metadata.resourceVersion is missing — reload the object before saving'))
+    await keepHiddenSecretValues(client, kind, o.metadata.namespace, o, signal)
     try {
       return await client.json<K8sObject>(
         'PUT',
         resourcePath(kind, o.metadata.namespace, o.metadata.name),
-        {
-          body: o
-        }
+        { body: o, ...(signal ? { signal } : {}) }
       )
     } catch (error) {
       if (error instanceof KubeError && error.status === 409)
         throw new Error(
-          'Someone changed this object since you opened it. Reload it and apply your change again.',
+          t(
+            'Someone changed this object since you opened it. Reload it and apply your change again.'
+          ),
           { cause: error }
         )
       throw error
@@ -839,35 +1037,79 @@ export class K8sService implements HostModuleSession {
   }
 
   /**
-   * Sửa YAML bằng editor trên máy: ghi ra file tạm (main cấp đường dẫn), theo dõi; mỗi lần lưu →
-   * replace. Lưu nối tiếp dùng resourceVersion mới nhất của chính mình; người khác sửa → 409 → báo.
+   * Sửa YAML bằng editor trên máy: ghi ra file tạm (main cấp đường dẫn — chỉ nhận đúng file đó),
+   * theo dõi; mỗi lần lưu → replace. Lưu nối tiếp dùng resourceVersion mới nhất của chính mình;
+   * người khác sửa → 409 → báo. Lâu không lưu thì hỏi file thưa dần; 8 giờ không đổi / file bị xoá
+   * → thôi theo dõi.
    */
   private async edit(
     client: KubeClient,
     kind: ResourceKind,
     namespace: string | undefined,
     name: string,
-    localPath: string
+    localPath: string,
+    signal?: AbortSignal
   ): Promise<null> {
     if (kind.id === 'secrets')
       throw new Error('Secrets cannot be edited in an editor (values would be written to disk)')
-    const o = slim(await client.json<K8sObject>('GET', resourcePath(kind, namespace, name)))
+    if (!(await this.deps.checkEditFile?.(localPath)))
+      throw new Error('This file cannot be used for editing')
+    await assertEditTarget(localPath)
+    const o = slim(
+      await client.json<K8sObject>(
+        'GET',
+        resourcePath(kind, namespace, name),
+        signal ? { signal } : {}
+      )
+    )
     const writtenRv = o.metadata.resourceVersion ?? ''
     let currentRv = writtenRv
     let last = toYaml(o)
-    await writeFile(localPath, last, 'utf8')
-    this.edits.get(localPath)?.()
+    await writeNoFollow(localPath, last)
+    this.edits.get(localPath)?.stop()
+    // Giới hạn số file đang theo dõi: bỏ file cũ nhất.
+    while (this.edits.size >= MAX_EDITS) {
+      const [oldest] = this.edits.keys()
+      if (oldest === undefined) break
+      this.edits.get(oldest)?.stop()
+    }
     let busy = false
-    // Hỏi nội dung file mỗi 500 ms (YAML nhỏ): không phụ thuộc mtime / sự kiện theo dõi file của
+    let changedAt = Date.now()
+    let timer: NodeJS.Timeout | null = null
+    let stopped = false
+    const stop = (): void => {
+      stopped = true
+      if (timer) clearTimeout(timer)
+      if (this.edits.get(localPath)?.stop === stop) this.edits.delete(localPath)
+    }
+    const schedule = (): void => {
+      if (stopped || this.disposed) return
+      const idle = Date.now() - changedAt
+      if (idle > EDIT_STOP_AFTER_MS) {
+        this.deps.log('info', `stopped watching ${localPath} (no changes for a long time)`)
+        stop()
+        return
+      }
+      timer = setTimeout(check, idle > EDIT_SLOW_AFTER_MS ? EDIT_SLOW_POLL_MS : EDIT_POLL_MS)
+    }
+    // Hỏi nội dung file định kỳ (YAML nhỏ): không phụ thuộc mtime / sự kiện theo dõi file của
     // từng hệ điều hành (lưu hai lần trong cùng một giây, editor ghi file tạm rồi đổi tên…).
     const check = (): void => {
-      if (busy) return
+      if (busy || stopped) return
       busy = true
       void (async () => {
         try {
-          const text = await readFile(localPath, 'utf8').catch(() => last)
+          let text: string
+          try {
+            text = await readFile(localPath, 'utf8')
+          } catch (error) {
+            // File tạm bị dọn (đóng app / main xoá) → thôi theo dõi.
+            if ((error as { code?: string }).code === 'ENOENT') stop()
+            return
+          }
           if (text === last) return
           last = text
+          changedAt = Date.now()
           const edited = parseYaml(text) as K8sObject
           // Người dùng không tự sửa resourceVersion → dùng bản mới nhất mình vừa ghi.
           if (edited.metadata.resourceVersion === writtenRv)
@@ -884,13 +1126,12 @@ export class K8sService implements HostModuleSession {
           })
         } finally {
           busy = false
+          schedule()
         }
       })()
     }
-    const timer = setInterval(check, 500)
-    this.edits.set(localPath, () => {
-      clearInterval(timer)
-    })
+    this.edits.set(localPath, { name, stop })
+    schedule()
     return null
   }
 
@@ -898,10 +1139,12 @@ export class K8sService implements HostModuleSession {
     client: KubeClient,
     namespace: string,
     target: string,
-    port: number
+    port: number,
+    signal?: AbortSignal
   ): Promise<{ pod: string; port: number }> {
     const [type, name] = target.split('/') as [string, string]
     if (type === 'pod') return { pod: name, port }
+    const opts = signal ? { signal } : {}
     const svc = await client.json<{
       spec: {
         selector?: Record<string, string>
@@ -909,7 +1152,8 @@ export class K8sService implements HostModuleSession {
       }
     }>(
       'GET',
-      `/api/v1/namespaces/${encodeURIComponent(namespace)}/services/${encodeURIComponent(name)}`
+      `/api/v1/namespaces/${encodeURIComponent(namespace)}/services/${encodeURIComponent(name)}`,
+      opts
     )
     const selector = Object.entries(svc.spec.selector ?? {})
       .map(([k, v]) => `${k}=${v}`)
@@ -920,7 +1164,8 @@ export class K8sService implements HostModuleSession {
         spec: { containers?: { ports?: { name?: string; containerPort: number }[] }[] }
       })[]
     }>('GET', `/api/v1/namespaces/${encodeURIComponent(namespace)}/pods`, {
-      query: { labelSelector: selector, fieldSelector: 'status.phase=Running' }
+      query: { labelSelector: selector, fieldSelector: 'status.phase=Running' },
+      ...opts
     })
     const pod = pods.items[0]
     if (!pod) throw new Error(`No running pod behind the service ${name}`)
@@ -945,11 +1190,12 @@ export class K8sService implements HostModuleSession {
     client: KubeClient,
     namespace: string,
     target: string,
-    ports: [number, number][]
+    ports: [number, number][],
+    signal?: AbortSignal
   ): Promise<PortForwardInfo[]> {
     const out: PortForwardInfo[] = []
     for (const [local, remote] of ports) {
-      const resolved = await this.resolveTarget(client, namespace, target, remote)
+      const resolved = await this.resolveTarget(client, namespace, target, remote, signal)
       const id = randomUUID()
       const f: Forward = {
         info: {
@@ -1064,6 +1310,7 @@ export class K8sService implements HostModuleSession {
       return
     }
     const seen = new Set<number>()
+    let wsPaused = false
     ws.on('message', (data: Buffer) => {
       if (data.length === 0) return
       const channel = data[0] ?? 0
@@ -1074,16 +1321,38 @@ export class K8sService implements HostModuleSession {
         payload = payload.subarray(2)
       }
       if (payload.length === 0) return
-      if (channel === 0) socket.write(payload)
-      else if (channel === 1) {
+      if (channel === 0) {
+        // Ứng dụng trên máy đọc chậm (tải file lớn…) → dừng đọc từ pod tới khi socket rút bớt,
+        // không dồn cả luồng vào bộ nhớ.
+        if (!socket.write(payload) && !wsPaused) {
+          wsPaused = true
+          ws.pause()
+          socket.once('drain', () => {
+            wsPaused = false
+            ws.resume()
+          })
+        }
+      } else if (channel === 1) {
         this.deps.log('warn', `port-forward: ${payload.toString('utf8')}`)
         socket.destroy()
       }
     })
     ws.on('close', () => socket.destroy())
     ws.on('error', () => socket.destroy())
+    let paused = false
     socket.on('data', (chunk: Buffer) => {
-      ws.send(Buffer.concat([Buffer.from([0]), chunk]))
+      ws.send(Buffer.concat([Buffer.from([0]), chunk]), () => {
+        // Đã gửi xong phần đệm → đọc tiếp từ ứng dụng trên máy.
+        if (paused && ws.bufferedAmount < FORWARD_HIGH_WATER / 2) {
+          paused = false
+          socket.resume()
+        }
+      })
+      // Mạng tới pod (qua bastion) chậm hơn ứng dụng gửi → dừng đọc socket.
+      if (ws.bufferedAmount > FORWARD_HIGH_WATER && !paused) {
+        paused = true
+        socket.pause()
+      }
     })
     socket.on('close', () => {
       ws.close()
@@ -1099,7 +1368,7 @@ export class K8sService implements HostModuleSession {
   }
 
   private async prometheus(client: KubeClient, signal?: AbortSignal): Promise<PromTarget | null> {
-    if (this.prom && (this.prom.target || Date.now() - this.prom.at < PROM_RETRY_MS))
+    if (this.prom && Date.now() - this.prom.at < (this.prom.target ? PROM_TTL_MS : PROM_RETRY_MS))
       return this.prom.target
     const target = await findPrometheus(client, signal)
     this.prom = { target, at: Date.now() }
@@ -1117,20 +1386,35 @@ export class K8sService implements HostModuleSession {
   async openTerminal(raw: unknown, size: TerminalSize, cb: TransportCallbacks): Promise<Transport> {
     const params = K8sTerminalParams.parse(raw)
     const client = this.client ?? (await this.connect(params.ref))
-    const command = params.command?.length ? params.command : DEFAULT_POD_SHELL
-    const ws = await client.websocket(
-      `/api/v1/namespaces/${encodeURIComponent(params.namespace)}/pods/${encodeURIComponent(params.pod)}/exec`,
-      {
-        command,
-        container: params.container,
-        stdin: true,
-        stdout: true,
-        stderr: true,
-        tty: true
-      },
-      ['v4.channel.k8s.io']
-    )
-    return new PodExecTransport(ws, size, cb)
+    // Shell vào pod làm được mọi thứ → chặn ở chế độ chỉ đọc (như thao tác thay đổi).
+    if (this.locked)
+      throw new Error(t('Read-only mode is on for this context — turn it off to open a shell'))
+    const pod = `/api/v1/namespaces/${encodeURIComponent(params.namespace)}/pods/${encodeURIComponent(params.pod)}`
+    // Container debug (stdin + TTY): gắn vào tiến trình chính như `kubectl debug -it` / `attach`.
+    const ws = params.attach
+      ? await client.websocket(
+          `${pod}/attach`,
+          { container: params.container, stdin: true, stdout: true, stderr: true, tty: true },
+          ['v4.channel.k8s.io']
+        )
+      : await client.websocket(
+          `${pod}/exec`,
+          {
+            command: params.command?.length ? params.command : DEFAULT_POD_SHELL,
+            container: params.container,
+            stdin: true,
+            stdout: true,
+            stderr: true,
+            tty: true
+          },
+          ['v4.channel.k8s.io']
+        )
+    if (params.banner)
+      cb.onData(Buffer.from(`\x1b[2m${params.banner.replace(/\r?\n/g, '\r\n')}\x1b[0m\r\n`))
+    const transport = new PodExecTransport(ws, size, cb)
+    // Attach không in lại dấu nhắc đã có → gửi Enter để shell hiện dấu nhắc.
+    if (params.attach) transport.write('\r')
+    return transport
   }
 
   dispose(): void {
@@ -1140,8 +1424,9 @@ export class K8sService implements HostModuleSession {
     for (const w of this.watches.values()) w.controller.abort()
     this.watches.clear()
     for (const f of [...this.forwards.values()]) this.stopForward(f)
-    for (const stop of this.edits.values()) stop()
+    for (const e of [...this.edits.values()]) e.stop()
     this.edits.clear()
+    this.client?.close()
   }
 }
 

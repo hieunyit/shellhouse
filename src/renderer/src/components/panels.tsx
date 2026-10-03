@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { cx, Kbd } from './ui'
+import { t } from '@shared/i18n'
+import { formatPercent } from '@shared/i18n/format'
+import { choiceKeyDown, cx, Kbd } from './ui'
 
 /**
  * Thành phần giao diện dùng chung cho các màn quản trị (Docker, Kubernetes…): pill trạng thái,
@@ -72,24 +74,40 @@ export function TabStrip<T extends string>({
   testIdPrefix?: string
 }): React.JSX.Element {
   return (
-    <div role="tablist" className="flex shrink-0 gap-3 overflow-x-auto border-b border-line px-3">
-      {tabs.map((t) => (
+    <div
+      role="tablist"
+      className="flex shrink-0 gap-3 overflow-x-auto border-b border-line px-3"
+      onKeyDown={(e) => {
+        choiceKeyDown(
+          e,
+          tabs.map((tab) => tab.id),
+          value,
+          onChange
+        )
+      }}
+    >
+      {tabs.map((tab) => (
         <button
-          key={t.id}
+          key={tab.id}
           type="button"
           role="tab"
-          aria-selected={value === t.id}
-          data-testid={testIdPrefix ? `${testIdPrefix}-${t.id}` : undefined}
+          aria-selected={value === tab.id}
+          tabIndex={value === tab.id || !tabs.some((x) => x.id === value) ? 0 : -1}
+          data-testid={testIdPrefix ? `${testIdPrefix}-${tab.id}` : undefined}
           className={cx(
             '-mb-px h-9 shrink-0 border-b-2 text-xs font-medium whitespace-nowrap transition-colors',
-            value === t.id ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'
+            value === tab.id
+              ? 'border-accent text-fg'
+              : 'border-transparent text-muted hover:text-fg'
           )}
           onClick={() => {
-            onChange(t.id)
+            onChange(tab.id)
           }}
         >
-          {t.label}
-          {t.count !== undefined && <span className="ml-1 text-faint tabular-nums">{t.count}</span>}
+          {tab.label}
+          {tab.count !== undefined && (
+            <span className="ml-1 text-faint tabular-nums">{tab.count}</span>
+          )}
         </button>
       ))}
     </div>
@@ -155,13 +173,13 @@ export function KeyHints({
           onClick={() => onOpenChange?.(!open)}
         >
           <Kbd>?</Kbd>
-          Shortcuts
+          {t('Shortcuts')}
         </button>
       )}
       {all && open && (
         <div
           role="dialog"
-          aria-label="Keyboard shortcuts"
+          aria-label={t('Keyboard shortcuts')}
           data-testid="key-hints-sheet"
           className="absolute right-2 bottom-8 z-40 grid max-h-[70vh] w-[30rem] max-w-[calc(100%-1rem)] grid-cols-2 gap-x-6 gap-y-3 overflow-auto rounded-lg border border-line bg-elevated p-3 text-xs whitespace-normal shadow-lg"
         >
@@ -252,7 +270,7 @@ export function Meter({
     <div className="flex flex-col gap-1" data-testid={testId}>
       <div className="flex justify-between text-xs">
         <span className="text-muted">{label}</span>
-        <span className="text-fg tabular-nums">{detail ?? `${Math.round(ratio * 100)}%`}</span>
+        <span className="text-fg tabular-nums">{detail ?? formatPercent(ratio)}</span>
       </div>
       <div className="h-1.5 overflow-hidden rounded-full bg-subtle">
         <div
@@ -406,6 +424,8 @@ export function SidePanel({
   minWidth = 300,
   testId,
   expanded = false,
+  maxRatio,
+  overlay = false,
   children
 }: {
   storageKey: string
@@ -414,6 +434,13 @@ export function SidePanel({
   testId?: string
   /** Phóng to hết chỗ (che nội dung bên cạnh) — vd. trang chi tiết đầy đủ. */
   expanded?: boolean
+  /** Tỉ lệ tối đa so với khung cha (mặc định 0,7) — vd. bản đồ cần giữ chỗ cho canvas. */
+  maxRatio?: number
+  /**
+   * Khung quá hẹp để chia đôi: bảng nổi đè lên mép phải nội dung (như ngăn kéo) thay vì ép nội
+   * dung — cha cần `relative`.
+   */
+  overlay?: boolean
   children: ReactNode
 }): React.JSX.Element {
   const [width, setWidth] = useState<number>(() => savedWidth(storageKey) ?? defaultWidth)
@@ -430,15 +457,26 @@ export function SidePanel({
     )
   return (
     <aside
-      className="relative flex max-w-[70%] shrink-0 flex-col border-l border-line bg-surface"
-      style={{ width }}
+      className={
+        overlay
+          ? 'absolute inset-y-0 right-0 z-20 flex flex-col border-l border-line bg-surface shadow-xl'
+          : 'relative flex max-w-[70%] shrink-0 flex-col border-l border-line bg-surface'
+      }
+      style={
+        overlay
+          ? { width, maxWidth: 'calc(100% - 3rem)' }
+          : maxRatio
+            ? { width, maxWidth: `${String(maxRatio * 100)}%` }
+            : { width }
+      }
       data-testid={testId}
+      data-overlay={overlay || undefined}
     >
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize the panel"
-        title="Drag to resize · double-click to reset"
+        aria-label={t('Resize the panel')}
+        title={t('Drag to resize · double-click to reset')}
         data-testid="side-panel-resize"
         className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40"
         onPointerDown={(e) => {
@@ -449,7 +487,16 @@ export function SidePanel({
         onPointerMove={(e) => {
           const d = drag.current
           if (!d) return
-          setWidth(Math.max(minWidth, d.width + (d.x - e.clientX)))
+          // Kéo quá mức tối đa thì giữ ở mức đó — kéo ngược lại có tác dụng ngay.
+          const parent = e.currentTarget.parentElement?.parentElement?.clientWidth
+          const max = !parent
+            ? Infinity
+            : overlay
+              ? parent - 48
+              : maxRatio
+                ? parent * maxRatio
+                : Infinity
+          setWidth(Math.max(minWidth, Math.min(max, d.width + (d.x - e.clientX))))
         }}
         onPointerUp={(e) => {
           if (!drag.current) return

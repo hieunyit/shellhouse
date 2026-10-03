@@ -1,7 +1,8 @@
+import { t } from '@shared/i18n'
 import { existsSync } from 'node:fs'
 import { mkdir, readdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { replaceUnsafeFileChars } from '@shared/file-names'
+import { hostNameOptions, safeFileName, UniqueNames } from '@shared/file-names'
 import { baseName, FOLDER_EXISTS, joinRemote } from '@shared/sftp'
 import { createLimiter, mapLimit } from '../../node-shared/pool'
 import type { SftpService } from './service'
@@ -15,7 +16,9 @@ const byPath =
     key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0
 
 function budgetExceeded(): Error {
-  return new Error(`The folder has too many items (more than ${MAX_FOLDER_ENTRIES})`)
+  return new Error(
+    t('The folder has too many items (more than {max})', { max: MAX_FOLDER_ENTRIES })
+  )
 }
 
 /**
@@ -29,7 +32,8 @@ export async function downloadFolder(
   localParent: string,
   overwrite: boolean
 ): Promise<number> {
-  const root = join(localParent, replaceUnsafeFileChars(baseName(remoteDir)))
+  const names = hostNameOptions(process.platform)
+  const root = join(localParent, safeFileName(baseName(remoteDir), names))
   if (existsSync(root) && !overwrite) throw new Error(FOLDER_EXISTS)
   const files: { remote: string; local: string }[] = []
   const dirs: string[] = [root]
@@ -40,10 +44,20 @@ export async function downloadFolder(
     const entries = await limit(() => sftp.readdir(remote))
     budget -= entries.length
     if (budget < 0) throw budgetExceeded()
+    // Hai tên khác nhau ra cùng tên an toàn ("a:b" / "a_b", "x." / "x" trên Windows…) → tên sau
+    // thêm " (2)": không ghi chung một file. Tên không phải đổi gì được giữ đúng tên.
+    const unique = new UniqueNames(names)
+    const targets = new Map<string, string>()
+    for (const e of [...entries].sort(
+      (a, b) =>
+        Number(safeFileName(a.filename, names) !== a.filename) -
+        Number(safeFileName(b.filename, names) !== b.filename)
+    ))
+      targets.set(e.filename, join(local, unique.name(e.filename, e.filename)))
     await Promise.all(
       entries.map(async (e) => {
         const child = joinRemote(remote, e.filename)
-        const target = join(local, replaceUnsafeFileChars(e.filename))
+        const target = targets.get(e.filename) ?? join(local, safeFileName(e.filename, names))
         // readdir của một số server báo thuộc tính của ĐÍCH link → lstat lại.
         const own =
           e.attrs.isDirectory() || e.attrs.isSymbolicLink()

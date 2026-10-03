@@ -148,7 +148,9 @@ export function createAuthHandler(options: AuthOptions): AuthHandlerMiddleware {
                 fields: prompts.map((p) => ({ prompt: p.prompt, echo: p.echo ?? false }))
               })
               .then((reply: PromptReply) => {
-                // Huỷ → gửi câu trả lời rỗng để server từ chối và chuỗi đi tiếp/dừng.
+                // Huỷ → dừng hẳn như ô password (không hỏi lại, không gửi thêm lần đăng nhập sai
+                // nào — fail2ban). Vẫn phải trả lời lượt này: câu rỗng để server từ chối.
+                if (!reply.ok) cancelled = true
                 finish(reply.ok ? reply.answers : prompts.map(() => ''))
               })
           }

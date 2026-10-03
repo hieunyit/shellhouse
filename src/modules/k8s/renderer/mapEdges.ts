@@ -2,7 +2,7 @@ import { MarkerType } from '@xyflow/react'
 import type { MapLayout, MapNode } from '../shared/map'
 import { bandOf } from '../shared/traffic'
 import { sides, type Band, type MapFlowEdge } from './MapFlow'
-import type { Palette } from './mapModel'
+import { EDGE_Z, type Palette } from './mapModel'
 
 export interface TrafficLink {
   from: string
@@ -65,7 +65,7 @@ export function buildMapEdges({
         target: e.to,
         ...(cross ? sides(sa, sb) : { sourceHandle: 'sb', targetHandle: 'tt' }),
         type: 'map',
-        zIndex: 2,
+        zIndex: EDGE_Z,
         data: {
           kind: e.kind,
           color,
@@ -103,27 +103,46 @@ export function buildMapEdges({
     const list = [...local, ...cross.values()]
     for (const t of list) {
       const color = palette.ramp[bandOf(t.rate)] ?? palette.edge
+      const sa = byId.get(t.from)
+      const sb = byId.get(t.to)
+      // Thẻ ở hai namespace khác nhau (nhìn gần): đi vòng ra bên phải hai đảo rồi vào cạnh phải
+      // thẻ đích — không cắt ngang tiêu đề đảo hay các thẻ khác trong làn.
+      const loop =
+        'cross' in t && t.cross && sa && sb && sa.kind !== 'namespace' && sb.kind !== 'namespace'
+          ? loopOffset(sa, sb, byId)
+          : 0
       out.push({
         id: `traffic:${t.from}>${t.to}`,
         source: t.from,
         target: t.to,
-        ...(() => {
-          const sa = byId.get(t.from)
-          const sb = byId.get(t.to)
-          return sa && sb ? sides(sa, sb) : { sourceHandle: 'sr', targetHandle: 'tl' }
-        })(),
+        ...(loop
+          ? { sourceHandle: 'sr', targetHandle: 'tr' }
+          : sa && sb
+            ? sides(sa, sb)
+            : { sourceHandle: 'sr', targetHandle: 'tl' }),
         type: 'map',
-        // Dưới thẻ workload (thẻ che phần đường đi qua) — không đè chữ.
-        zIndex: 2,
+        // Dưới mọi thẻ (thẻ che phần đường đi qua) — không đè chữ.
+        zIndex: EDGE_Z,
         data: {
           kind: 'traffic',
           rate: t.rate,
           color,
-          ...('cross' in t && t.cross ? { cross: true } : {})
+          ...('cross' in t && t.cross ? { cross: true } : {}),
+          ...(loop ? { loop } : {})
         },
         markerEnd: arrow(color)
       })
     }
   }
   return out
+}
+
+/** Khoảng đi vòng sang phải (px) để vượt qua mép phải của cả hai đảo namespace. */
+function loopOffset(a: MapNode, b: MapNode, byId: ReadonlyMap<string, MapNode>): number {
+  const right = (n: MapNode): number => {
+    const island = n.ns ? byId.get(`n:${n.ns}`) : undefined
+    return island ? island.x + island.w : n.x + n.w
+  }
+  const edge = Math.max(right(a), right(b))
+  return Math.max(48, edge + 40 - Math.max(a.x + a.w, b.x + b.w))
 }

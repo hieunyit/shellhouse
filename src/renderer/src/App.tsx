@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TEST_HOOKS_GLOBAL } from '@shared/test-hooks'
 import { CommandPalette } from './components/CommandPalette'
 import type { SettingsSectionId } from './components/settings/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
 import { TabBar } from './components/TabBar'
 import { Toaster } from './components/Toaster'
+import { ConfirmHost } from './components/ConfirmHost'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { toast } from './stores/toasts'
 import { useTerminalFind } from './stores/terminal-find'
 import { Workspace } from './components/Workspace'
@@ -23,6 +25,8 @@ import { TerminalMenu } from './terminal/TerminalMenu'
 import { controllers } from './terminal/registry'
 import { EnableModuleDialog } from './components/EnableModuleDialog'
 import { useModuleUi } from './stores/module-ui'
+import { modeForTab, useSidebarLayout } from './stores/sidebar-layout'
+import { t } from '@shared/i18n'
 
 type Overlay =
   | { kind: 'snippets' }
@@ -109,7 +113,7 @@ export function App(): React.JSX.Element {
         if (tabs.activeId) controllers.get(tabs.activeId)?.reconnect()
         break
       case 'tab.reopen':
-        if (!tabs.reopenClosed()) toast.info('No recently closed tabs', { group: 'reopen' })
+        if (!tabs.reopenClosed()) toast.info(t('No recently closed tabs'), { group: 'reopen' })
         break
       case 'tab.duplicate':
         if (tabs.activeId) tabs.duplicate(tabs.activeId)
@@ -140,6 +144,14 @@ export function App(): React.JSX.Element {
           const { settings, update } = useSettings.getState()
           if (settings.appearance.sidebarHidden)
             await update({ appearance: { sidebarHidden: false } })
+          // Thanh bên đang ở dạng gọn (tab module) → mở tạm rồi focus ô tìm.
+          const tabsNow = useTabs.getState()
+          const kind = tabsNow.tabs.find((x) => x.id === tabsNow.activeId)?.target.kind
+          const layout = useSidebarLayout.getState()
+          if (layout.compact[modeForTab(kind)]) {
+            layout.requestPeek(true)
+            return
+          }
           requestAnimationFrame(() => {
             searchRef.current?.focus()
             searchRef.current?.select()
@@ -180,7 +192,7 @@ export function App(): React.JSX.Element {
                 Math.min(32, settings.terminal.fontSize + (id === 'terminal.zoomIn' ? 1 : -1))
               )
         void update({ terminal: { fontSize: size } })
-        toast.info(`Terminal text size ${String(size)}`, { group: 'font-size', duration: 1500 })
+        toast.info(t('Terminal text size {size}', { size }), { group: 'font-size', duration: 1500 })
         break
       }
       case 'vault.lock':
@@ -215,6 +227,34 @@ export function App(): React.JSX.Element {
     }
   }, [runCommand])
 
+  // Ổn định qua các lần vẽ: App vẽ lại mỗi lần đổi tab; TabBar / Sidebar / Workspace (memo) thì
+  // không cần vẽ lại theo.
+  const sidebarActions = useMemo(
+    () => ({
+      onOpenSettings: () => {
+        setOverlay({ kind: 'settings' })
+      }
+    }),
+    []
+  )
+  const tabBarActions = useMemo(
+    () => ({
+      onOpenSnippets: () => {
+        setOverlay({ kind: 'snippets' })
+      },
+      onOpenSettings: () => {
+        setOverlay({ kind: 'settings' })
+      },
+      onOpenDiagnostics: () => {
+        setOverlay({ kind: 'settings', section: 'diagnostics' })
+      },
+      onOpenWorkspaces: () => {
+        setOverlay({ kind: 'workspaces' })
+      }
+    }),
+    []
+  )
+
   const closeOverlay = (): void => {
     setOverlay(null)
     if (activeId) controllers.get(activeId)?.activate()
@@ -223,22 +263,16 @@ export function App(): React.JSX.Element {
   return (
     <div className="flex h-full">
       <Toaster />
-      {!sidebarHidden && <Sidebar ref={searchRef} />}
+      {/* Mỗi vùng có ErrorBoundary riêng: thanh bên lỗi không gỡ vùng terminal (mất phiên). */}
+      {!sidebarHidden && (
+        <ErrorBoundary label="sidebar" compact>
+          <Sidebar ref={searchRef} {...sidebarActions} />
+        </ErrorBoundary>
+      )}
       <div className="flex min-w-0 flex-1 flex-col">
-        <TabBar
-          onOpenSnippets={() => {
-            setOverlay({ kind: 'snippets' })
-          }}
-          onOpenSettings={() => {
-            setOverlay({ kind: 'settings' })
-          }}
-          onOpenDiagnostics={() => {
-            setOverlay({ kind: 'settings', section: 'diagnostics' })
-          }}
-          onOpenWorkspaces={() => {
-            setOverlay({ kind: 'workspaces' })
-          }}
-        />
+        <ErrorBoundary label="tab bar" compact>
+          <TabBar {...tabBarActions} />
+        </ErrorBoundary>
         {/* overflow-clip: panel ẩn (renderer "always") giữ kích thước cũ khi thu nhỏ cửa sổ —
             không được làm cả trang tràn; "clip" (khác "hidden") còn chặn cuộn do focus() /
             scrollIntoView, nếu không cả vùng tab bị đẩy lên vài chục px. */}
@@ -282,6 +316,8 @@ export function App(): React.JSX.Element {
         />
       )}
       <EnableModuleDialog />
+      {/* Sau cùng: hộp thoại xác nhận nằm trên mọi hộp thoại khác. */}
+      <ConfirmHost />
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import type { TopologyEdge, TopologyEdgeType, TopologyNode, TopologyResult } from './ops'
 
 /**
@@ -26,14 +27,35 @@ export const EDGE_CATEGORY: Record<TopologyEdgeType, TopologyCategory> = {
   calls: 'live'
 }
 
-export const CATEGORY_LABEL: Record<TopologyCategory, string> = {
-  ownership: 'Ownership',
-  network: 'Traffic',
-  live: 'Live traffic',
-  config: 'Config & storage',
-  scheduling: 'Scheduling',
-  policy: 'Policies',
-  rbac: 'Access (RBAC)'
+/** Thứ tự nhóm quan hệ trên thanh lọc. */
+export const CATEGORIES: readonly TopologyCategory[] = [
+  'ownership',
+  'network',
+  'live',
+  'config',
+  'scheduling',
+  'policy',
+  'rbac'
+]
+
+/** Tên nhóm quan hệ (dịch lúc gọi). */
+export function categoryLabel(c: TopologyCategory): string {
+  switch (c) {
+    case 'ownership':
+      return t('Ownership')
+    case 'network':
+      return t('Traffic')
+    case 'live':
+      return t('Live traffic')
+    case 'config':
+      return t('Config & storage')
+    case 'scheduling':
+      return t('Scheduling')
+    case 'policy':
+      return t('Policies')
+    case 'rbac':
+      return t('Access (RBAC)')
+  }
 }
 
 /** Cột theo loại. */
@@ -74,10 +96,10 @@ const GROUP: Record<string, number> = {
   serviceaccounts: 4
 }
 
-export const TOPO_NODE_W = 196
-export const TOPO_NODE_H = 48
-const COL_GAP = 84
-const ROW_GAP = 14
+export const TOPO_NODE_W = 220
+export const TOPO_NODE_H = 58
+const COL_GAP = 96
+const ROW_GAP = 16
 const TB_RANK_GAP = 56
 const TB_SIBLING_GAP = 16
 
@@ -305,7 +327,9 @@ export function liveTopology(
   // Ingress chỉ là cấu hình; kết nối TCP thật đi từ pod controller (nginx, traefik…) → ghi rõ
   // controller đang phục vụ Ingress nào.
   const via = ingresses.length
-    ? `via Ingress ${ingresses.slice(0, 2).join(', ')}${ingresses.length > 2 ? ` +${String(ingresses.length - 2)}` : ''}`
+    ? t('via Ingress {names}', {
+        names: `${ingresses.slice(0, 2).join(', ')}${ingresses.length > 2 ? ` +${String(ingresses.length - 2)}` : ''}`
+      })
     : undefined
   for (const r of rates) {
     if (!isRoot(r.client) && !isRoot(r.server)) continue
@@ -320,7 +344,7 @@ export function liveTopology(
         kindLabel: k?.label ?? 'External',
         name: other.name,
         ...(other.ns ? { namespace: other.ns } : {}),
-        summary: k ? 'live traffic' : 'outside the cluster',
+        summary: k ? t('live traffic') : t('outside the cluster'),
         tone: 'ok'
       })
     const from = idOf(r.client)

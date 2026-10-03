@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, type ComponentType } from 'react'
+import { lazy, Suspense, useState, type ComponentType, type ReactNode } from 'react'
 
 /**
  * Các màn ít dùng lúc khởi động được tách thành chunk riêng → bundle chính nhỏ hơn, mở app nhanh
@@ -10,7 +10,9 @@ import { lazy, Suspense, useState, type ComponentType } from 'react'
  * thoại khác). Lựa chọn được chốt theo từng lần mount — xem Component.
  */
 function preloadable<P extends object>(
-  load: () => Promise<ComponentType<P>>
+  load: () => Promise<ComponentType<P>>,
+  /** Vẽ trong lúc chờ chunk (mặc định: không gì cả). */
+  fallback: ReactNode = null
 ): { Component: ComponentType<P>; preload: () => Promise<void> } {
   let loaded: ComponentType<P> | null = null
   const remember = (c: ComponentType<P>): ComponentType<P> => {
@@ -24,7 +26,7 @@ function preloadable<P extends object>(
     const [Loaded] = useState(() => loaded)
     if (Loaded) return <Loaded {...props} />
     return (
-      <Suspense fallback={null}>
+      <Suspense fallback={fallback}>
         <Lazy {...props} />
       </Suspense>
     )
@@ -54,6 +56,31 @@ const deployKey = preloadable(() =>
   import('./terminal/DeployKeyDialog').then((m) => m.DeployKeyDialog)
 )
 
+/**
+ * Editor trong app (CodeMirror ~ vài trăm KB): chỉ nạp khi mở tab editor đầu tiên — không nằm trong
+ * bundle khởi động, cũng không nạp sẵn (phần lớn người dùng không mở editor).
+ */
+const editorTab = preloadable(() => import('./editor/EditorTab').then((m) => m.EditorTabView))
+export const EditorTabView = editorTab.Component
+
+/**
+ * Terminal (xterm.js + WebGL + addon ~500 KB): tách khỏi bundle khởi động — màn đầu (Home, thanh
+ * bên) vẽ không phải chờ parse xterm. Bắt đầu nạp ngay khi renderer chạy (`preloadTerminal()` trong
+ * main.tsx, song song với chờ font) nên tab local lúc khởi động thường render đồng bộ; nếu chưa kịp
+ * thì khung nền màu terminal giữ chỗ (không chớp trắng). Trong lúc đó chưa có controller của tab —
+ * mọi chỗ gọi `controllers.get(id)` đều đã chịu được undefined; TerminalView tự activate khi mount.
+ */
+const terminalView = preloadable(
+  () => import('./terminal/TerminalView').then((m) => m.TerminalView),
+  <div className="h-full bg-terminal" data-testid="terminal-loading" />
+)
+export const TerminalView = terminalView.Component
+
+/** Nạp chunk terminal sớm nhất có thể (gọi một lần lúc khởi động; gọi lại không tốn gì). */
+export function preloadTerminal(): Promise<void> {
+  return terminalView.preload()
+}
+
 export const SettingsDialog = settings.Component
 export const SnippetsDialog = snippets.Component
 export const HostForm = hostForm.Component
@@ -66,8 +93,16 @@ export const DeployKeyDialog = deployKey.Component
 /** Nạp sẵn mọi chunk (file nằm trong app, tổng ~60 KB → xong trong vài ms). */
 export function preloadLazyParts(): Promise<unknown> {
   return Promise.all(
-    [settings, snippets, hostForm, groupForm, importDialog, sftp, forwards, deployKey].map((p) =>
-      p.preload()
-    )
+    [
+      terminalView,
+      settings,
+      snippets,
+      hostForm,
+      groupForm,
+      importDialog,
+      sftp,
+      forwards,
+      deployKey
+    ].map((p) => p.preload())
   )
 }

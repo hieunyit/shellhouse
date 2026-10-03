@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, CaseSensitive, Regex, WholeWord, X } from 'lucide-react'
 import type { ISearchOptions } from '@xterm/addon-search'
+import { t } from '@shared/i18n'
+import { formatNumber } from '@shared/i18n/format'
 import { cx } from '../components/ui'
 import { useTerminalFind } from '../stores/terminal-find'
 import { controllers } from './registry'
@@ -119,15 +121,24 @@ export function FindBar({ tabId }: { tabId: string }): React.JSX.Element | null 
     <div
       className="absolute top-2 right-4 z-20 flex items-center gap-1 rounded-lg border border-line bg-elevated p-1 shadow-lg"
       data-testid="terminal-find"
+      role="search"
+      aria-label={t('Find in terminal')}
       onMouseDown={(e) => {
         e.stopPropagation()
+      }}
+      onKeyDown={(e) => {
+        // Esc khi focus đang ở nút tuỳ chọn (không phải ô nhập) cũng đóng thanh tìm.
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          close()
+        }
       }}
     >
       <input
         ref={input}
         value={query}
-        placeholder="Find"
-        aria-label="Find in terminal"
+        placeholder={t('Find')}
+        aria-label={t('Find in terminal')}
         data-testid="terminal-find-input"
         className={cx(
           'h-7 w-56 rounded-md border bg-surface px-2 font-mono text-xs text-fg outline-none',
@@ -137,10 +148,7 @@ export function FindBar({ tabId }: { tabId: string }): React.JSX.Element | null 
           setQuery(e.target.value)
         }}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') {
-            e.preventDefault()
-            close()
-          } else if (e.key === 'Enter') {
+          if (e.key === 'Enter') {
             e.preventDefault()
             next(e.shiftKey)
           }
@@ -152,18 +160,22 @@ export function FindBar({ tabId }: { tabId: string }): React.JSX.Element | null 
           none ? 'text-danger' : 'text-faint'
         )}
         data-testid="terminal-find-count"
+        aria-live="polite"
       >
         {!query || !result
           ? ''
           : result.count === 0
-            ? 'No results'
+            ? t('No results')
             : result.index < 0
-              ? `${String(result.count)} found`
-              : `${String(result.index + 1)} of ${String(result.count)}`}
+              ? t('{n} found', { n: formatNumber(result.count) })
+              : t('{index} of {count}', {
+                  index: formatNumber(result.index + 1),
+                  count: formatNumber(result.count)
+                })}
       </span>
       <Toggle
         on={caseSensitive}
-        label="Match case"
+        label={t('Match case')}
         onClick={() => {
           setCase((v) => !v)
         }}
@@ -172,7 +184,7 @@ export function FindBar({ tabId }: { tabId: string }): React.JSX.Element | null 
       </Toggle>
       <Toggle
         on={wholeWord}
-        label="Whole word"
+        label={t('Whole word')}
         onClick={() => {
           setWord((v) => !v)
         }}
@@ -181,7 +193,7 @@ export function FindBar({ tabId }: { tabId: string }): React.JSX.Element | null 
       </Toggle>
       <Toggle
         on={regex}
-        label="Regular expression"
+        label={t('Regular expression')}
         onClick={() => {
           setRegex((v) => !v)
         }}
@@ -191,7 +203,7 @@ export function FindBar({ tabId }: { tabId: string }): React.JSX.Element | null 
       <span className="mx-0.5 h-4 w-px bg-line" />
       <Toggle
         on={false}
-        label="Previous (Shift+Enter)"
+        label={t('Previous (Shift+Enter)')}
         onClick={() => {
           next(true)
         }}
@@ -200,14 +212,14 @@ export function FindBar({ tabId }: { tabId: string }): React.JSX.Element | null 
       </Toggle>
       <Toggle
         on={false}
-        label="Next (Enter)"
+        label={t('Next (Enter)')}
         onClick={() => {
           next(false)
         }}
       >
         <ArrowDown size={14} />
       </Toggle>
-      <Toggle on={false} label="Close (Esc)" onClick={close}>
+      <Toggle on={false} label={t('Close (Esc)')} onClick={close}>
         <X size={14} />
       </Toggle>
     </div>

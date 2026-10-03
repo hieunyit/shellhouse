@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Copy, FileDown, KeyRound, Trash2, Upload } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { useHosts } from '../../stores/hosts'
 import { Button, Field, Input, Notice, SectionTitle, Select } from '../ui'
+import { confirmAction } from '../../stores/confirm'
 
 const BITS = { ed25519: [], rsa: [3072, 4096], ecdsa: [256, 384, 521] } as const
 
@@ -28,7 +30,7 @@ export function KeysSection(): React.JSX.Element {
       setName('')
       setMessage({
         ok: true,
-        text: 'Key created. Use “Copy public key” or “Deploy key” to add it to a server.'
+        text: t('Key created. Use “Copy public key” or “Deploy key” to add it to a server.')
       })
     } else setMessage({ ok: false, text: result.message })
   }
@@ -41,11 +43,13 @@ export function KeysSection(): React.JSX.Element {
         </Notice>
       )}
       <section>
-        <SectionTitle description="Private keys are stored encrypted in the vault.">
-          Keys
+        <SectionTitle description={t('Private keys are stored encrypted in the vault.')}>
+          {t('Keys')}
         </SectionTitle>
         <div className="flex flex-col gap-2">
-          {keys.length === 0 && <p className="text-xs text-faint">No keys in the vault yet.</p>}
+          {keys.length === 0 && (
+            <p className="text-xs text-faint">{t('No keys in the vault yet.')}</p>
+          )}
           {keys.map((k) => (
             <div
               key={k.id}
@@ -58,7 +62,7 @@ export function KeysSection(): React.JSX.Element {
                 <span className="text-[13px] font-medium">{k.name}</span>
                 <span className="rounded bg-subtle px-1.5 py-0.5 text-xs text-muted">
                   {k.type}
-                  {k.encrypted ? ' · passphrase' : ''}
+                  {k.encrypted ? ` · ${t('passphrase')}` : ''}
                 </span>
               </div>
               <p className="mt-1 font-mono text-xs break-all text-faint">{k.fingerprint}</p>
@@ -73,11 +77,14 @@ export function KeysSection(): React.JSX.Element {
                       .publicKey(k.id)
                       .then((line) => window.shellhouse.writeClipboard(line))
                       .then(() => {
-                        setMessage({ ok: true, text: `Copied the public key of “${k.name}”.` })
+                        setMessage({
+                          ok: true,
+                          text: t('Copied the public key of “{name}”.', { name: k.name })
+                        })
                       })
                   }}
                 >
-                  Copy public key
+                  {t('Copy public key')}
                 </Button>
                 <Button
                   size="sm"
@@ -88,12 +95,14 @@ export function KeysSection(): React.JSX.Element {
                       if (r)
                         setMessage({
                           ok: r.ok,
-                          text: r.ok ? `Saved ${r.path} (mode 600) and ${r.path}.pub` : r.message
+                          text: r.ok
+                            ? t('Saved {path} (mode 600) and {path}.pub', { path: r.path })
+                            : r.message
                         })
                     })
                   }}
                 >
-                  Export…
+                  {t('Export…')}
                 </Button>
                 <div className="flex-1" />
                 <Button
@@ -101,13 +110,23 @@ export function KeysSection(): React.JSX.Element {
                   variant="danger-ghost"
                   icon={<Trash2 size={13} />}
                   onClick={() => {
-                    if (!window.confirm(`Delete the key “${k.name}” from the vault?`)) return
-                    void window.shellhouse.deleteKey(k.id).then((r) => {
-                      if (!r.ok) setMessage({ ok: false, text: r.message })
-                    })
+                    void (async () => {
+                      const ok = await confirmAction({
+                        title: t('Delete the key “{name}” from the vault?', { name: k.name }),
+                        message: t(
+                          'Hosts that use this key will no longer be able to sign in with it.'
+                        ),
+                        confirmLabel: t('Delete'),
+                        danger: true
+                      })
+                      if (!ok) return
+                      void window.shellhouse.deleteKey(k.id).then((r) => {
+                        if (!r.ok) setMessage({ ok: false, text: r.message })
+                      })
+                    })()
                   }}
                 >
-                  Delete
+                  {t('Delete')}
                 </Button>
               </div>
             </div>
@@ -116,10 +135,10 @@ export function KeysSection(): React.JSX.Element {
       </section>
 
       <section className="flex flex-col gap-3 rounded-lg border border-line p-4">
-        <SectionTitle>Generate a new key</SectionTitle>
-        <Field label="Name">
+        <SectionTitle>{t('Generate a new key')}</SectionTitle>
+        <Field label={t('Name')}>
           <Input
-            placeholder="e.g. laptop-2026"
+            placeholder={t('e.g. laptop-2026')}
             data-testid="keygen-name"
             value={name}
             onChange={(e) => {
@@ -128,7 +147,7 @@ export function KeysSection(): React.JSX.Element {
           />
         </Field>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Type">
+          <Field label={t('Type')}>
             <Select
               data-testid="keygen-type"
               value={type}
@@ -138,13 +157,13 @@ export function KeysSection(): React.JSX.Element {
                 setBits(BITS[next][0])
               }}
             >
-              <option value="ed25519">Ed25519 (recommended)</option>
+              <option value="ed25519">{t('Ed25519 (recommended)')}</option>
               <option value="rsa">RSA</option>
               <option value="ecdsa">ECDSA</option>
             </Select>
           </Field>
           {type !== 'ed25519' && (
-            <Field label="Size">
+            <Field label={t('Size')}>
               <Select
                 value={bits}
                 onChange={(e) => {
@@ -153,14 +172,14 @@ export function KeysSection(): React.JSX.Element {
               >
                 {BITS[type].map((b) => (
                   <option key={b} value={b}>
-                    {b} bits
+                    {t('{n} bits', { n: b })}
                   </option>
                 ))}
               </Select>
             </Field>
           )}
         </div>
-        <Field label="Passphrase" hint="Optional. Leave empty for no passphrase.">
+        <Field label={t('Passphrase')} hint={t('Optional. Leave empty for no passphrase.')}>
           <Input
             type="password"
             autoComplete="new-password"
@@ -177,7 +196,7 @@ export function KeysSection(): React.JSX.Element {
             data-testid="keygen-create"
             onClick={() => void generate()}
           >
-            {busy ? 'Generating…' : 'Generate key'}
+            {busy ? t('Generating…') : t('Generate key')}
           </Button>
           <Button
             icon={<Upload size={14} />}
@@ -187,7 +206,7 @@ export function KeysSection(): React.JSX.Element {
               })
             }}
           >
-            Import from file…
+            {t('Import from file…')}
           </Button>
         </div>
       </section>

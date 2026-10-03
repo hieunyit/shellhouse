@@ -3,7 +3,8 @@ import {
   invokeModule,
   onModuleEvent,
   openModuleTab,
-  openModuleTerminal
+  openModuleTerminal,
+  t
 } from '../../registry/renderer-kit'
 import type { ContextEntry, ContextList, ContextSettings, ImportResult } from '../shared/ipc'
 import type { ContextRef, K8sClusterParams, K8sLogsParams, K8sTerminalParams } from '../shared/ops'
@@ -50,7 +51,9 @@ export function openPodLogs(params: K8sLogsParams): string | null {
 export function openPodShell(params: K8sTerminalParams, bastionHostId?: string): string {
   return openModuleTerminal(
     'k8s',
-    `${params.pod}${params.container ? `/${params.container}` : ''} (shell)`,
+    t('{name} (shell)', {
+      name: `${params.pod}${params.container ? `/${params.container}` : ''}`
+    }),
     params,
     bastionHostId
   )

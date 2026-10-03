@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { ChevronRight, LayoutDashboard, Map as MapIcon } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
-import type { DiscoveredKind } from '../shared/ops'
+import { COUNT_CAPPED, type DiscoveredKind } from '../shared/ops'
 import { BUILTIN_KINDS, CRD_SECTIONS, type ResourceSection } from '../shared/resources'
+import { formatNumber, t } from '../../registry/renderer-kit'
 import { HELM, MAP, OVERVIEW } from './nav'
 
 /** Thứ tự nhóm như Rancher; CRD có nhóm riêng (Gateway API, Argo CD) đứng sau, rồi Apps. */
@@ -14,6 +15,7 @@ const SECTIONS: readonly ResourceSection[] = [
   'Access Control',
   'Cluster'
 ]
+/** Id nhóm (cũng là test id) — tiêu đề hiện dịch lúc vẽ. */
 const CUSTOM = 'Custom resources'
 const APPS = 'Apps'
 const STORE_KEY = 'shellhouse.k8s.nav'
@@ -54,7 +56,7 @@ function plural(kind: string): string {
  * Policy, Access Control, Cluster; Gateway API / Argo CD khi cluster có), mỗi loại có số đối
  * tượng. Mặc định mở Workloads và nhóm đang xem; lựa chọn mở / đóng được nhớ.
  */
-export function ResourceNav({
+export const ResourceNav = memo(function ResourceNav({
   kinds,
   view,
   drilled,
@@ -79,7 +81,8 @@ export function ResourceNav({
     const items = visible
       .filter((x) => builtin.get(x.id)?.section === section)
       .map((x) => ({ id: x.id, title: builtin.get(x.id)?.title ?? x.kind }))
-    if (items.length) groups.push({ id: section, title: section, items })
+    // Tên nhóm là hằng tiếng Anh (cũng là id / test id) → dịch lúc vẽ.
+    if (items.length) groups.push({ id: section, title: t(section), items })
   }
   const custom = visible.filter((x) => !builtin.has(x.id))
   for (const [group, title] of Object.entries(CRD_SECTIONS)) {
@@ -89,7 +92,7 @@ export function ResourceNav({
       .sort((a, b) => a.title.localeCompare(b.title))
     if (items.length) groups.push({ id: title, title, items })
   }
-  groups.push({ id: APPS, title: APPS, items: [{ id: HELM, title: 'Helm releases' }] })
+  groups.push({ id: APPS, title: t('Apps'), items: [{ id: HELM, title: t('Helm releases') }] })
   const byGroup = new Map<string, Item[]>()
   for (const x of custom) {
     if (CRD_SECTIONS[x.group]) continue
@@ -117,6 +120,8 @@ export function ResourceNav({
   const item = (x: Item, indent: boolean): React.JSX.Element => {
     const current = view === x.id && !drilled
     const n = counts[x.id]
+    // Loại quá nhiều đối tượng để đếm hết: số là mức tối thiểu.
+    const capped = counts[`${COUNT_CAPPED}${x.id}`] === 1
     return (
       <button
         key={x.id}
@@ -143,8 +148,10 @@ export function ResourceNav({
               n === 0 ? 'text-faint/70' : 'text-faint'
             )}
             data-testid="k8s-nav-count"
+            title={capped ? t('At least {n}', { n: formatNumber(n) }) : undefined}
           >
-            {n}
+            {formatNumber(n)}
+            {capped ? '+' : ''}
           </span>
         )}
       </button>
@@ -203,7 +210,7 @@ export function ResourceNav({
           onGo(OVERVIEW)
         }}
       >
-        <LayoutDashboard size={13} /> Overview
+        <LayoutDashboard size={13} /> {t('Overview')}
       </button>
       <button
         type="button"
@@ -219,7 +226,7 @@ export function ResourceNav({
           onGo(MAP)
         }}
       >
-        <MapIcon size={13} /> Map
+        <MapIcon size={13} /> {t('Map')}
       </button>
       {groups.map((g) => {
         const open = isOpen(g.id, g.items, g.id === 'Workloads')
@@ -232,7 +239,7 @@ export function ResourceNav({
       })}
       {crdGroups.length > 0 && (
         <div>
-          {header(CUSTOM, CUSTOM, customOpen, has(customItems))}
+          {header(CUSTOM, t('Custom resources'), customOpen, has(customItems))}
           {customOpen &&
             crdGroups.map((g) => {
               const open = isOpen(g.id, g.items, false)
@@ -247,4 +254,4 @@ export function ResourceNav({
       )}
     </nav>
   )
-}
+})

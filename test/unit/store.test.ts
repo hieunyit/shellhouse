@@ -1,5 +1,5 @@
-import { readFileSync, utimesSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   backupDatabase,
@@ -154,5 +154,18 @@ describe('openStore', () => {
       value: 'v'
     })
     restored.close()
+  })
+
+  it('khôi phục lỗi giữa chừng (file sao lưu không đọc được) không đụng DB hiện tại', async () => {
+    const paths = storePaths(tempDir())
+    const db = await openStore(paths)
+    db.exec("INSERT INTO settings (key, value) VALUES ('k', 'giữ')")
+    db.close()
+    const before = readFileSync(paths.db)
+    expect(() => {
+      restoreBackup(join(tempDir(), 'không-có.db'), paths.db)
+    }).toThrow()
+    expect(readFileSync(paths.db).equals(before)).toBe(true)
+    expect(readdirSync(dirname(paths.db)).some((f) => f.includes('.restore-'))).toBe(false)
   })
 })

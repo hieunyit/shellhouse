@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, Minus, Plus, Type } from 'lucide-react'
 import { BUILTIN_THEMES } from '@shared/themes'
+import { t } from '@shared/i18n'
 import { cx } from '../components/ui'
 import { useSettings } from '../stores/settings'
 
@@ -47,7 +48,7 @@ export function LookMenu(): React.JSX.Element {
   const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null)
   const root = useRef<HTMLDivElement>(null)
   const panel = useRef<HTMLDivElement>(null)
-  const t = useSettings((s) => s.settings.terminal)
+  const term = useSettings((s) => s.settings.terminal)
   const custom = useSettings((s) => s.settings.customThemes)
   const update = useSettings((s) => s.update)
   const fonts = useMemo(
@@ -71,16 +72,17 @@ export function LookMenu(): React.JSX.Element {
     }
   }, [open])
   const themes = [...BUILTIN_THEMES, ...custom]
-  const font = t.fontFamily || 'JetBrains Mono'
+  const font = term.fontFamily || 'JetBrains Mono'
   const size = (delta: number): void => {
-    void update({ terminal: { fontSize: Math.max(8, Math.min(32, t.fontSize + delta)) } })
+    void update({ terminal: { fontSize: Math.max(8, Math.min(32, term.fontSize + delta)) } })
   }
   return (
     <div ref={root} className="relative">
       <button
         type="button"
-        title="Terminal look: theme, font and size"
-        aria-label="Terminal look"
+        title={t('Terminal look: theme, font and size')}
+        aria-label={t('Terminal look')}
+        aria-haspopup="dialog"
         aria-expanded={open}
         data-testid="terminal-look"
         className={cx(
@@ -94,7 +96,7 @@ export function LookMenu(): React.JSX.Element {
         }}
       >
         <Type size={13} />
-        <span className="hidden tabular-nums @md:inline">{t.fontSize}</span>
+        <span className="hidden tabular-nums @md:inline">{term.fontSize}</span>
       </button>
       {open &&
         anchor &&
@@ -104,13 +106,17 @@ export function LookMenu(): React.JSX.Element {
             className="fixed z-50 flex w-80 flex-col gap-3 rounded-lg border border-line bg-elevated p-3 text-xs shadow-lg"
             style={{ top: anchor.top, right: anchor.right }}
             data-testid="terminal-look-menu"
+            role="dialog"
+            aria-label={t('Terminal look')}
           >
             <div className="flex items-center gap-2">
-              <span className="flex-1 font-medium text-fg">Text size</span>
+              <span className="flex-1 font-medium text-fg">{t('Text size')}</span>
               <button
                 type="button"
-                aria-label="Smaller text"
-                className="rounded-md border border-line p-1 hover:bg-hover"
+                aria-label={t('Smaller text')}
+                title={t('Smaller text')}
+                disabled={term.fontSize <= 8}
+                className="rounded-md border border-line p-1 hover:bg-hover disabled:opacity-40 disabled:hover:bg-transparent"
                 onClick={() => {
                   size(-1)
                 }}
@@ -121,13 +127,15 @@ export function LookMenu(): React.JSX.Element {
                 className="w-8 text-center font-mono tabular-nums"
                 data-testid="terminal-look-size"
               >
-                {t.fontSize}
+                {term.fontSize}
               </span>
               <button
                 type="button"
-                aria-label="Bigger text"
+                aria-label={t('Bigger text')}
+                title={t('Bigger text')}
+                disabled={term.fontSize >= 32}
                 data-testid="terminal-look-bigger"
-                className="rounded-md border border-line p-1 hover:bg-hover"
+                className="rounded-md border border-line p-1 hover:bg-hover disabled:opacity-40 disabled:hover:bg-transparent"
                 onClick={() => {
                   size(1)
                 }}
@@ -136,7 +144,7 @@ export function LookMenu(): React.JSX.Element {
               </button>
             </div>
             <div>
-              <div className="mb-1 font-medium text-fg">Font</div>
+              <div className="mb-1 font-medium text-fg">{t('Font')}</div>
               <div className="grid max-h-36 grid-cols-2 gap-1 overflow-auto">
                 {fonts.map((f) => (
                   <button
@@ -149,6 +157,7 @@ export function LookMenu(): React.JSX.Element {
                         : 'border-line hover:bg-hover'
                     )}
                     style={{ fontFamily: `"${f}", monospace` }}
+                    aria-pressed={font === f}
                     data-testid="terminal-look-font"
                     data-font={f}
                     onClick={() =>
@@ -162,19 +171,20 @@ export function LookMenu(): React.JSX.Element {
               </div>
             </div>
             <div>
-              <div className="mb-1 font-medium text-fg">Color theme</div>
+              <div className="mb-1 font-medium text-fg">{t('Color theme')}</div>
               <div className="grid max-h-48 grid-cols-2 gap-1 overflow-auto">
-                {[{ id: 'system', name: 'Match app', colors: null } as const, ...themes].map(
+                {[{ id: 'system', name: t('Match app'), colors: null } as const, ...themes].map(
                   (th) => (
                     <button
                       key={th.id}
                       type="button"
                       className={cx(
                         'flex items-center gap-2 rounded-md border px-2 py-1 text-left',
-                        t.themeId === th.id
+                        term.themeId === th.id
                           ? 'border-accent bg-accent-soft'
                           : 'border-line hover:bg-hover'
                       )}
+                      aria-pressed={term.themeId === th.id}
                       data-testid="terminal-look-theme"
                       data-theme={th.id}
                       onClick={() => void update({ terminal: { themeId: th.id } })}

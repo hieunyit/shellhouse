@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import type { MapData, MapNodeInfo, MapPod, MapTone } from './map'
 
 /**
@@ -67,23 +68,32 @@ export function summarizeNodes(data: MapData): NodesSummary {
       { cpu: 0, memory: 0 }
     )
     const issues: NodeView['issues'] = []
-    const raise = (t: MapTone, why: string): void => {
-      issues.push({ text: why, tone: t })
+    const raise = (level: MapTone, why: string): void => {
+      issues.push({ text: why, tone: level })
     }
-    if (!info.ready) raise('bad', 'Not ready')
+    if (!info.ready) raise('bad', t('Not ready'))
     for (const p of info.pressure) raise('bad', p)
-    if (info.unschedulable) raise('warn', 'Cordoned')
+    if (info.unschedulable) raise('warn', t('Cordoned'))
     const ratio = (used: number, cap: number): number => (cap > 0 ? used / cap : 0)
     for (const [label, r] of [
       ['CPU', ratio(requested.cpu, info.allocatable.cpu)],
-      ['Memory', ratio(requested.memory, info.allocatable.memory)],
+      [t('Memory'), ratio(requested.memory, info.allocatable.memory)],
       ['Pods', ratio(live.length, info.allocatable.pods)]
     ] as const)
-      if (r >= ALLOC_BAD) raise('bad', `${label} ${Math.round(r * 100)}% requested`)
-      else if (r >= ALLOC_WARN) raise('warn', `${label} ${Math.round(r * 100)}% requested`)
+      if (r >= ALLOC_BAD)
+        raise(
+          'bad',
+          t('{resource} {pct}% requested', { resource: label, pct: Math.round(r * 100) })
+        )
+      else if (r >= ALLOC_WARN)
+        raise(
+          'warn',
+          t('{resource} {pct}% requested', { resource: label, pct: Math.round(r * 100) })
+        )
     if (info.usage && info.allocatable.memory > 0) {
       const r = ratio(info.usage.memory, info.allocatable.memory)
-      if (r >= 0.9) raise(r >= 0.97 ? 'bad' : 'warn', `Memory ${Math.round(r * 100)}% used`)
+      if (r >= 0.9)
+        raise(r >= 0.97 ? 'bad' : 'warn', t('Memory {pct}% used', { pct: Math.round(r * 100) }))
     }
     const tone: MapTone = issues.some((i) => i.tone === 'bad')
       ? 'bad'

@@ -54,7 +54,11 @@ const TerminalSettings = z.object({
   /** Thanh CPU/RAM/ổ đĩa/mạng dưới terminal SSH (chỉ đo khi tab đang hiện; server Linux). */
   serverStats: z.boolean().catch(true),
   /** Bật cây accessibility của xterm.js để trình đọc màn hình đọc được output. Tốn thêm CPU. */
-  screenReaderMode: z.boolean().catch(false)
+  screenReaderMode: z.boolean().catch(false),
+  /** Dán văn bản nhiều dòng (shell không bật bracketed paste) → hỏi trước, tránh chạy nhầm lệnh. */
+  warnMultilinePaste: z.boolean().catch(true),
+  /** Đóng tab SSH đang kết nối → hỏi trước (luôn hỏi khi đang truyền file). */
+  confirmCloseConnected: z.boolean().catch(true)
 })
 
 const SecuritySettings = z.object({
@@ -68,6 +72,8 @@ const SecuritySettings = z.object({
 const AppearanceSettings = z.object({
   /** Giao diện app: theo hệ điều hành, hoặc cố định sáng/tối. */
   theme: z.enum(['system', 'light', 'dark']).catch('system'),
+  /** Ngôn ngữ giao diện; 'system' = theo hệ điều hành. Đổi có hiệu lực sau khi khởi động lại. */
+  language: z.enum(['system', 'en', 'vi']).catch('system'),
   /** Ẩn thanh bên (danh sách host) để terminal rộng hơn. */
   sidebarHidden: z.boolean().catch(false),
   /** Mục "Favorites" / "Recent" ở đầu thanh bên (host đã có trong cây nhóm — lặp lại cho nhanh). */
@@ -181,13 +187,18 @@ export function parseSettings(raw: unknown): AppSettings {
   return parsed.success ? parsed.data : AppSettings.parse({})
 }
 
-/** Patch sâu 1 cấp cho các nhóm cài đặt. */
+/**
+ * Patch sâu 1 cấp cho các nhóm cài đặt — dạng renderer được gửi qua `settings:update`. Không có
+ * `files.editor` (chương trình main sẽ chạy: chỉ đặt qua hộp thoại của main, `files:chooseEditor`)
+ * và `security.rememberOnDevice` (bật/tắt qua `vault:setRemember` để khoá trên máy luôn khớp).
+ * Trường lạ bị zod bỏ đi, không báo lỗi.
+ */
 export const SettingsPatch = z.object({
   appearance: AppearanceSettings.partial().optional(),
   terminal: TerminalSettings.partial().optional(),
-  security: SecuritySettings.partial().optional(),
+  security: SecuritySettings.omit({ rememberOnDevice: true }).partial().optional(),
   updates: UpdateSettings.partial().optional(),
-  files: FileSettings.partial().optional(),
+  files: FileSettings.omit({ editor: true }).partial().optional(),
   logging: LoggingSettings.partial().optional(),
   keybindings: z.record(z.string().max(64), z.string().max(64)).optional(),
   customThemes: z.array(TerminalTheme).max(100).optional(),
@@ -198,7 +209,13 @@ export const SettingsPatch = z.object({
 })
 export type SettingsPatch = z.infer<typeof SettingsPatch>
 
-export function applyPatch(current: AppSettings, patch: SettingsPatch): AppSettings {
+/** Patch chỉ main dùng: thêm các trường renderer không được tự đặt. */
+export type MainSettingsPatch = Omit<SettingsPatch, 'security' | 'files'> & {
+  security?: Partial<AppSettings['security']> | undefined
+  files?: Partial<AppSettings['files']> | undefined
+}
+
+export function applyPatch(current: AppSettings, patch: MainSettingsPatch): AppSettings {
   return parseSettings({
     ...current,
     appearance: { ...current.appearance, ...patch.appearance },

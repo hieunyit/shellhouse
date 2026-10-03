@@ -69,9 +69,50 @@ export const SftpOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('edit'), remotePath: RemotePath, localPath: LocalPath }),
   z.object({ op: z.literal('cancel'), transferId: z.string().max(64) }),
   z.object({ op: z.literal('retry'), transferId: z.string().max(64) }),
-  z.object({ op: z.literal('clearDone') })
+  /** Bỏ lượt lỗi / đã huỷ: xoá khỏi danh sách và xoá file part. */
+  z.object({ op: z.literal('discard'), transferId: z.string().max(64) }),
+  /** `keepParts`: giữ file part của lượt dở dang (tải lại cùng file sau thì tiếp tục). */
+  z.object({ op: z.literal('clearDone'), keepParts: z.boolean().optional() }),
+  /**
+   * File tải dở bị bỏ lại trong thư mục trên máy (khung Local): `names` = tên file đích (bỏ đuôi
+   * `.shellhouse-part`) thấy trong danh sách thư mục. Trả về LocalPartInfo[].
+   */
+  z.object({
+    op: z.literal('localParts'),
+    dir: LocalPath,
+    names: z.array(z.string().min(1).max(1024)).max(500)
+  }),
+  /** Xoá file part + meta của các mục đó; trả về số file part đã xoá. */
+  z.object({
+    op: z.literal('discardLocalParts'),
+    dir: LocalPath,
+    names: z.array(z.string().min(1).max(1024)).max(500)
+  })
 ])
 export type SftpOp = z.infer<typeof SftpOp>
+
+/** Đuôi file tải dở (ghi xong mới đổi tên) và file meta đi kèm (resume). */
+export const PART_SUFFIX = '.shellhouse-part'
+export const PART_META_SUFFIX = '.shellhouse-part-meta'
+
+/** File tạm của lượt truyền dở dang — ẩn khỏi danh sách file (như file ẩn). */
+export function isPartFile(name: string): boolean {
+  return name.endsWith(PART_SUFFIX) || name.endsWith(PART_META_SUFFIX)
+}
+
+/** File tải dở bị bỏ lại trong thư mục trên máy (op `localParts`). */
+export interface LocalPartInfo {
+  /** Tên file đích (không có đuôi part). */
+  name: string
+  /** Đã tải được. */
+  partBytes: number
+  /** Kích thước đầy đủ (từ file meta), null nếu không có meta. */
+  totalBytes: number | null
+  /** Nguồn trên server (từ file meta). */
+  remotePath: string | null
+  /** Server của tab này còn đúng file nguồn đó → tiếp tục được. */
+  resumable: boolean
+}
 
 /** Ghi file từ editor trong app: lớn nhất chừng này byte. */
 export const MAX_WRITE_BYTES = 8 * 1024 * 1024
@@ -117,6 +158,8 @@ export interface TransferStatus {
   bytesPerSecond: number
   /** Lượt tải lên của tính năng sửa file (lưu trong editor → server). */
   edit?: boolean
+  /** Lỗi / huỷ mà còn giữ file part: "Resume" tiếp tục từ chỗ dừng, "Discard" xoá file part. */
+  resumable?: boolean
 }
 
 /** Chuỗi quyền kiểu `ls -l`: rwxr-xr-x. */

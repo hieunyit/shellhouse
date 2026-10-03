@@ -604,6 +604,11 @@ function slug(name: string): string {
   }`
 }
 
+/** Màu vùng chọn khi file theme không có: tối trên nền tối, xanh nhạt trên nền sáng. */
+export function defaultSelection(background: string): string {
+  return luminance(background) < 0.5 ? '#44475a' : '#cde2ff'
+}
+
 function finish(name: string, c: Colors): TerminalTheme {
   for (const [key, value] of Object.entries(c)) {
     if (!HEX.test(value)) throw new Error(`Invalid color "${key}": ${value}`)
@@ -635,7 +640,7 @@ export function importWindowsTerminal(json: string): TerminalTheme {
     background,
     foreground,
     cursor: get('cursorColor', foreground),
-    selectionBackground: get('selectionBackground', '#44475a'),
+    selectionBackground: get('selectionBackground', defaultSelection(background)),
     black: get('black'),
     red: get('red'),
     green: get('green'),
@@ -679,11 +684,12 @@ export function importItermColors(xml: string, name = 'iTerm2'): TerminalTheme {
   }
   const a = (n: number): string => color(`Ansi ${n} Color`)
   const foreground = color('Foreground Color')
+  const background = color('Background Color')
   return finish(name, {
-    background: color('Background Color'),
+    background,
     foreground,
     cursor: color('Cursor Color', foreground),
-    selectionBackground: color('Selection Color', '#44475a'),
+    selectionBackground: color('Selection Color', defaultSelection(background)),
     black: a(0),
     red: a(1),
     green: a(2),

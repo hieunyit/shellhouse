@@ -5,53 +5,113 @@ import {
   CircleAlert,
   CircleCheck,
   Download,
+  Play,
   RotateCcw,
+  Trash2,
   Upload,
   X
 } from 'lucide-react'
+import { t, tn } from '@shared/i18n'
+import { formatBytes, formatDuration, formatPercent, formatRate } from '@shared/i18n/format'
 import type { TransferStatus } from '@shared/sftp'
+import { choose } from '../../stores/confirm'
 import { cx, IconButton } from '../ui'
-import { formatSize } from '../../lib/format'
+
+/** Lượt lỗi / huỷ còn giữ file part (tiếp tục được). */
+function isPartial(t: TransferStatus): boolean {
+  return (t.state === 'error' || t.state === 'cancelled') && t.resumable === true
+}
+
+/**
+ * Hỏi khi dọn danh sách mà còn lượt dở dang giữ file part: giữ (lần sau tải lại cùng file thì tiếp
+ * tục) hay xoá luôn. null = người dùng đóng hộp thoại (không dọn).
+ */
+async function askKeepParts(partials: TransferStatus[]): Promise<boolean | null> {
+  const bytes = partials.reduce((n, p) => n + p.transferred, 0)
+  const choice = await choose({
+    title: t('Clear finished transfers'),
+    message: tn(
+      partials.length,
+      '{n} incomplete transfer keeps a partial file ({size}) so it can resume later. Delete it too?',
+      '{n} incomplete transfers keep partial files ({size}) so they can resume later. Delete them too?',
+      { size: formatBytes(bytes) }
+    ),
+    testId: 'transfers-clear-dialog',
+    width: 'max-w-md',
+    choices: [
+      { value: 'keep', label: t('Keep partial files'), testId: 'transfers-clear-keep' },
+      {
+        value: 'delete',
+        label: t('Delete partial files'),
+        variant: 'danger',
+        autoFocus: true,
+        testId: 'transfers-clear-delete'
+      }
+    ]
+  })
+  return choice === null ? null : choice === 'keep'
+}
 
 /**
  * Danh sách truyền file (S3 và SFTP): gọn, thu lại được; chỉ lượt đang chạy mới có thanh tiến độ.
- * `onRetry` (SFTP): thử lại lượt lỗi / huỷ, tiếp tục từ chỗ dừng.
+ * `onRetry` (SFTP): thử lại lượt lỗi / huỷ — tiếp tục từ chỗ dừng nếu còn file part.
+ * `onDiscard` (SFTP): bỏ lượt dở dang + xoá file part; có thì "Clear finished" hỏi xoá file part.
  */
 export function TransferList({
   transfers,
   onCancel,
   onClear,
   onRetry,
+  onDiscard,
   testId,
   rowTestId
 }: {
   transfers: TransferStatus[]
   onCancel: (id: string) => void
-  onClear: () => void
+  /** `keepParts`: giữ file part của lượt dở dang (chỉ khi có `onDiscard`). */
+  onClear: (keepParts?: boolean) => void
   onRetry?: (id: string) => void
+  onDiscard?: (id: string) => void
   testId: string
   rowTestId: string
 }): React.JSX.Element | null {
   const [open, setOpen] = useState(true)
   if (transfers.length === 0) return null
 
-  const active = transfers.filter((t) => t.state === 'running' || t.state === 'queued')
-  const done = transfers.filter((t) => t.state === 'done').length
-  const failed = transfers.filter((t) => t.state === 'error').length
-  const total = active.reduce((n, t) => n + t.size, 0)
-  const moved = active.reduce((n, t) => n + t.transferred, 0)
-  const speed = active.reduce((n, t) => n + (t.state === 'running' ? t.bytesPerSecond : 0), 0)
+  const active = transfers.filter((x) => x.state === 'running' || x.state === 'queued')
+  const done = transfers.filter((x) => x.state === 'done').length
+  const failed = transfers.filter((x) => x.state === 'error').length
+  const total = active.reduce((n, x) => n + x.size, 0)
+  const moved = active.reduce((n, x) => n + x.transferred, 0)
+  const speed = active.reduce((n, x) => n + (x.state === 'running' ? x.bytesPerSecond : 0), 0)
   const remaining = speed > 0 ? (total - moved) / speed : null
   const summary = [
     active.length > 0 &&
-      `${active.length} active${total > 0 ? ` · ${Math.floor((moved / total) * 100)}%` : ''}${
-        speed > 0 ? ` · ${formatSize(speed)}/s` : ''
-      }${remaining !== null && remaining > 1 ? ` · ${duration(remaining)} left` : ''}`,
-    done > 0 && `${done} done`,
-    failed > 0 && `${failed} failed`
+      [
+        tn(active.length, '{n} active', '{n} active'),
+        total > 0 && formatPercent(Math.min(1, moved / total)),
+        speed > 0 && formatRate(speed),
+        remaining !== null &&
+          remaining > 1 &&
+          t('{time} left', { time: formatDuration(remaining * 1000) })
+      ]
+        .filter(Boolean)
+        .join(' · '),
+    done > 0 && tn(done, '{n} done', '{n} done'),
+    failed > 0 && tn(failed, '{n} failed', '{n} failed')
   ]
     .filter(Boolean)
     .join(' · ')
+
+  const clear = async (): Promise<void> => {
+    const partials = onDiscard ? transfers.filter(isPartial) : []
+    if (partials.length === 0) {
+      onClear()
+      return
+    }
+    const keep = await askKeepParts(partials)
+    if (keep !== null) onClear(keep)
+  }
 
   return (
     <div className="shrink-0 border-t border-line bg-surface" data-testid={testId}>
@@ -68,8 +128,13 @@ export function TransferList({
             size={13}
             className={cx('shrink-0 transition-transform duration-150', open && 'rotate-90')}
           />
-          <span className="shrink-0">Transfers</span>
-          <span className={cx('truncate font-normal', failed > 0 ? 'text-danger' : 'text-faint')}>
+          <span className="shrink-0">{t('Transfers')}</span>
+          <span
+            className={cx(
+              'truncate font-normal tabular-nums',
+              failed > 0 ? 'text-danger' : 'text-faint'
+            )}
+          >
             {summary}
           </span>
         </button>
@@ -79,10 +144,10 @@ export function TransferList({
             className="shrink-0 rounded px-1.5 py-0.5 text-faint hover:bg-hover hover:text-fg"
             data-testid="transfers-retry-failed"
             onClick={() => {
-              for (const t of transfers) if (t.state === 'error') onRetry(t.id)
+              for (const x of transfers) if (x.state === 'error') onRetry(x.id)
             }}
           >
-            Retry failed
+            {t('Retry failed')}
           </button>
         )}
         {active.length > 1 && (
@@ -91,141 +156,188 @@ export function TransferList({
             className="shrink-0 rounded px-1.5 py-0.5 text-faint hover:bg-hover hover:text-danger"
             data-testid="transfers-cancel-all"
             onClick={() => {
-              for (const t of active) onCancel(t.id)
+              for (const x of active) onCancel(x.id)
             }}
           >
-            Cancel all
+            {t('Cancel all')}
           </button>
         )}
         {active.length < transfers.length && (
           <button
             type="button"
             className="shrink-0 rounded px-1.5 py-0.5 text-faint hover:bg-hover hover:text-fg"
-            onClick={onClear}
+            data-testid="transfers-clear"
+            onClick={() => void clear()}
           >
-            Clear finished
+            {t('Clear finished')}
           </button>
         )}
       </div>
       {open && (
         <ul className="max-h-36 overflow-auto px-1.5 pb-1.5">
-          {transfers.map((t) => {
-            const pct =
-              t.size > 0
-                ? Math.min(100, Math.floor((t.transferred / t.size) * 100))
-                : t.state === 'done'
-                  ? 100
-                  : 0
-            const name = t.remotePath.split('/').at(-1) ?? t.remotePath
-            const DirIcon = t.direction === 'upload' ? Upload : Download
-            return (
-              <li
-                key={t.id}
-                className="rounded-md px-1.5 py-1 hover:bg-hover"
-                data-testid={rowTestId}
-                data-state={t.state}
-              >
-                <div className="flex items-center gap-2 text-xs">
-                  {t.state === 'done' ? (
-                    <CircleCheck size={13} className="shrink-0 text-success" />
-                  ) : t.state === 'error' ? (
-                    <CircleAlert size={13} className="shrink-0 text-danger" />
-                  ) : t.state === 'cancelled' ? (
-                    <Ban size={13} className="shrink-0 text-faint" />
-                  ) : (
-                    <DirIcon size={13} className="shrink-0 text-accent" />
-                  )}
-                  <span
-                    className={cx(
-                      'min-w-0 flex-1 truncate',
-                      t.state === 'cancelled' && 'text-faint'
-                    )}
-                    title={`${t.direction === 'upload' ? t.localPath : t.remotePath} → ${
-                      t.direction === 'upload' ? t.remotePath : t.localPath
-                    }`}
-                  >
-                    {name}
-                  </span>
-                  {t.edit && (
-                    <span className="shrink-0 rounded bg-subtle px-1 text-[11px] text-faint">
-                      edit
-                    </span>
-                  )}
-                  <span className="shrink-0 text-faint tabular-nums">
-                    {t.state === 'running' &&
-                      [
-                        t.size > 0
-                          ? `${formatSize(t.transferred)} of ${formatSize(t.size)}`
-                          : `${pct}%`,
-                        t.bytesPerSecond > 0 && `${formatSize(t.bytesPerSecond)}/s`,
-                        t.bytesPerSecond > 0 &&
-                          t.size > t.transferred &&
-                          `${duration((t.size - t.transferred) / t.bytesPerSecond)} left`
-                      ]
-                        .filter(Boolean)
-                        .join(' · ')}
-                    {t.state === 'queued' && 'Queued'}
-                    {t.state === 'done' &&
-                      (t.edit
-                        ? 'Saved to server'
-                        : `${formatSize(t.size)}${t.resumedFrom > 0 ? ' (resumed)' : ''}`)}
-                    {t.state === 'cancelled' && 'Cancelled'}
-                    {t.state === 'error' && 'Failed'}
-                  </span>
-                  {t.state === 'running' || t.state === 'queued' ? (
-                    <IconButton
-                      label="Cancel"
-                      size="sm"
-                      className="size-5"
-                      onClick={() => {
-                        onCancel(t.id)
-                      }}
-                    >
-                      <X size={12} />
-                    </IconButton>
-                  ) : onRetry && (t.state === 'error' || t.state === 'cancelled') ? (
-                    <IconButton
-                      label="Retry (resumes where it stopped)"
-                      size="sm"
-                      className="size-5"
-                      onClick={() => {
-                        onRetry(t.id)
-                      }}
-                    >
-                      <RotateCcw size={12} />
-                    </IconButton>
-                  ) : (
-                    <span className="size-5 shrink-0" />
-                  )}
-                </div>
-                {t.state === 'running' && (
-                  <div className="mt-1 ml-5 h-1 overflow-hidden rounded-full bg-subtle">
-                    <div
-                      className="h-1 rounded-full bg-accent-solid transition-[width] duration-200"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                )}
-                {t.error && (
-                  <p className="mt-0.5 ml-5 truncate text-xs text-danger" title={t.error}>
-                    {t.error}
-                  </p>
-                )}
-              </li>
-            )
-          })}
+          {transfers.map((x) => (
+            <TransferRow
+              key={x.id}
+              transfer={x}
+              rowTestId={rowTestId}
+              onCancel={onCancel}
+              onRetry={onRetry}
+              onDiscard={onDiscard}
+            />
+          ))}
         </ul>
       )}
     </div>
   )
 }
 
-/** "8s", "1:05", "1:02:05" — thời gian còn lại. */
-export function duration(seconds: number): string {
-  const s = Math.max(0, Math.round(seconds))
-  if (s < 60) return `${String(s)}s`
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = String(s % 60).padStart(2, '0')
-  return h ? `${String(h)}:${String(m).padStart(2, '0')}:${sec}` : `${String(m)}:${sec}`
+function TransferRow({
+  transfer: x,
+  rowTestId,
+  onCancel,
+  onRetry,
+  onDiscard
+}: {
+  transfer: TransferStatus
+  rowTestId: string
+  onCancel: (id: string) => void
+  onRetry: ((id: string) => void) | undefined
+  onDiscard: ((id: string) => void) | undefined
+}): React.JSX.Element {
+  const ratio = x.size > 0 ? Math.min(1, x.transferred / x.size) : x.state === 'done' ? 1 : 0
+  const name = x.remotePath.split('/').at(-1) ?? x.remotePath
+  const DirIcon = x.direction === 'upload' ? Upload : Download
+  const partial = isPartial(x)
+  const from = x.direction === 'upload' ? x.localPath : x.remotePath
+  const to = x.direction === 'upload' ? x.remotePath : x.localPath
+  const finished = x.state === 'error' || x.state === 'cancelled'
+
+  let detail: string
+  if (x.state === 'running')
+    detail = [
+      x.size > 0
+        ? t('{done} of {total}', { done: formatBytes(x.transferred), total: formatBytes(x.size) })
+        : formatPercent(ratio),
+      x.bytesPerSecond > 0 && formatRate(x.bytesPerSecond),
+      x.bytesPerSecond > 0 &&
+        x.size > x.transferred &&
+        t('{time} left', {
+          time: formatDuration(((x.size - x.transferred) / x.bytesPerSecond) * 1000)
+        })
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  else if (x.state === 'queued') detail = t('Queued')
+  else if (x.state === 'done')
+    detail = x.edit
+      ? t('Saved to server')
+      : x.resumedFrom > 0
+        ? t('{size} (resumed)', { size: formatBytes(x.size) })
+        : formatBytes(x.size)
+  else if (partial)
+    detail = t('{state} at {percent}', {
+      state: x.state === 'cancelled' ? t('Cancelled') : t('Failed'),
+      percent: formatPercent(ratio)
+    })
+  else detail = x.state === 'cancelled' ? t('Cancelled') : t('Failed')
+
+  return (
+    <li
+      className="group rounded-md px-1.5 py-1 hover:bg-hover"
+      data-testid={rowTestId}
+      data-state={x.state}
+      {...(partial ? { 'data-resumable': 'true' } : {})}
+    >
+      <div className="flex items-center gap-2 text-xs">
+        {x.state === 'done' ? (
+          <CircleCheck size={13} className="shrink-0 text-success" aria-label={t('Done')} />
+        ) : x.state === 'error' ? (
+          <CircleAlert size={13} className="shrink-0 text-danger" aria-label={t('Failed')} />
+        ) : x.state === 'cancelled' ? (
+          <Ban size={13} className="shrink-0 text-faint" aria-label={t('Cancelled')} />
+        ) : (
+          <DirIcon
+            size={13}
+            className="shrink-0 text-accent"
+            aria-label={x.direction === 'upload' ? t('Upload') : t('Download')}
+          />
+        )}
+        <span
+          className={cx('min-w-0 flex-1 truncate', x.state === 'cancelled' && 'text-faint')}
+          title={`${from} → ${to}`}
+        >
+          {name}
+        </span>
+        {x.edit && (
+          <span className="shrink-0 rounded bg-subtle px-1 text-[11px] text-faint">
+            {t('edit')}
+          </span>
+        )}
+        <span className="shrink-0 text-faint tabular-nums">{detail}</span>
+        {x.state === 'running' || x.state === 'queued' ? (
+          <IconButton
+            label={t('Cancel')}
+            size="sm"
+            className="size-5"
+            onClick={() => {
+              onCancel(x.id)
+            }}
+          >
+            <X size={12} />
+          </IconButton>
+        ) : finished && onRetry ? (
+          <>
+            <IconButton
+              label={
+                partial ? t('Resume from {percent}', { percent: formatPercent(ratio) }) : t('Retry')
+              }
+              size="sm"
+              className="size-5"
+              data-testid={partial ? 'transfer-resume' : 'transfer-retry'}
+              onClick={() => {
+                onRetry(x.id)
+              }}
+            >
+              {partial ? <Play size={12} /> : <RotateCcw size={12} />}
+            </IconButton>
+            {onDiscard && (
+              <IconButton
+                label={partial ? t('Discard (delete the partial file)') : t('Remove from list')}
+                size="sm"
+                className="size-5 hover:text-danger"
+                data-testid="transfer-discard"
+                onClick={() => {
+                  onDiscard(x.id)
+                }}
+              >
+                {partial ? <Trash2 size={12} /> : <X size={12} />}
+              </IconButton>
+            )}
+          </>
+        ) : (
+          <span className="size-5 shrink-0" />
+        )}
+      </div>
+      {x.state === 'running' && (
+        <div
+          className="mt-1 ml-5 h-1 overflow-hidden rounded-full bg-subtle"
+          role="progressbar"
+          aria-label={name}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.floor(ratio * 100)}
+        >
+          <div
+            className="h-1 rounded-full bg-accent-solid transition-[width] duration-200"
+            style={{ width: `${String(ratio * 100)}%` }}
+          />
+        </div>
+      )}
+      {x.error && (
+        <p className="mt-0.5 ml-5 truncate text-xs text-danger" title={x.error}>
+          {x.error}
+        </p>
+      )}
+    </li>
+  )
 }

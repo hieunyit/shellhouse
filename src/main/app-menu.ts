@@ -1,4 +1,5 @@
 import { app, Menu, type BrowserWindow, type MenuItemConstructorOptions } from 'electron'
+import { t } from '@shared/i18n'
 
 /**
  * Thanh menu của app. Mặc định Electron có File / Edit / View / Window / Help với Reload, Developer
@@ -27,7 +28,7 @@ export function installAppMenu(): void {
       ]
     },
     {
-      label: 'Edit',
+      label: t('Edit'),
       submenu: [
         { role: 'undo' },
         { role: 'redo' },
@@ -39,7 +40,7 @@ export function installAppMenu(): void {
       ]
     },
     {
-      label: 'Window',
+      label: t('Window'),
       submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
     }
   ]

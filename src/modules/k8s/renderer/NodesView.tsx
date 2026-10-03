@@ -6,6 +6,7 @@ import type { MapData, MapPod, MapTone } from '../shared/map'
 import { ALLOC_BAD, ALLOC_WARN, summarizeNodes, type NodeView } from '../shared/nodes'
 import { formatCpu, formatMemory } from '../shared/resources'
 import { WORKLOAD_KIND_ID } from '../shared/traffic'
+import { formatNumber, t, tn } from '../../registry/renderer-kit'
 import type { MapRef } from './mapModel'
 
 /**
@@ -70,16 +71,16 @@ export function NodesView({
   }, [summary, sort, query])
 
   const totals = useMemo(() => {
-    const t = { cpu: 0, cpuCap: 0, mem: 0, memCap: 0, ready: 0, cordoned: 0 }
+    const sum = { cpu: 0, cpuCap: 0, mem: 0, memCap: 0, ready: 0, cordoned: 0 }
     for (const n of summary.nodes) {
-      t.cpu += n.requested.cpu
-      t.cpuCap += n.info.allocatable.cpu
-      t.mem += n.requested.memory
-      t.memCap += n.info.allocatable.memory
-      if (n.info.ready) t.ready++
-      if (n.info.unschedulable) t.cordoned++
+      sum.cpu += n.requested.cpu
+      sum.cpuCap += n.info.allocatable.cpu
+      sum.mem += n.requested.memory
+      sum.memCap += n.info.allocatable.memory
+      if (n.info.ready) sum.ready++
+      if (n.info.unschedulable) sum.cordoned++
     }
-    return t
+    return sum
   }, [summary])
 
   const risksByNode = useMemo(() => {
@@ -91,7 +92,7 @@ export function NodesView({
   if (!data.nodeList) {
     return (
       <div className="flex flex-1 items-center justify-center text-xs text-faint">
-        Node details are not available — your account may not be allowed to list nodes.
+        {t('Node details are not available — your account may not be allowed to list nodes.')}
       </div>
     )
   }
@@ -100,24 +101,31 @@ export function NodesView({
     <div className="flex min-h-0 flex-1 flex-col" data-testid="k8s-nodes">
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-line px-3 py-2 text-xs">
         <span className="font-medium text-fg" data-testid="k8s-nodes-summary">
-          {summary.nodes.length} node{summary.nodes.length === 1 ? '' : 's'} · {totals.ready} ready
-          {totals.cordoned ? ` · ${totals.cordoned} cordoned` : ''}
+          {tn(summary.nodes.length, '{n} node', '{n} nodes')} ·{' '}
+          {t('{n} ready', { n: formatNumber(totals.ready) })}
+          {totals.cordoned ? ` · ${t('{n} cordoned', { n: formatNumber(totals.cordoned) })}` : ''}
         </span>
         <span className="text-faint tabular-nums">
-          CPU requested {formatCpu(totals.cpu)} / {formatCpu(totals.cpuCap)} (
-          {Math.round(ratio(totals.cpu, totals.cpuCap) * 100)}%)
+          {t('CPU requested {used} / {total} ({percent})', {
+            used: formatCpu(totals.cpu),
+            total: formatCpu(totals.cpuCap),
+            percent: `${Math.round(ratio(totals.cpu, totals.cpuCap) * 100)}%`
+          })}
         </span>
         <span className="text-faint tabular-nums">
-          Memory requested {formatMemory(totals.mem)} / {formatMemory(totals.memCap)} (
-          {Math.round(ratio(totals.mem, totals.memCap) * 100)}%)
+          {t('Memory requested {used} / {total} ({percent})', {
+            used: formatMemory(totals.mem),
+            total: formatMemory(totals.memCap),
+            percent: `${Math.round(ratio(totals.mem, totals.memCap) * 100)}%`
+          })}
         </span>
         <div className="flex-1" />
         <div className="flex h-7 w-48 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent">
           <Search size={12} className="text-faint" />
           <input
             type="search"
-            placeholder="Filter nodes…"
-            aria-label="Filter nodes"
+            placeholder={t('Filter nodes…')}
+            aria-label={t('Filter nodes')}
             data-testid="k8s-nodes-filter"
             className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint"
             value={query}
@@ -127,7 +135,7 @@ export function NodesView({
           />
         </div>
         <label className="flex h-7 items-center gap-1 rounded-md border border-line pl-2 text-muted">
-          <span className="text-faint">Sort</span>
+          <span className="text-faint">{t('Sort')}</span>
           <select
             data-testid="k8s-nodes-sort"
             className="h-full cursor-pointer bg-transparent pr-1 font-medium text-fg outline-none"
@@ -136,11 +144,11 @@ export function NodesView({
               setSort(e.target.value as Sort)
             }}
           >
-            <option value="problems">problems first</option>
-            <option value="cpu">CPU requested</option>
-            <option value="memory">memory requested</option>
-            <option value="pods">pod count</option>
-            <option value="name">name</option>
+            <option value="problems">{t('problems first')}</option>
+            <option value="cpu">{t('CPU requested')}</option>
+            <option value="memory">{t('memory requested')}</option>
+            <option value="pods">{t('pod count')}</option>
+            <option value="name">{t('name')}</option>
           </select>
         </label>
       </div>
@@ -157,9 +165,11 @@ export function NodesView({
           >
             {risksOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             <AlertTriangle size={13} />
-            {summary.risks.length} workload{summary.risks.length === 1 ? ' has' : 's have'} every
-            replica on a single node — losing that node takes{' '}
-            {summary.risks.length === 1 ? 'it' : 'them'} down
+            {tn(
+              summary.risks.length,
+              '{n} workload has every replica on a single node — losing that node takes it down',
+              '{n} workloads have every replica on a single node — losing that node takes them down'
+            )}
           </button>
           {risksOpen && (
             <div className="mt-1 flex flex-col pl-6">
@@ -178,12 +188,13 @@ export function NodesView({
                     {r.ns}/{r.name}
                   </span>
                   <span className="text-faint">
-                    {r.kind} · {r.replicas} replicas on {r.node}
+                    {r.kind} ·{' '}
+                    {t('{n} replicas on {node}', { n: formatNumber(r.replicas), node: r.node })}
                   </span>
                 </button>
               ))}
               <p className="mt-1 text-faint">
-                Add a podAntiAffinity or topologySpreadConstraints rule to spread them out.
+                {t('Add a podAntiAffinity or topologySpreadConstraints rule to spread them out.')}
               </p>
             </div>
           )}
@@ -195,7 +206,11 @@ export function NodesView({
           data-testid="k8s-nodes-unscheduled"
         >
           <Pill tone="warn">
-            {`${summary.unscheduled.length} pod${summary.unscheduled.length === 1 ? '' : 's'} waiting for a node`}
+            {tn(
+              summary.unscheduled.length,
+              '{n} pod waiting for a node',
+              '{n} pods waiting for a node'
+            )}
           </Pill>
           {summary.unscheduled.slice(0, 8).map((p) => (
             <button
@@ -213,7 +228,9 @@ export function NodesView({
       )}
       <div className="min-h-0 flex-1 overflow-auto bg-canvas p-3">
         {list.length === 0 ? (
-          <p className="p-6 text-center text-xs text-faint">No node matches “{query}”.</p>
+          <p className="p-6 text-center text-xs text-faint">
+            {t('No node matches “{query}”.', { query })}
+          </p>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(330px,1fr))] gap-3">
             {list.map((n) => (
@@ -266,7 +283,7 @@ function NodeCard({
             <button
               type="button"
               className="min-w-0 truncate text-left text-[13px] font-semibold text-fg hover:text-accent"
-              title={`Open ${info.name}`}
+              title={t('Open {name}', { name: info.name })}
               onClick={() => {
                 onOpen({ kind: 'nodes', name: info.name })
               }}
@@ -281,7 +298,7 @@ function NodeCard({
                 {r}
               </span>
             ))}
-            {info.unschedulable && <Pill tone="warn">cordoned</Pill>}
+            {info.unschedulable && <Pill tone="warn">{t('cordoned')}</Pill>}
           </div>
           <div className="truncate text-[11px] text-faint">
             {[info.zone, info.instance, info.kubelet].filter(Boolean).join(' · ') || '—'}
@@ -306,7 +323,7 @@ function NodeCard({
         testId="k8s-node-cpu"
       />
       <AllocBar
-        label="Memory"
+        label={t('Memory')}
         requested={node.requested.memory}
         used={info.usage?.memory ?? null}
         capacity={info.allocatable.memory}
@@ -315,7 +332,7 @@ function NodeCard({
       />
       <div>
         <div className="mb-1 flex justify-between text-[11px]">
-          <span className="text-muted">Pods</span>
+          <span className="text-muted">{t('Pods')}</span>
           <span className="text-fg tabular-nums">
             {node.active} / {info.allocatable.pods || '—'}
           </span>
@@ -327,7 +344,7 @@ function NodeCard({
                 key={`${p.ns}/${p.name}`}
                 type="button"
                 aria-label={`${p.ns}/${p.name}`}
-                title={`${p.ns}/${p.name} · ${p.status}${p.restarts ? ` · ${p.restarts} restarts` : ''}`}
+                title={`${p.ns}/${p.name} · ${p.status}${p.restarts ? ` · ${tn(p.restarts, '{n} restart', '{n} restarts')}` : ''}`}
                 data-testid="k8s-node-pod"
                 className={cx(
                   'size-2.5 rounded-[3px] transition-transform hover:scale-150',
@@ -341,26 +358,26 @@ function NodeCard({
             ))}
           </div>
         ) : (
-          <p className="text-[11px] text-faint">No pods.</p>
+          <p className="text-[11px] text-faint">{t('No pods.')}</p>
         )}
       </div>
       {info.taints.length > 0 && (
         <div className="flex flex-wrap gap-1" data-testid="k8s-node-taints">
-          {info.taints.map((t) => (
+          {info.taints.map((taint) => (
             <span
-              key={`${t.key}:${t.effect}`}
+              key={`${taint.key}:${taint.effect}`}
               className="rounded border border-line px-1 font-mono text-[10.5px] text-muted"
-              title="Taint — only pods that tolerate it are scheduled here"
+              title={t('Taint — only pods that tolerate it are scheduled here')}
             >
-              {t.key}
-              {t.value ? `=${t.value}` : ''}:{t.effect}
+              {taint.key}
+              {taint.value ? `=${taint.value}` : ''}:{taint.effect}
             </span>
           ))}
         </div>
       )}
       {risks.length > 0 && (
         <div className="text-[11px] text-warning" data-testid="k8s-node-risk">
-          All replicas here:{' '}
+          {t('All replicas here:')}{' '}
           {risks.map((r, i) => (
             <span key={`${r.ns}/${r.name}`}>
               {i > 0 && ', '}
@@ -398,9 +415,11 @@ function AllocBar({
       <div className="mb-1 flex justify-between gap-2 text-[11px]">
         <span className="text-muted">{label}</span>
         <span className="truncate text-fg tabular-nums">
-          {format(requested)} / {format(capacity)} requested
+          {t('{used} / {total} requested', { used: format(requested), total: format(capacity) })}
           <span className="text-faint"> ({Math.round(r * 100)}%)</span>
-          {used !== null && <span className="text-faint"> · {format(used)} used</span>}
+          {used !== null && (
+            <span className="text-faint"> · {t('{value} used', { value: format(used) })}</span>
+          )}
         </span>
       </div>
       <div className="relative h-1.5 overflow-hidden rounded-full bg-subtle">
@@ -412,7 +431,7 @@ function AllocBar({
           <div
             className="absolute top-0 h-full w-0.5 bg-fg"
             style={{ left: `calc(${Math.min(1, u) * 100}% - 1px)` }}
-            title={`${format(used ?? 0)} in use`}
+            title={t('{value} in use', { value: format(used ?? 0) })}
           />
         )}
       </div>

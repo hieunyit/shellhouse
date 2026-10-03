@@ -1,7 +1,10 @@
+// Phải là import đầu tiên: đặt ngôn ngữ trước khi module khác tính chuỗi giao diện.
+import './i18n'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { VaultGate } from './components/VaultGate'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { setAppInfo } from './lib/platform'
 import { installTestHooks } from './test-hooks'
 import './styles.css'
@@ -9,6 +12,8 @@ import './styles.css'
 import './stores/appearance'
 import { registerRendererModules, startModules } from '../../modules/registry/renderer-kit'
 import { RENDERER_MODULES } from '../../modules/registry/all-renderer'
+import { preloadTerminal } from './lazy'
+import { applyTestDefaults } from './stores/sidebar-layout'
 
 // Module chính thức (ADR-014): đăng ký trước lần vẽ đầu, trạng thái bật / tắt lấy từ main.
 registerRendererModules(RENDERER_MODULES)
@@ -34,14 +39,23 @@ function loadFonts(): Promise<unknown> {
   ])
 }
 
+// Chunk terminal bắt đầu nạp ngay, song song với chờ font / thông tin app (không chặn lần vẽ đầu):
+// tab local mở lúc khởi động thường đã có xterm sẵn. Lỗi nạp bỏ qua — lazy sẽ thử lại khi mount.
+void preloadTerminal().catch(() => undefined)
+
 void Promise.all([window.shellhouse.getInfo(), loadFonts()]).then(([info]) => {
   setAppInfo(info)
-  if (info.testHooks) installTestHooks()
+  if (info.testHooks) {
+    installTestHooks()
+    applyTestDefaults()
+  }
   createRoot(root).render(
     <StrictMode>
-      <VaultGate>
-        <App />
-      </VaultGate>
+      <ErrorBoundary label="window">
+        <VaultGate>
+          <App />
+        </VaultGate>
+      </ErrorBoundary>
     </StrictMode>
   )
 })

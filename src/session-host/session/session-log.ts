@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs'
 import { dirname } from 'node:path'
 
@@ -78,11 +79,19 @@ export interface SessionLogOptions {
   header: string
 }
 
+/**
+ * Trần dữ liệu chờ ghi xuống đĩa. Đĩa chậm (ổ mạng, USB) hơn output (`cat` file lớn) → không dồn
+ * bộ nhớ vô hạn, cũng không làm chậm terminal: bỏ phần vượt trần và ghi một dòng đánh dấu.
+ */
+export const MAX_PENDING_LOG_BYTES = 8 * 1024 * 1024
+
 /** Ghi toàn bộ output của một phiên ra file (nối thêm nếu file đã có). */
 export class SessionLog {
   private readonly stream: WriteStream
   private readonly stripper: AnsiStripper | null
   private failed = false
+  /** Số byte đã bỏ vì đĩa không theo kịp (ghi dòng đánh dấu khi đĩa theo kịp lại). */
+  private dropped = 0
 
   constructor(
     options: SessionLogOptions,
@@ -93,7 +102,7 @@ export class SessionLog {
     this.stream.on('error', (error) => {
       if (this.failed) return
       this.failed = true
-      this.onError(`Session log stopped: ${error.message}`)
+      this.onError(t('Session log stopped: {error}', { error: error.message }))
     })
     this.stripper = options.stripAnsi ? new AnsiStripper() : null
     this.stream.write(`${options.header}\n`)
@@ -101,10 +110,18 @@ export class SessionLog {
 
   write(data: Uint8Array): void {
     if (this.failed) return
-    if (this.stripper) {
-      const text = this.stripper.push(data)
-      if (text) this.stream.write(text)
-    } else this.stream.write(data)
+    // Vẫn đưa qua bộ lọc ANSI (giữ đúng trạng thái chuỗi ESC bị cắt ngang) dù có thể bỏ kết quả.
+    const out = this.stripper ? this.stripper.push(data) : data
+    if (out.length === 0) return
+    if (this.stream.writableLength > MAX_PENDING_LOG_BYTES) {
+      this.dropped += out.length
+      return
+    }
+    if (this.dropped > 0) {
+      this.stream.write(`\n[… ${this.dropped} bytes not logged: the disk is too slow …]\n`)
+      this.dropped = 0
+    }
+    this.stream.write(out)
   }
 
   close(footer: string): void {

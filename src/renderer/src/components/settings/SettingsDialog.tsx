@@ -11,6 +11,7 @@ import {
   Shield,
   SquareTerminal
 } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { Diagnostics } from '../Diagnostics'
 import { cx, Modal } from '../ui'
 import { AppearanceSection } from './AppearanceSection'
@@ -23,17 +24,18 @@ import { UpdatesSection } from './UpdatesSection'
 import { AboutSection } from './AboutSection'
 import { ModulesSection } from './ModulesSection'
 
+// Tiêu đề là hàm: dịch lúc render, không ở cấp module.
 const SECTIONS = [
-  { id: 'appearance', title: 'Appearance', icon: Palette },
-  { id: 'terminal', title: 'Terminal', icon: SquareTerminal },
-  { id: 'files', title: 'Files', icon: FolderOpen },
-  { id: 'modules', title: 'Modules', icon: Puzzle },
-  { id: 'security', title: 'Security', icon: Shield },
-  { id: 'keys', title: 'SSH keys', icon: KeyRound },
-  { id: 'shortcuts', title: 'Shortcuts', icon: Keyboard },
-  { id: 'updates', title: 'Updates', icon: Download },
-  { id: 'diagnostics', title: 'Diagnostics', icon: Activity },
-  { id: 'about', title: 'About', icon: Info }
+  { id: 'appearance', title: () => t('Appearance'), icon: Palette },
+  { id: 'terminal', title: () => t('Terminal'), icon: SquareTerminal },
+  { id: 'files', title: () => t('Files'), icon: FolderOpen },
+  { id: 'modules', title: () => t('Modules'), icon: Puzzle },
+  { id: 'security', title: () => t('Security'), icon: Shield },
+  { id: 'keys', title: () => t('SSH keys'), icon: KeyRound },
+  { id: 'shortcuts', title: () => t('Shortcuts'), icon: Keyboard },
+  { id: 'updates', title: () => t('Updates'), icon: Download },
+  { id: 'diagnostics', title: () => t('Diagnostics'), icon: Activity },
+  { id: 'about', title: () => t('About'), icon: Info }
 ] as const
 export type SettingsSectionId = (typeof SECTIONS)[number]['id']
 
@@ -47,7 +49,7 @@ export function SettingsDialog({
   const [section, setSection] = useState<SettingsSectionId>(initial)
   return (
     <Modal
-      title="Settings"
+      title={t('Settings')}
       onClose={onClose}
       width="max-w-4xl"
       testId="settings-dialog"
@@ -72,7 +74,7 @@ export function SettingsDialog({
               }}
             >
               <s.icon size={15} />
-              {s.title}
+              {s.title()}
             </button>
           ))}
         </nav>

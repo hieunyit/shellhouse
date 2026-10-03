@@ -1,50 +1,100 @@
-import { useRef, useState, type SyntheticEvent } from 'react'
+import { useEffect, useRef, useState, type SyntheticEvent } from 'react'
 import { ShieldAlert, ShieldQuestion } from 'lucide-react'
+import { t } from '@shared/i18n'
 import type { PromptRequest } from '@shared/stream-protocol'
+import { PasswordInput } from '../components/PasswordInput'
 import { Button, Checkbox, Field, Input, useFocusTrap } from '../components/ui'
+import {
+  dropPending,
+  passwordKey,
+  promptTab,
+  rememberAfterLogin,
+  savedHostForPassword,
+  takeRememberedPassphrase
+} from '../stores/credentials'
+import { useVault } from '../stores/vault'
 import type { ActivePrompt } from './controller'
 
 type Answer = (ok: boolean, answers: string[]) => void
+
+/** Tuỳ chọn ghi nhớ dưới các ô nhập (lưu mật khẩu vào vault / nhớ passphrase trong phiên chạy). */
+interface RememberOption {
+  label: string
+  description: string
+  testId: string
+  onSubmit: (values: string[]) => void
+}
 
 function Fields({
   fields,
   title,
   description,
   submitLabel,
+  remember,
   onAnswer
 }: {
   fields: { prompt: string; echo: boolean }[]
   title: string
   description?: string
   submitLabel: string
+  remember?: RememberOption | null
   onAnswer: Answer
 }): React.JSX.Element {
   const [values, setValues] = useState(() => fields.map(() => ''))
+  const [keep, setKeep] = useState(false)
   const submit = (event: SyntheticEvent): void => {
     event.preventDefault()
+    if (remember && keep && values.some((v) => v !== '')) remember.onSubmit(values)
     onAnswer(true, values)
+  }
+  const change = (i: number, value: string): void => {
+    const next = [...values]
+    next[i] = value
+    setValues(next)
   }
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
-      <h2 className="text-[15px] font-semibold">{title}</h2>
-      {description && <p className="text-xs whitespace-pre-wrap text-muted">{description}</p>}
+      <h2 className="text-[15px] font-semibold break-all">{title}</h2>
+      {description && (
+        <p className="text-xs break-all whitespace-pre-wrap text-muted">{description}</p>
+      )}
       {fields.map((field, i) => (
         <Field key={i} label={field.prompt}>
-          <Input
-            type={field.echo ? 'text' : 'password'}
-            autoFocus={i === 0}
-            autoComplete="off"
-            spellCheck={false}
-            data-testid="prompt-input"
-            value={values[i] ?? ''}
-            onChange={(e) => {
-              const next = [...values]
-              next[i] = e.target.value
-              setValues(next)
-            }}
-          />
+          {field.echo ? (
+            <Input
+              type="text"
+              autoFocus={i === 0}
+              autoComplete="off"
+              spellCheck={false}
+              data-testid="prompt-input"
+              value={values[i] ?? ''}
+              onChange={(e) => {
+                change(i, e.target.value)
+              }}
+            />
+          ) : (
+            <PasswordInput
+              autoFocus={i === 0}
+              data-testid="prompt-input"
+              value={values[i] ?? ''}
+              onChange={(e) => {
+                change(i, e.target.value)
+              }}
+            />
+          )}
         </Field>
       ))}
+      {remember && (
+        <Checkbox
+          data-testid={remember.testId}
+          checked={keep}
+          onChange={(e) => {
+            setKeep(e.target.checked)
+          }}
+          label={remember.label}
+          description={remember.description}
+        />
+      )}
       <div className="flex justify-end gap-2 pt-1">
         <Button
           data-testid="prompt-cancel"
@@ -52,7 +102,7 @@ function Fields({
             onAnswer(false, [])
           }}
         >
-          Cancel
+          {t('Cancel')}
         </Button>
         <Button type="submit" variant="primary" data-testid="prompt-submit">
           {submitLabel}
@@ -78,21 +128,28 @@ function HostKey({
       <div className="flex flex-col gap-3" data-testid="hostkey-changed">
         <div className="flex items-center gap-2 text-danger">
           <ShieldAlert size={20} />
-          <h2 className="text-[15px] font-semibold">The host key for {where} has changed</h2>
+          <h2 className="text-[15px] font-semibold">
+            {t('The host key for {host} has changed', { host: where })}
+          </h2>
         </div>
         <p className="text-xs leading-relaxed text-muted">
-          Someone could be intercepting this connection (a man-in-the-middle attack), or the server
-          was reinstalled. <strong className="text-fg">Do not continue</strong> until you have
-          verified the new fingerprint with the server administrator.
+          {t(
+            'Someone could be intercepting this connection (a man-in-the-middle attack), or the server was reinstalled.'
+          )}{' '}
+          <strong className="text-fg">
+            {t(
+              'Do not continue until you have verified the new fingerprint with the server administrator.'
+            )}
+          </strong>
         </p>
         <div className="rounded-md border border-danger/30 bg-danger-soft p-3 font-mono text-xs leading-relaxed break-all">
           {changedFrom.map((k) => (
             <div key={k.fingerprint} className="text-muted">
-              Previous: {k.keyType} {k.fingerprint}
+              {t('Previous:')} {k.keyType} {k.fingerprint}
             </div>
           ))}
           <div className="text-danger">
-            New: {key.keyType} {key.fingerprint}
+            {t('New:')} {key.keyType} {key.fingerprint}
           </div>
         </div>
         <Checkbox
@@ -101,7 +158,7 @@ function HostKey({
           onChange={(e) => {
             setConfirmed(e.target.checked)
           }}
-          label="I have verified the new fingerprint with the server administrator."
+          label={t('I have verified the new fingerprint with the server administrator.')}
         />
         <div className="flex justify-end gap-2 pt-1">
           <Button
@@ -112,7 +169,7 @@ function HostKey({
               onAnswer(false, [])
             }}
           >
-            Cancel connection
+            {t('Cancel connection')}
           </Button>
           <Button
             variant="danger"
@@ -122,7 +179,7 @@ function HostKey({
               onAnswer(true, [])
             }}
           >
-            Replace key and connect
+            {t('Replace key and connect')}
           </Button>
         </div>
       </div>
@@ -133,11 +190,12 @@ function HostKey({
     <div className="flex flex-col gap-3" data-testid="hostkey-new">
       <div className="flex items-center gap-2">
         <ShieldQuestion size={20} className="text-accent" />
-        <h2 className="text-[15px] font-semibold">New host: {where}</h2>
+        <h2 className="text-[15px] font-semibold">{t('New host: {host}', { host: where })}</h2>
       </div>
       <p className="text-xs text-muted">
-        This is the first connection to this host. Compare the fingerprint with the one from the
-        administrator before trusting it.
+        {t(
+          'This is the first connection to this host. Compare the fingerprint with the one from the administrator before trusting it.'
+        )}
       </p>
       <div className="flex gap-4">
         <pre className="rounded-md border border-line bg-subtle p-2 font-mono text-xs leading-tight text-fg">
@@ -157,7 +215,7 @@ function HostKey({
             onAnswer(false, [])
           }}
         >
-          Cancel
+          {t('Cancel')}
         </Button>
         <Button
           autoFocus
@@ -167,7 +225,7 @@ function HostKey({
             onAnswer(true, [])
           }}
         >
-          Trust and connect
+          {t('Trust and connect')}
         </Button>
       </div>
     </div>
@@ -175,45 +233,142 @@ function HostKey({
 }
 
 function Body({
-  request,
+  prompt,
   onAnswer
 }: {
-  request: PromptRequest
+  prompt: ActivePrompt
   onAnswer: Answer
-}): React.JSX.Element {
+}): React.JSX.Element | null {
+  const request = prompt.request
   switch (request.kind) {
     case 'hostkey':
       return <HostKey request={request} onAnswer={onAnswer} />
     case 'password':
-      return (
-        <Fields
-          title={`Password for ${request.username}@${request.host}`}
-          fields={[{ prompt: 'Password', echo: false }]}
-          submitLabel="Log in"
-          onAnswer={onAnswer}
-        />
-      )
+      return <PasswordPrompt prompt={prompt} request={request} onAnswer={onAnswer} />
     case 'passphrase':
-      return (
-        <Fields
-          title="Key passphrase"
-          description={request.keyPath}
-          fields={[{ prompt: 'Passphrase', echo: false }]}
-          submitLabel="Unlock key"
-          onAnswer={onAnswer}
-        />
-      )
+      return <PassphrasePrompt prompt={prompt} request={request} onAnswer={onAnswer} />
     case 'keyboard-interactive':
       return (
         <Fields
-          title={request.name || 'Authentication'}
+          title={request.name || t('Authentication')}
           {...(request.instructions ? { description: request.instructions } : {})}
           fields={request.fields}
-          submitLabel="Continue"
+          submitLabel={t('Continue')}
           onAnswer={onAnswer}
         />
       )
   }
+}
+
+/** Mật khẩu SSH: host đã lưu + vault mở → cho lưu vào vault (chỉ ghi sau khi đăng nhập được). */
+function PasswordPrompt({
+  prompt,
+  request,
+  onAnswer
+}: {
+  prompt: ActivePrompt
+  request: Extract<PromptRequest, { kind: 'password' }>
+  onAnswer: Answer
+}): React.JSX.Element {
+  const unlocked = useVault((s) => s.state === 'unlocked')
+  const [target] = useState(() => {
+    const tabId = promptTab(prompt)
+    const key = passwordKey(request)
+    // Hỏi lại cùng tài khoản trong cùng tab → mật khẩu vừa gõ sai: không lưu nó.
+    if (tabId) dropPending(tabId, 'password', key)
+    const host = tabId ? savedHostForPassword(request, tabId) : null
+    return tabId && host ? { tabId, key, host } : null
+  })
+  const remember: RememberOption | null =
+    target && unlocked
+      ? {
+          label: t('Save password in vault'),
+          description: target.host.hasPassword
+            ? t('Replaces the saved password of {name} once you are signed in.', {
+                name: target.host.label
+              })
+            : t(
+                'Saved for {name} once you are signed in. Next time you connect without a prompt.',
+                {
+                  name: target.host.label
+                }
+              ),
+          testId: 'prompt-save-password',
+          onSubmit: ([password]) => {
+            if (!password) return
+            rememberAfterLogin({
+              kind: 'password',
+              tabId: target.tabId,
+              key: target.key,
+              hostId: target.host.id,
+              label: target.host.label,
+              secret: password
+            })
+          }
+        }
+      : null
+  return (
+    <Fields
+      title={t('Password for {user}@{host}', { user: request.username, host: request.host })}
+      fields={[{ prompt: t('Password'), echo: false }]}
+      submitLabel={t('Log in')}
+      remember={remember}
+      onAnswer={onAnswer}
+    />
+  )
+}
+
+/** Passphrase của key: nhớ trong phiên chạy (bộ nhớ, tới khi thoát app / khoá vault). */
+function PassphrasePrompt({
+  prompt,
+  request,
+  onAnswer
+}: {
+  prompt: ActivePrompt
+  request: Extract<PromptRequest, { kind: 'passphrase' }>
+  onAnswer: Answer
+}): React.JSX.Element | null {
+  const [tabId] = useState(() => {
+    const id = promptTab(prompt)
+    if (id) dropPending(id, 'passphrase', request.keyPath)
+    return id
+  })
+  // Đã nhớ passphrase cho key này → tự trả lời (bị hỏi lại ngay = sai → hiện hộp như thường).
+  const [auto] = useState(() => takeRememberedPassphrase(request.keyPath, tabId))
+  useEffect(() => {
+    if (auto !== null) onAnswer(true, [auto])
+    // Chỉ một lần cho mỗi prompt (component được gắn key = id prompt).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  if (auto !== null) return null
+  const remember: RememberOption | null = tabId
+    ? {
+        label: t('Remember for this session'),
+        description: t('Kept in memory until you quit Shellhouse or lock the vault.'),
+        testId: 'prompt-remember-passphrase',
+        onSubmit: ([passphrase]) => {
+          if (!passphrase) return
+          rememberAfterLogin({
+            kind: 'passphrase',
+            tabId,
+            key: request.keyPath,
+            hostId: null,
+            label: request.keyPath,
+            secret: passphrase
+          })
+        }
+      }
+    : null
+  return (
+    <Fields
+      title={t('Key passphrase')}
+      description={request.keyPath}
+      fields={[{ prompt: t('Passphrase'), echo: false }]}
+      submitLabel={t('Unlock key')}
+      remember={remember}
+      onAnswer={onAnswer}
+    />
+  )
 }
 
 /** Hộp thoại phủ lên tab terminal. Esc = huỷ. */
@@ -227,10 +382,10 @@ export function PromptDialog({
   const ref = useRef<HTMLDivElement>(null)
   useFocusTrap(ref)
   const labels: Record<string, string> = {
-    hostkey: 'Verify host key',
-    password: 'Password',
-    passphrase: 'Key passphrase',
-    'keyboard-interactive': 'Authentication'
+    hostkey: t('Verify host key'),
+    password: t('Password'),
+    passphrase: t('Key passphrase'),
+    'keyboard-interactive': t('Authentication')
   }
   return (
     <div
@@ -241,7 +396,7 @@ export function PromptDialog({
       ref={ref}
       role="dialog"
       aria-modal="true"
-      aria-label={labels[prompt.request.kind] ?? 'Connection prompt'}
+      aria-label={labels[prompt.request.kind] ?? t('Connection prompt')}
       data-testid="prompt-dialog"
       data-prompt-kind={prompt.request.kind}
       onKeyDown={(e) => {
@@ -250,7 +405,7 @@ export function PromptDialog({
     >
       <div className="shadow-elevated animate-dialog-in w-full max-w-md rounded-xl border border-line bg-elevated p-5">
         {/* key = id: mỗi prompt mới có state (ô nhập, checkbox) mới */}
-        <Body key={prompt.id} request={prompt.request} onAnswer={onAnswer} />
+        <Body key={prompt.id} prompt={prompt} onAnswer={onAnswer} />
       </div>
     </div>
   )

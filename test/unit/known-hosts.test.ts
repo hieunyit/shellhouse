@@ -113,4 +113,33 @@ describe('KnownHosts', () => {
     kh.trust('a.example', 22, rotated)
     expect(kh.check('a.example', 22, rotated)).toEqual({ status: 'match' })
   })
+
+  it('@revoked thắng cả key đã tin trong kho của app', async () => {
+    const dir = tempDir()
+    const file = join(dir, 'known_hosts')
+    const key = fakeKey('ssh-ed25519')
+    writeFileSync(file, '')
+    const kh = await store([file])
+    kh.trust('a.example', 22, key)
+    expect(kh.check('a.example', 22, key)).toEqual({ status: 'match' })
+    writeFileSync(file, `@revoked * ssh-ed25519 ${key.toString('base64')}\n`)
+    expect(kh.check('a.example', 22, key)).toEqual({ status: 'revoked' })
+  })
+
+  it('file OpenSSH đổi (mtime / cỡ) thì đọc lại', async () => {
+    const dir = tempDir()
+    const file = join(dir, 'known_hosts')
+    const first = fakeKey('ssh-ed25519')
+    const second = fakeKey('ecdsa-sha2-nistp256')
+    writeFileSync(file, `a.example ssh-ed25519 ${first.toString('base64')}\n`)
+    const kh = await store([file])
+    expect(kh.knownKeyTypes('a.example', 22)).toEqual(['ssh-ed25519'])
+    writeFileSync(
+      file,
+      `a.example ssh-ed25519 ${first.toString('base64')}\n` +
+        `a.example ecdsa-sha2-nistp256 ${second.toString('base64')}\n`
+    )
+    expect(kh.knownKeyTypes('a.example', 22)).toEqual(['ssh-ed25519', 'ecdsa-sha2-nistp256'])
+    expect(kh.check('a.example', 22, second)).toEqual({ status: 'match' })
+  })
 })

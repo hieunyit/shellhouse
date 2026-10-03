@@ -2,11 +2,11 @@ import type { ZodType } from 'zod'
 import type { AppSettings, ModuleEntry, SettingsPatch } from '@shared/settings'
 import type { Db } from '../../main/store/db'
 import type { Vault } from '../../main/vault/vault'
-import { readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join } from 'node:path'
+import { readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { createModuleDb, migrateModule, removeModuleData } from './main-db'
-import { expandHome, localPathAllowed } from './local-paths'
+import { expandHome, localPathAllowed, sensitiveTarget } from './local-paths'
 import type { MainModule, MainModuleApi, MainModuleContext, ModuleLog } from './main-types'
 import { tablePrefix, type ModuleManifest, type ModuleState } from './types'
 
@@ -37,9 +37,13 @@ export interface MainRegistryDeps {
   }): Promise<string[]>
   /** Windows: bản phân phối WSL (không khởi động distro nào). */
   listWslDistros?(): Promise<{ name: string; running: boolean; version: number }[]>
+  /** File tạm "sửa trong editor" do main cấp (files:prepareEdit) — module chỉ ghi được vào đó. */
+  ownsEditFile?(path: string): boolean
   /** Cho test: home / biến môi trường khi kiểm quyền đọc file. */
   home?: string
   env?: NodeJS.ProcessEnv
+  /** userData của app — không module nào đọc / ghi được vào đó (kể cả qua symlink). */
+  appData?: string
 }
 
 interface Active {
@@ -76,6 +80,14 @@ export class MainModuleRegistry {
       if (!/^[a-z0-9-]{1,40}$/.test(m.manifest.id))
         throw new Error(`Invalid module id: ${m.manifest.id}`)
       if (this.modules.has(m.manifest.id)) throw new Error(`Duplicate module: ${m.manifest.id}`)
+      // Tiền tố bảng không được lồng nhau ("a_" và "a_b_" của module a-b): module a sẽ đọc được,
+      // và "Remove data" của a sẽ xoá luôn, bảng của a-b.
+      const prefix = tablePrefix(m.manifest.id)
+      for (const other of this.modules.keys()) {
+        const otherPrefix = tablePrefix(other)
+        if (prefix.startsWith(otherPrefix) || otherPrefix.startsWith(prefix))
+          throw new Error(`Module ids ${other} and ${m.manifest.id} have overlapping table names`)
+      }
       this.modules.set(m.manifest.id, m)
     }
   }
@@ -315,11 +327,13 @@ export class MainModuleRegistry {
         }
       },
       home: this.deps.home ?? homedir(),
+      ownsEditFile: (path) => this.deps.ownsEditFile?.(path) ?? false,
       readFile: async (path) => {
         const ctx = {
           home: this.deps.home ?? homedir(),
           env: this.deps.env ?? process.env,
-          platform: process.platform
+          platform: process.platform,
+          ...(this.deps.appData ? { appData: this.deps.appData } : {})
         }
         if (!localPathAllowed(module.manifest, 'read-file', path, ctx))
           throw new Error(
@@ -331,13 +345,17 @@ export class MainModuleRegistry {
         const ctx = {
           home: this.deps.home ?? homedir(),
           env: this.deps.env ?? process.env,
-          platform: process.platform
+          platform: process.platform,
+          ...(this.deps.appData ? { appData: this.deps.appData } : {})
         }
         if (!localPathAllowed(module.manifest, 'write-file', path, ctx))
           throw new Error(
             `Module ${id} is not allowed to change ${path} (not declared in its manifest)`
           )
-        const target = expandHome(path, ctx.home)
+        // ~/.kube/config thường là symlink (dotfiles…): ghi vào file thật, đổi tên trong thư mục
+        // của file thật — rename đè lên symlink sẽ biến nó thành file thường.
+        const declared = expandHome(path, ctx.home)
+        const target = await realpath(declared).catch(() => declared)
         const mode = await stat(target).then(
           (s) => s.mode & 0o777,
           () => 0o600
@@ -355,7 +373,8 @@ export class MainModuleRegistry {
         const ctx = {
           home: this.deps.home ?? homedir(),
           env: this.deps.env ?? process.env,
-          platform: process.platform
+          platform: process.platform,
+          ...(this.deps.appData ? { appData: this.deps.appData } : {})
         }
         const dir = expandHome(path, ctx.home)
         const entries = await readdir(dir, { withFileTypes: true })
@@ -381,6 +400,12 @@ export class MainModuleRegistry {
           throw new Error(`Module ${id} did not declare the "pick-file" permission`)
         if (!this.deps.showOpenDialog) return []
         const paths = await this.deps.showOpenDialog(options)
+        const pathCtx = {
+          home: this.deps.home ?? homedir(),
+          env: this.deps.env ?? process.env,
+          platform: process.platform,
+          ...(this.deps.appData ? { appData: this.deps.appData } : {})
+        }
         const MAX = 4 * 1024 * 1024
         return Promise.all(
           paths.map(async (path) => {
@@ -391,7 +416,13 @@ export class MainModuleRegistry {
               name: basename(path),
               content: await readFile(path, 'utf8'),
               readReferenced: async (ref: string) => {
-                const target = isAbsolute(ref) ? ref : join(dirname(path), ref)
+                const target = resolve(dirname(path), expandHome(ref, pathCtx.home))
+                // File chọn có thể đến từ người khác (kubeconfig tải về): cho đọc file tham chiếu
+                // ở đâu cũng được (kubeadm /etc/kubernetes/pki, ~/certs, ../certs/ca.crt) TRỪ vùng
+                // bí mật — xét cả đích thật của symlink — để nó không trỏ tokenFile vào
+                // ~/.ssh/id_rsa rồi gửi đi như token.
+                if (sensitiveTarget(target, pathCtx))
+                  throw new Error(`${ref} points into a protected folder (keys, credentials)`)
                 const s = await stat(target)
                 if (!s.isFile() || s.size > 1024 * 1024)
                   throw new Error(`${ref} is not a small file`)

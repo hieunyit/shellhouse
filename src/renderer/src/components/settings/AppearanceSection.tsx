@@ -1,23 +1,30 @@
 import { Monitor, Moon, Sun } from 'lucide-react'
 import { useSettings } from '../../stores/settings'
-import { Checkbox, cx, SectionTitle, Segmented } from '../ui'
+import { LANGUAGES, t } from '@shared/i18n'
+import { systemLanguage } from '../../lib/platform'
+import { Button, Checkbox, cx, SectionTitle, Segmented } from '../ui'
 
-const OPTIONS = [
-  { value: 'system', label: 'System', icon: Monitor, hint: 'Follow the operating system' },
-  { value: 'light', label: 'Light', icon: Sun, hint: 'Always light' },
-  { value: 'dark', label: 'Dark', icon: Moon, hint: 'Always dark' }
-] as const
+// Hàm (không phải hằng): dịch lúc render.
+function themeOptions() {
+  return [
+    { value: 'system', label: t('System'), icon: Monitor, hint: t('Follow the operating system') },
+    { value: 'light', label: t('Light'), icon: Sun, hint: t('Always light') },
+    { value: 'dark', label: t('Dark'), icon: Moon, hint: t('Always dark') }
+  ] as const
+}
 
 export function AppearanceSection(): React.JSX.Element {
   const { settings, update } = useSettings()
   const current = settings.appearance.theme
   return (
     <div data-testid="settings-appearance">
-      <SectionTitle description="The terminal color theme follows this too when set to “Match app”.">
-        Theme
+      <SectionTitle
+        description={t('The terminal color theme follows this too when set to “Match app”.')}
+      >
+        {t('Theme')}
       </SectionTitle>
       <div className="grid grid-cols-3 gap-3" role="radiogroup">
-        {OPTIONS.map((o) => (
+        {themeOptions().map((o) => (
           <button
             key={o.value}
             type="button"
@@ -39,37 +46,84 @@ export function AppearanceSection(): React.JSX.Element {
         ))}
       </div>
       <div className="mt-6">
-        <SectionTitle description="Shortcuts at the top of the sidebar. The hosts stay in their groups either way.">
-          Sidebar
+        <SectionTitle
+          description={t(
+            'Shortcuts at the top of the sidebar. The hosts stay in their groups either way.'
+          )}
+        >
+          {t('Sidebar')}
         </SectionTitle>
         <div className="flex flex-col gap-3">
           <Checkbox
-            label="Show Favorites"
+            label={t('Show Favorites')}
             checked={settings.appearance.showFavorites}
             data-testid="setting-show-favorites"
             onChange={(e) => void update({ appearance: { showFavorites: e.target.checked } })}
           />
           <Checkbox
-            label="Show Recent (last 5 hosts you connected to)"
+            label={t('Show Recent (last 5 hosts you connected to)')}
             checked={settings.appearance.showRecent}
             data-testid="setting-show-recent"
             onChange={(e) => void update({ appearance: { showRecent: e.target.checked } })}
           />
         </div>
       </div>
+      <LanguagePicker />
       <div>
-        <h3 className="text-[13px] font-semibold text-fg">When Shellhouse starts</h3>
-        <p className="mt-0.5 mb-2 text-xs text-muted">What the first tab shows.</p>
+        <h3 className="text-[13px] font-semibold text-fg">{t('When Shellhouse starts')}</h3>
+        <p className="mt-0.5 mb-2 text-xs text-muted">{t('What the first tab shows.')}</p>
         <Segmented
           value={settings.appearance.startup ?? 'home'}
           testIdPrefix="setting-startup"
           options={[
-            { value: 'home', label: 'Home' },
-            { value: 'terminal', label: 'Local terminal' }
+            { value: 'home', label: t('Home') },
+            { value: 'terminal', label: t('Local terminal') }
           ]}
           onChange={(startup) => void update({ appearance: { startup } })}
         />
       </div>
+    </div>
+  )
+}
+
+/**
+ * Ngôn ngữ giao diện. Chuỗi được dịch lúc vẽ và nhiều chỗ tính sẵn khi nạp, nên đổi ngôn ngữ cần
+ * khởi động lại app (như VS Code) — không cố vẽ lại nửa vời.
+ */
+function LanguagePicker(): React.JSX.Element {
+  const { settings, update } = useSettings()
+  const value = settings.appearance.language
+  const systemName = LANGUAGES.find((l) => l.value === systemLanguage())?.label ?? 'English'
+  const effective = value === 'system' ? systemLanguage() : value
+  const pending = effective !== window.shellhouse.language
+  return (
+    <div>
+      <h3 className="text-[13px] font-semibold text-fg">{t('Language')}</h3>
+      <p className="mt-0.5 mb-2 text-xs text-muted">
+        {t('Dates, times and numbers follow the language you pick.')}
+      </p>
+      <Segmented
+        value={value}
+        testIdPrefix="setting-language"
+        options={[
+          { value: 'system', label: t('System ({name})', { name: systemName }) },
+          ...LANGUAGES.map((l) => ({ value: l.value, label: l.label }))
+        ]}
+        onChange={(language) => void update({ appearance: { language } })}
+      />
+      {pending && (
+        <div
+          className="mt-2 flex items-center gap-3 rounded-lg border border-line bg-subtle px-3 py-2 text-xs text-muted"
+          data-testid="language-restart"
+        >
+          <span className="flex-1">
+            {t('Restart Shellhouse to switch the language. Open sessions will be closed.')}
+          </span>
+          <Button size="sm" variant="primary" onClick={() => void window.shellhouse.relaunch()}>
+            {t('Restart now')}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

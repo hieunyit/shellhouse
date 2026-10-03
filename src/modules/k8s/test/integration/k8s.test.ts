@@ -1,6 +1,7 @@
 import { connect, type Socket } from 'node:net'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ServerMessage } from '@shared/stream-protocol'
 import { HostModuleRegistry } from '../../../registry/session-host'
@@ -62,7 +63,9 @@ function service(config: ResolvedClusterConfig) {
       }),
     spawn: noSpawn,
     emit: (event, data) => events.push({ event, data }),
-    log: () => undefined
+    log: () => undefined,
+    // Như main: chỉ file trong thư mục tạm của test (main: thư mục remote-edit của app).
+    checkEditFile: (path) => Promise.resolve(path.startsWith(tmpdir()))
   })
   cleanups.push(() => {
     s.dispose()
@@ -87,7 +90,8 @@ describe('Kubernetes qua API server giả (HTTPS, chứng chỉ test)', () => {
     const good = service(cluster(server))
     expect(await good.run({ op: 'connect', ref, readOnly: false })).toEqual({
       version: 'v1.31.2',
-      namespace: 'shop'
+      namespace: 'shop',
+      readOnly: false
     })
     const noCa = service(cluster(server, { ca: undefined }))
     await expect(noCa.run({ op: 'connect', ref, readOnly: false })).rejects.toThrow(/certificate/i)

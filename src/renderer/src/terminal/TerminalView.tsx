@@ -13,13 +13,16 @@ import { hostAddress, useHosts } from '../stores/hosts'
 import { useTabStatus } from '../stores/tab-status'
 import { useBroadcast } from './broadcast'
 import { useTerminalMenu } from './TerminalMenu'
-import { useTabs, type TerminalTarget } from '../stores/tabs'
+import { setCloseGuard, useTabs, type TerminalTarget } from '../stores/tabs'
+import { useSettings } from '../stores/settings'
 import { TerminalController, type ActivePrompt } from './controller'
 import { DeployKeyDialog, ForwardsPanel, SftpPanel } from '../lazy'
 import type { SftpOp, TransferStatus } from '@shared/sftp'
 import type { ServerStats } from '@shared/server-stats'
 import { PromptDialog } from './PromptDialog'
-import { ServerStatsBar } from './ServerStatsBar'
+import { ServerStatsBar, ServerStatsPlaceholder } from './ServerStatsBar'
+import { t, tn } from '@shared/i18n'
+import { formatNumber, formatTime } from '@shared/i18n/format'
 import { controllers } from './registry'
 import { ModuleSuggestion } from '../components/ModuleSuggestion'
 
@@ -49,7 +52,7 @@ export function TerminalView({
   const [latency, setLatency] = useState<number | null | undefined>(undefined)
   /** 'files' = trình quản lý file hai cột (Local | Remote); terminal vẫn chạy phía sau. */
   const [view, setViewState] = useState<'terminal' | 'files'>(
-    () => useTabs.getState().tabs.find((t) => t.id === tabId)?.view ?? 'terminal'
+    () => useTabs.getState().tabs.find((x) => x.id === tabId)?.view ?? 'terminal'
   )
   // Ghi lại vào tab để Workspace / Duplicate giữ đúng chế độ.
   const setView = (next: 'terminal' | 'files'): void => {
@@ -61,7 +64,7 @@ export function TerminalView({
   const [localTarget, setLocalTarget] = useState<LocalTarget | undefined>(undefined)
   const sftpActions = useRef<SftpActions | null>(null)
   const [panel, setPanel] = useState<Panel>(
-    () => useTabs.getState().tabs.find((t) => t.id === tabId)?.initialPanel ?? null
+    () => useTabs.getState().tabs.find((x) => x.id === tabId)?.initialPanel ?? null
   )
   // Màu môi trường + đường dẫn nhóm (host đã lưu): nhắc người dùng đang ở server nào.
   // Terminal của module qua SSH (shell vào container…) cũng mang màu của host đi qua.
@@ -92,6 +95,7 @@ export function TerminalView({
   // Terminal của module: không có SFTP / forwarding / deploy key trên kênh này.
   const isSsh = protocol === 'ssh' && target.kind !== 'module-terminal'
   const multiExec = useBroadcast((s) => s.enabled)
+  const statsEnabled = useSettings((s) => s.settings.terminal.serverStats)
   // Địa chỉ đích trên thanh phiên (host đã lưu: sau kế thừa từ nhóm).
   const address = useHosts((s) => {
     if (target.kind === 'ssh')
@@ -109,14 +113,14 @@ export function TerminalView({
     if (state === 'connected') setConnectedSeq((n) => n + 1)
   }
   // Editor trong app mở từ SFTP của tab này: "nơi chứa" hiện trên thanh editor.
-  const tabTitle = useTabs((s) => s.tabs.find((t) => t.id === tabId)?.title ?? '')
+  const tabTitle = useTabs((s) => s.tabs.find((x) => x.id === tabId)?.title ?? '')
   const sftpOrigin = useMemo(
     () => ({ key: tabId, label: tabTitle.replace(/ \(SFTP\)$/, '') }),
     [tabId, tabTitle]
   )
   const runSftp = useCallback(
     (op: SftpOp) =>
-      controllers.get(tabId)?.sftp(op) ?? Promise.reject(new Error('The tab was closed')),
+      controllers.get(tabId)?.sftp(op) ?? Promise.reject(new Error(t('The tab was closed'))),
     [tabId]
   )
 
@@ -163,9 +167,63 @@ export function TerminalView({
     controllers.get(tabId)?.setVisible(visible)
   }, [tabId, visible])
 
+  // Đóng tab đang kết nối: đang truyền file → luôn hỏi; tab SSH → hỏi nếu cài đặt bật.
+  const transfersRef = useRef(transfers)
   useEffect(() => {
-    if (active && !prompt) controllers.get(tabId)?.activate()
-  }, [active, tabId, prompt, panel])
+    transfersRef.current = transfers
+  }, [transfers])
+  useEffect(() => {
+    setCloseGuard(tabId, () => {
+      if (target.kind === 'local') return null
+      if (controllers.get(tabId)?.connectionState !== 'connected') return null
+      const name = useTabs.getState().tabs.find((x) => x.id === tabId)?.title ?? t('this server')
+      const running = transfersRef.current.filter(
+        (x) => x.state === 'running' || x.state === 'queued'
+      ).length
+      if (running > 0)
+        return {
+          title: t('Close “{name}”?', { name }),
+          message: tn(
+            running,
+            '{n} file transfer is still running on {name}. Closing the tab cancels it.',
+            '{n} file transfers are still running on {name}. Closing the tab cancels them.',
+            { name }
+          ),
+          confirmLabel: t('Close and cancel')
+        }
+      if (
+        (target.kind === 'host' || target.kind === 'ssh') &&
+        useSettings.getState().settings.terminal.confirmCloseConnected
+      )
+        return {
+          title: t('Close “{name}”?', { name }),
+          message: t('You are connected to {name}. Closing the tab ends the session.', { name }),
+          confirmLabel: t('Close')
+        }
+      return null
+    })
+    return () => {
+      setCloseGuard(tabId, null)
+    }
+    // target không đổi trong suốt vòng đời một tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId])
+
+  const filesRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!active || prompt) return
+    // File manager che terminal → không focus terminal ẩn (phím gõ sẽ chạy vào shell); focus bảng file.
+    if (view === 'files') {
+      controllers.get(tabId)?.activate(false)
+      const files = filesRef.current
+      if (files && !files.contains(document.activeElement)) {
+        const grids = files.querySelectorAll<HTMLElement>('[role="grid"]')
+        ;(grids[grids.length - 1] ?? files).focus()
+      }
+      return
+    }
+    controllers.get(tabId)?.activate()
+  }, [active, tabId, prompt, panel, view])
 
   const activeForwards = forwards.filter((f) => f.state === 'active').length
 
@@ -197,9 +255,9 @@ export function TerminalView({
                       : 'bg-danger-soft text-danger'
                 )}
                 data-testid="session-latency"
-                title="Round-trip time to the server (SSH keepalive)"
+                title={t('Round-trip time to the server (SSH keepalive)')}
               >
-                {latency} ms
+                {t('{ms} ms', { ms: formatNumber(latency, 0) })}
               </span>
             )}
           </span>
@@ -216,9 +274,9 @@ export function TerminalView({
             <span
               className="ml-2 shrink-0 rounded bg-warning-soft px-1.5 py-px text-xs font-medium text-warning"
               data-testid="session-telnet"
-              title="Telnet sends everything, including passwords, in clear text"
+              title={t('Telnet sends everything, including passwords, in clear text')}
             >
-              Telnet · not encrypted
+              {t('Telnet · not encrypted')}
             </span>
           )}
           {protocol === 'serial' && (
@@ -233,9 +291,9 @@ export function TerminalView({
             <span
               className="ml-2 hidden shrink-0 rounded bg-warning-soft px-1.5 py-px text-xs font-medium text-warning @sm:inline"
               data-testid="session-legacy"
-              title="Legacy algorithms are allowed for this host (weaker security)"
+              title={t('Legacy algorithms are allowed for this host (weaker security)')}
             >
-              Legacy
+              {t('Legacy')}
             </span>
           )}
           {env?.path && (
@@ -245,7 +303,7 @@ export function TerminalView({
                 env.color ? hostTileClass[env.color] : 'bg-subtle text-muted'
               )}
               data-testid="session-group-path"
-              title="Group"
+              title={t('Group')}
             >
               {env.path}
             </span>
@@ -254,7 +312,7 @@ export function TerminalView({
             <span
               className="ml-2 hidden shrink-0 rounded bg-subtle px-1.5 py-px font-mono text-[10.5px] text-muted uppercase @sm:inline"
               data-testid="session-encoding"
-              title="Character encoding of this host (Edit host → Advanced)"
+              title={t('Character encoding of this host (Edit host → Advanced)')}
             >
               {encoding}
             </span>
@@ -268,7 +326,7 @@ export function TerminalView({
               useTerminalFind.getState().open(tabId)
             }}
           >
-            Find
+            {t('Find')}
           </ToolbarButton>
           {isSsh && (
             <>
@@ -281,7 +339,7 @@ export function TerminalView({
                   if (panel === 'sftp') setPanel(null)
                 }}
               >
-                {view === 'files' ? 'Show terminal' : 'File manager'}
+                {view === 'files' ? t('Show terminal') : t('File manager')}
               </ToolbarButton>
               <ToolbarButton
                 testId="open-deploy-key"
@@ -291,7 +349,7 @@ export function TerminalView({
                   setDeploying(true)
                 }}
               >
-                Deploy key
+                {t('Deploy key')}
               </ToolbarButton>
               <ToolbarButton
                 testId="toggle-sftp"
@@ -312,7 +370,9 @@ export function TerminalView({
                   setPanel(panel === 'forwards' ? null : 'forwards')
                 }}
               >
-                Forwarding{activeForwards > 0 ? ` (${activeForwards})` : ''}
+                {activeForwards > 0
+                  ? t('Forwarding ({count})', { count: formatNumber(activeForwards) })
+                  : t('Forwarding')}
               </ToolbarButton>
             </>
           )}
@@ -321,7 +381,9 @@ export function TerminalView({
       {detected.length > 0 && (
         <ModuleSuggestion
           candidates={detected}
-          where={`on ${useTabs.getState().tabs.find((t) => t.id === tabId)?.title ?? 'this server'}`}
+          where={t('on {name}', {
+            name: useTabs.getState().tabs.find((x) => x.id === tabId)?.title ?? t('this server')
+          })}
         />
       )}
       <div className="relative flex min-h-0 flex-1">
@@ -329,7 +391,12 @@ export function TerminalView({
           <div className="relative min-h-0 flex-1 bg-terminal">
             <FindBar tabId={tabId} />
             {view === 'files' && (
-              <div className="absolute inset-0 z-10 flex bg-surface" data-testid="file-manager">
+              <div
+                ref={filesRef}
+                tabIndex={-1}
+                className="absolute inset-0 z-10 flex bg-surface outline-none"
+                data-testid="file-manager"
+              >
                 <LocalPanel
                   transfers={transfers}
                   actionsRef={sftpActions}
@@ -368,7 +435,17 @@ export function TerminalView({
               />
             )}
           </div>
-          {stats && <ServerStatsBar stats={stats} />}
+          {stats ? (
+            <ServerStatsBar stats={stats} />
+          ) : (
+            // Chờ lần đo đầu (vài giây sau khi vào server): giữ chỗ thay vì để thanh nhảy ra đột ngột.
+            stats === undefined &&
+            isSsh &&
+            connected &&
+            statsEnabled &&
+            visible &&
+            !multiExec && <StatsLoading key={`stats-${String(connectedSeq)}`} />
+          )}
         </div>
         {deploying && (
           <DeployKeyDialog
@@ -377,7 +454,7 @@ export function TerminalView({
             }}
             deploy={(publicKey) =>
               controllers.get(tabId)?.deployKey(publicKey) ??
-              Promise.resolve({ status: 'error' as const, message: 'The tab was closed' })
+              Promise.resolve({ status: 'error' as const, message: t('The tab was closed') })
             }
           />
         )}
@@ -442,30 +519,48 @@ function ToolbarButton({
   )
 }
 
-/** "12s", "4m", "1h 05m" — thời gian từ lúc phiên vào được server. */
+/** Giữ chỗ thanh số liệu; server không trả lời (treo, chặn exec im lặng) → thôi hiện sau 20 giây. */
+function StatsLoading(): React.JSX.Element | null {
+  const [expired, setExpired] = useState(false)
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setExpired(true)
+    }, 20_000)
+    return () => {
+      window.clearTimeout(timer)
+    }
+  }, [])
+  return expired ? null : <ServerStatsPlaceholder />
+}
+
+/** "just now", "4 min", "1 h 05 min" — thời gian từ lúc phiên vào được server. */
 function SessionClock(): React.JSX.Element {
   const [start] = useState(() => Date.now())
   const [now, setNow] = useState(start)
   useEffect(() => {
-    const t = window.setInterval(() => {
+    const timer = window.setInterval(() => {
       setNow(Date.now())
     }, 15_000)
     return () => {
-      window.clearInterval(t)
+      window.clearInterval(timer)
     }
   }, [])
   const s = Math.floor((now - start) / 1000)
+  const minutes = Math.floor(s / 60)
   const text =
     s < 60
-      ? 'just now'
-      : s < 3600
-        ? `${String(Math.floor(s / 60))}m`
-        : `${String(Math.floor(s / 3600))}h ${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`
+      ? t('just now')
+      : minutes < 60
+        ? t('{n} min', { n: formatNumber(minutes) })
+        : t('{h} h {m} min', {
+            h: formatNumber(Math.floor(minutes / 60)),
+            m: String(minutes % 60).padStart(2, '0')
+          })
   return (
     <span
       className="hidden text-faint tabular-nums @sm:inline"
       data-testid="session-clock"
-      title={`Connected since ${new Date(start).toLocaleTimeString()}`}
+      title={t('Connected since {time}', { time: formatTime(start, false) })}
     >
       · {text}
     </span>

@@ -6,10 +6,12 @@ import type {
   TopologyNode,
   TopologyResult
 } from '../shared/ops'
+import { t, tn } from '@shared/i18n'
 import { selectorMatches } from '../shared/map'
 import { rbacRisk } from '../shared/security'
 import { type K8sObject } from '../shared/resources'
 import { KubeError, type KubeClient } from './client'
+import { listPaged } from './operations'
 import {
   KIND_LABEL,
   backendServices,
@@ -214,6 +216,11 @@ export const nodeId = (kind: string, ns: string | undefined, name: string): stri
   `${kind}|${ns ?? ''}|${name}`
 
 type Listed = { items: K8sObject[] } | { error: string }
+/** Kết quả tra một đối tượng theo tên: có / không tồn tại / không biết (thiếu quyền, lỗi). */
+type Lookup = { obj: K8sObject } | { missing: true } | { unknown: string }
+
+/** List mỗi loại tối đa chừng này đối tượng (quá → ghi chú, không kết luận "missing"). */
+const LIST_MAX = 20_000
 
 /** Một lượt dựng đồ thị: cache list / get, gom node + cạnh + ghi chú. */
 class Builder {
@@ -222,6 +229,7 @@ class Builder {
   readonly notes = new Set<string>()
   private readonly lists = new Map<string, Promise<Listed>>()
   private readonly gets = new Map<string, Promise<K8sObject | null>>()
+  private readonly lookups = new Map<string, Promise<Lookup>>()
 
   constructor(
     private readonly client: KubeClient,
@@ -238,24 +246,40 @@ class Builder {
     const key = `${kind}|${ns ?? ''}|${JSON.stringify(query ?? {})}`
     let p = this.lists.get(key)
     if (!p) {
-      p = this.client
-        .json<{ items: K8sObject[] }>('GET', this.path(kind, ns), {
-          query: { limit: 2000, ...query },
-          ...(this.signal ? { signal: this.signal } : {})
-        })
-        .then(
-          (r): Listed => ({ items: r.items }),
-          (error: unknown): Listed => {
-            if (error instanceof KubeError && error.status === 404) return { items: [] }
-            const label = KINDS[kind]?.label ?? kind
-            const msg =
-              error instanceof KubeError && error.status === 403
-                ? `Not allowed to list ${label}s${ns ? ` in ${ns}` : ''}`
-                : `${label}s: ${error instanceof Error ? error.message : String(error)}`
-            this.notes.add(msg)
-            return { error: msg }
-          }
-        )
+      const label = KINDS[kind]?.label ?? kind
+      p = listPaged(this.client, this.path(kind, ns), {
+        ...(query ? { query } : {}),
+        signal: this.signal,
+        max: LIST_MAX
+      }).then(
+        (r): Listed => {
+          if (!r.truncated) return { items: r.items }
+          // Quá nhiều để đọc hết: không kết luận "không tồn tại" từ danh sách thiếu.
+          const msg = ns
+            ? t('Too many {kind} objects in {ns} — only the first {max} were read', {
+                kind: label,
+                ns,
+                max: LIST_MAX
+              })
+            : t('Too many {kind} objects — only the first {max} were read', {
+                kind: label,
+                max: LIST_MAX
+              })
+          this.notes.add(msg)
+          return { error: msg }
+        },
+        (error: unknown): Listed => {
+          if (error instanceof KubeError && error.status === 404) return { items: [] }
+          const msg =
+            error instanceof KubeError && error.status === 403
+              ? ns
+                ? t('Not allowed to list {kind} in {ns}', { kind: label, ns })
+                : t('Not allowed to list {kind}', { kind: label })
+              : `${label}s: ${error instanceof Error ? error.message : String(error)}`
+          this.notes.add(msg)
+          return { error: msg }
+        }
+      )
       this.lists.set(key, p)
     }
     return p
@@ -282,6 +306,62 @@ class Builder {
     return p
   }
 
+  /**
+   * Tra một đối tượng theo tên (GET, nhớ trong lượt): không list cả loại chỉ để tìm vài cái tên
+   * (list Secret của một namespace có thể hàng chục MB — release Helm).
+   */
+  lookup(kind: string, ns: string | undefined, name: string): Promise<Lookup> {
+    const key = nodeId(kind, ns, name)
+    let p = this.lookups.get(key)
+    if (!p) {
+      p = this.client
+        .json<K8sObject>(
+          'GET',
+          this.path(kind, ns, name),
+          this.signal ? { signal: this.signal } : {}
+        )
+        .then(
+          (obj): Lookup => ({ obj }),
+          (error: unknown): Lookup => {
+            if (error instanceof KubeError && error.status === 404) return { missing: true }
+            const label = KINDS[kind]?.label ?? kind
+            return {
+              unknown:
+                error instanceof KubeError && error.status === 403
+                  ? ns
+                    ? t('Not allowed to read {kind} in {ns}', { kind: label, ns })
+                    : t('Not allowed to read {kind}', { kind: label })
+                  : `${label} ${name}: ${error instanceof Error ? error.message : String(error)}`
+            }
+          }
+        )
+      this.lookups.set(key, p)
+    }
+    return p
+  }
+
+  /**
+   * Node cho đối tượng được tham chiếu theo tên: có → node thật; không tồn tại → "missing"; không
+   * biết (thiếu quyền) → node mờ, không kết luận missing.
+   */
+  async ref(
+    kind: string,
+    ns: string | undefined,
+    name: string
+  ): Promise<{ id: string; obj?: K8sObject }> {
+    const r = await this.lookup(kind, ns, name)
+    if ('obj' in r) return { id: this.add(kind, r.obj), obj: r.obj }
+    if ('missing' in r) return { id: this.missing(kind, ns, name) }
+    this.notes.add(r.unknown)
+    const id = this.missing(kind, ns, name, t('Unknown (not allowed to read)'))
+    const n = this.nodes.get(id)
+    if (n) {
+      n.tone = 'muted'
+      delete n.missing
+    }
+    return { id }
+  }
+
   /** Thêm node cho đối tượng có thật (tóm tắt theo loại). */
   add(kind: string, obj: K8sObject, expandable = true): string {
     const ns = KINDS[kind]?.namespaced === false ? undefined : obj.metadata.namespace
@@ -303,7 +383,7 @@ class Builder {
   }
 
   /** Được tham chiếu nhưng không tìm thấy. */
-  missing(kind: string, ns: string | undefined, name: string, why = 'Not found'): string {
+  missing(kind: string, ns: string | undefined, name: string, why = t('Not found')): string {
     const id = nodeId(kind, ns, name)
     if (!this.nodes.has(id))
       this.nodes.set(id, {
@@ -326,8 +406,8 @@ class Builder {
       id,
       kind: '',
       kindLabel: label,
-      name: `+${count} more`,
-      summary: `${count} ${label.toLowerCase()} not shown`,
+      name: tn(count, '+{n} more', '+{n} more'),
+      summary: tn(count, '{n} not shown', '{n} not shown'),
       tone: 'muted'
     })
     return id
@@ -362,7 +442,7 @@ function describe(kind: string, obj: K8sObject): { summary: string; tone: Topolo
   switch (kind) {
     case 'pods':
       return {
-        summary: `${podSummary(obj)}${spec['nodeName'] ? '' : ' · unscheduled'}`,
+        summary: `${podSummary(obj)}${spec['nodeName'] ? '' : ` · ${t('unscheduled')}`}`,
         tone: podTone(obj)
       }
     case 'deployments.apps':
@@ -376,7 +456,7 @@ function describe(kind: string, obj: K8sObject): { summary: string; tone: Topolo
       const ready = Number(st['readyReplicas'] ?? 0)
       const rev = obj.metadata.annotations?.['deployment.kubernetes.io/revision']
       return {
-        summary: `${rev ? `rev ${rev} · ` : ''}${ready}/${want} ready`,
+        summary: `${rev ? `rev ${rev} · ` : ''}${t('{ready}/{desired} ready', { ready, desired: want })}`,
         tone: want === 0 ? 'muted' : ready >= want ? 'ok' : ready ? 'warn' : 'bad'
       }
     }
@@ -386,14 +466,14 @@ function describe(kind: string, obj: K8sObject): { summary: string; tone: Topolo
       const hosts = a(spec['rules'])
         .map((r) => s(r['host']))
         .filter(Boolean)
-      return { summary: hosts.length ? hosts.join(', ') : 'any host', tone: 'ok' }
+      return { summary: hosts.length ? hosts.join(', ') : t('any host'), tone: 'ok' }
     }
     case 'httproutes.gateway.networking.k8s.io':
     case 'grpcroutes.gateway.networking.k8s.io': {
       const hosts = (Array.isArray(spec['hostnames']) ? (spec['hostnames'] as unknown[]) : [])
         .map(s)
         .filter(Boolean)
-      return { summary: hosts.length ? hosts.join(', ') : 'any host', tone: 'ok' }
+      return { summary: hosts.length ? hosts.join(', ') : t('any host'), tone: 'ok' }
     }
     case 'gateways.gateway.networking.k8s.io': {
       const listeners = a(spec['listeners'])
@@ -405,10 +485,10 @@ function describe(kind: string, obj: K8sObject): { summary: string; tone: Topolo
       }
     }
     case 'configmaps':
-      return { summary: `${keys} key${keys === 1 ? '' : 's'}`, tone: 'ok' }
+      return { summary: tn(keys, '{n} key', '{n} keys'), tone: 'ok' }
     case 'secrets':
       return {
-        summary: `${s(o(obj)['type']) || 'Opaque'} · ${keys} key${keys === 1 ? '' : 's'}`,
+        summary: `${s(o(obj)['type']) || 'Opaque'} · ${tn(keys, '{n} key', '{n} keys')}`,
         tone: 'ok'
       }
     case 'persistentvolumeclaims': {
@@ -441,7 +521,7 @@ function describe(kind: string, obj: K8sObject): { summary: string; tone: Topolo
       return {
         summary: [
           ok ? 'Ready' : 'NotReady',
-          cordoned ? 'cordoned' : '',
+          cordoned ? t('cordoned') : '',
           s(o(st['nodeInfo'])['kubeletVersion'])
         ]
           .filter(Boolean)
@@ -451,13 +531,17 @@ function describe(kind: string, obj: K8sObject): { summary: string; tone: Topolo
     }
     case 'horizontalpodautoscalers.autoscaling':
       return {
-        summary: `${txt(spec['minReplicas']) || '1'}–${txt(spec['maxReplicas'])} replicas · now ${txt(st['currentReplicas']) || '0'}`,
+        summary: t('{min}–{max} replicas, now {current}', {
+          min: txt(spec['minReplicas']) || '1',
+          max: txt(spec['maxReplicas']),
+          current: txt(st['currentReplicas']) || '0'
+        }),
         tone: 'ok'
       }
     case 'poddisruptionbudgets.policy': {
       const allowed = Number(st['disruptionsAllowed'])
       return {
-        summary: `${spec['minAvailable'] !== undefined ? `min available ${txt(spec['minAvailable'])}` : `max unavailable ${txt(spec['maxUnavailable'])}`}${Number.isFinite(allowed) ? ` · ${allowed} disruptions allowed` : ''}`,
+        summary: `${spec['minAvailable'] !== undefined ? t('min available {n}', { n: txt(spec['minAvailable']) }) : t('max unavailable {n}', { n: txt(spec['maxUnavailable']) })}${Number.isFinite(allowed) ? ` · ${tn(allowed, '{n} disruption allowed', '{n} disruptions allowed')}` : ''}`,
         tone: allowed === 0 ? 'warn' : 'ok'
       }
     }
@@ -468,12 +552,12 @@ function describe(kind: string, obj: K8sObject): { summary: string; tone: Topolo
         .map(s)
         .filter(Boolean)
       return {
-        summary: `${types.join(' + ')} · ${a(spec['ingress']).length} in / ${a(spec['egress']).length} out rules`,
+        summary: `${types.join(' + ')} · ${t('{in} in / {out} out rules', { in: a(spec['ingress']).length, out: a(spec['egress']).length })}`,
         tone: 'ok'
       }
     }
     case 'serviceaccounts':
-      return { summary: 'Identity of the pods', tone: 'muted' }
+      return { summary: t('Identity of the pods'), tone: 'muted' }
     case 'rolebindings.rbac.authorization.k8s.io':
     case 'clusterrolebindings.rbac.authorization.k8s.io': {
       const ref = o(o(obj)['roleRef'])
@@ -488,7 +572,7 @@ function describe(kind: string, obj: K8sObject): { summary: string; tone: Topolo
         summary:
           high[0]?.reason ??
           medium[0]?.reason ??
-          `${grants.length} permission${grants.length === 1 ? '' : 's'}`,
+          tn(grants.length, '{n} permission', '{n} permissions'),
         tone: high.length ? 'bad' : medium.length ? 'warn' : 'ok'
       }
     }
@@ -639,7 +723,7 @@ async function wireIdentity(b: Builder, from: string, ns: string, sa: string): P
   b.link(from, saId, 'identity')
   for (const x of await bindingsOf(b, ns, sa)) {
     const bid = b.add(x.kind, x.binding, false)
-    b.link(saId, bid, 'subject', 'bound by')
+    b.link(saId, bid, 'subject', t('bound by'))
     const rid = x.role
       ? b.add(x.roleKind, x.role, false)
       : b.missing(
@@ -660,49 +744,29 @@ async function wireDependencies(
   claims: string[] = []
 ): Promise<void> {
   const refs = podRefs(spec)
-  const [cms, secrets, pvcs] = await Promise.all([
-    refs.configMaps.size ? b.list('configmaps', ns) : Promise.resolve({ items: [] }),
-    refs.secrets.size || refs.pullSecrets.size
-      ? b.list('secrets', ns)
-      : Promise.resolve({ items: [] }),
-    refs.pvcs.size || claims.length
-      ? b.list('persistentvolumeclaims', ns)
-      : Promise.resolve({ items: [] })
-  ])
-  const pick = (
+  // Tra theo tên (vài GET nhỏ) thay vì list cả loại trong namespace.
+  const pick = async (
     kind: string,
-    list: Listed,
     names: Iterable<string>,
     type: TopologyEdgeType,
     label: (n: string) => string
-  ): K8sObject[] => {
-    const found: K8sObject[] = []
-    for (const name of names) {
-      const x = 'error' in list ? undefined : list.items.find((i) => i.metadata.name === name)
-      // Thiếu quyền list → không kết luận "missing".
-      const id = x
-        ? b.add(kind, x)
-        : 'error' in list
-          ? b.missing(kind, ns, name, 'Unknown (not allowed to read)')
-          : b.missing(kind, ns, name)
-      if ('error' in list && !x) {
-        const n = b.nodes.get(id)
-        if (n) {
-          n.tone = 'muted'
-          delete n.missing
-        }
-      }
-      b.link(from, id, type, label(name))
-      if (x) found.push(x)
-    }
-    return found
+  ): Promise<K8sObject[]> => {
+    const found = await Promise.all(
+      [...names].map(async (name) => {
+        const r = await b.ref(kind, ns, name)
+        b.link(from, r.id, type, label(name))
+        return r.obj
+      })
+    )
+    return found.filter((x): x is K8sObject => x !== undefined)
   }
-  pick('configmaps', cms, refs.configMaps, 'uses', () => 'config')
-  pick('secrets', secrets, new Set([...refs.secrets, ...refs.pullSecrets]), 'uses', (n) =>
-    refs.pullSecrets.has(n) && !refs.secrets.has(n) ? 'image pull' : 'secret'
-  )
-  const claimSet = new Set([...refs.pvcs, ...claims])
-  const bound = pick('persistentvolumeclaims', pvcs, claimSet, 'mounts', () => 'volume')
+  const [, , bound] = await Promise.all([
+    pick('configmaps', refs.configMaps, 'uses', () => t('config')),
+    pick('secrets', new Set([...refs.secrets, ...refs.pullSecrets]), 'uses', (n) =>
+      refs.pullSecrets.has(n) && !refs.secrets.has(n) ? t('image pull') : t('secret')
+    ),
+    pick('persistentvolumeclaims', new Set([...refs.pvcs, ...claims]), 'mounts', () => t('volume'))
+  ])
   await Promise.all(
     bound.map(async (pvc) => {
       const pvName = s(o(pvc.spec)['volumeName'])
@@ -718,7 +782,8 @@ async function wireDependencies(
       )
     })
   )
-  await wireIdentity(b, from, ns, refs.serviceAccount ?? 'default')
+  // podRefs trả '' khi không khai báo — ServiceAccount mặc định là "default".
+  await wireIdentity(b, from, ns, refs.serviceAccount || 'default')
 }
 
 /** Phía trước workload / pod: Service chọn nó, Ingress / Route / Gateway tới Service đó. */
@@ -838,7 +903,7 @@ async function wireNodes(b: Builder, pairs: Set<string>): Promise<void> {
   const names = [...new Set([...pairs].map((x) => x.split('\n')[1] ?? ''))].filter(Boolean)
   const shown = new Set(names.slice(0, MAX_NODES))
   if (names.length > MAX_NODES)
-    b.notes.add(`Pods run on ${names.length} nodes — showing ${MAX_NODES}`)
+    b.notes.add(t('Pods run on {n} nodes — showing {max}', { n: names.length, max: MAX_NODES }))
   const objs = new Map(
     await Promise.all([...shown].map(async (n) => [n, await b.get('nodes', undefined, n)] as const))
   )
@@ -987,7 +1052,7 @@ async function serviceGraph(b: Builder, svc: K8sObject): Promise<string> {
   await wireServiceFront(b, ns, new Map([[svc.metadata.name, root]]))
   const selector = o(o(svc.spec)['selector'])
   if (!Object.keys(selector).length) {
-    b.notes.add('This service has no selector — endpoints are managed manually')
+    b.notes.add(t('This service has no selector — endpoints are managed manually'))
     return root
   }
   const ports = a(o(svc.spec)['ports'])
@@ -1004,7 +1069,7 @@ async function serviceGraph(b: Builder, svc: K8sObject): Promise<string> {
     b.link(root, wid, 'selects', ports || undefined)
     const n = pods.filter((p) => topOwnerName(p) === w.obj.metadata.name).length
     const node = b.nodes.get(wid)
-    if (node && n) node.summary = `${node.summary} · ${n} endpoint${n === 1 ? '' : 's'}`
+    if (node && n) node.summary = `${node.summary} · ${tn(n, '{n} endpoint', '{n} endpoints')}`
   }
   // Pod không thuộc workload nào ở trên (pod lẻ / owner lạ).
   const covered = new Set(workloads.map((w) => w.obj.metadata.name))
@@ -1014,7 +1079,7 @@ async function serviceGraph(b: Builder, svc: K8sObject): Promise<string> {
   if (loose.length > PODS_PER_OWNER)
     b.link(root, b.more(root, loose.length - PODS_PER_OWNER, 'Pods'), 'selects')
   if (!workloads.length && !pods.length)
-    b.notes.add('No pods match the selector — the service has no endpoints')
+    b.notes.add(t('No pods match the selector — the service has no endpoints'))
   return root
 }
 
@@ -1040,16 +1105,10 @@ async function wireBackends(
   ns: string,
   names: Iterable<string>
 ): Promise<void> {
-  const services = await b.list('services', ns)
   for (const name of names) {
-    const svc =
-      'error' in services ? undefined : services.items.find((x) => x.metadata.name === name)
-    if (!svc) {
-      b.link(from, b.missing('services', ns, name), 'routes')
-      continue
-    }
-    const sid = b.add('services', svc)
+    const { id: sid, obj: svc } = await b.ref('services', ns, name)
     b.link(from, sid, 'routes')
+    if (!svc) continue
     const selector = o(o(svc.spec)['selector'])
     if (!Object.keys(selector).length) continue
     for (const w of await workloadsWhere(b, ns, (_s, labels) => selectorMatches(selector, labels)))
@@ -1066,7 +1125,7 @@ async function usersGraph(b: Builder, kind: string, obj: K8sObject): Promise<str
     const r = podRefs(spec)
     if (kind === 'configmaps') return r.configMaps.has(name)
     if (kind === 'secrets') return r.secrets.has(name) || r.pullSecrets.has(name)
-    if (kind === 'serviceaccounts') return (r.serviceAccount ?? 'default') === name
+    if (kind === 'serviceaccounts') return (r.serviceAccount || 'default') === name
     return r.pvcs.has(name)
   }
   const edge: TopologyEdgeType =
@@ -1132,7 +1191,7 @@ async function usersGraph(b: Builder, kind: string, obj: K8sObject): Promise<str
     }
   }
   if (!users.length && !bare.length && kind !== 'serviceaccounts')
-    b.notes.add('Nothing in this namespace uses it — safe to change')
+    b.notes.add(t('Nothing in this namespace uses it — safe to change'))
   return root
 }
 
@@ -1176,11 +1235,11 @@ async function nodeGraph(b: Builder, node: K8sObject): Promise<string> {
       kindLabel: KIND_LABEL[g.kind] ?? KINDS[g.kind]?.label ?? g.kind,
       name: g.name,
       namespace: g.ns,
-      summary: `${g.pods.length} pod${g.pods.length === 1 ? '' : 's'} here · ${g.ns}`,
+      summary: `${tn(g.pods.length, '{n} pod here', '{n} pods here')} · ${g.ns}`,
       tone: tones.includes('bad') ? 'bad' : tones.includes('warn') ? 'warn' : 'ok',
       expandable: true
     })
-    b.link(id, root, 'runs-on', `${g.pods.length} pod${g.pods.length === 1 ? '' : 's'}`)
+    b.link(id, root, 'runs-on', tn(g.pods.length, '{n} pod', '{n} pods'))
   }
   if (list.length > MAX_USERS)
     b.link(b.more(root, list.length - MAX_USERS, 'Workloads'), root, 'runs-on')
@@ -1215,13 +1274,10 @@ export async function topology(
       root = b.add(kind, obj)
       const ns = obj.metadata.namespace ?? ''
       await wireBackends(b, root, ns, backendServices(obj))
-      const secrets = await b.list('secrets', ns)
       for (const t of a(o(obj.spec)['tls'])) {
         const name = s(t['secretName'])
         if (!name) continue
-        const x =
-          'error' in secrets ? undefined : secrets.items.find((i) => i.metadata.name === name)
-        b.link(root, x ? b.add('secrets', x) : b.missing('secrets', ns, name), 'uses', 'tls')
+        b.link(root, (await b.ref('secrets', ns, name)).id, 'uses', 'tls')
       }
       break
     }
@@ -1244,7 +1300,7 @@ export async function topology(
             b.link(root, rid, 'attaches')
             await wireBackends(b, rid, ns, routeBackends(r))
           }
-      b.notes.add('Only routes in the same namespace are shown')
+      b.notes.add(t('Only routes in the same namespace are shown'))
       break
     }
     case 'configmaps':

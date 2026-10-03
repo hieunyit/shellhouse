@@ -1,4 +1,5 @@
 import { utils, type ParsedKey } from 'ssh2'
+import { t } from '@shared/i18n'
 
 export type KeyType = 'ed25519' | 'rsa' | 'ecdsa'
 
@@ -50,7 +51,7 @@ export function generateVerifiedKey(options: GenerateOptions): {
     if (!pub.verify(probe, priv.sign(probe))) continue
     return { privateKey: pair.private, publicKey: pair.public.trim(), attempts: attempt }
   }
-  throw new Error('Could not generate a valid key after several attempts')
+  throw new Error(t('Could not generate a valid key after several attempts'))
 }
 
 /** Public key một dòng hợp lệ (dùng trước khi triển khai lên server). */

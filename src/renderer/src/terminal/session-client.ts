@@ -6,6 +6,7 @@ import {
   type PromptRequest
 } from '@shared/stream-protocol'
 import type { ForwardSpec, ForwardStatus } from '@shared/forwards'
+import { t } from '@shared/i18n'
 import type { ServerStats } from '@shared/server-stats'
 import type { SftpOp, TransferStatus } from '@shared/sftp'
 
@@ -167,7 +168,10 @@ export class SessionClient {
   deployKey(
     publicKey: string
   ): Promise<{ status: 'added' | 'exists' | 'error'; message: string | null }> {
-    if (this.closed) return Promise.resolve({ status: 'error', message: 'The session is closed' })
+    // Chỉ hiện cho người dùng (không ai so chuỗi này) → dịch; Error 'The session is closed' ở chỗ khác
+    // giữ tiếng Anh vì module S3 so khớp nguyên văn.
+    if (this.closed)
+      return Promise.resolve({ status: 'error', message: t('The session is closed') })
     const id = this.nextSftpId++
     return new Promise((resolve) => {
       this.deployPending.set(id, resolve)

@@ -1,5 +1,6 @@
 import { request as httpRequest, type IncomingMessage } from 'node:http'
-import type { Duplex } from 'node:stream'
+import { Readable, type Duplex } from 'node:stream'
+import { t } from '@shared/i18n'
 
 /**
  * Client HTTP tối giản cho Docker Engine API (ADR-014 mục 6.2) — không dùng dockerode (nhiều phụ
@@ -7,8 +8,45 @@ import type { Duplex } from 'node:stream'
  * SSH. Mỗi request một kết nối (kênh SSH mở nhanh; không cần keep-alive).
  */
 
-/** API tối thiểu: Docker 20.10 / Podman 3 (compat API). */
-export const API_VERSION = 'v1.41'
+/**
+ * Phiên bản API (thương lượng theo từng kết nối — không cố định): Docker Engine 29 nâng mức tối
+ * thiểu lên 1.44 nên luôn dùng 1.41 thì bị từ chối ("client version 1.41 is too old"). Dùng
+ * min(phiên bản server, MAX_API_VERSION); server không báo (Podman cũ…) → DEFAULT_API_VERSION.
+ */
+export const DEFAULT_API_VERSION = '1.41'
+/** Bản mới nhất mình đã kiểm dạng dữ liệu (Docker 27). */
+export const MAX_API_VERSION = '1.47'
+
+/** "1.44" so với "1.41" → dương nếu a mới hơn. Chuỗi hỏng coi như 0.0. */
+export function compareApiVersions(a: string, b: string): number {
+  const parse = (v: string): [number, number] => {
+    const m = /^v?(\d+)\.(\d+)/.exec(v.trim())
+    return m ? [Number(m[1]), Number(m[2])] : [0, 0]
+  }
+  const [a1, a2] = parse(a)
+  const [b1, b2] = parse(b)
+  return a1 !== b1 ? a1 - b1 : a2 - b2
+}
+
+/** Phiên bản dùng khi server báo `server` (header Api-Version của /_ping). */
+export function negotiateApiVersion(server: string): string {
+  if (!/^v?\d+\.\d+/.test(server.trim())) return DEFAULT_API_VERSION
+  const clean = server.trim().replace(/^v/, '')
+  return compareApiVersions(clean, MAX_API_VERSION) < 0 ? clean : MAX_API_VERSION
+}
+
+/**
+ * Lỗi 400 "client version 1.41 is too old. Minimum supported API version is 1.44" (hoặc "too new.
+ * Maximum supported API version is 1.40") → phiên bản server chấp nhận; null = lỗi khác.
+ */
+export function versionFromError(status: number, message: string): string | null {
+  if (status !== 400) return null
+  const m =
+    /client version [\d.]+ is too (?:old|new)\.?\s*(?:minimum|maximum) supported API version is (\d+\.\d+)/i.exec(
+      message
+    )
+  return m?.[1] ?? null
+}
 
 export type Connect = () => Promise<Duplex>
 
@@ -28,14 +66,18 @@ export interface RequestOptions {
   signal?: AbortSignal
   /** Không thêm tiền tố phiên bản (/_ping). */
   raw?: boolean
+  /** Header thêm (X-Registry-Auth…). */
+  headers?: Record<string, string>
+  /** Thân dạng luồng (tar khi tải file vào container) — gửi chunked. */
+  upload?: { contentType: string; data: AsyncIterable<Buffer> }
 }
 
-function buildPath(path: string, options: RequestOptions): string {
+function buildPath(path: string, options: RequestOptions, version: string): string {
   const params = new URLSearchParams()
   for (const [k, v] of Object.entries(options.query ?? {}))
     if (v !== undefined) params.set(k, String(v))
   const qs = params.toString()
-  return `${options.raw ? '' : `/${API_VERSION}`}${path}${qs ? `?${qs}` : ''}`
+  return `${options.raw ? '' : `/v${version}`}${path}${qs ? `?${qs}` : ''}`
 }
 
 async function readAll(res: IncomingMessage, limit = 64 * 1024 * 1024): Promise<Buffer> {
@@ -43,7 +85,7 @@ async function readAll(res: IncomingMessage, limit = 64 * 1024 * 1024): Promise<
   let size = 0
   for await (const chunk of res as AsyncIterable<Buffer>) {
     size += chunk.length
-    if (size > limit) throw new Error('The Docker response is too large')
+    if (size > limit) throw new Error(t('The Docker response is too large'))
     chunks.push(chunk)
   }
   return Buffer.concat(chunks)
@@ -61,22 +103,46 @@ function errorMessage(status: number, body: Buffer): string {
 }
 
 export class EngineClient {
+  /** Phiên bản API của kết nối này (sau `/_ping`). */
+  private version = DEFAULT_API_VERSION
+  private negotiated: Promise<void> | null = null
+
   constructor(private readonly connect: Connect) {}
+
+  /** Phiên bản API đang dùng ("1.45"). */
+  get apiVersion(): string {
+    return this.version
+  }
+
+  /** Thương lượng phiên bản một lần (ping); ping lỗi → giữ mặc định, lần sau thử lại. */
+  private negotiate(signal?: AbortSignal): Promise<void> {
+    if (!this.negotiated) {
+      const pending = this.ping(signal).then(() => undefined)
+      this.negotiated = pending
+      pending.catch(() => {
+        if (this.negotiated === pending) this.negotiated = null
+      })
+    }
+    return this.negotiated
+  }
 
   /** Mở request; trả response (người gọi đọc / huỷ). */
   async open(method: string, path: string, options: RequestOptions = {}): Promise<IncomingMessage> {
+    if (!options.raw) await this.negotiate(options.signal).catch(() => undefined)
     const socket = await this.connect()
     const body = options.body === undefined ? undefined : Buffer.from(JSON.stringify(options.body))
     return new Promise<IncomingMessage>((resolve, reject) => {
       const req = httpRequest({
         method,
-        path: buildPath(path, options),
+        path: buildPath(path, options, this.version),
         // Kết nối đã mở sẵn (socket / kênh SSH). Không đặt `agent` (kể cả false): có agent thì Node
         // bỏ qua createConnection.
         createConnection: () => socket,
         headers: {
           Host: 'docker',
-          ...(body ? { 'Content-Type': 'application/json', 'Content-Length': body.length } : {})
+          ...(body ? { 'Content-Type': 'application/json', 'Content-Length': body.length } : {}),
+          ...(options.upload ? { 'Content-Type': options.upload.contentType } : {}),
+          ...options.headers
         }
       })
       const abort = (): void => {
@@ -101,16 +167,41 @@ export class EngineClient {
         socket.destroy()
         reject(error)
       })
-      req.end(body)
+      if (options.upload) {
+        // Lỗi đọc nguồn (file biến mất…) → huỷ request, báo lỗi đó (không treo chờ Docker).
+        const source = Readable.from(options.upload.data)
+        source.on('error', (error) => {
+          req.destroy(error)
+        })
+        source.pipe(req)
+      } else req.end(body)
     })
+  }
+
+  /**
+   * Mở request; HTTP ≥ 400 → EngineError. Server từ chối phiên bản ("client version … is too old")
+   * → đổi sang phiên bản server nêu rồi thử lại một lần.
+   */
+  async openOk(method: string, path: string, options: RequestOptions): Promise<IncomingMessage> {
+    for (let attempt = 0; ; attempt++) {
+      const res = await this.open(method, path, options)
+      const status = res.statusCode ?? 0
+      if (status < 400) return res
+      const body = await readAll(res)
+      const message = errorMessage(status, body)
+      const wanted = options.raw ? null : versionFromError(status, message)
+      if (attempt === 0 && wanted && wanted !== this.version) {
+        this.version = wanted
+        continue
+      }
+      throw new EngineError(status, message)
+    }
   }
 
   /** Request trả JSON (hoặc rỗng). HTTP ≥ 400 → EngineError với thông báo của Docker. */
   async json<T>(method: string, path: string, options: RequestOptions = {}): Promise<T> {
-    const res = await this.open(method, path, options)
+    const res = await this.openOk(method, path, options)
     const body = await readAll(res)
-    const status = res.statusCode ?? 0
-    if (status >= 400) throw new EngineError(status, errorMessage(status, body))
     if (body.length === 0) return undefined as T
     return JSON.parse(body.toString('utf8')) as T
   }
@@ -126,12 +217,7 @@ export class EngineClient {
     onChunk: (chunk: Buffer) => void,
     onStart?: (res: IncomingMessage) => void
   ): Promise<void> {
-    const res = await this.open(method, path, options)
-    const status = res.statusCode ?? 0
-    if (status >= 400) {
-      const body = await readAll(res)
-      throw new EngineError(status, errorMessage(status, body))
-    }
+    const res = await this.openOk(method, path, options)
     onStart?.(res)
     try {
       for await (const chunk of res as AsyncIterable<Buffer>) onChunk(chunk)
@@ -141,14 +227,20 @@ export class EngineClient {
     }
   }
 
-  /** `GET /_ping` — kiểm có nói chuyện được với Engine không; trả phiên bản API của server. */
+  /**
+   * `GET /_ping` — kiểm có nói chuyện được với Engine không; trả phiên bản API của server và chọn
+   * phiên bản cho các request sau của kết nối này.
+   */
   async ping(signal?: AbortSignal): Promise<string> {
     const res = await this.open('GET', '/_ping', { raw: true, ...(signal ? { signal } : {}) })
     const body = await readAll(res)
     if ((res.statusCode ?? 0) >= 400)
       throw new EngineError(res.statusCode ?? 0, errorMessage(res.statusCode ?? 0, body))
-    const version = res.headers['api-version']
-    return typeof version === 'string' ? version : ''
+    const header = res.headers['api-version']
+    const version = typeof header === 'string' ? header : ''
+    this.version = negotiateApiVersion(version)
+    this.negotiated ??= Promise.resolve()
+    return version
   }
 }
 

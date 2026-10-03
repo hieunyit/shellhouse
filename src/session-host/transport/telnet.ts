@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import { connect as netConnect, type Socket } from 'node:net'
 import type { Transport, TransportCallbacks } from './types'
 
@@ -41,6 +42,9 @@ export class TelnetParser {
 
   /** Nhận byte từ mạng → trả về phần dữ liệu cho terminal. */
   push(chunk: Uint8Array): Uint8Array {
+    // Đường nhanh (gần như mọi gói khi đang in output): không có IAC → trả nguyên, không chép
+    // từng byte qua mảng số.
+    if (this.state === 'data' && chunk.indexOf(IAC) === -1) return chunk
     const out: number[] = []
     for (const b of chunk) {
       switch (this.state) {
@@ -188,7 +192,14 @@ export class TelnetTransport implements Transport {
       const socket = netConnect({ host: options.host, port: options.port, noDelay: true })
       const timer = setTimeout(() => {
         socket.destroy()
-        reject(new Error(`Timed out connecting to ${options.host}:${options.port}`))
+        reject(
+          Object.assign(
+            new Error(
+              t('Timed out connecting to {host}:{port}', { host: options.host, port: options.port })
+            ),
+            { code: 'ETIMEDOUT' }
+          )
+        )
       }, options.timeoutMs ?? 15_000)
       socket.once('connect', () => {
         clearTimeout(timer)

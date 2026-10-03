@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
   FileInput,
@@ -11,11 +11,12 @@ import {
   Star,
   Zap
 } from 'lucide-react'
+import { t, tn } from '@shared/i18n'
+import { formatRelative } from '@shared/i18n/format'
 import type { HostSummary } from '@shared/hosts'
 import { keybindingFor } from '@shared/commands'
 import { parseQuickConnect } from '@shared/quick-connect'
 import { displayKeybinding, isMac } from '../lib/keybindings'
-import { ago } from '../lib/format'
 import { hostAddress, useHosts } from '../stores/hosts'
 import { browseModules } from '../stores/module-ui'
 import { useSettings } from '../stores/settings'
@@ -85,38 +86,53 @@ function HostCard({ host }: { host: HostSummary }): React.JSX.Element {
         open()
       }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') open()
+        // Chỉ khi chính thẻ đang focus — Enter trên nút con (Edit, SFTP) không mở thêm phiên.
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          open()
+        }
       }}
     >
       <HostAvatar host={host} size={36} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1">
           <span className="truncate text-[13px] font-semibold text-fg">{host.label}</span>
-          {host.favorite && <Star size={11} className="shrink-0 fill-warning text-warning" />}
+          {host.favorite && (
+            <Star
+              size={11}
+              className="shrink-0 fill-warning text-warning"
+              aria-label={t('Favorite')}
+            />
+          )}
         </div>
         <div className="truncate font-mono text-[11px] text-faint">{address}</div>
         {host.lastUsedAt !== null && (
-          <div className="text-[11px] text-faint">Connected {ago(host.lastUsedAt)}</div>
+          <div className="text-[11px] text-faint">
+            {t('Connected {time}', { time: formatRelative(host.lastUsedAt) })}
+          </div>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-0.5 opacity-60 transition-opacity group-hover:opacity-100">
+        {host.protocol === 'ssh' && (
+          <button
+            type="button"
+            title={t('Open files (SFTP)')}
+            aria-label={t('Open files on {name}', { name: host.label })}
+            data-testid="home-sftp"
+            className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-fg"
+            onClick={(e) => {
+              e.stopPropagation()
+              open('files')
+            }}
+          >
+            <FolderOpen size={14} />
+          </button>
+        )}
         <button
           type="button"
-          title="Open files (SFTP)"
-          aria-label={`Open files on ${host.label}`}
-          data-testid="home-sftp"
-          className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-fg"
-          onClick={(e) => {
-            e.stopPropagation()
-            open('files')
-          }}
-        >
-          <FolderOpen size={14} />
-        </button>
-        <button
-          type="button"
-          title="Edit"
-          aria-label={`Edit ${host.label}`}
+          title={t('Edit')}
+          aria-label={t('Edit {name}', { name: host.label })}
           className="rounded-md p-1.5 text-muted hover:bg-hover hover:text-fg"
           onClick={(e) => {
             e.stopPropagation()
@@ -127,8 +143,8 @@ function HostCard({ host }: { host: HostSummary }): React.JSX.Element {
         </button>
         <button
           type="button"
-          title="Connect"
-          aria-label={`Connect to ${host.label}`}
+          title={t('Connect')}
+          aria-label={t('Connect to {name}', { name: host.label })}
           data-testid="home-connect"
           className="flex items-center gap-1 rounded-md bg-accent-solid px-2 py-1 text-xs font-medium text-accent-fg hover:bg-accent-solid-hover"
           onClick={(e) => {
@@ -136,7 +152,7 @@ function HostCard({ host }: { host: HostSummary }): React.JSX.Element {
             open()
           }}
         >
-          <Play size={12} /> Connect
+          <Play size={12} /> {t('Connect')}
         </button>
       </div>
     </div>
@@ -146,12 +162,28 @@ function HostCard({ host }: { host: HostSummary }): React.JSX.Element {
 function greeting(now = new Date()): string {
   const h = now.getHours()
   return h < 5
-    ? 'Good evening'
+    ? t('Good evening')
     : h < 12
-      ? 'Good morning'
+      ? t('Good morning')
       : h < 18
-        ? 'Good afternoon'
-        : 'Good evening'
+        ? t('Good afternoon')
+        : t('Good evening')
+}
+
+/** "12 saved hosts in 3 groups — pick up where you left off." */
+function summary(hosts: number, groups: number): string {
+  return groups
+    ? tn(
+        hosts,
+        '{n} saved host in {groups} — pick up where you left off.',
+        '{n} saved hosts in {groups} — pick up where you left off.',
+        { groups: tn(groups, '{n} group', '{n} groups') }
+      )
+    : tn(
+        hosts,
+        '{n} saved host — pick up where you left off.',
+        '{n} saved hosts — pick up where you left off.'
+      )
 }
 
 /**
@@ -164,6 +196,7 @@ export function HomeView(): React.JSX.Element {
   const groups = useHosts((s) => s.tree.groups.length)
   const key = (id: string): string => displayKeybinding(keybindingFor(id, overrides, isMac))
   const [value, setValue] = useState('')
+  const quickRef = useRef<HTMLInputElement>(null)
   const [invalid, setInvalid] = useState(false)
   const recent = useMemo(
     () =>
@@ -191,12 +224,14 @@ export function HomeView(): React.JSX.Element {
           <Logo size={48} className="drop-shadow-md" />
           <div className="min-w-0">
             <h1 className="text-xl font-semibold tracking-tight text-fg">
-              {hasHosts ? greeting() : 'Welcome to Shellhouse'}
+              {hasHosts ? greeting() : t('Welcome to Shellhouse')}
             </h1>
             <p className="text-[13px] text-muted">
               {hasHosts
-                ? `${String(hosts.length)} saved host${hosts.length === 1 ? '' : 's'}${groups ? ` in ${String(groups)} group${groups === 1 ? '' : 's'}` : ''} — pick up where you left off.`
-                : 'SSH, SFTP, Telnet, serial and more in one place. How would you like to start?'}
+                ? summary(hosts.length, groups)
+                : t(
+                    'SSH, SFTP, Telnet, serial and more in one place. How would you like to start?'
+                  )}
             </p>
           </div>
         </header>
@@ -223,8 +258,9 @@ export function HomeView(): React.JSX.Element {
           <Zap size={16} className="shrink-0 text-accent" />
           <input
             className="min-w-0 flex-1 bg-transparent font-mono text-[14px] text-fg outline-none placeholder:font-sans placeholder:text-faint"
-            placeholder="Quick connect — user@host:port"
-            aria-label="Quick connect"
+            placeholder={t('Quick connect — user@host:port')}
+            ref={quickRef}
+            aria-label={t('Quick connect')}
             data-testid="home-quick-connect"
             value={value}
             onChange={(e) => {
@@ -233,10 +269,12 @@ export function HomeView(): React.JSX.Element {
             }}
           />
           {invalid ? (
-            <span className="shrink-0 text-xs text-danger">Use user@host or user@host:port</span>
+            <span role="alert" className="shrink-0 text-xs text-danger">
+              {t('Use user@host or user@host:port')}
+            </span>
           ) : (
             <span className="flex shrink-0 items-center gap-1 text-xs text-faint">
-              Enter <ArrowRight size={12} />
+              <Kbd>Enter</Kbd> <ArrowRight size={12} />
             </span>
           )}
         </form>
@@ -246,7 +284,7 @@ export function HomeView(): React.JSX.Element {
             {recent.length > 0 && (
               <section data-testid="home-recent">
                 <h2 className="mb-2 text-[11px] font-semibold tracking-wider text-faint uppercase">
-                  Recent
+                  {t('Recent')}
                 </h2>
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   {recent.map((h) => (
@@ -258,7 +296,7 @@ export function HomeView(): React.JSX.Element {
             {favorites.length > 0 && (
               <section data-testid="home-favorites">
                 <h2 className="mb-2 text-[11px] font-semibold tracking-wider text-faint uppercase">
-                  Favorites
+                  {t('Favorites')}
                 </h2>
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   {favorites.map((h) => (
@@ -270,7 +308,7 @@ export function HomeView(): React.JSX.Element {
             {saved.length > 0 && (
               <section data-testid="home-saved">
                 <h2 className="mb-2 text-[11px] font-semibold tracking-wider text-faint uppercase">
-                  Your hosts
+                  {t('Your hosts')}
                 </h2>
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   {saved.map((h) => (
@@ -284,44 +322,44 @@ export function HomeView(): React.JSX.Element {
 
         <section>
           <h2 className="mb-2 text-[11px] font-semibold tracking-wider text-faint uppercase">
-            {hasHosts ? 'Start something new' : 'Get started'}
+            {hasHosts ? t('Start something new') : t('Get started')}
           </h2>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
             <StartCard
               icon={<Server size={18} />}
-              title="Add a host"
-              text="Save a server with its login — connect later in one click."
+              title={t('Add a host')}
+              text={t('Save a server with its login — connect later in one click.')}
               testId="welcome-add-host"
               onClick={() => void openSidebarDialog('new-host')}
             />
             <StartCard
               icon={<FileInput size={18} />}
-              title="Import hosts"
-              text="From ~/.ssh/config, MobaXterm, Termius or a CSV file."
+              title={t('Import hosts')}
+              text={t('From ~/.ssh/config, MobaXterm, Termius or a CSV file.')}
               testId="welcome-import"
               onClick={() => void openSidebarDialog('import-hosts')}
             />
             <StartCard
               icon={<SquareTerminal size={18} />}
-              title="Local terminal"
-              text="Open a shell on this computer."
+              title={t('Local terminal')}
+              text={t('Open a shell on this computer.')}
               hint={key('tab.new')}
               testId="welcome-new-terminal"
               onClick={() => useTabs.getState().addLocal()}
             />
             <StartCard
               icon={<Zap size={18} />}
-              title="Quick connect"
-              text="Type user@host:port — nothing is saved."
+              title={t('Quick connect')}
+              text={t('Type user@host:port — nothing is saved.')}
               testId="welcome-quick-connect"
               onClick={() => {
-                document.querySelector<HTMLInputElement>('[data-testid="quick-connect"]')?.focus()
+                quickRef.current?.focus()
               }}
             />
             <StartCard
               icon={<Puzzle size={18} />}
-              title="Add tools"
-              text="S3 storage, Docker and Kubernetes — turn on what you need."
+              title={t('Add tools')}
+              text={t('S3 storage, Docker and Kubernetes — turn on what you need.')}
               testId="welcome-add-tools"
               className="lg:col-span-2"
               onClick={() => {
@@ -333,13 +371,16 @@ export function HomeView(): React.JSX.Element {
 
         <footer className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-4 text-xs text-faint">
           <span>
-            Search hosts <Kbd>{key('hosts.search')}</Kbd>
+            {t('Search hosts')} <Kbd>{key('hosts.search')}</Kbd>
           </span>
           <span>
-            Command palette <Kbd>{key('palette.open')}</Kbd>
+            {t('Command palette')} <Kbd>{key('palette.open')}</Kbd>
           </span>
           <span>
-            New terminal <Kbd>{key('tab.new')}</Kbd>
+            {t('New terminal')} <Kbd>{key('tab.new')}</Kbd>
+          </span>
+          <span>
+            {t('Settings')} <Kbd>{key('settings.open')}</Kbd>
           </span>
         </footer>
       </div>

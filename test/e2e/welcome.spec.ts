@@ -24,7 +24,7 @@ test('màn chào + thẻ bắt đầu ở thanh bên: mở đúng hộp thoại,
   await expect(page.getByTestId('import-dialog')).toBeVisible()
   await page.keyboard.press('Escape')
   await welcome.getByTestId('welcome-quick-connect').click()
-  await expect(page.getByTestId('quick-connect')).toBeFocused()
+  await expect(welcome.getByTestId('home-quick-connect')).toBeFocused()
 
   // Thanh bên đang ẩn: "Add a host" vẫn mở được (tự hiện thanh bên).
   await page.getByTestId('toggle-sidebar').click()

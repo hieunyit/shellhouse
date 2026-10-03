@@ -34,6 +34,8 @@ export async function launchApp(extraEnv: Record<string, string> = {}): Promise<
       ...process.env,
       SHELLHOUSE_TEST_HOOKS: '1',
       SHELLHOUSE_FAST_KDF: '1',
+      // Giao diện tiếng Anh cố định (test tìm theo chữ); chụp màn hình tiếng Việt: SHELLHOUSE_LANG=vi.
+      SHELLHOUSE_LANG: process.env['SHELLHOUSE_LANG'] ?? 'en',
       SHELLHOUSE_USER_DATA: userData,
       ...extraEnv
     }
@@ -127,4 +129,19 @@ export function echoComputed(marker: string): { command: string; expected: strin
   return isWindows
     ? { command: `Write-Output ("${marker}-" + (40+2))`, expected: `${marker}-42` }
     : { command: `echo ${marker}-$((40+2))`, expected: `${marker}-42` }
+}
+
+/**
+ * Xác nhận hộp thoại "Close …?" hiện khi đóng tab SSH đang kết nối (cài đặt "confirmCloseConnected"
+ * mặc định bật) — gọi ngay sau thao tác đóng (nút ×, Ctrl+W, "Close other tabs"…). `optional`: tab có
+ * thể đã mất kết nối (mạng chập chờn) nên không hỏi → chỉ bấm nếu hộp thoại hiện trong `timeout`
+ * (guard được hỏi đồng bộ lúc đóng, hộp thoại hiện ngay hoặc không bao giờ).
+ */
+export async function confirmTabClose(
+  page: Page,
+  { optional = false, timeout = 2_000 }: { optional?: boolean; timeout?: number } = {}
+): Promise<void> {
+  const ok = page.getByTestId('close-tab-confirm').getByTestId('confirm-ok')
+  if (optional) await ok.click({ timeout }).catch(() => undefined)
+  else await ok.click()
 }

@@ -22,24 +22,29 @@ const cases: [string, string[]][] = [
 ]
 
 describe.skipIf(!hasSshKeygen())('hostkey so với ssh-keygen', () => {
-  it.each(cases)('%s: fingerprint + randomart trùng khớp từng ký tự', (_name, args) => {
-    const dir = tempDir()
-    const keyPath = join(dir, 'k')
-    execFileSync('ssh-keygen', [...args, '-N', '', '-q', '-f', keyPath])
-    const pub = readFileSync(`${keyPath}.pub`, 'utf8').trim().split(/\s+/)
-    const blob = Buffer.from(pub[1] ?? '', 'base64')
+  it.each(cases)(
+    '%s: fingerprint + randomart trùng khớp từng ký tự',
+    (_name, args) => {
+      const dir = tempDir()
+      const keyPath = join(dir, 'k')
+      execFileSync('ssh-keygen', [...args, '-N', '', '-q', '-f', keyPath])
+      const pub = readFileSync(`${keyPath}.pub`, 'utf8').trim().split(/\s+/)
+      const blob = Buffer.from(pub[1] ?? '', 'base64')
 
-    expect(keyTypeOf(blob)).toBe(pub[0])
-    const out = execFileSync('ssh-keygen', ['-lv', '-E', 'sha256', '-f', `${keyPath}.pub`], {
-      encoding: 'utf8'
-    })
-      .replace(/\r\n/g, '\n') // ssh-keygen trên Windows in CRLF
-      .trimEnd()
-    const [summary, ...art] = out.split('\n')
-    expect(summary).toContain(fingerprintSha256(blob))
-    expect(summary).toContain(String(keyLabel(blob).bits))
-    expect(randomart(blob)).toBe(art.join('\n'))
-  })
+      expect(keyTypeOf(blob)).toBe(pub[0])
+      const out = execFileSync('ssh-keygen', ['-lv', '-E', 'sha256', '-f', `${keyPath}.pub`], {
+        encoding: 'utf8'
+      })
+        .replace(/\r\n/g, '\n') // ssh-keygen trên Windows in CRLF
+        .trimEnd()
+      const [summary, ...art] = out.split('\n')
+      expect(summary).toContain(fingerprintSha256(blob))
+      expect(summary).toContain(String(keyLabel(blob).bits))
+      expect(randomart(blob)).toBe(art.join('\n'))
+      // Sinh khoá RSA bằng ssh-keygen tốn CPU: 5 giây mặc định không đủ khi máy đang bận.
+    },
+    30_000
+  )
 })
 
 describe('hostkey', () => {

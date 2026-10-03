@@ -1,14 +1,21 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle2, XCircle } from 'lucide-react'
 import type { AppInfo, NativeModuleStatus, SessionHostStatus } from '@shared/ipc'
+import { t } from '@shared/i18n'
 import { useHostStatus } from '../stores/host-status'
 import { Button, cx, SectionTitle } from './ui'
 
-const stateLabel: Record<SessionHostStatus['state'], string> = {
-  starting: 'Starting',
-  running: 'Running',
-  restarting: 'Restarting',
-  stopped: 'Stopped'
+function stateLabel(state: SessionHostStatus['state']): string {
+  switch (state) {
+    case 'starting':
+      return t('Starting')
+    case 'running':
+      return t('Running')
+    case 'restarting':
+      return t('Restarting')
+    case 'stopped':
+      return t('Stopped')
+  }
 }
 
 const stateColor: Record<SessionHostStatus['state'], string> = {
@@ -40,7 +47,7 @@ export function Diagnostics(): React.JSX.Element {
   return (
     <div className="flex flex-col gap-6 text-[13px]">
       <section>
-        <SectionTitle>Application</SectionTitle>
+        <SectionTitle>{t('Application')}</SectionTitle>
         {info && (
           <p className="font-mono text-xs text-muted" data-testid="app-info">
             v{info.version} · Electron {info.electron} · Node {info.node} · {info.platform}/
@@ -50,24 +57,31 @@ export function Diagnostics(): React.JSX.Element {
       </section>
 
       <section>
-        <SectionTitle description="Runs every SSH connection and terminal in a separate process, restarted automatically if it crashes.">
-          Session host
+        <SectionTitle
+          description={t(
+            'Runs every SSH connection and terminal in a separate process, restarted automatically if it crashes.'
+          )}
+        >
+          {t('Session host')}
         </SectionTitle>
         {status && (
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             <span className="flex items-center gap-2">
               <span className={cx('size-2 rounded-full', stateColor[status.state])} />
               <span data-testid="host-state" data-state={status.state}>
-                {stateLabel[status.state]}
+                {stateLabel(status.state)}
               </span>
             </span>
             <span className="text-muted">PID {status.pid ?? '—'}</span>
             <span className="text-muted" data-testid="host-restarts">
-              Restarts: {status.restarts}
+              {t('Restarts: {n}', { n: status.restarts })}
             </span>
             {status.lastExit && (
               <span className="text-faint">
-                Last exit: {status.lastExit.reason} (code {status.lastExit.code ?? '—'})
+                {t('Last exit: {reason} (code {code})', {
+                  reason: status.lastExit.reason,
+                  code: status.lastExit.code ?? '—'
+                })}
               </span>
             )}
           </div>
@@ -80,7 +94,7 @@ export function Diagnostics(): React.JSX.Element {
             data-testid="crash-host"
             onClick={() => void window.shellhouse.crashSessionHostForTest()}
           >
-            Kill session host (test)
+            {t('Kill session host (test)')}
           </Button>
         )}
       </section>
@@ -88,7 +102,7 @@ export function Diagnostics(): React.JSX.Element {
       <section>
         <div className="flex items-start">
           <div className="flex-1">
-            <SectionTitle>Native modules</SectionTitle>
+            <SectionTitle>{t('Native modules')}</SectionTitle>
           </div>
           <Button
             size="sm"
@@ -96,7 +110,7 @@ export function Diagnostics(): React.JSX.Element {
             data-testid="run-selfcheck"
             onClick={() => void runCheck()}
           >
-            {checking ? 'Checking…' : 'Run check'}
+            {checking ? t('Checking…') : t('Run check')}
           </Button>
         </div>
         {modules && (
@@ -104,9 +118,9 @@ export function Diagnostics(): React.JSX.Element {
             <table className="w-full text-left" data-testid="module-table">
               <thead className="bg-subtle text-xs text-muted">
                 <tr>
-                  <th className="px-3 py-2 font-medium">Module</th>
-                  <th className="px-3 py-2 font-medium">Process</th>
-                  <th className="px-3 py-2 font-medium">Result</th>
+                  <th className="px-3 py-2 font-medium">{t('Module')}</th>
+                  <th className="px-3 py-2 font-medium">{t('Process')}</th>
+                  <th className="px-3 py-2 font-medium">{t('Result')}</th>
                 </tr>
               </thead>
               <tbody>

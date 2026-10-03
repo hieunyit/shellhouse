@@ -27,6 +27,10 @@ electronFuses:
   enableNodeCliInspectArguments: false
   enableEmbeddedAsarIntegrityValidation: true
   onlyLoadAppFromAsar: true
+  # Phải giữ: renderer nạp bằng file:// (loadFile) với script module của Vite — tắt fuse này thì
+  # file:// bị đối xử như trình duyệt thường (chặn module/fetch cùng file://) và app trắng màn hình.
+  # Muốn tắt cần chuyển sang protocol riêng (app://). Phạm vi IPC đã khoá đúng index.html
+  # (security-policy.ts isAppUrl).
   grantFileProtocolExtraPrivileges: true
 
 win:

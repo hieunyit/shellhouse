@@ -1,3 +1,4 @@
+import { t } from '@shared/i18n'
 import {
   ClientMessage,
   type ExitReason,
@@ -18,8 +19,10 @@ import { LatencyMonitor } from '../ssh/latency'
 import { RemoteEdits } from '../sftp/edit'
 import { downloadFolder, uploadFolder } from '../sftp/folders'
 import { TransferQueue } from '../sftp/transfers'
+import { discardLocalParts, inspectLocalParts } from '../sftp/parts'
 import { parentRemote, type SftpOp } from '@shared/sftp'
 import { stat } from 'node:fs/promises'
+import { isAbsolute, relative, resolve as resolvePath } from 'node:path'
 import type { ForwardSpec } from '@shared/forwards'
 import { LocalPty, resolveLocalShell } from '../transport/local-pty'
 import { buildShellEnv } from '../transport/shell'
@@ -41,15 +44,19 @@ const MAX_PENDING_INPUT = 64 * 1024
 /** Lỗi SFTP mang mã số theo giao thức; đổi sang câu dễ hiểu. */
 function sftpErrorText(error: unknown): string {
   const code = (error as { code?: unknown } | null)?.code
-  if (code === 2) return 'No such file or folder'
-  if (code === 3) return 'Permission denied'
+  if (code === 2) return t('No such file or folder')
+  if (code === 3) return t('Permission denied')
   if (code === 4) {
     const message = error instanceof Error ? error.message : ''
     return message && message !== 'Failure'
       ? message
-      : 'Operation failed (folder not empty or already exists?)'
+      : t('Operation failed (folder not empty or already exists?)')
   }
   return error instanceof Error ? error.message : String(error)
+}
+
+function sessionEnded(): Error {
+  return new Error(t('The session has ended'))
 }
 
 /** Phần tối thiểu của MessagePortMain mà session cần. */
@@ -78,6 +85,18 @@ export interface SessionDeps {
   modules: HostModuleRegistry
   /** Cho test. */
   sshOverrides?: { agent?: string | null; keyFiles?: readonly string[] }
+  /**
+   * Thư mục tạm của "sửa file trên server" (main cấp qua `--edit-dir=`). Có thì op `edit` chỉ nhận
+   * đường dẫn nằm trong đó — renderer không thể bắt session host theo dõi / ghi đè file bất kỳ.
+   */
+  editRoot?: string
+}
+
+/** `path` nằm TRONG `root` (không phải chính `root`, không thoát ra bằng `..`). */
+export function isInside(root: string, path: string): boolean {
+  if (!isAbsolute(path)) return false
+  const rel = relative(resolvePath(root), resolvePath(path))
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
 }
 
 export interface SessionExtras {
@@ -120,6 +139,8 @@ export class Session {
   private readonly prompts = new Map<number, (reply: PromptReply) => void>()
   /** Phím gõ trong lúc SSH đang kết nối — gửi khi shell mở, thay vì bỏ âm thầm. */
   private pendingInput = ''
+  /** Người chờ kết nối SSH tích hợp (null = session kết thúc trước khi có). */
+  private sshWaiters: ((ssh: SshShell | null) => void)[] = []
 
   constructor(
     readonly id: string,
@@ -197,14 +218,14 @@ export class Session {
           this.transport = transport
           this.flushPendingInput()
         }
-        this.post({ t: 'status', phase: 'connected', detail: 'Ready' })
         this.deps.log('info', `Session ${this.id}: module ${module} (${sessionKind})`)
+        this.post({ t: 'status', phase: 'connected', detail: t('Ready') })
       } else if (this.spec.kind === 'telnet') {
         const { host, port } = this.spec.target
         this.post({
           t: 'status',
           phase: 'connecting',
-          detail: `Connecting to ${host}:${port} (Telnet)…`
+          detail: t('Connecting to {host}:{port} (Telnet)…', { host, port: String(port) })
         })
         const transport = await TelnetTransport.open(
           { host, port, cols: this.spec.cols, rows: this.spec.rows },
@@ -216,11 +237,19 @@ export class Session {
         }
         this.transport = transport
         this.flushPendingInput()
-        this.post({ t: 'status', phase: 'connected', detail: 'Connected (Telnet — not encrypted)' })
         this.deps.log('info', `Session ${this.id}: telnet ${host}:${port}`)
+        this.post({
+          t: 'status',
+          phase: 'connected',
+          detail: t('Connected (Telnet — not encrypted)')
+        })
       } else if (this.spec.kind === 'serial') {
         const { serial } = this.spec
-        this.post({ t: 'status', phase: 'connecting', detail: `Opening ${serial.path}…` })
+        this.post({
+          t: 'status',
+          phase: 'connecting',
+          detail: t('Opening {path}…', { path: serial.path })
+        })
         const transport = await SerialTransport.open(serial, callbacks)
         if (this.closed) {
           transport.close()
@@ -231,12 +260,15 @@ export class Session {
         this.post({
           t: 'status',
           phase: 'connected',
-          detail: `Connected to ${serial.path} (${serialSummary(serial)}) — press Enter if nothing shows`
+          detail: t('Connected to {path} ({summary}) — press Enter if nothing shows', {
+            path: serial.path,
+            summary: serialSummary(serial)
+          })
         })
         this.deps.log('info', `Session ${this.id}: serial ${serial.path}`)
       } else if (this.spec.kind === 'system-ssh') {
         const file = findSystemSsh()
-        if (!file) throw new Error('The system ssh command (OpenSSH client) was not found')
+        if (!file) throw new Error(t('The system ssh command (OpenSSH client) was not found'))
         const args = buildSystemSshArgs(this.spec)
         const env = buildShellEnv({
           platform: process.platform,
@@ -267,7 +299,7 @@ export class Session {
           cols: this.spec.cols,
           rows: this.spec.rows,
           ...(this.spec.noShell || this.spec.moduleTerminal ? { shell: false } : {}),
-          ...(this.spec.moduleTerminal ? { noShellStatus: 'Authenticated' } : {}),
+          ...(this.spec.moduleTerminal ? { noShellStatus: t('Authenticated') } : {}),
           ...(this.extras.tmux ? { tmux: this.extras.tmux } : {}),
           callbacks,
           ctx: this.context(),
@@ -278,6 +310,8 @@ export class Session {
           return
         }
         this.ssh = transport
+        this.dropCredentials()
+        for (const resolve of this.sshWaiters.splice(0)) resolve(transport)
         const moduleTerminal = this.spec.moduleTerminal
         if (moduleTerminal) {
           const session = await this.attachModule(moduleTerminal.module)
@@ -385,6 +419,8 @@ export class Session {
     this.pendingInput = ''
     for (const resolve of this.prompts.values()) resolve({ ok: false, answers: [] })
     this.prompts.clear()
+    for (const resolve of this.sshWaiters.splice(0)) resolve(this.ssh)
+    this.dropCredentials()
     this.deps.onEnded(this.id)
   }
 
@@ -414,7 +450,9 @@ export class Session {
     if (result.status === 'revoked') {
       this.post({
         t: 'error',
-        message: `The host key of ${host} has been revoked (@revoked). Refusing to connect.`
+        message: t('The host key of {host} has been revoked (@revoked). Refusing to connect.', {
+          host
+        })
       })
       return false
     }
@@ -447,21 +485,59 @@ export class Session {
    * Kết nối SSH tích hợp, chờ nếu đang mở dở: renderer thấy "đã xác thực" (và mở SFTP) trước khi
    * kênh shell mở xong — yêu cầu SFTP tới trong khoảng đó phải chờ, không báo lỗi.
    */
-  private async waitForSsh(timeoutMs = 30_000): Promise<SshShell | null> {
-    // Đọc qua hàm để TS không thu hẹp kiểu qua `await` (giá trị đổi trong lúc chờ).
-    const current = (): SshShell | null => this.ssh
-    const closed = (): boolean => this.closed
-    if (current() || this.spec.kind !== 'ssh') return current()
-    const deadline = Date.now() + timeoutMs
-    while (!current() && !closed() && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 50))
+  private waitForSsh(timeoutMs = 30_000): Promise<SshShell | null> {
+    if (this.ssh || this.spec.kind !== 'ssh' || this.closed) return Promise.resolve(this.ssh)
+    return new Promise((resolve) => {
+      const waiter = (ssh: SshShell | null): void => {
+        clearTimeout(timer)
+        resolve(ssh)
+      }
+      const timer = setTimeout(() => {
+        this.sshWaiters = this.sshWaiters.filter((w) => w !== waiter)
+        resolve(this.ssh)
+      }, timeoutMs)
+      this.sshWaiters.push(waiter)
+    })
+  }
+
+  /**
+   * Đã xác thực (hoặc session kết thúc): không giữ password / private key / passphrase trong bộ nhớ
+   * lâu hơn cần. Kết nối lại = renderer mở session mới (main gửi lại thông tin xác thực).
+   */
+  private dropCredentials(): void {
+    delete this.extras.credentials
+    for (const hop of this.extras.jumps ?? []) delete hop.credentials
+  }
+
+  /**
+   * File tải dở trong thư mục trên máy (khung Local): đọc / xoá trên máy, không cần chờ kết nối —
+   * chỉ "tiếp tục được không" mới hỏi server (khi đã kết nối).
+   */
+  private async localPartOp(
+    op: Extract<SftpOp, { op: 'localParts' | 'discardLocalParts' }>
+  ): Promise<unknown> {
+    const busy = (localPath: string): boolean => this.transfers?.isBusyLocal(localPath) ?? false
+    if (op.op === 'discardLocalParts') return discardLocalParts(op.dir, op.names, busy)
+    // Tab đang kết nối: chờ một chút để biết file tải dở còn tiếp tục được không.
+    await this.waitForSsh(5_000)
+    if (this.ssh && !this.sftp) {
+      const limits = this.spec.kind === 'ssh' ? this.spec.sftpLimits : undefined
+      this.sftp = new SftpService(this.ssh.client, limits?.requests)
     }
-    return current()
+    const sftp = this.ssh && this.sftp && !this.sftp.isLost() ? this.sftp : null
+    const remoteStat = sftp
+      ? async (path: string) => {
+          const st = await sftp.statOrNull(path)
+          return st && st.isFile() ? { size: st.size, mtime: st.mtime } : null
+        }
+      : null
+    return inspectLocalParts(op.dir, op.names, remoteStat, busy)
   }
 
   private async runSftp(op: SftpOp): Promise<unknown> {
+    if (op.op === 'localParts' || op.op === 'discardLocalParts') return this.localPartOp(op)
     const ssh = await this.waitForSsh()
-    if (!ssh) throw new Error('SFTP is only available on a connected built-in SSH session')
+    if (!ssh) throw new Error(t('SFTP is only available on a connected built-in SSH session'))
     const limits = this.spec.kind === 'ssh' ? this.spec.sftpLimits : undefined
     this.sftp ??= new SftpService(ssh.client, limits?.requests)
     const sftp = this.sftp
@@ -512,6 +588,8 @@ export class Session {
       case 'uploadFolder':
         return uploadFolder(sftp, transfers, op.localPath, op.remoteParent, op.overwrite)
       case 'edit':
+        if (this.deps.editRoot !== undefined && !isInside(this.deps.editRoot, op.localPath))
+          throw new Error(t('The local copy for editing must be in the app’s temporary folder'))
         this.edits ??= new RemoteEdits(sftp, transfers)
         await this.edits.open(op.remotePath, op.localPath)
         return null
@@ -521,8 +599,11 @@ export class Session {
       case 'retry':
         transfers.retry(op.transferId)
         return null
+      case 'discard':
+        transfers.discard(op.transferId)
+        return null
       case 'clearDone':
-        transfers.clearDone()
+        transfers.clearDone(op.keepParts === true)
         return null
     }
   }
@@ -549,14 +630,15 @@ export class Session {
     if (existing) return existing
     const pending = (async () => {
       const ssh = await this.waitForSsh()
-      if (!ssh || this.closed) throw new Error('Only available on a connected built-in SSH session')
+      if (!ssh || this.closed)
+        throw new Error(t('Only available on a connected built-in SSH session'))
       const { host, username } =
         this.spec.kind === 'ssh' ? this.spec.target : { host: '', username: '' }
       const capability = createSshCapability(ssh.client, `${username}@${host}`)
       const session = this.deps.modules.attach(module, capability, this.moduleSink(module))
       if (this.isClosed()) {
         session.dispose()
-        throw new Error('The session has ended')
+        throw sessionEnded()
       }
       this.deps.log('info', `Session ${this.id}: attached module ${module}`)
       return session
@@ -589,7 +671,7 @@ export class Session {
           : this.spec.kind === 'ssh'
             ? await this.attachModule(module)
             : null
-      if (!session) throw new Error(`Module ${module} is not available in this tab`)
+      if (!session) throw new Error(t('Module {module} is not available in this tab', { module }))
       const result = await session.run(op, controller.signal)
       this.post({ t: 'module-result', id, ok: true, result })
     } catch (error) {
@@ -692,7 +774,7 @@ export class Session {
         void this.waitForSsh().then(async (ssh) => {
           const r: { status: 'added' | 'exists' | 'error'; message?: string } = ssh
             ? await deployPublicKey(ssh.client, publicKey)
-            : { status: 'error', message: 'Not connected with built-in SSH' }
+            : { status: 'error', message: t('Not connected with built-in SSH') }
           this.post({
             t: 'deploy-key-result',
             id,
@@ -705,7 +787,7 @@ export class Session {
       case 'forward-start':
         if (this.forwards) void this.forwards.start(message.spec)
         else if (this.spec.kind === 'ssh') this.pendingForwards.push(message.spec)
-        else this.rejectForward(message.spec, 'Only available with built-in SSH')
+        else this.rejectForward(message.spec, t('Only available with built-in SSH'))
         break
       case 'stats':
         this.wantStats = message.on

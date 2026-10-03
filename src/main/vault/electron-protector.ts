@@ -1,5 +1,6 @@
 import { safeStorage } from 'electron'
 import type { KeyProtector } from './device-key'
+import { t } from '@shared/i18n'
 
 /** safeStorage của Electron. Trên Linux không có Secret Service thì chỉ là "basic_text" → từ chối. */
 export const electronProtector: KeyProtector = {
@@ -7,7 +8,7 @@ export const electronProtector: KeyProtector = {
     if (!safeStorage.isEncryptionAvailable()) {
       return {
         ok: false,
-        reason: 'The operating system does not provide a keychain to store the key securely.'
+        reason: t('The operating system does not provide a keychain to store the key securely.')
       }
     }
     if (process.platform === 'linux') {
@@ -15,8 +16,9 @@ export const electronProtector: KeyProtector = {
       if (backend === 'basic_text' || backend === 'unknown') {
         return {
           ok: false,
-          reason:
+          reason: t(
             'No secure keychain found (GNOME Keyring / KWallet). The key would only be obfuscated, not encrypted, so this option is disabled.'
+          )
         }
       }
     }

@@ -7,6 +7,7 @@ import { findOnPath } from '../../node-shared/find-on-path'
 import type { RunningProgram } from '../../modules/registry/host-types'
 import type { Transport, TransportCallbacks } from '../transport/types'
 import { LocalPty } from '../transport/local-pty'
+import { appFreeEnv } from '../transport/shell'
 
 /**
  * Chạy chương trình trên máy cho module (ADR-014 mục 3.6): tìm theo tên trong PATH (và vài chỗ cài
@@ -67,6 +68,27 @@ function hashFile(path: string): Promise<string> {
   })
 }
 
+/**
+ * Biến môi trường cho phép chèn code vào tiến trình (thư viện nạp trước, tuỳ chọn trình thông dịch,
+ * file khởi động của shell). Env do module truyền vào có thể đến từ file cấu hình người khác gửi
+ * (ví dụ `exec.env` trong kubeconfig) → bỏ những biến này. Biến thường (BROWSER, AWS_PROFILE…) giữ.
+ */
+const INJECTION_ENV =
+  /^(LD_|DYLD_)|^(NODE_OPTIONS|NODE_PATH|ELECTRON_RUN_AS_NODE|PYTHONSTARTUP|PYTHONPATH|PYTHONHOME|PYTHONINSPECT|PERL5OPT|PERL5LIB|PERLLIB|RUBYOPT|RUBYLIB|BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|GCONV_PATH|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|JDK_JAVA_OPTIONS)$/
+
+/** Env cho chương trình của module: env của app (đã bỏ biến của app/Electron) + env an toàn của module. */
+export function programEnv(
+  extra?: Readonly<Record<string, string>>,
+  base: NodeJS.ProcessEnv = process.env
+): Record<string, string> {
+  const env = appFreeEnv(base)
+  for (const [key, value] of Object.entries(extra ?? {})) {
+    // Windows không phân biệt hoa thường tên biến.
+    if (typeof value === 'string' && !INJECTION_ENV.test(key.toUpperCase())) env[key] = value
+  }
+  return env
+}
+
 export function spawnProgram(
   path: string,
   args: readonly string[],
@@ -77,14 +99,18 @@ export function spawnProgram(
     shell: false,
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: env ? { ...process.env, ...env } : process.env
+    env: programEnv(env)
   })
   const exitListeners: ((code: number | null) => void)[] = []
   let exited = false
   let exitCode: number | null = null
+  const onAbort = (): void => {
+    child.kill()
+  }
   const finish = (code: number | null): void => {
     if (exited) return
     exited = true
+    signal?.removeEventListener('abort', onAbort)
     exitCode = code
     for (const l of exitListeners) l(code)
   }
@@ -94,9 +120,8 @@ export function spawnProgram(
   child.on('close', (code) => {
     finish(code)
   })
-  signal?.addEventListener('abort', () => {
-    child.kill()
-  })
+  if (signal?.aborted) onAbort()
+  else signal?.addEventListener('abort', onAbort, { once: true })
   // Chương trình thoát trước khi đọc hết stdin → EPIPE; không để thành lỗi không bắt.
   child.stdin.on('error', () => undefined)
   const program: RunningProgram = {
@@ -124,11 +149,7 @@ export function openProgramPty(
       file: path,
       args: [...args],
       cwd: homedir(),
-      env: Object.fromEntries(
-        Object.entries({ ...process.env, TERM: 'xterm-256color' }).filter(
-          (e): e is [string, string] => typeof e[1] === 'string'
-        )
-      )
+      env: { ...programEnv(), TERM: 'xterm-256color' }
     },
     size.cols,
     size.rows,

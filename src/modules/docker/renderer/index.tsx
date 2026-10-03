@@ -1,6 +1,6 @@
 import { Container, FileText } from 'lucide-react'
 import { defineTab, type RendererModule } from '../../registry/renderer-types'
-import { lazyModuleComponent } from '../../registry/renderer-kit'
+import { lazyModuleComponent, t } from '../../registry/renderer-kit'
 import { dockerManifest } from '../manifest'
 import { DockerEngineParams, DockerLogsParams } from '../shared/ops'
 import { openDocker } from './api'
@@ -20,7 +20,7 @@ export const dockerRenderer: RendererModule = {
       component: lazyModuleComponent(() => import('./LogsView').then((m) => m.LogsTab)),
       params: DockerLogsParams,
       icon: FileText,
-      title: (p) => `${p.name} (logs)`
+      title: (p) => t('{name} (logs)', { name: p.name })
     })
   },
   hostActions: (host) =>
@@ -28,7 +28,7 @@ export const dockerRenderer: RendererModule = {
       ? [
           {
             id: 'open',
-            label: 'Docker…',
+            label: t('Docker…'),
             icon: <Container size={14} />,
             onSelect: () => {
               openDocker(host.hostId)
@@ -39,7 +39,7 @@ export const dockerRenderer: RendererModule = {
   commands: () => [
     {
       id: 'open-local',
-      title: 'Open Docker on this computer',
+      title: t('Open Docker on this computer'),
       run: () => {
         openDocker(null)
       }

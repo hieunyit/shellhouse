@@ -321,6 +321,9 @@ describe('xác thực', () => {
     })
     now += 14.5 * 60_000
     expect((await creds(false)).headers).toEqual({ Authorization: 'Bearer tok-2' })
+    // 401 ngay sau khi vừa làm mới (request gửi bằng token cũ) → không chạy plugin lần nữa.
+    expect((await creds(true)).headers).toEqual({ Authorization: 'Bearer tok-2' })
+    now += 10_000
     expect((await creds(true)).headers).toEqual({ Authorization: 'Bearer tok-3' })
   })
 
@@ -377,7 +380,7 @@ contexts:
         'clusters:\n- name: c\n  cluster: {server: x, certificate-authority: missing.crt}\n',
         read
       )
-    ).rejects.toThrow('missing.crt')
+    ).rejects.toThrow(/missing\.crt.*ENOENT/)
   })
 
   it('quantity và selector', async () => {

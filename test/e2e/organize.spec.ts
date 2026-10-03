@@ -133,6 +133,10 @@ test('menu chuột phải: yêu thích, copy lệnh ssh, nhân bản, mở SFTP;
   await page.getByTestId('menu-sftp').click()
   await page.getByTestId('hostkey-accept').click()
   await expect(page.getByTestId('sftp-panel')).toBeVisible()
+  // Đang nằm trong Favorites → Recent không lặp lại; bỏ yêu thích thì hiện ở Recent.
+  await expect(page.locator('[data-testid="recent-row"][data-host-label="web"]')).toHaveCount(0)
+  await hostRow(page, 'web').click({ button: 'right' })
+  await page.getByTestId('menu-favorite').click()
   await expect(page.locator('[data-testid="recent-row"][data-host-label="web"]')).toBeVisible()
 })
 

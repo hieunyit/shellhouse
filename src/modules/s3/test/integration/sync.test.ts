@@ -118,7 +118,16 @@ describe('S3: đồng bộ', () => {
       await put(client, 'dst', 'backup/extra.txt', 'x')
       const bySize = await sync(s, { ...base, compare: 'size', dryRun: true })
       expect(bySize.plan.update).toBe(0)
-      const mirror = await sync(s, { ...base, mirror: true, dryRun: false })
+      // Xem trước thấy xoá 1; lúc chạy thật đích có thêm object thừa → nhiều hơn số đã xem → dừng,
+      // không chép / xoá gì.
+      await put(client, 'dst', 'backup/extra2.txt', 'y')
+      const guarded = await sync(s, { ...base, mirror: true, dryRun: false, maxDelete: 1 })
+      expect(guarded.phase).toBe('error')
+      expect(guarded.error).toMatch(/preview again/)
+      expect(guarded.done).toMatchObject({ copied: 0, deleted: 0 })
+      expect((await get(client, 'dst', 'backup/extra2.txt')).text).toBe('y')
+      await s.run({ op: 'delete', bucket: 'dst', keys: ['backup/extra2.txt'] })
+      const mirror = await sync(s, { ...base, mirror: true, dryRun: false, maxDelete: 1 })
       expect(mirror.plan).toMatchObject({ new: 0, update: 1, delete: 1 })
       expect(mirror.done).toMatchObject({ copied: 1, deleted: 1, failed: 0 })
       expect((await get(client, 'dst', 'backup/f1.txt')).text).toBe('FILE 1')

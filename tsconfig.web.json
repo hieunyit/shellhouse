@@ -12,7 +12,8 @@
     "src/modules/registry/all-renderer.ts",
     "src/modules/*/manifest.ts",
     "src/modules/*/shared/**/*",
-    "src/modules/*/renderer/**/*"
+    "src/modules/*/renderer/**/*",
+    "test/renderer/**/*"
   ],
   "compilerOptions": {
     "composite": true,

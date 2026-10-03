@@ -137,13 +137,50 @@ test('Docker: tổng quan, lọc trạng thái, chạy container mới, log cả
       HostConfig: { PortBindings: { '80/tcp': [{ HostPort: '8088' }] } }
     })
 
-    // Phím tắt trên dòng đang chọn: r = restart.
+    // Phím tắt trên dòng đang chọn: r = restart — hỏi lại trước (gõ nhầm phím không dừng dịch vụ).
     await view.locator('[data-testid="docker-container"][data-name="web"]').click()
     await expect(view.getByTestId('docker-detail')).toBeVisible()
     await page.keyboard.press('r')
+    await expect(page.getByTestId('docker-confirm')).toContainText('Restart web?')
+    await page.getByTestId('docker-confirm-ok').click()
     await expect
       .poll(() => engine.requests.some((r) => /\/containers\/web-[^/]+\/restart/.test(r)))
       .toBe(true)
+
+    // Healthcheck hiện ở bảng chi tiết; tab Files duyệt hệ thống file của container.
+    const detail = view.getByTestId('docker-detail')
+    await expect(detail.getByTestId('docker-health').first()).toHaveAttribute(
+      'data-health',
+      'healthy'
+    )
+    await detail.getByTestId('docker-detail-tab-files').click()
+    const etc = detail.locator('[data-testid="docker-file"][data-name="etc"]')
+    await etc.dblclick()
+    await expect(detail.getByTestId('docker-files-path')).toHaveValue('/etc')
+    await expect(detail.locator('[data-testid="docker-file"][data-name="hosts"]')).toBeVisible()
+
+    // Nút "⋯" trên dòng: menu có chữ, đủ thao tác (kể cả thứ không có nút nhanh).
+    await view
+      .locator('[data-testid="docker-container"][data-name="db"]')
+      .getByTestId('docker-row-more')
+      .click()
+    await expect(page.getByRole('menuitem', { name: /Copy name/ })).toBeVisible()
+    await page.keyboard.press('Escape')
+
+    // Volume mới qua hộp thoại → Engine nhận đúng tên / driver.
+    await view.getByTestId('docker-nav-volumes').click()
+    await view.getByTestId('docker-new-volume').click()
+    await page.getByTestId('docker-volume-name').fill('pgdata')
+    await page.getByTestId('docker-volume-create').click()
+    await expect(view.locator('[data-testid="docker-volume"][data-name="pgdata"]')).toBeVisible()
+
+    // Tổng quan: build cache có nút dọn (xem trước dung lượng).
+    await view.getByTestId('docker-nav-overview').click()
+    await expect(view.getByTestId('docker-ov-row-buildCache')).toContainText('reclaimable')
+    await view.getByTestId('docker-ov-prune-buildCache').click()
+    await expect(page.getByTestId('docker-prune-dialog')).toContainText('cache-free')
+    await page.getByTestId('docker-prune-confirm').click()
+    await expect.poll(() => engine.buildCache.length).toBe(1)
 
     // Log của cả Compose project: một tab, dòng có tiền tố service.
     await view.getByTestId('docker-nav-compose').click()

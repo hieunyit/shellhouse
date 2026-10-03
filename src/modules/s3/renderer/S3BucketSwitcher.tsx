@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Database, LayoutList, Search } from 'lucide-react'
 import type { S3Bucket } from '../shared/ops'
 import { cx } from '../../../renderer/src/components/ui'
+import { t } from '../../registry/renderer-kit'
 import { collator } from './parts'
 
 /**
@@ -62,7 +63,7 @@ export function S3BucketSwitcher({
           type="button"
           className="flex min-w-0 items-center gap-1.5 rounded-l-md py-0.5 pr-1 pl-2 font-medium text-fg hover:bg-hover"
           data-testid="s3-crumb-bucket"
-          title={`Go to the top of ${current}`}
+          title={t('Go to the top of {bucket}', { bucket: current })}
           onClick={onRoot}
         >
           <Database size={13} className="shrink-0 text-accent" />
@@ -70,10 +71,10 @@ export function S3BucketSwitcher({
         </button>
         <button
           type="button"
-          aria-label="Switch bucket"
+          aria-label={t('Switch bucket')}
           aria-haspopup="listbox"
           aria-expanded={open}
-          title="Switch bucket"
+          title={t('Switch bucket')}
           data-testid="s3-bucket-switch"
           className="flex items-center rounded-r-md border-l border-line px-1 text-muted hover:bg-hover hover:text-fg"
           onClick={() => {
@@ -95,14 +96,14 @@ export function S3BucketSwitcher({
           className="absolute top-full left-0 z-40 mt-1.5 w-64 rounded-lg border border-line bg-surface p-1 shadow-lg"
           data-testid="s3-bucket-menu"
         >
-          <p className="px-2 pt-1 pb-1.5 text-xs font-medium text-faint">Switch bucket</p>
+          <p className="px-2 pt-1 pb-1.5 text-xs font-medium text-faint">{t('Switch bucket')}</p>
           <label className="mx-1 mb-1 flex h-7 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent">
             <Search size={12} className="shrink-0 text-faint" />
             <input
               autoFocus
               className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-faint"
-              placeholder="Type to filter…"
-              aria-label="Filter buckets"
+              placeholder={t('Type to filter…')}
+              aria-label={t('Filter buckets')}
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value)
@@ -124,9 +125,9 @@ export function S3BucketSwitcher({
               }}
             />
           </label>
-          <ul role="listbox" aria-label="Buckets" className="max-h-72 overflow-auto">
+          <ul role="listbox" aria-label={t('Buckets')} className="max-h-72 overflow-auto">
             {matches.length === 0 && (
-              <li className="px-2.5 py-2 text-xs text-faint">No bucket matches.</li>
+              <li className="px-2.5 py-2 text-xs text-faint">{t('No bucket matches.')}</li>
             )}
             {matches.map((b, i) => (
               <li
@@ -160,7 +161,7 @@ export function S3BucketSwitcher({
               }}
             >
               <LayoutList size={14} className="shrink-0" />
-              All buckets
+              {t('All buckets')}
             </button>
           </div>
         </div>

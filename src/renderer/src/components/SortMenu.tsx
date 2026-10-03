@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ArrowDownUp, Check } from 'lucide-react'
+import { t } from '@shared/i18n'
 import { useContextMenu, type MenuEntry } from './ContextMenu'
 import { IconButton } from './ui'
 
@@ -15,11 +16,16 @@ export interface SortOption<K extends string> {
   kind: 'text' | 'number' | 'date'
 }
 
-const DIR_LABELS = {
-  text: { asc: 'A → Z', desc: 'Z → A' },
-  number: { asc: 'Smallest first', desc: 'Largest first' },
-  date: { asc: 'Oldest first', desc: 'Newest first' }
-} as const
+function dirLabel(kind: SortOption<string>['kind'], dir: SortDir): string {
+  switch (kind) {
+    case 'text':
+      return dir === 'asc' ? 'A → Z' : 'Z → A'
+    case 'number':
+      return dir === 'asc' ? t('Smallest first') : t('Largest first')
+    case 'date':
+      return dir === 'asc' ? t('Oldest first') : t('Newest first')
+  }
+}
 
 /** Chiều mặc định khi chọn một cột: tên A → Z; dung lượng / ngày thì lớn / mới trước. */
 export function defaultDir(kind: SortOption<string>['kind']): SortDir {
@@ -93,7 +99,7 @@ export function SortMenu<K extends string>({
     'separator',
     ...(['asc', 'desc'] as const).map((dir): MenuEntry => ({
       id: `sort-${dir}`,
-      label: DIR_LABELS[kind][dir],
+      label: dirLabel(kind, dir),
       icon: mark(sort.dir === dir),
       onSelect: () => {
         onChange({ key: sort.key, dir })
@@ -104,7 +110,10 @@ export function SortMenu<K extends string>({
   return (
     <>
       <IconButton
-        label={`Sort: ${current?.label ?? ''}, ${DIR_LABELS[kind][sort.dir]}`}
+        label={t('Sort: {column}, {direction}', {
+          column: current?.label ?? '',
+          direction: dirLabel(kind, sort.dir)
+        })}
         size="sm"
         className="size-7"
         data-testid={testId}

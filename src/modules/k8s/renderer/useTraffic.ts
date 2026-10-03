@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { cleanError } from '../../../renderer/src/lib/format'
 import type { K8sOp } from '../shared/ops'
-import { trafficRates, type TrafficRate, type TrafficSample } from '../shared/traffic'
+import { trafficRates, windowRates, type TrafficRate, type TrafficSample } from '../shared/traffic'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 
@@ -33,7 +33,8 @@ const WINDOW_MS = 60_000
 const OFF: TrafficState = { status: 'off', agents: 0, rates: [], history: [], updated: 0 }
 
 /**
- * Một luồng đọc Caretta cho mỗi phiên cluster (`request`), dùng chung giữa Map, tab Traffic,
+ * Một luồng đọc Caretta cho mỗi phiên cluster (`request` — useK8sSession tạo hàm mới mỗi lần kết
+ * nối, nên đổi context trong tab không trộn mẫu của hai cluster), dùng chung giữa Map, tab Traffic,
  * Topology — mở tab nào cũng có số liệu ngay, không đếm lại từ đầu. Dừng khi không còn ai xem.
  */
 interface Hub {
@@ -95,7 +96,7 @@ function tick(hub: Hub, request: Request): void {
         schedule(hub, request, FIRST_GAP_MS)
         return
       }
-      const rates = trafficRates(oldest, s)
+      const rates = windowRates(hub.samples)
       const step = trafficRates(prevLatest, s)
       publish(hub, {
         status: 'live',
@@ -114,13 +115,17 @@ function tick(hub: Hub, request: Request): void {
 }
 
 export function useTraffic(request: Request, enabled: boolean): TrafficState {
+  // `request` mới cho mỗi lần kết nối (đổi context…) → hub mới; trạng thái của hub cũ không hiện.
   const hub = hubFor(request)
-  const [state, setState] = useState<TrafficState>(hub.state)
+  const [seen, setSeen] = useState<{ hub: Hub; state: TrafficState }>(() => ({
+    hub,
+    state: hub.state
+  }))
   useEffect(() => {
     if (!enabled) return
     const h = hubFor(request)
     const listener = (s: TrafficState): void => {
-      setState(s)
+      setSeen({ hub: h, state: s })
     }
     h.listeners.add(listener)
     if (!h.running) tick(h, request)
@@ -134,5 +139,6 @@ export function useTraffic(request: Request, enabled: boolean): TrafficState {
     }
   }, [request, enabled])
   if (!enabled) return OFF
+  const state = seen.hub === hub ? seen.state : hub.state
   return state.status === 'off' ? { ...state, status: 'connecting' } : state
 }

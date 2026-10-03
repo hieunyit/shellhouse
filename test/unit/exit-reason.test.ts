@@ -17,4 +17,13 @@ describe('classifyConnectError', () => {
   ])('%s → %s', (error, reason) => {
     expect(classifyConnectError(error)).toBe(reason)
   })
+
+  it('phân loại theo mã lỗi, không theo câu chữ (câu đã dịch sang tiếng Việt)', () => {
+    const timeout = Object.assign(new Error('Hết thời gian kết nối tới h:22'), {
+      code: 'ETIMEDOUT'
+    })
+    const closed = Object.assign(new Error('Server h đã đóng kết nối'), { code: 'ECONNRESET' })
+    expect(classifyConnectError(timeout)).toBe('network')
+    expect(classifyConnectError(closed)).toBe('network')
+  })
 })

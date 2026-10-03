@@ -9,6 +9,8 @@ async function visibleText(page: Page): Promise<string> {
   return page.evaluate(() => {
     const clone = document.body.cloneNode(true) as HTMLElement
     for (const el of clone.querySelectorAll('.xterm')) el.remove()
+    // Ô chọn ngôn ngữ: tên mỗi ngôn ngữ viết bằng chính ngôn ngữ đó ("Tiếng Việt") — có chủ ý.
+    for (const el of clone.querySelectorAll('[data-testid^="setting-language-"]')) el.remove()
     const attrs = [...document.querySelectorAll('[placeholder],[title],[aria-label]')]
       .flatMap((el) => ['placeholder', 'title', 'aria-label'].map((a) => el.getAttribute(a) ?? ''))
       .join('\n')
@@ -24,6 +26,16 @@ async function expectEnglish(page: Page, where: string): Promise<void> {
 
 test('mọi màn hình chính chỉ có tiếng Anh', async ({ page }) => {
   await expectEnglish(page, 'main window')
+
+  await page.getByTestId('open-home').click()
+  await expect(page.getByTestId('welcome')).toBeVisible()
+  await expectEnglish(page, 'home')
+
+  // Thanh bên gọn (thanh icon) + mở tạm.
+  await page.getByTestId('sidebar-collapse').click()
+  await page.getByTestId('rail-search').click()
+  await expectEnglish(page, 'sidebar rail')
+  await page.getByTestId('sidebar-pin').click()
 
   await page.getByTestId('add-host').click()
   await expectEnglish(page, 'host form')
