@@ -121,7 +121,8 @@ describe('RdpLauncher', () => {
       '/pass:s3cret'
     ])
     const [file, data] = [...s.files.entries()][0] ?? []
-    expect(file).toMatch(/^\/tmp\/rdp\/.+\.rdp$/)
+    // Thư mục tạm thật dùng dấu phân cách của máy chạy (Windows: \\).
+    expect(file).toMatch(/^[\\/]tmp[\\/]rdp[\\/].+\.rdp$/)
     expect(Buffer.from(data as Buffer).toString('utf16le')).not.toContain('s3cret')
     expect(s.calls[0]).toMatchObject({ file: mstsc.path, args: [file], stdin: false })
     // Mật khẩu không bao giờ vào log.

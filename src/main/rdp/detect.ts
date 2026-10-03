@@ -1,4 +1,4 @@
-import { join, delimiter } from 'node:path'
+import { posix, win32 } from 'node:path'
 import { t } from '@shared/i18n'
 import type { RdpClientKind } from '@shared/rdp'
 import type { FreeRdpMajor } from './argv'
@@ -26,11 +26,20 @@ export interface DetectDeps {
   output(file: string, args: string[]): Promise<string | null>
 }
 
+/** Quy tắc đường dẫn theo nền tảng ĐÍCH (không theo máy đang chạy — test giả lập OS khác). */
+function pathsFor(platform: NodeJS.Platform): typeof posix {
+  return platform === 'win32' ? win32 : posix
+}
+
 /** Tìm chương trình trong PATH (không qua shell, không dùng `which`). */
-export function findInPath(name: string, deps: Pick<DetectDeps, 'env' | 'exists'>): string | null {
-  for (const dir of (deps.env['PATH'] ?? '').split(delimiter)) {
+export function findInPath(
+  name: string,
+  deps: Pick<DetectDeps, 'env' | 'exists'> & { platform?: NodeJS.Platform }
+): string | null {
+  const paths = pathsFor(deps.platform ?? process.platform)
+  for (const dir of (deps.env['PATH'] ?? '').split(paths.delimiter)) {
     if (!dir) continue
-    const full = join(dir, name)
+    const full = paths.join(dir, name)
     if (deps.exists(full)) return full
   }
   return null
@@ -50,12 +59,13 @@ const MAC_APPS = [
 
 /** Client RDP tốt nhất có trên máy; null = chưa cài. */
 export async function detectRdpClient(deps: DetectDeps): Promise<DetectedClient | null> {
+  const paths = pathsFor(deps.platform)
   if (deps.platform === 'win32') {
     const root = deps.env['SystemRoot'] ?? deps.env['windir'] ?? 'C:\\Windows'
     // Đường dẫn tuyệt đối trong System32 — không tra PATH (chống chương trình giả mạo cùng tên).
-    const mstsc = join(root, 'System32', 'mstsc.exe')
+    const mstsc = paths.join(root, 'System32', 'mstsc.exe')
     if (!deps.exists(mstsc)) return null
-    const cmdkey = join(root, 'System32', 'cmdkey.exe')
+    const cmdkey = paths.join(root, 'System32', 'cmdkey.exe')
     return {
       kind: 'mstsc',
       name: 'mstsc',
@@ -64,9 +74,9 @@ export async function detectRdpClient(deps: DetectDeps): Promise<DetectedClient 
     }
   }
   if (deps.platform === 'darwin') {
-    for (const dir of ['/Applications', join(deps.home, 'Applications')]) {
+    for (const dir of ['/Applications', paths.join(deps.home, 'Applications')]) {
       for (const app of MAC_APPS) {
-        const path = join(dir, app.bundle)
+        const path = paths.join(dir, app.bundle)
         if (deps.exists(path)) return { kind: 'windows-app', name: app.name, path }
       }
     }

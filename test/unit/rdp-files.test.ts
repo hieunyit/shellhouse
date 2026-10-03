@@ -289,7 +289,16 @@ describe('RDP: dò client', () => {
   })
 
   it('PATH / phiên bản', () => {
-    expect(findInPath('x', { env: { PATH: '/a:/b' }, exists: (p) => p === '/b/x' })).toBe('/b/x')
+    expect(
+      findInPath('x', { env: { PATH: '/a:/b' }, exists: (p) => p === '/b/x', platform: 'linux' })
+    ).toBe('/b/x')
+    expect(
+      findInPath('x.exe', {
+        env: { PATH: 'C:\\a;C:\\b' },
+        exists: (p) => p === 'C:\\b\\x.exe',
+        platform: 'win32'
+      })
+    ).toBe('C:\\b\\x.exe')
     expect(parseFreeRdpMajor('This is FreeRDP version 2.11.7 (2.11.7)', 3)).toBe(2)
     expect(parseFreeRdpMajor(null, 3)).toBe(3)
   })
