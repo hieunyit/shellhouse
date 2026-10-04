@@ -107,7 +107,12 @@ test('output lớn không làm treo UI', async ({ page }) => {
       ? `[Console]::Out.Write(((,'${line}') * 450000) -join [char]10); ${command}`
       : `yes ${line} | head -n 450000; ${command}`
   )
-  await waitForText(page, tab, expected, 30_000)
+  // Chỉ đọc 50 dòng cuối: quét cả scrollback 20 lần/giây tranh main thread với chính output đang đo.
+  await page.waitForFunction(
+    ([id, text]) => window.__shellhouseTest.bufferText(id, 50).includes(text),
+    [tab, expected] as const,
+    { timeout: 30_000, polling: 250 }
+  )
   const longest = await page.evaluate(() => window.__shellhouseTest.maxLongTaskMs())
   expect(longest).toBeLessThan(500)
 })
