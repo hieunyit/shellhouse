@@ -40,6 +40,8 @@ async function enableModule(page: Page, id: string): Promise<void> {
   await page.getByTestId(`module-toggle-${id}`).click()
   await page.getByTestId('module-enable-confirm').click()
   await page.keyboard.press('Escape')
+  // Khung v0.5: cluster / endpoint / tài khoản nằm trong khu vực riêng của module.
+  await page.getByTestId(`activity-${id}`).click()
 }
 
 function shooter(page: Page, theme: string) {

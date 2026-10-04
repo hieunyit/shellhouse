@@ -12,8 +12,37 @@ test('chuột phải tiêu đề tab: Restart shell / Duplicate / Close other ta
   const box = await page.getByTestId('context-menu').boundingBox()
   expect(box?.height ?? 0).toBeGreaterThan(150)
   await expect(page.getByTestId('menu-tab-close-others')).toBeInViewport()
+  // Ghi lại trạng thái tab + blur / resize quanh cú click (chẩn đoán lỗi chỉ gặp trên macOS CI).
+  await page.evaluate((id) => {
+    const log: string[] = []
+    ;(window as unknown as { __diag: string[] }).__diag = log
+    let last = ''
+    const timer = setInterval(() => {
+      const s = window.__shellhouseTest.state(id) ?? 'none'
+      if (s !== last) log.push(`state:${s}`)
+      last = s
+    }, 5)
+    setTimeout(() => {
+      clearInterval(timer)
+    }, 8_000)
+    window.addEventListener('blur', () => log.push('blur'))
+    window.addEventListener('resize', () => log.push('resize'))
+    document.addEventListener(
+      'click',
+      (e) =>
+        log.push(
+          `click:${(e.target as HTMLElement).closest('[data-testid]')?.getAttribute('data-testid') ?? '?'}`
+        ),
+      true
+    )
+  }, tab)
   await page.getByTestId('menu-tab-reconnect').click()
-  await waitForText(page, tab, '— new session —')
+  await waitForText(page, tab, '— new session —').catch(async (e: unknown) => {
+    const diag = await page.evaluate(() => (window as unknown as { __diag: string[] }).__diag)
+    throw new Error(
+      `${String(e)}\ndiag: ${diag.join(' ')}\nbuffer: ${await page.evaluate((id) => window.__shellhouseTest.bufferText(id).trim().slice(0, 600), tab)}`
+    )
+  })
   const { command, expected } = echoComputed('after-restart')
   await sendLine(page, tab, command)
   await waitForText(page, tab, expected)
