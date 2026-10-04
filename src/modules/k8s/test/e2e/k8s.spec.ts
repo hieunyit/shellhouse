@@ -70,7 +70,9 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
       'CrashLoopBackOff'
     )
 
-    // Watch: pod mới xuất hiện không cần tải lại.
+    // Watch: pod mới xuất hiện không cần tải lại. Server giả chỉ gửi sự kiện cho watch đang mở →
+    // đợi app mở watch pods (sau bước list) rồi mới thêm pod.
+    await expect.poll(() => server.requests.some((r) => /\/pods\?.*watch=true/.test(r))).toBe(true)
     server.upsert('pods', {
       apiVersion: 'v1',
       kind: 'Pod',
