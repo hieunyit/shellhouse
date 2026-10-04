@@ -81,6 +81,11 @@ test('Design kit: chỉ có khi bật giao diện mới; Esc đóng lớp trên 
   await expect.poll(async () => (await active(page)).text).toBe('Logs')
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('kit-menu-last-dark')).toContainText('logs')
+  await expect(menu).toHaveCount(0)
+
+  // Đưa focus về nút một cách tường minh: sau khi chọn mục, thời điểm Radix trả focus
+  // khác nhau giữa các máy (CI Linux/Windows) — phần dưới chỉ kiểm vòng focus.
+  await trigger.focus()
 
   // Focus bàn phím luôn thấy được (vòng focus = box-shadow).
   await page.keyboard.press('Shift+Tab')
