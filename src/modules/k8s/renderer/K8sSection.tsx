@@ -316,10 +316,21 @@ function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
   const [name, setName] = useState('')
   const [yaml, setYaml] = useState('')
   const [error, setError] = useState<string | null>(null)
+  // Môi trường cho mọi context trong kubeconfig này — chọn ngay khi import (v0.6).
+  const [environment, setEnvironment] = useState<string | null>(null)
   const submit = async (): Promise<void> => {
     const r = await k8sApi.importKubeconfig(name.trim() || t('Imported'), yaml)
-    if (r.ok) onClose()
-    else setError(r.message)
+    if (!r.ok) {
+      setError(r.message)
+      return
+    }
+    if (environment) {
+      await useK8s.getState().reload()
+      for (const c of useK8s.getState().contexts)
+        if (c.ref.source === `imported:${r.id}`)
+          await setSourceEnvironment('k8s', c.key, environment)
+    }
+    onClose()
   }
   return (
     <Modal
@@ -370,6 +381,14 @@ function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
             }}
           />
         </Field>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted">{t('Environment')}</span>
+          <EnvironmentPicker
+            value={environment}
+            onChange={setEnvironment}
+            testIdPrefix="k8s-import-env"
+          />
+        </div>
         {error && <Notice tone="danger">{error}</Notice>}
       </div>
     </Modal>

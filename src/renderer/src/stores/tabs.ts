@@ -21,7 +21,7 @@ export interface ModuleTerminalTarget {
 /** Tab có terminal (local / SSH / host đã lưu / terminal của module). */
 export type TerminalTarget =
   | { kind: 'local'; shellId?: string }
-  | { kind: 'ssh'; host: string; port: number; username: string }
+  | { kind: 'ssh'; host: string; port: number; username: string; jumpHostId?: string }
   | { kind: 'host'; hostId: string }
   | ModuleTerminalTarget
 
@@ -132,7 +132,7 @@ interface TabsState {
   openHome: () => string
   /** Mở (hoặc chuyển tới) tab editor của tài liệu `key`. */
   openEditor: (title: string, key: string) => string
-  addSsh: (target: { host: string; port: number; username: string }) => string
+  addSsh: (target: { host: string; port: number; username: string; jumpHostId?: string }) => string
   addHost: (host: { id: string; label: string }, options?: OpenHostOptions) => string
   /** Mở tab của module (dùng `openModuleTab` của registry — nó kiểm tham số, đặt tiêu đề). */
   addTarget: (title: string, target: TabTarget) => string

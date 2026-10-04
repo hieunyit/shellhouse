@@ -57,5 +57,10 @@ export const shell: Readonly<Record<string, string>> = {
   'Focus mode: only the terminal': 'Chế độ tập trung: chỉ còn terminal',
   Exit: 'Thoát',
   Focus: 'Tập trung',
-  'save as host': 'lưu thành host'
+  'save as host': 'lưu thành host',
+  'via {name}': 'qua {name}',
+  'Jump host “{name}” is not a saved host — add it first':
+    'Jump host “{name}” chưa được lưu — hãy thêm host đó trước',
+  'Pick a host in the sidebar to copy files to or from it.':
+    'Chọn một host ở thanh bên để chép file qua lại.'
 }

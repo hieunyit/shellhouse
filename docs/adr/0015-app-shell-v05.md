@@ -45,5 +45,5 @@ nào dùng làm khung.
 - Workspace (lưu bố cục) ghi thêm tab module sau bố cục dockview.
 - Môi trường "Type name" bắt gõ tên khi xoá ở Kubernetes (GuardProvider), Docker (container, image,
   volume, network, Compose down) và S3 (object). Form tài khoản S3 chọn được môi trường ngay khi thêm.
-- Còn lại cho sau: chọn môi trường ngay trong luồng import kubeconfig / thêm Docker endpoint (hiện đặt
-  sau bằng menu chuột phải).
+- Chọn môi trường ngay khi import kubeconfig; Docker endpoint qua SSH kế thừa môi trường của host
+  (đặt riêng bằng menu chuột phải sẽ ghi đè).

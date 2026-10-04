@@ -66,8 +66,10 @@ export function whenHostRunning(timeoutMs = 15_000): Promise<void> {
 export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
 export { usePublishTransfers } from '../../renderer/src/stores/transfers'
 export {
+  hostEnvironmentId,
   setSourceEnvironment,
   useEnvironments,
+  useHostEnvironmentId,
   useSourceEnvironment,
   useSourceEnvironmentMap
 } from '../../renderer/src/stores/environments'

@@ -36,6 +36,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   Environment). Production asks you to type the resource name before deleting (Kubernetes, Docker);
   leaving it asks first and offers Undo. Groups or contexts that only had a color keep their
   environment.
+- Pick the environment while importing kubeconfig contexts; a Docker endpoint over SSH takes the
+  environment of its host unless you set one.
+- **Files → This computer**: browse local files without opening a session.
+- Quick connect understands `ssh -J jump user@host` (the jump host can be a saved host or
+  `user@host:port`); "Save as host" keeps the jump.
+- Label selector errors in Kubernetes are translated.
 - **Focus mode** (Ctrl+Shift+Enter or the ⤢ button): only the terminal and the title bar; a small
   pill shows where you are and exits. Esc stays with vim / less.
 - **Copy as command**: Pods, Deployments… (kubectl with the right context / namespace /

@@ -22,7 +22,8 @@ const CurrentTarget = z.discriminatedUnion('kind', [
     kind: z.literal('ssh'),
     host: z.string().min(1).max(255),
     port: z.number().int().min(1).max(65535),
-    username: z.string().min(1).max(128)
+    username: z.string().min(1).max(128),
+    jumpHostId: z.string().min(1).max(64).optional()
   }),
   z.object({ kind: z.literal('host'), hostId: z.string().min(1).max(64) }),
   /** Remote Desktop trong tab. */

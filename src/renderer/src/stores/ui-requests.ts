@@ -11,6 +11,7 @@ export interface HostPrefill {
   hostname: string
   port: number
   username: string
+  jumpHostIds?: string[]
 }
 
 interface UiRequests {

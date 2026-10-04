@@ -91,7 +91,9 @@ test('bản đóng gói: khởi động, tạo vault, native module + Session Ho
   const created = await page.evaluate(() => window.shellhouse.createVault('smoke-test-password'))
   expect(created.ok).toBe(true)
   await expect(page.getByTestId('vault-gate')).toHaveCount(0)
-  await expect(page.getByTestId('tab')).toHaveCount(1)
+  // Mở app vào Home (trang của khu vực, không phải tab phiên).
+  await expect(page.getByTestId('welcome')).toBeVisible()
+  await expect(page.getByTestId('tab')).toHaveCount(0)
 
   const modules = await page.evaluate(() => window.shellhouse.checkNativeModules())
   expect(modules.filter((m) => !m.ok)).toEqual([])
@@ -117,12 +119,13 @@ test('bản đóng gói: khởi động, tạo vault, native module + Session Ho
     return Number(out.trim()) || 0
   }
   const before = mainProcesses()
+  await page.getByTestId('activity-hosts').click()
   await page.getByTestId('new-tab').click()
-  await expect(page.getByTestId('tab')).toHaveCount(2)
+  await expect(page.getByTestId('tab')).toHaveCount(1)
   await page.waitForTimeout(1_500)
   const closedAt = Date.now()
   await page.getByTestId('tab-close').last().click()
-  await expect(page.getByTestId('tab')).toHaveCount(1)
+  await expect(page.getByTestId('tab')).toHaveCount(0)
   // Đếm liên tục ~3 giây: một app thứ hai (nếu có) sẽ tự thoát nhanh vì khoá single-instance.
   let most = 0
   while (Date.now() - closedAt < 3_000) {

@@ -14,10 +14,12 @@ import { cx, IconButton } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
 import {
   environmentMenu,
+  hostEnvironmentId,
   setSourceEnvironment,
   t,
   useEnvironments,
   useSavedHosts,
+  useHostEnvironmentId,
   useSourceEnvironment,
   useSourceEnvironmentMap
 } from '../../registry/renderer-kit'
@@ -84,7 +86,7 @@ export function DockerSection(): React.JSX.Element {
     'separator',
     ...environmentMenu(
       environments,
-      sourceEnvs[`docker:${endpointKey(hostId)}`] ?? null,
+      sourceEnvs[`docker:${endpointKey(hostId)}`] ?? hostEnvironmentId(hostId),
       (id) => void setSourceEnvironment('docker', endpointKey(hostId), id)
     ),
     ...(hostId
@@ -214,11 +216,15 @@ export function endpointKey(hostId: string | null): string {
   return hostId ?? 'local'
 }
 
-/** Môi trường của endpoint Docker (Settings › Environments). */
+/**
+ * Môi trường của endpoint Docker (Settings › Environments): chọn riêng, không thì kế thừa môi
+ * trường của host SSH chạy Docker (host trong nhóm Production → endpoint là Production).
+ */
 export function useEndpointEnvironment(
   hostId: string | null
 ): ReturnType<typeof useSourceEnvironment> {
-  return useSourceEnvironment('docker', endpointKey(hostId))
+  const inherited = useHostEnvironmentId(hostId)
+  return useSourceEnvironment('docker', endpointKey(hostId), inherited ?? undefined)
 }
 
 function EndpointEnv({ hostId }: { hostId: string | null }): React.JSX.Element | null {

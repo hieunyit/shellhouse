@@ -41,6 +41,7 @@ import { kbdKeys } from './keys'
 import { keybindingFor } from '@shared/commands'
 import { displayKeybinding, isMac } from '../lib/keybindings'
 import { TransfersPage } from './TransfersPage'
+import { LocalFilesPage } from './LocalFilesPage'
 import { inDockview, sharesDockview, tabArea, useShell, type Area } from './store'
 
 /** Lớp trong vùng chính: lớp không hiện vẫn sống (terminal giữ phiên) nhưng ẩn và không nhận focus. */
@@ -497,7 +498,8 @@ export const Main = memo(function Main({
   const active = tabs.find((x) => x.id === activeId)
   const stageShown =
     active && !inDockview(active.target) && tabArea(active) === area ? active.id : null
-  const sessions = sharesDockview(area)
+  const filesLocal = useShell((s) => s.filesLocal)
+  const sessions = sharesDockview(area) && !(area === 'files' && filesLocal)
   const env = useMainEnv(area, stageShown)
   const multiExec = useBroadcast((s) => s.enabled)
   const focus = useShell((s) => s.focus)
@@ -549,6 +551,11 @@ export const Main = memo(function Main({
                 useShell.getState().openSettings(s)
               }}
             />
+          </Layer>
+        )}
+        {area === 'files' && filesLocal && (
+          <Layer shown testId="local-files-layer">
+            <LocalFilesPage />
           </Layer>
         )}
         {area === 'transfers' && (

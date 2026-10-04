@@ -10,12 +10,46 @@ import { cx, ICON_SM } from '../ds/utils'
 import { HostAvatar } from '../components/HostAvatar'
 import { connect } from '../components/sidebar/actions'
 import { hostAddress, useHosts } from '../stores/hosts'
+import { sshAlias } from '@shared/host-export'
 import { useTabs } from '../stores/tabs'
 import { openSidebarDialog } from '../stores/ui-requests'
 
 type Item =
   | { kind: 'host'; host: HostSummary; address: string; path: string }
-  | { kind: 'address'; text: string; target: NonNullable<ReturnType<typeof parseQuickConnect>> }
+  | {
+      kind: 'address'
+      text: string
+      target: NonNullable<ReturnType<typeof parseQuickConnect>>
+      /** `-J …` đã tìm thấy trong host đã lưu. */
+      jumpHost?: HostSummary
+    }
+
+/**
+ * `-J <jump>` → host đã lưu: theo tên, bí danh (tên viết thường không dấu cách), hostname, hoặc
+ * `user@host[:port]`. Jump host phải là host đã lưu (main dùng thông tin đăng nhập của nó).
+ */
+function findJumpHost(
+  jump: string,
+  hosts: readonly HostSummary[],
+  effective: ReturnType<typeof useHosts.getState>['effective']
+): HostSummary | undefined {
+  const j = jump.toLowerCase()
+  const parsed = /^(?:([^@]+)@)?([^:@]+)(?::(\d+))?$/.exec(jump)
+  return (
+    hosts.find((h) => h.label.toLowerCase() === j) ??
+    hosts.find((h) => sshAlias(h.label) === j) ??
+    hosts.find((h) => {
+      if (h.protocol !== 'ssh' || !parsed) return false
+      const [, user, host, port] = parsed
+      const eff = effective.get(h.id)
+      return (
+        h.hostname.toLowerCase() === (host ?? '').toLowerCase() &&
+        (!user || (eff?.username ?? h.username) === user) &&
+        (!port || (eff?.port ?? h.port ?? 22) === Number(port))
+      )
+    })
+  )
+}
 
 const MAX = 8
 
@@ -33,7 +67,15 @@ export function QuickConnectDialog({ onClose }: { onClose: () => void }): React.
   const items = useMemo((): Item[] => {
     const address = parseQuickConnect(query)
     const list: Item[] = []
-    if (address) list.push({ kind: 'address', text: query.trim(), target: address })
+    if (address) {
+      const jumpHost = address.jump ? findJumpHost(address.jump, hosts, effective) : undefined
+      list.push({
+        kind: 'address',
+        text: query.trim(),
+        target: address,
+        ...(jumpHost ? { jumpHost } : {})
+      })
+    }
     const q = query.trim()
     const ranked = q
       ? hosts
@@ -62,11 +104,17 @@ export function QuickConnectDialog({ onClose }: { onClose: () => void }): React.
       setInvalid(query.trim().length > 0)
       return
     }
+    const jumpHost = target.jump ? findJumpHost(target.jump, hosts, effective) : undefined
+    if (target.jump && !jumpHost) {
+      setInvalid(true)
+      return
+    }
     onClose()
     void openSidebarDialog('new-host', undefined, {
       hostname: target.host,
       port: target.port,
-      username: target.username
+      username: target.username,
+      ...(jumpHost ? { jumpHostIds: [jumpHost.id] } : {})
     })
   }
 
@@ -75,12 +123,21 @@ export function QuickConnectDialog({ onClose }: { onClose: () => void }): React.
       setInvalid(query.trim().length > 0)
       return
     }
+    if (item.kind === 'address' && item.target.jump && !item.jumpHost) {
+      setInvalid(true)
+      return
+    }
     onClose()
     if (item.kind === 'host') {
       connect(item.host, split ? { split: 'right' } : undefined)
       return
     }
-    useTabs.getState().addSsh(item.target)
+    useTabs.getState().addSsh({
+      host: item.target.host,
+      port: item.target.port,
+      username: item.target.username,
+      ...(item.jumpHost ? { jumpHostId: item.jumpHost.id } : {})
+    })
   }
 
   return (
@@ -182,6 +239,21 @@ export function QuickConnectDialog({ onClose }: { onClose: () => void }): React.
                     {item.kind === 'host' && (
                       <span className="truncate text-ds-sm text-ds-fg-3">
                         {[item.address, item.path].filter(Boolean).join(' · ')}
+                      </span>
+                    )}
+                    {item.kind === 'address' && item.target.jump && (
+                      <span
+                        className={cx(
+                          'truncate text-ds-sm',
+                          item.jumpHost ? 'text-ds-fg-3' : 'text-ds-danger'
+                        )}
+                        data-testid="quick-connect-jump"
+                      >
+                        {item.jumpHost
+                          ? t('via {name}', { name: item.jumpHost.label })
+                          : t('Jump host “{name}” is not a saved host — add it first', {
+                              name: item.target.jump
+                            })}
                       </span>
                     )}
                   </span>

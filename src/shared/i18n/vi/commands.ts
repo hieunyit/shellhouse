@@ -46,5 +46,12 @@ export const commands: Readonly<Record<string, string>> = {
   'No username': 'Chưa có tên đăng nhập',
   'A file saved with Export hosts (Shellhouse YAML). Groups are recreated; passwords are never in it.':
     'File lưu bằng Export hosts (YAML của Shellhouse). Nhóm được tạo lại; trong file không có mật khẩu.',
-  'Choose a file saved with Export hosts.': 'Chọn file đã lưu bằng Export hosts.'
+  'Choose a file saved with Export hosts.': 'Chọn file đã lưu bằng Export hosts.',
+  'Type a label selector, like app=web': 'Gõ label selector, ví dụ app=web',
+  'Unbalanced parentheses': 'Thiếu hoặc thừa dấu ngoặc',
+  'Empty requirement (two commas in a row?)': 'Điều kiện trống (hai dấu phẩy liền nhau?)',
+  '“{name}” is not a valid label key': '“{name}” không phải khoá nhãn hợp lệ',
+  '“{name}” is not a valid label value': '“{name}” không phải giá trị nhãn hợp lệ',
+  '“{name}” needs values': '“{name}” cần danh sách giá trị',
+  'Can’t read “{name}”': 'Không đọc được “{name}”'
 }

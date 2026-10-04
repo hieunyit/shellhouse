@@ -34,6 +34,7 @@ describe('k8s: label selector', () => {
 
   it('cú pháp sai → thông báo cụ thể; chuẩn hoá cho kubectl', () => {
     expect(parseSelector('app in (web')).toEqual({ ok: false, error: 'Unbalanced parentheses' })
+    expect(parseSelector('app=we b')).toMatchObject({ params: { name: 'app=we b' } })
     const bad = parseSelector('app=we b')
     expect(bad.ok).toBe(false)
     const ok = parseSelector('-l app = web , tier in (a,b)')

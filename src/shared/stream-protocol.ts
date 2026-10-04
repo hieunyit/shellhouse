@@ -229,7 +229,12 @@ export const SshSessionSpec = z.object({
   noShell: z.boolean().optional(),
   /** Mức song song của SFTP — main điền từ cài đặt. */
   sftpLimits: ParallelLimits.optional(),
-  moduleTerminal: ModuleTerminal.optional()
+  moduleTerminal: ModuleTerminal.optional(),
+  /**
+   * Quick connect `ssh -J <host đã lưu> …`: đi qua host đã lưu này (và jump host của nó). Main tự
+   * giải mã thông tin đăng nhập — renderer chỉ gửi id.
+   */
+  jumpHostId: z.string().min(1).max(64).optional()
 })
 export type SshSessionSpec = z.infer<typeof SshSessionSpec>
 

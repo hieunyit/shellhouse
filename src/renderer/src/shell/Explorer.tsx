@@ -5,6 +5,7 @@ import {
   CircleCheck,
   Clock,
   FolderOpen,
+  Laptop,
   List,
   Loader,
   PanelLeftClose,
@@ -236,6 +237,7 @@ function FilesExplorer(): React.JSX.Element {
   const activeId = useTabs((s) => s.activeId)
   const [query, setQuery] = useState('')
   const results = useHostSearch(query)
+  const filesLocal = useShell((s) => s.filesLocal)
   const ssh = useMemo(() => hosts.filter((h) => h.protocol === 'ssh'), [hosts])
   const open = tabs.filter((x) => x.view === 'files')
   return (
@@ -249,6 +251,19 @@ function FilesExplorer(): React.JSX.Element {
         />
       </div>
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-2">
+        {!results && (
+          <ExplorerGroup title={t('Local')}>
+            <ExplorerItem
+              testId="explorer-files-local"
+              icon={<Laptop {...ICON_SM} />}
+              label={t('This computer')}
+              current={filesLocal}
+              onClick={() => {
+                useShell.getState().openLocalFiles()
+              }}
+            />
+          </ExplorerGroup>
+        )}
         {open.length > 0 && !results && (
           <ExplorerGroup title={t('Open')}>
             {open.map((x) => (
@@ -257,7 +272,7 @@ function FilesExplorer(): React.JSX.Element {
                 testId="explorer-files-tab"
                 icon={<FolderOpen {...ICON_SM} />}
                 label={x.title.replace(/ \(SFTP\)$/, '')}
-                current={x.id === activeId}
+                current={!filesLocal && x.id === activeId}
                 onClick={() => {
                   useTabs.getState().activate(x.id)
                 }}

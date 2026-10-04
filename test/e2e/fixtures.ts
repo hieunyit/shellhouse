@@ -142,11 +142,29 @@ export async function waitForText(
   text: string,
   timeout = isWindows ? 30_000 : 10_000
 ): Promise<void> {
-  await page.waitForFunction(
-    ([id, t]) => window.__shellhouseTest.bufferText(id).includes(t),
-    [tabId, text] as const,
-    { timeout, polling: 50 }
-  )
+  try {
+    await page.waitForFunction(
+      ([id, t]) => window.__shellhouseTest.bufferText(id).includes(t),
+      [tabId, text] as const,
+      { timeout, polling: 50 }
+    )
+  } catch (e) {
+    // Hết giờ: in kèm trạng thái + cuối buffer — lỗi chỉ gặp trên CI mới đọc được nguyên nhân.
+    const seen = await page
+      .evaluate(
+        (id) => ({
+          state: window.__shellhouseTest.state(id),
+          active: window.__shellhouseTest.activeTabId(),
+          tail: window.__shellhouseTest.bufferText(id, 15)
+        }),
+        tabId
+      )
+      .catch(() => null)
+    throw new Error(
+      `waitForText(${JSON.stringify(text)}) hết ${String(timeout)}ms — ${JSON.stringify(seen)}`,
+      { cause: e }
+    )
+  }
 }
 
 export async function sendLine(page: Page, tabId: string, line: string): Promise<void> {

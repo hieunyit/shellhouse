@@ -1097,8 +1097,14 @@ export class TerminalController {
     const noShell = this.openedWithoutShell ? { noShell: true } : {}
     if (this.target.kind === 'host')
       return { kind: 'host', ...size, hostId: this.target.hostId, ...noShell }
-    const { host, port, username } = this.target
-    return { kind: 'ssh', ...size, target: { host, port, username }, ...noShell }
+    const { host, port, username, jumpHostId } = this.target
+    return {
+      kind: 'ssh',
+      ...size,
+      target: { host, port, username },
+      ...noShell,
+      ...(jumpHostId ? { jumpHostId } : {})
+    }
   }
 
   /**

@@ -414,6 +414,12 @@ function registerIpc(): void {
         } else {
           const known = (t: { host: string; port: number }): string[] =>
             knownHosts?.knownKeyTypes(t.host, t.port) ?? []
+          // Jump host: của host đã lưu; hoặc Quick connect `-J <host đã lưu>` (host đó + jump của nó).
+          const quickJump =
+            spec.kind === 'ssh' && spec.jumpHostId
+              ? requireHosts().resolveForConnect(spec.jumpHostId, localUser())
+              : null
+          const hops = resolved ? resolved.jumps : quickJump ? [...quickJump.jumps, quickJump] : []
           const autoForwards =
             spec.kind === 'host'
               ? requireHosts()
@@ -428,9 +434,9 @@ function registerIpc(): void {
             ...(resolved?.keyFiles ? { keyFiles: resolved.keyFiles } : {}),
             ...(resolved?.legacyAlgorithms ? { legacyAlgorithms: true } : {}),
             ...(resolved?.storedOnly ? { storedOnly: true } : {}),
-            ...(resolved && resolved.jumps.length > 0
+            ...(hops.length > 0
               ? {
-                  jumps: resolved.jumps.map((j) => ({
+                  jumps: hops.map((j) => ({
                     target: j.target,
                     knownKeyTypes: known(j.target),
                     credentials: j.credentials,

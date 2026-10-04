@@ -1,3 +1,4 @@
+import type { HostPrefill } from '../stores/ui-requests'
 import { toast } from '../stores/toasts'
 import { useMemo, useState, type SyntheticEvent } from 'react'
 import { t } from '@shared/i18n'
@@ -82,7 +83,7 @@ export function HostForm({
   host: HostSummary | null
   defaultGroupId: string | null
   /** Host mới điền sẵn (Quick connect → Ctrl+Enter "lưu thành host"). */
-  prefill?: { hostname: string; port: number; username: string } | undefined
+  prefill?: HostPrefill | undefined
   onClose: () => void
 }): React.JSX.Element {
   const { keys, hosts, accounts } = useHosts((s) => s.tree)
@@ -124,7 +125,9 @@ export function HostForm({
   const [groupId, setGroupId] = useState<string | null>(host?.groupId ?? defaultGroupId)
   const [tags, setTags] = useState<string[]>(host?.tags ?? [])
   const [color, setColor] = useState<HostSummary['color']>(host?.color ?? null)
-  const [jumpHostIds, setJumpHostIds] = useState<string[]>(host?.jumpHostIds ?? [])
+  const [jumpHostIds, setJumpHostIds] = useState<string[]>(
+    host?.jumpHostIds ?? prefill?.jumpHostIds ?? []
+  )
   const [mode, setMode] = useState<HostMode>(host?.mode ?? 'builtin')
   const [direct, setDirect] = useState(host?.direct ?? false)
   const [legacy, setLegacy] = useState(host?.legacyAlgorithms ?? false)

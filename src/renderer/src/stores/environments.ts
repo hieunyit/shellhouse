@@ -60,3 +60,13 @@ export function setSourceEnvironment(
 export function useSourceEnvironmentMap(): Readonly<Record<string, string>> {
   return useSettings((s) => s.settings.sourceEnvironments)
 }
+
+/** Id môi trường hiệu lực của host đã lưu (đọc một lần, không theo dõi) — null nếu không có. */
+export function hostEnvironmentId(hostId: string | null | undefined): string | null {
+  return hostId ? (useHosts.getState().effective.get(hostId)?.environment ?? null) : null
+}
+
+/** Như `hostEnvironmentId` nhưng theo dõi thay đổi (hook). */
+export function useHostEnvironmentId(hostId: string | null | undefined): string | null {
+  return useHosts((s) => (hostId ? (s.effective.get(hostId)?.environment ?? null) : null))
+}

@@ -9,7 +9,8 @@ export type Requirement =
   | { key: string; op: 'exists' | '!exists' }
 
 export type SelectorParse =
-  { ok: true; requirements: Requirement[]; text: string } | { ok: false; error: string }
+  | { ok: true; requirements: Requirement[]; text: string }
+  | { ok: false; error: string; params?: Record<string, string> }
 
 const KEY = /^(?:[a-z0-9]([-a-z0-9.]*[a-z0-9])?\/)?[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$/
 const VALUE = /^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$/
@@ -40,12 +41,22 @@ function splitTop(text: string): string[] | null {
   return parts.map((p) => p.trim())
 }
 
-function checkKey(key: string): string | null {
-  return KEY.test(key) ? null : `“${key}” is not a valid label key`
+type Problem = { error: string; params?: Record<string, string> }
+
+/**
+ * Lỗi là MẪU câu tiếng Anh + tham số (`{name}`) — giao diện dịch khi hiển thị
+ * (`t(error, params)`), chuỗi gốc đã có trong từ điển tiếng Việt.
+ */
+function checkKey(key: string): Problem | null {
+  return KEY.test(key)
+    ? null
+    : { error: '“{name}” is not a valid label key', params: { name: key } }
 }
 
-function checkValue(value: string): string | null {
-  return value.length <= 63 && VALUE.test(value) ? null : `“${value}” is not a valid label value`
+function checkValue(value: string): Problem | null {
+  return value.length <= 63 && VALUE.test(value)
+    ? null
+    : { error: '“{name}” is not a valid label value', params: { name: value } }
 }
 
 /** Đọc selector; lỗi kèm thông báo cụ thể (tiếng Anh — giao diện dịch khi hiển thị). */
@@ -65,8 +76,13 @@ export function parseSelector(raw: string): SelectorParse {
         .map((v) => v.trim())
         .filter((v) => v !== '')
       const bad = checkKey(key) ?? values.map(checkValue).find((e) => e !== null) ?? null
-      if (bad) return { ok: false, error: bad }
-      if (values.length === 0) return { ok: false, error: `“${key} ${op ?? ''}” needs values` }
+      if (bad) return { ok: false, ...bad }
+      if (values.length === 0)
+        return {
+          ok: false,
+          error: '“{name}” needs values',
+          params: { name: `${key} ${op ?? ''}` }
+        }
       requirements.push({ key, op: op === 'in' ? 'in' : 'notin', values })
       continue
     }
@@ -74,7 +90,7 @@ export function parseSelector(raw: string): SelectorParse {
     if (m) {
       const [, key = '', op, value = ''] = m
       const bad = checkKey(key) ?? checkValue(value)
-      if (bad) return { ok: false, error: bad }
+      if (bad) return { ok: false, ...bad }
       requirements.push({ key, op: op === '!=' ? '!=' : '=', value })
       continue
     }
@@ -82,11 +98,11 @@ export function parseSelector(raw: string): SelectorParse {
     if (m) {
       const [, not, key = ''] = m
       const bad = checkKey(key)
-      if (bad) return { ok: false, error: bad }
+      if (bad) return { ok: false, ...bad }
       requirements.push({ key, op: not ? '!exists' : 'exists' })
       continue
     }
-    return { ok: false, error: `Can’t read “${part}”` }
+    return { ok: false, error: 'Can’t read “{name}”', params: { name: part } }
   }
   return { ok: true, requirements, text: selectorText(requirements) }
 }

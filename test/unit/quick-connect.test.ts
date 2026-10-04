@@ -24,4 +24,19 @@ describe('parseQuickConnect', () => {
       expect(parseQuickConnect(input)).toBeNull()
     }
   )
+
+  it('lệnh ssh đầy đủ: -p / -J ở trước hoặc sau đích; -J nhận một jump host', () => {
+    expect(parseQuickConnect('ssh -p 2222 -J bastion deploy@10.0.0.5')).toEqual({
+      username: 'deploy',
+      host: '10.0.0.5',
+      port: 2222,
+      jump: 'bastion'
+    })
+    expect(parseQuickConnect('deploy@web -Jops@bastion:2200')).toMatchObject({
+      jump: 'ops@bastion:2200'
+    })
+    expect(parseQuickConnect('ssh -J a -J b u@h')).toBeNull()
+    expect(parseQuickConnect('ssh -J -oProxyCommand=x u@h')).toBeNull()
+    expect(parseQuickConnect('ssh -p x u@h')).toBeNull()
+  })
 })

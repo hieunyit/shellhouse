@@ -71,7 +71,7 @@ import {
 } from './sidebar/dialogs'
 import { DropLine, HostRow, type DropPos, type HostRowHandlers } from './sidebar/HostRow'
 import { Button, cx, IconButton } from './ui'
-import { useUiRequests } from '../stores/ui-requests'
+import { useUiRequests, type HostPrefill } from '../stores/ui-requests'
 import { EnvLabel } from '../ds'
 import { findEnvironment } from '@shared/environments'
 import { groupOwnEnvironment, useEnvironments } from '../stores/environments'
@@ -146,7 +146,7 @@ type Dialog =
       kind: 'host'
       host: HostSummary | null
       groupId: string | null
-      prefill?: { hostname: string; port: number; username: string }
+      prefill?: HostPrefill
     }
   | { kind: 'group'; group: GroupSummary | null; parentId?: string | null; confirmDelete?: boolean }
   | { kind: 'import' }

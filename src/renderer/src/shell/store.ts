@@ -51,6 +51,9 @@ interface ShellState {
    */
   focus: boolean
   setFocus: (focus: boolean) => void
+  /** Khu vực Files đang xem "This computer" (file trên máy) thay cho trình quản lý file của phiên. */
+  filesLocal: boolean
+  openLocalFiles: () => void
   /** Môi trường mà tab module báo (cluster / endpoint / tài khoản đang xem) — nhãn + vạch trên cùng. */
   envByTab: Readonly<Record<string, string | null>>
   reportEnvironment: (tabId: string, env: string | null) => void
@@ -136,6 +139,10 @@ export const useShell = create<ShellState>((set, get) => {
     settingsSection: 'appearance',
     explorerWidth: loadExplorerWidth(),
     focus: false,
+    filesLocal: false,
+    openLocalFiles: () => {
+      set((s) => ({ filesLocal: true, area: 'files', ...pushHistory(s, 'files') }))
+    },
     setFocus: (focus) => {
       if (focus) {
         // Focus mode là cho phiên: đang ở khu vực khác → về khu vực phiên trước.
@@ -199,6 +206,8 @@ function sameKind(a: Area, b: Area): boolean {
 }
 
 useTabs.subscribe((state, prev) => {
+  if (state.activeId !== prev.activeId && useShell.getState().filesLocal)
+    useShell.setState({ filesLocal: false })
   const shell = useShell.getState()
   const closedPrev = prev.activeId !== null && !state.tabs.some((t) => t.id === prev.activeId)
   const origin = closedPrev && prev.activeId !== null ? openedFrom.get(prev.activeId) : undefined

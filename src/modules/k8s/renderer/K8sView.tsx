@@ -969,7 +969,7 @@ export function ClusterTab({
                     className="absolute top-9 right-0 left-0 z-30 rounded-ds-md bg-ds-popover px-2.5 py-1.5 text-xs text-ds-danger shadow-ds-popover"
                     data-testid="k8s-selector-error"
                   >
-                    {selector.error}
+                    {t(selector.error, selector.params)}
                   </div>
                 )}
                 {commandMode && suggestions.length > 0 && (

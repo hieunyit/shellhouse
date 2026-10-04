@@ -115,13 +115,13 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     expect(Math.round(((await describe.boundingBox())?.width ?? 0) - before)).toBe(100)
     // Thanh điều hướng nằm ở Explorer; ẩn Explorer → điều hướng về trong view, thu gọn được.
     await expect(page.getByTestId('explorer').getByTestId('k8s-nav')).toBeVisible()
-    await page.keyboard.press('Control+Shift+B')
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+B' : 'Control+Shift+B')
     await expect(view.getByTestId('k8s-nav')).toBeVisible()
     await page.getByTestId('k8s-nav-toggle').click()
     await expect(page.getByTestId('k8s-nav')).toHaveCount(0)
     await page.getByTestId('k8s-nav-toggle').click()
     await expect(page.getByTestId('k8s-nav')).toBeVisible()
-    await page.keyboard.press('Control+Shift+B')
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+B' : 'Control+Shift+B')
     await expect(page.getByTestId('explorer').getByTestId('k8s-nav')).toBeVisible()
     await describe.getByTestId('k8s-detail-tab-events').click()
     await expect(view.getByTestId('k8s-events')).toContainText('BackOff')
@@ -157,6 +157,8 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await expectActiveTab(page, 'web-1/app (shell)')
     const tab = await activeTab(page)
     await waitForText(page, tab, 'exec: sh -c')
+    // Banner tới trước khi phiên báo "connected" → gõ sớm hơn thì chữ có thể chưa tới exec.
+    await page.waitForFunction((id) => window.__shellhouseTest.state(id) === 'connected', tab)
     await page.evaluate((id) => {
       window.__shellhouseTest.sendInput(id, 'echo xin-chao\r')
     }, tab)

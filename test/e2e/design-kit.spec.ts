@@ -62,7 +62,7 @@ test('Design kit: mở từ bảng lệnh; Esc đóng lớp trên cùng rồi m�
   await page.keyboard.press('Escape')
   await expect(menu).toHaveCount(0)
   await expect(page.getByTestId('design-kit')).toBeVisible()
-  expect((await active(page)).testId).toBe('kit-menu-dark')
+  await expect.poll(async () => (await active(page)).testId).toBe('kit-menu-dark')
 
   // Chọn bằng Enter chạy lệnh.
   await page.keyboard.press('ArrowDown')
