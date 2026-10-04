@@ -54,6 +54,10 @@ export function installTestHooks(): void {
       }
     },
     state: (tabId) => controllers.get(tabId)?.connectionState ?? null,
+    terminalInfo: (tabId) => {
+      const c = controllers.get(tabId)
+      return c ? { serial: c.serial, sessions: c.sessionsOpened, input: c.inputSent } : null
+    },
     sendInput: (tabId, data) => {
       controllers.get(tabId)?.sendInput(data)
     },

@@ -40,7 +40,7 @@ test('chuột phải tiêu đề tab: Restart shell / Duplicate / Close other ta
   await waitForText(page, tab, '— new session —').catch(async (e: unknown) => {
     const diag = await page.evaluate(() => (window as unknown as { __diag: string[] }).__diag)
     throw new Error(
-      `${String(e)}\ndiag: ${diag.join(' ')}\nbuffer: ${await page.evaluate((id) => window.__shellhouseTest.bufferText(id).trim().slice(0, 600), tab)}`
+      `${String(e)}\ndiag: ${diag.join(' ')}\ninfo: ${JSON.stringify(await page.evaluate((id) => window.__shellhouseTest.terminalInfo(id), tab))}\nbuffer: ${await page.evaluate((id) => window.__shellhouseTest.bufferText(id).trim().slice(0, 600), tab)}`
     )
   })
   const { command, expected } = echoComputed('after-restart')

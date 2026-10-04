@@ -160,6 +160,11 @@ export class TerminalController {
   /** `restarts` của Session Host lúc session hiện tại được mở. */
   private hostEpoch: number | null = null
   private hadSession = false
+  /** Chẩn đoán (test hook): số thứ tự controller được tạo, số phiên đã mở, byte gõ đã gửi. */
+  private static created = 0
+  readonly serial = ++TerminalController.created
+  sessionsOpened = 0
+  inputSent = 0
   /** Đã từng kết nối thành công trong lần kết nối hiện tại → mất mạng thì tự nối lại. */
   private everConnected = false
   private reconnectAttempt = 0
@@ -831,6 +836,7 @@ export class TerminalController {
   // ---------- Test hooks ----------
 
   sendInput(data: string): void {
+    this.inputSent += data.length
     if (this.client) this.client.input(data)
     else if (this.state === 'idle' || this.state === 'connecting')
       this.pendingInput = (this.pendingInput + data).slice(-64 * 1024)
@@ -953,6 +959,7 @@ export class TerminalController {
       }
       if (this.hadSession) this.term.write(`${DIM}— ${t('new session')} —${RESET}\r\n`)
       this.hadSession = true
+      this.sessionsOpened++
       this.hostEpoch = host.restarts
       this.client = new SessionClient(sessionId, port, {
         write: (data, done) => {

@@ -104,9 +104,9 @@ migrations/        SQL migrations (append-only)
 
 ## Engineering highlights
 
-- **Security by construction.** Electron fuses locked down, sandboxed renderer, locked-down
-  navigation policy. Secrets are encrypted per field (DEK/KEK, associated data bound to table / row /
-  column) with libsodium; no hand-rolled crypto. Remote commands are built as argv with explicit
+- **Security by construction.** Electron fuses locked down, sandboxed renderer, CSP in
+  production builds, strict navigation policy. Secrets are encrypted per field (DEK/KEK,
+  associated data bound to table / row / column) with libsodium; no hand-rolled crypto. Remote commands are built as argv with explicit
   quoting, never as shell strings. See [SECURITY.md](SECURITY.md) and
   [docs/security-review.md](docs/security-review.md).
 - **Tested against real servers.** A Docker matrix runs the SSH stack against OpenSSH 7.4, 8.2, 9.6

@@ -180,6 +180,8 @@ export async function waitForText(
       .evaluate(
         (id) => ({
           state: window.__shellhouseTest.state(id),
+          info: window.__shellhouseTest.terminalInfo(id),
+          head: window.__shellhouseTest.bufferText(id).trim().slice(0, 400),
           active: window.__shellhouseTest.activeTabId(),
           tail: window.__shellhouseTest.bufferText(id, 15)
         }),

@@ -19,6 +19,8 @@ export interface ShellhouseTestHooks {
     tabId: string
   ): 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'exited' | null
   sendInput(tabId: string, data: string): void
+  /** Chẩn đoán: controller thứ mấy, đã mở bao nhiêu phiên, đã gửi bao nhiêu ký tự. */
+  terminalInfo(tabId: string): { serial: number; sessions: number; input: number } | null
   /** Thêm lệnh vào lịch sử của đích (DB + cache gợi ý) mà không cần gõ. */
   seedCommandHistory(target: string, command: string): Promise<void>
   /** Trạng thái gợi ý lệnh (chẩn đoán test trên shell khác nhau). */
