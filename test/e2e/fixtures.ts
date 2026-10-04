@@ -93,6 +93,32 @@ export async function launchApp(extraEnv: Record<string, string> = {}): Promise<
     const id = hooks.activeTabId()
     return !!id && hooks.state(id) === 'connected' && hooks.bufferText(id).trim().length > 0
   })
+  // macOS CI: cửa sổ mới thường chưa phải cửa sổ active, còn đổi kích thước một lúc sau khi hiện —
+  // blur / resize đóng menu chuột phải ngay trước cú click. Kéo lên trước, đợi kích thước đứng yên.
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.focus()
+  })
+  await page
+    .waitForFunction(() => document.hasFocus(), undefined, { timeout: 3_000 })
+    .catch(() => {
+      // Máy không cho cửa sổ nhận focus (headless) — test vẫn chạy.
+    })
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        let size = `${String(innerWidth)}x${String(innerHeight)}`
+        let stable = 0
+        const started = Date.now()
+        const tick = (): void => {
+          const now = `${String(innerWidth)}x${String(innerHeight)}`
+          stable = now === size ? stable + 1 : 0
+          size = now
+          if (stable >= 6 || Date.now() - started > 5_000) resolve()
+          else setTimeout(tick, 50)
+        }
+        tick()
+      })
+  )
   return {
     app,
     page,
