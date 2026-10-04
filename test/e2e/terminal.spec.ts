@@ -95,6 +95,10 @@ test('Session Host bị giết → tab mở lại phiên mới, giữ scrollback
 })
 
 test('output lớn không làm treo UI', async ({ page }) => {
+  // Windows CI: 20 MB qua ConPTY + PowerShell mất 10 – 30 giây tuỳ runner. Test đo UI không bị treo
+  // (main thread), không đo thông lượng → cho đủ thời gian.
+  const wait = isWindows ? 75_000 : 30_000
+  test.setTimeout(wait + 15_000)
   const tab = await activeTab(page)
   await page.evaluate(() => window.__shellhouseTest.maxLongTaskMs(true))
   const { command, expected } = echoComputed('bigdone')
@@ -111,7 +115,7 @@ test('output lớn không làm treo UI', async ({ page }) => {
   await page.waitForFunction(
     ([id, text]) => window.__shellhouseTest.bufferText(id, 50).includes(text),
     [tab, expected] as const,
-    { timeout: 30_000, polling: 250 }
+    { timeout: wait, polling: 250 }
   )
   const longest = await page.evaluate(() => window.__shellhouseTest.maxLongTaskMs())
   expect(longest).toBeLessThan(500)
