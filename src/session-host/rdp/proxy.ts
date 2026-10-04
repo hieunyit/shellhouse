@@ -5,7 +5,9 @@ import type { Duplex } from 'node:stream'
 import type { TLSSocket } from 'node:tls'
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import { t } from '@shared/i18n'
-import type { RdpProbe, RdpViewTarget } from '@shared/rdp-viewer'
+import type { RdpProbe, RdpSessionTuning, RdpViewTarget } from '@shared/rdp-viewer'
+import { BitmapFixer } from './bitmap-fix'
+import { ClientInfoRewriter } from './client-info'
 import {
   detectPdu,
   errorPdu,
@@ -78,6 +80,7 @@ interface Grant {
   /** Dấu SHA-256 người dùng đã tin — chứng chỉ khác → từ chối (không chuyển mật khẩu cho ai khác). */
   pin: string
   expiresAt: number
+  tuning: RdpSessionTuning | undefined
 }
 
 /** Đường dẫn WebSocket — có thêm một lớp kiểm (client lạ gõ nhầm cổng không vào được). */
@@ -89,6 +92,11 @@ const MAX_LEGACY_TARGETS = 256
 /** Ngưỡng dừng đọc từ server khi renderer chưa nhận kịp (backpressure). */
 const HIGH_WATER = 4 * 1024 * 1024
 const LOW_WATER = 1024 * 1024
+/**
+ * Gom dữ liệu server trong cùng một lượt event loop thành một message WebSocket (tối đa ngần này):
+ * TLS trả từng record ≤ 16 KB, mỗi message là một task + một lượt đánh thức WASM ở renderer.
+ */
+const BATCH_BYTES = 64 * 1024
 
 class ProxyFailure extends Error {
   constructor(
@@ -345,13 +353,17 @@ export class RdpProxy {
   }
 
   /** Cấp token cho một phiên (đích + dấu chứng chỉ đã tin). Trả cổng nghe + token. */
-  async open(target: RdpViewTarget, pin: string): Promise<{ port: number; token: string }> {
+  async open(
+    target: RdpViewTarget,
+    pin: string,
+    tuning?: RdpSessionTuning
+  ): Promise<{ port: number; token: string }> {
     this.sweep()
     if (this.grants.size >= MAX_GRANTS)
       throw new Error(t('Too many pending Remote Desktop connections'))
     const port = await this.listen()
     const token = randomBytes(32).toString('base64url')
-    this.grants.set(token, { target, pin, expiresAt: this.now() + this.ttl })
+    this.grants.set(token, { target, pin, expiresAt: this.now() + this.ttl, tuning })
     this.scheduleIdle()
     return { port, token }
   }
@@ -497,7 +509,7 @@ export class RdpProxy {
         )
       if (inbound.isClosed()) throw new Error('client went away')
       ws.send(responsePdu(serverAddress(socket, target.port), confirmRaw, chain))
-      this.pipe(ws, tls, inbound, `${target.host}:${target.port}`)
+      this.pipe(ws, tls, inbound, `${target.host}:${target.port}`, grant.tuning)
     } catch (error) {
       inbound.dispose()
       const failure = error instanceof ProxyFailure ? error : null
@@ -509,22 +521,48 @@ export class RdpProxy {
     }
   }
 
-  private pipe(ws: WebSocket, tls: TLSSocket, inbound: Inbound, label: string): void {
+  private pipe(
+    ws: WebSocket,
+    tls: TLSSocket,
+    inbound: Inbound,
+    label: string,
+    tuning: RdpSessionTuning | undefined
+  ): void {
     let up = 0
     let down = 0
     let closed = false
+    const rewriter = tuning
+      ? new ClientInfoRewriter({
+          performanceFlags: tuning.performanceFlags,
+          autologon: tuning.autologon
+        })
+      : null
+    // Khung đích bitmap lệch kích thước → IronRDP vẽ vỡ hình / panic (xem bitmap-fix.ts).
+    const fixer = new BitmapFixer()
     const shutdown = (reason: string): void => {
       if (closed) return
       closed = true
       inbound.dispose()
       tls.destroy()
       if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) ws.close(1000)
-      this.opts.log('info', `RDP proxy: ${label} closed (${reason}; up ${up} B, down ${down} B)`)
+      this.opts.log(
+        'info',
+        `RDP proxy: ${label} closed (${reason}; up ${up} B, down ${down} B${fixer.fixed > 0 ? `; ${fixer.fixed} bitmap rects realigned` : ''})`
+      )
     }
     inbound.attach(
       (chunk) => {
         up += chunk.length
-        if (!tls.write(chunk)) {
+        let data = chunk
+        if (rewriter && !rewriter.done) {
+          data = rewriter.process(chunk)
+          if (rewriter.found)
+            this.opts.log(
+              'info',
+              `RDP proxy: ${label} client info: performance flags 0x${(rewriter.found.performanceFlags ?? 0).toString(16)} → 0x${(tuning?.performanceFlags ?? 0).toString(16)}${tuning?.autologon && rewriter.found.hasPassword ? ', autologon' : ''}`
+            )
+        }
+        if (!tls.write(data)) {
           ws.pause()
           tls.once('drain', () => {
             ws.resume()
@@ -536,23 +574,50 @@ export class RdpProxy {
       }
     )
     let paused = false
-    tls.on('data', (chunk: Buffer) => {
-      down += chunk.length
-      ws.send(chunk, { binary: true }, () => {
-        if (paused && ws.bufferedAmount < LOW_WATER) {
-          paused = false
-          tls.resume()
-        }
-      })
+    const onSent = (): void => {
+      if (paused && ws.bufferedAmount < LOW_WATER) {
+        paused = false
+        tls.resume()
+      }
+    }
+    // Gom các record TLS tới trong cùng lượt event loop (setImmediate chạy ngay sau pha I/O).
+    let batch: Buffer[] = []
+    let batched = 0
+    let scheduled = false
+    const flush = (): void => {
+      scheduled = false
+      if (batched === 0 || closed) return
+      const data = batch.length === 1 ? (batch[0] as Buffer) : Buffer.concat(batch, batched)
+      batch = []
+      batched = 0
+      ws.send(data, { binary: true }, onSent)
       if (!paused && ws.bufferedAmount > HIGH_WATER) {
         paused = true
         tls.pause()
       }
+    }
+    const enqueue = (data: Buffer | null): void => {
+      if (!data || data.length === 0) return
+      batch.push(data)
+      batched += data.length
+    }
+    tls.on('data', (chunk: Buffer) => {
+      down += chunk.length
+      enqueue(fixer.push(chunk))
+      if (batched >= BATCH_BYTES) flush()
+      else if (!scheduled) {
+        scheduled = true
+        setImmediate(flush)
+      }
     })
     tls.on('end', () => {
+      enqueue(fixer.flush())
+      flush()
       shutdown('server ended')
     })
     tls.on('close', () => {
+      enqueue(fixer.flush())
+      flush()
       shutdown('server closed')
     })
     tls.on('error', (error: Error) => {

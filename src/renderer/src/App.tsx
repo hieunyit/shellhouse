@@ -12,7 +12,7 @@ import { toast } from './stores/toasts'
 import { useTerminalFind } from './stores/terminal-find'
 import { Workspace } from './components/Workspace'
 import { WorkspacesDialog } from './components/WorkspacesDialog'
-import { preloadLazyParts, SettingsDialog, SnippetsDialog } from './lazy'
+import { DesignKit, preloadLazyParts, SettingsDialog, SnippetsDialog } from './lazy'
 import { matchCommand } from './lib/keybindings'
 import { useHosts } from './stores/hosts'
 import { useSettings } from './stores/settings'
@@ -33,6 +33,7 @@ type Overlay =
   | { kind: 'snippets' }
   | { kind: 'palette' }
   | { kind: 'workspaces' }
+  | { kind: 'designKit' }
   | {
       kind: 'settings'
       section?: SettingsSectionId
@@ -168,6 +169,9 @@ export function App(): React.JSX.Element {
       case 'settings.open':
         setOverlay({ kind: 'settings' })
         break
+      case 'keychain.open':
+        setOverlay({ kind: 'settings', section: 'keychain' })
+        break
       case 'multiexec.toggle':
         toggleMultiExec()
         break
@@ -198,6 +202,10 @@ export function App(): React.JSX.Element {
       }
       case 'vault.lock':
         void window.shellhouse.lockVault()
+        break
+      case 'designkit.open':
+        // Design kit của giao diện mới — chỉ có khi bật "New interface (beta)".
+        if (useSettings.getState().settings.appearance.newUi) setOverlay({ kind: 'designKit' })
         break
       case 'diagnostics.toggle':
         setOverlay((o) =>
@@ -314,6 +322,7 @@ export function App(): React.JSX.Element {
         <CommandPalette onClose={closeOverlay} runCommand={runCommand} />
       )}
       {overlay?.kind === 'workspaces' && <WorkspacesDialog onClose={closeOverlay} />}
+      {overlay?.kind === 'designKit' && <DesignKit onClose={closeOverlay} />}
       {overlay?.kind === 'settings' && (
         <SettingsDialog
           onClose={closeOverlay}

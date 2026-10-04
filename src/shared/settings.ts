@@ -80,7 +80,11 @@ const AppearanceSettings = z.object({
   showFavorites: z.boolean().catch(true),
   showRecent: z.boolean().catch(true),
   /** Mở app: trang Home hay một terminal local; chưa chọn = Home. */
-  startup: z.enum(['home', 'terminal']).optional().catch(undefined)
+  startup: z.enum(['home', 'terminal']).optional().catch(undefined),
+  /** Giao diện mới (beta, đang xây dựng sau cờ này) — bật / tắt không cần khởi động lại. */
+  newUi: z.boolean().catch(false),
+  /** Mật độ của giao diện mới: hàng 32 px (comfortable, mặc định) hay 28 px (compact). */
+  density: z.enum(['comfortable', 'compact']).catch('comfortable')
 })
 
 const FileSettings = z.object({

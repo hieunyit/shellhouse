@@ -12,6 +12,7 @@ let probe: RdpViewProbeResult
 let connectResult: () => Promise<unknown>
 const saved: [string, string][] = []
 const pasted: string[] = []
+const panics = new Set<(message: string) => void>()
 
 const fakeSession = {
   run: () => new Promise(() => undefined),
@@ -54,6 +55,10 @@ function makeBuilder(): object {
 const Builder = makeBuilder as unknown as new () => object
 
 vi.mock('../../src/renderer/src/rdp/ironrdp', () => ({
+  onIronRdpPanic: (listener: (message: string) => void) => {
+    panics.add(listener)
+    return () => panics.delete(listener)
+  },
   loadIronRdp: () =>
     Promise.resolve({
       Backend: {
@@ -87,6 +92,7 @@ function element(): HTMLElement & HTMLCanvasElement {
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
     focus: () => undefined,
+    getContext: () => null,
     style: {},
     width: 0,
     height: 0,
@@ -109,7 +115,9 @@ beforeEach(() => {
     clipboard: true,
     dynamicResolution: true,
     width: 1920,
-    height: 1080
+    height: 1080,
+    hidpi: false,
+    experience: 'balanced'
   }
   probe = {
     cert: {
@@ -201,6 +209,22 @@ describe('RdpController', () => {
     expect(pasted).toEqual(['local text'])
     c.dispose()
     expect(calls).toContain('shutdown')
+  })
+
+  it('IronRDP panic → ngắt phiên kèm lỗi (không đứng hình mãi ở "Connected")', async () => {
+    prepare = { ...prepare, username: 'saved', hasPassword: true } as typeof prepare
+    probe = { ...probe, status: 'trusted' }
+    const { RdpController } = await import('../../src/renderer/src/rdp/controller')
+    const c = new RdpController('h1', 'win')
+    c.attach(element(), element())
+    c.start()
+    await settle()
+    expect(c.getState().phase).toBe('connected')
+    for (const l of [...panics]) l('panicked at crates/ironrdp-session/src/image.rs:591:34:')
+    expect(c.getState().phase).toBe('disconnected')
+    expect(c.getState().error?.message).toContain('image.rs:591')
+    expect(panics.size).toBe(0)
+    c.dispose()
   })
 
   it('không tin chứng chỉ → dừng, không mở proxy', async () => {

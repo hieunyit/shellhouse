@@ -22,7 +22,38 @@ export function wasmDataResponse(input: unknown): Response | null {
   return new Response(bytes, { headers: { 'Content-Type': 'application/wasm' } })
 }
 
+const panicListeners = new Set<(message: string) => void>()
+
+/**
+ * Báo khi phần Rust của IronRDP panic (hook panic của WASM in ra console.error "panicked at …").
+ * Sau panic, vòng xử lý của phiên đứng im — màn hình đóng băng trong khi vẫn "đã kết nối".
+ */
+export function onIronRdpPanic(listener: (message: string) => void): () => void {
+  panicListeners.add(listener)
+  return () => {
+    panicListeners.delete(listener)
+  }
+}
+
+let consoleHooked = false
+
+function hookPanics(): void {
+  if (consoleHooked) return
+  consoleHooked = true
+  // Hook panic của WASM chỉ in ra console.error — bọc lại để nghe (vẫn in như cũ).
+  // eslint-disable-next-line no-console -- bọc chính console.error
+  const original = console.error.bind(console)
+  // eslint-disable-next-line no-console -- bọc chính console.error
+  console.error = (...args: unknown[]) => {
+    original(...args)
+    const first = args[0]
+    if (typeof first === 'string' && first.startsWith('panicked at '))
+      for (const listener of panicListeners) listener(first.split('\n')[0] ?? first)
+  }
+}
+
 async function load(): Promise<IronRdpModule> {
+  hookPanics()
   const mod = await import('@devolutions/iron-remote-desktop-rdp')
   // Giữ đúng hàm gốc để trả lại nguyên vẹn sau khi khởi tạo.
   const original = Reflect.get(window, 'fetch')

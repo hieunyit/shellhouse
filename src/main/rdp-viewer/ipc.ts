@@ -23,8 +23,13 @@ export function registerRdpViewIpc(options: RdpViewIpcOptions): RdpViewControlle
     certs: new RdpCertStore(options.db),
     probe: async (target) =>
       RdpProbe.parse(await options.supervisor.rdpRequest({ type: 'rdp:probe', target })),
-    open: async (target, pin) => {
-      const result = (await options.supervisor.rdpRequest({ type: 'rdp:open', target, pin })) as {
+    open: async (target, pin, tuning) => {
+      const result = (await options.supervisor.rdpRequest({
+        type: 'rdp:open',
+        target,
+        pin,
+        tuning
+      })) as {
         proxyAddress: string
         token: string
       }

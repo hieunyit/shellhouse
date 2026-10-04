@@ -18,7 +18,8 @@ import {
   startTls
 } from '../../src/session-host/rdp/tls'
 import { connectionRequest } from '../../src/session-host/rdp/x224'
-import { fakeCertPem, startFakeRdp, type FakeRdp } from './rdp-fake-server'
+import { findClientInfo } from '../../src/session-host/rdp/client-info'
+import { clientInfoPdu, fakeCertPem, startFakeRdp, type FakeRdp } from './rdp-fake-server'
 
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
@@ -145,6 +146,45 @@ describe('RdpProxy (server RDP giả: X.224 + TLS)', () => {
     client.ws.send(Buffer.from('bye'))
     await client.waitClosed()
     await expect.poll(() => p.activeConnections).toBe(0)
+  })
+
+  it('sửa cờ hiệu năng / autologon trong Client Info; gom dữ liệu server thành ít message', async () => {
+    const server = await fake()
+    const logs: string[] = []
+    const p = proxy(undefined, logs)
+    const target = { host: '127.0.0.1', port: server.port }
+    const { fingerprint } = (await p.probe(target)).cert
+    const { port, token } = await p.open(target, fingerprint, {
+      performanceFlags: 0x25,
+      autologon: true
+    })
+    const client = await Client.open(port)
+    client.ws.send(requestPdu(token))
+    expect((await client.pdu()).error).toBeUndefined()
+    let messages = 0
+    client.ws.on('message', () => {
+      messages++
+    })
+    // Bắt tay CredSSP (không phải TPKT) đi nguyên vẹn, rồi Client Info (server giả trả lại y nguyên).
+    const credssp = Buffer.from([0x30, 0x03, 0x02, 0x01, 0x06])
+    client.ws.send(credssp)
+    expect((await client.bytes(credssp.length)).equals(credssp)).toBe(true)
+    const info = clientInfoPdu({ password: 'pw', perf: 0x86 })
+    client.ws.send(info)
+    const echoed = await client.bytes(info.length)
+    const f = findClientInfo(echoed)
+    expect(f?.performanceFlags).toBe(0x25)
+    expect((f?.flags ?? 0) & 0x8).toBe(0x8)
+    expect(logs.some((l) => l.includes('performance flags 0x86 → 0x25, autologon'))).toBe(true)
+    // PDU sau không bị đụng tới.
+    const again = clientInfoPdu({ password: 'pw', perf: 0x86 })
+    client.ws.send(again)
+    expect((await client.bytes(again.length)).equals(again)).toBe(true)
+    // 200 lần ghi nhỏ liền nhau của server → ít message WebSocket hơn nhiều.
+    messages = 0
+    for (let i = 0; i < 200; i++) client.ws.send(Buffer.alloc(100, i))
+    await client.bytes(200 * 100)
+    expect(messages).toBeLessThan(200)
   })
 
   it('token sai / đã dùng → 401; proxy bỏ qua destination của client (không relay mở)', async () => {

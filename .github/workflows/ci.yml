@@ -42,6 +42,12 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # Tiến trình phụ Remote Desktop (control RDP gốc) — csc.exe của .NET Framework có sẵn trên runner.
+      # Build trước unit test (test tích hợp chạy exe thật), E2E và đóng gói (extraResources).
+      - name: Build Remote Desktop helper (Windows)
+        if: runner.os == 'Windows'
+        run: node scripts/build-rdp-host.mjs --require
+
       - name: Unit tests
         shell: bash
         run: set -o pipefail; pnpm test 2>&1 | tee unit.log
@@ -94,3 +100,44 @@ jobs:
             playwright-report
             test-results
           retention-days: 7
+
+  # RDP thật tới chính runner (127.0.0.2) bằng control gốc: bật Remote Desktop, tạo user tạm. Phụ thuộc
+  # cấu hình image của runner nên không chặn CI (continue-on-error) — xem kết quả trong log.
+  rdp-loopback:
+    name: RDP loopback (Windows, optional)
+    runs-on: windows-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build Remote Desktop helper
+        run: node scripts/build-rdp-host.mjs --require
+
+      - name: Enable Remote Desktop and create a temporary user
+        shell: pwsh
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0
+          Enable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue
+          Set-Service -Name TermService -StartupType Manual
+          Start-Service TermService
+          $pw = 'Sh' + [guid]::NewGuid().ToString('N').Substring(0, 16) + '!9a'
+          Write-Output "::add-mask::$pw"
+          $secure = ConvertTo-SecureString $pw -AsPlainText -Force
+          New-LocalUser -Name shrdp -Password $secure -PasswordNeverExpires | Out-Null
+          Add-LocalGroupMember -Group 'Remote Desktop Users' -Member shrdp
+          "SHELLHOUSE_RDP_LOOPBACK_USER=shrdp" >> $env:GITHUB_ENV
+          "SHELLHOUSE_RDP_LOOPBACK_PASSWORD=$pw" >> $env:GITHUB_ENV
+          "SHELLHOUSE_RDP_LOOPBACK_DOMAIN=$env:COMPUTERNAME" >> $env:GITHUB_ENV
+
+      - name: Native RDP integration test
+        run: pnpm vitest run test/integration/rdp-native-host.test.ts

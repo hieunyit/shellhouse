@@ -1,11 +1,52 @@
 import { t } from '@shared/i18n'
 import type { HostSummary } from '@shared/hosts'
-import { RDP_SCALES, RDP_SIZES, mstscFileOnlyOptions, type RdpSettings } from '@shared/rdp'
+import {
+  RDP_SCALES,
+  RDP_SIZES,
+  mstscFileOnlyOptions,
+  type RdpEngine,
+  type RdpSettings
+} from '@shared/rdp'
 import { unsignedRdpNotice } from '@shared/rdp-notice'
 import { isWindows } from '../lib/platform'
 import { Checkbox, Field, Input, Notice, Segmented, Select } from './ui'
 
 type Path = 'direct' | 'ssh' | 'gateway'
+
+/**
+ * Engine của tab RDP (chỉ hiện trên Windows): control Remote Desktop gốc của Windows (như mstsc —
+ * GPU, RemoteFX / AVC, RD Gateway) hay trình xem tích hợp IronRDP.
+ */
+function RdpEngineField({
+  value,
+  onChange
+}: {
+  value: RdpEngine
+  onChange: (engine: RdpEngine) => void
+}): React.JSX.Element {
+  return (
+    <div className="mt-1 flex flex-col gap-2">
+      <span className="text-xs font-medium text-muted">{t('Remote Desktop engine')}</span>
+      <Segmented
+        value={value}
+        onChange={onChange}
+        testIdPrefix="rdp-engine"
+        options={[
+          { value: 'auto', label: t('Automatic') },
+          { value: 'native', label: t('Windows RDP') },
+          { value: 'ironrdp', label: t('Built-in (IronRDP)') }
+        ]}
+      />
+      <p className="text-xs text-faint">
+        {value === 'ironrdp'
+          ? t('Uses the built-in viewer (IronRDP), the same as on macOS and Linux.')
+          : t(
+              'Uses the Remote Desktop control of Windows (the engine of mstsc): GPU rendering, RemoteFX / H.264 and RD Gateway. Falls back to the built-in viewer if it is not available.'
+            )}
+      </p>
+    </div>
+  )
+}
 
 const sizeKey = (w: number, h: number): string => `${w}x${h}`
 
@@ -70,6 +111,14 @@ export function RdpFields({
                 'Opens the Remote Desktop client of your system (mstsc, Windows App, FreeRDP or Remmina).'
               )}
         </p>
+        {value.openWith === 'tab' && isWindows() && (
+          <RdpEngineField
+            value={value.engine ?? 'auto'}
+            onChange={(engine) => {
+              set('engine', engine)
+            }}
+          />
+        )}
         {unsigned && <Notice testId="rdp-unsigned-notice">{unsigned}</Notice>}
       </div>
       <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
@@ -169,6 +218,44 @@ export function RdpFields({
           </Select>
         </Field>
       </div>
+
+      {value.openWith === 'tab' && (
+        <div className="flex flex-col gap-2 rounded-lg border border-line p-3">
+          <span className="text-xs font-medium text-muted">{t('Visual experience')}</span>
+          <Segmented
+            value={value.experience ?? 'balanced'}
+            onChange={(v) => {
+              set('experience', v)
+            }}
+            testIdPrefix="rdp-experience"
+            options={[
+              { value: 'performance', label: t('Best performance') },
+              { value: 'balanced', label: t('Balanced') },
+              { value: 'quality', label: t('Best quality') }
+            ]}
+          />
+          <p className="text-xs text-faint">
+            {value.experience === 'performance'
+              ? t(
+                  'No wallpaper, animations, themes or font smoothing; windows move as outlines. Fastest on slow links.'
+                )
+              : value.experience === 'quality'
+                ? t('Wallpaper, animations and font smoothing, like sitting at the computer.')
+                : t('No wallpaper or animations; font smoothing stays on.')}
+          </p>
+          <Checkbox
+            label={t('HiDPI (sharper, slower)')}
+            data-testid="rdp-hidpi"
+            checked={value.hidpi ?? false}
+            description={t(
+              'Uses every physical pixel of a scaled display (125–200%). Sharper text, but the server has to send up to 4× more pixels.'
+            )}
+            onChange={(e) => {
+              set('hidpi', e.target.checked)
+            }}
+          />
+        </div>
+      )}
 
       <div className="flex flex-col gap-2 rounded-lg border border-line p-3">
         <span className="text-xs font-medium text-muted">

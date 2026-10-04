@@ -67,7 +67,7 @@ test('mọi màn hình chính chỉ có tiếng Anh', async ({ page }) => {
     'appearance',
     'terminal',
     'security',
-    'keys',
+    'keychain',
     'shortcuts',
     'updates',
     'diagnostics'

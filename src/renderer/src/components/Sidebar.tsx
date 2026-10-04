@@ -1399,7 +1399,7 @@ export const Sidebar = memo(
               setWidth(Math.min(WIDTH.max, Math.max(WIDTH.min, next)))
             }}
           />
-          <div className="flex h-11 items-center gap-2 border-b border-line px-3">
+          <div className="sh-titlebar sh-titlebar-lead flex h-11 items-center gap-2 border-b border-line px-3">
             <Logo size={24} className="shrink-0" />
             <span className="flex-1 text-sm font-semibold text-fg">Shellhouse</span>
             <IconButton

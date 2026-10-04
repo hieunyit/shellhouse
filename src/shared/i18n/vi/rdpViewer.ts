@@ -93,5 +93,37 @@ export const rdpViewer: Readonly<Record<string, string>> = {
   'Signing in as {user}…': 'Đang đăng nhập bằng {user}…',
   'The session ended: {reason}': 'Phiên đã kết thúc: {reason}',
   'The session ended': 'Phiên đã kết thúc',
-  'The connection was lost': 'Mất kết nối'
+  'The connection was lost': 'Mất kết nối',
+  // Hiệu năng (bảng đo Ctrl+Shift+Alt+P, tuỳ chọn trong form host)
+  'Best performance': 'Nhanh nhất',
+  Balanced: 'Cân bằng',
+  'Best quality': 'Đẹp nhất',
+  'Visual experience': 'Hiệu ứng hình ảnh',
+  'No wallpaper, animations, themes or font smoothing; windows move as outlines. Fastest on slow links.':
+    'Tắt hình nền, hiệu ứng, theme và làm mượt chữ; kéo cửa sổ chỉ hiện khung. Nhanh nhất khi mạng chậm.',
+  'Wallpaper, animations and font smoothing, like sitting at the computer.':
+    'Có hình nền, hiệu ứng và làm mượt chữ, như ngồi trước máy.',
+  'No wallpaper or animations; font smoothing stays on.':
+    'Tắt hình nền và hiệu ứng; vẫn làm mượt chữ.',
+  'HiDPI (sharper, slower)': 'HiDPI (nét hơn, chậm hơn)',
+  'Uses every physical pixel of a scaled display (125–200%). Sharper text, but the server has to send up to 4× more pixels.':
+    'Dùng mọi pixel vật lý của màn hình có scale (125–200%). Chữ nét hơn, nhưng server phải gửi số pixel nhiều gấp tới 4 lần.',
+  Performance: 'Hiệu năng',
+  Frames: 'Khung hình',
+  '{n} fps': '{n} fps',
+  'Screen updates': 'Vùng cập nhật',
+  '{n}/s': '{n}/giây',
+  'Decode + draw': 'Giải mã + vẽ',
+  '{ms} ms per frame · {busy} of main thread': '{ms} ms mỗi khung hình · {busy} luồng chính',
+  Bandwidth: 'Băng thông',
+  '↓ {down} · ↑ {up}': '↓ {down} · ↑ {up}',
+  'Input → screen': 'Input → màn hình',
+  'type or click to measure': 'gõ phím hoặc bấm chuột để đo',
+  Resolution: 'Độ phân giải',
+  'HiDPI on': 'HiDPI bật',
+  'HiDPI off': 'HiDPI tắt',
+  Encoding: 'Mã hoá hình',
+  'Ctrl+Shift+Alt+P to hide': 'Ctrl+Shift+Alt+P để ẩn',
+  'The Remote Desktop client stopped on an internal error ({detail}). Reconnect to continue.':
+    'Trình xem Remote Desktop dừng do lỗi nội bộ ({detail}). Kết nối lại để tiếp tục.'
 }

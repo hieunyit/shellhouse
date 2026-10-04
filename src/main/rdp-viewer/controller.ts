@@ -1,14 +1,16 @@
 import { t } from '@shared/i18n'
 import { hostPort, splitDomainUser } from '@shared/rdp'
-import type {
-  RdpCertInfo,
-  RdpProbe,
-  RdpViewOpenRequest,
-  RdpViewOpenResult,
-  RdpViewPrepare,
-  RdpViewProbeRequest,
-  RdpViewProbeResult,
-  RdpViewTarget
+import {
+  performanceFlagsFor,
+  type RdpCertInfo,
+  type RdpProbe,
+  type RdpViewOpenRequest,
+  type RdpViewOpenResult,
+  type RdpViewPrepare,
+  type RdpViewProbeRequest,
+  type RdpViewProbeResult,
+  type RdpSessionTuning,
+  type RdpViewTarget
 } from '@shared/rdp-viewer'
 import type { ResolvedRdp } from '../hosts/service'
 import type { RdpCertStore } from './cert-store'
@@ -19,7 +21,11 @@ export interface RdpViewDeps {
   /** Session Host: dò chứng chỉ server (+ kiểu TLS bắt tay được). */
   probe(target: RdpViewTarget): Promise<RdpProbe>
   /** Session Host: cấp token proxy cho đích + dấu chứng chỉ đã tin. */
-  open(target: RdpViewTarget, pin: string): Promise<{ proxyAddress: string; token: string }>
+  open(
+    target: RdpViewTarget,
+    pin: string,
+    tuning: RdpSessionTuning
+  ): Promise<{ proxyAddress: string; token: string }>
   now?: () => number
 }
 
@@ -85,7 +91,9 @@ export class RdpViewController {
         clipboard: h.settings.clipboard,
         dynamicResolution: h.settings.dynamicResolution,
         width: h.settings.width,
-        height: h.settings.height
+        height: h.settings.height,
+        hidpi: h.settings.hidpi ?? false,
+        experience: h.settings.experience ?? 'balanced'
       }
     })
   }
@@ -138,9 +146,17 @@ export class RdpViewController {
       const password = request.password ?? h.password?.revealString() ?? null
       if (!username) throw new Error(t('Enter a username'))
       if (password === null) throw new Error(t('Enter the password to connect'))
-      return { target, pin, username, domain, password }
+      const tuning: RdpSessionTuning = {
+        performanceFlags: performanceFlagsFor(h.settings.experience ?? 'balanced'),
+        autologon: true
+      }
+      return { target, pin, username, domain, password, tuning }
     })
-    const { proxyAddress, token } = await this.deps.open(prepared.target, prepared.pin)
+    const { proxyAddress, token } = await this.deps.open(
+      prepared.target,
+      prepared.pin,
+      prepared.tuning
+    )
     return {
       proxyAddress,
       authToken: token,

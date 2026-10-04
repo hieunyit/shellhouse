@@ -9,16 +9,20 @@ import {
   Palette,
   Puzzle,
   Shield,
-  SquareTerminal,
-  UsersRound
+  SquareTerminal
 } from 'lucide-react'
 import { t } from '@shared/i18n'
 import { Diagnostics } from '../Diagnostics'
 import { cx, Modal } from '../ui'
-import { AccountsSection } from './AccountsSection'
+import type { KeychainFilter } from '../accounts/keychain-logic'
+import {
+  resolveSettingsSection,
+  type SettingsSection,
+  type SettingsSectionId
+} from './settings-sections'
 import { AppearanceSection } from './AppearanceSection'
 import { FilesSection } from './FilesSection'
-import { KeysSection } from './KeysSection'
+import { KeychainSection } from './KeychainSection'
 import { SecuritySection } from './SecuritySection'
 import { ShortcutsSection } from './ShortcutsSection'
 import { TerminalSection } from './TerminalSection'
@@ -27,20 +31,23 @@ import { AboutSection } from './AboutSection'
 import { ModulesSection } from './ModulesSection'
 
 // Tiêu đề là hàm: dịch lúc render, không ở cấp module.
-const SECTIONS = [
+const SECTIONS: readonly {
+  id: SettingsSection
+  title: () => string
+  icon: typeof Palette
+}[] = [
   { id: 'appearance', title: () => t('Appearance'), icon: Palette },
   { id: 'terminal', title: () => t('Terminal'), icon: SquareTerminal },
   { id: 'files', title: () => t('Files'), icon: FolderOpen },
   { id: 'modules', title: () => t('Modules'), icon: Puzzle },
   { id: 'security', title: () => t('Security'), icon: Shield },
-  { id: 'accounts', title: () => t('Accounts'), icon: UsersRound },
-  { id: 'keys', title: () => t('SSH keys'), icon: KeyRound },
+  { id: 'keychain', title: () => t('Keychain'), icon: KeyRound },
   { id: 'shortcuts', title: () => t('Shortcuts'), icon: Keyboard },
   { id: 'updates', title: () => t('Updates'), icon: Download },
   { id: 'diagnostics', title: () => t('Diagnostics'), icon: Activity },
   { id: 'about', title: () => t('About'), icon: Info }
-] as const
-export type SettingsSectionId = (typeof SECTIONS)[number]['id']
+]
+export type { SettingsSectionId } from './settings-sections'
 
 export function SettingsDialog({
   onClose,
@@ -49,7 +56,9 @@ export function SettingsDialog({
   onClose: () => void
   initial?: SettingsSectionId
 }): React.JSX.Element {
-  const [section, setSection] = useState<SettingsSectionId>(initial)
+  const resolved = resolveSettingsSection(initial)
+  const [section, setSection] = useState<SettingsSection>(resolved.section)
+  const [keychainFilter, setKeychainFilter] = useState<KeychainFilter>(resolved.keychainFilter)
   return (
     <Modal
       title={t('Settings')}
@@ -74,6 +83,7 @@ export function SettingsDialog({
               )}
               onClick={() => {
                 setSection(s.id)
+                setKeychainFilter('all')
               }}
             >
               <s.icon size={15} />
@@ -81,14 +91,19 @@ export function SettingsDialog({
             </button>
           ))}
         </nav>
-        <div className="min-w-0 flex-1 overflow-auto p-6">
+        <div
+          className={cx(
+            'min-w-0 flex-1',
+            // Keychain tự chia hai khung, tự cuộn từng khung.
+            section === 'keychain' ? 'overflow-hidden' : 'overflow-auto p-6'
+          )}
+        >
           {section === 'appearance' && <AppearanceSection />}
           {section === 'terminal' && <TerminalSection />}
           {section === 'files' && <FilesSection />}
           {section === 'modules' && <ModulesSection />}
           {section === 'security' && <SecuritySection />}
-          {section === 'accounts' && <AccountsSection />}
-          {section === 'keys' && <KeysSection />}
+          {section === 'keychain' && <KeychainSection filter={keychainFilter} />}
           {section === 'shortcuts' && <ShortcutsSection />}
           {section === 'updates' && <UpdatesSection />}
           {section === 'diagnostics' && <Diagnostics />}

@@ -31,10 +31,11 @@ test('tài khoản dùng chung: tạo ở Settings (key + passphrase) → host c
   // Server chỉ nhận key (không có mật khẩu): kết nối được tức là đã dùng key + passphrase đã lưu.
   server = await startTestSshServer([{ username: 'deployer', publicKey: pair.public }])
 
-  // Settings → Accounts → tạo tài khoản, nhập key có passphrase.
+  // Settings → Keychain → New → Account: tạo tài khoản, nhập key có passphrase.
   await page.getByTestId('open-settings').click()
-  await page.getByTestId('settings-nav-accounts').click()
-  await page.getByTestId('account-new').click()
+  await page.getByTestId('settings-nav-keychain').click()
+  await page.getByTestId('keychain-new').click()
+  await page.getByTestId('menu-keychain-new-account').click()
   const editor = page.getByTestId('account-editor')
   await editor.getByTestId('account-name').fill('Prod deploy')
   await editor.getByTestId('account-username').fill('deployer')
@@ -47,7 +48,21 @@ test('tài khoản dùng chung: tạo ở Settings (key + passphrase) → host c
   await expect(accountRow).toContainText('deployer')
   await expect(accountRow.locator('[data-badge="key"]')).toContainText('id_deploy')
   await expect(accountRow.locator('[data-badge="passphrase"]')).toBeVisible()
-  await expect(accountRow.getByTestId('account-usage')).toHaveText('Not used by any host')
+  await expect(accountRow.getByTestId('account-row-usage')).toHaveText('Not used by any host')
+  // Cùng một danh sách: key vừa import nằm dưới, ghi rõ tài khoản đang dùng nó.
+  const keyRow = page.locator('[data-testid="key-row"][data-key-name="id_deploy"]')
+  await expect(keyRow.getByTestId('key-row-usage')).toHaveText('Used by: Prod deploy')
+  await page.getByTestId('keychain-filter-accounts').click()
+  await expect(keyRow).toHaveCount(0)
+  await page.getByTestId('keychain-filter-keys').click()
+  await expect(accountRow).toHaveCount(0)
+  // Chi tiết key → liên kết tới tài khoản: bỏ lọc, chọn tài khoản.
+  await keyRow.click()
+  await page.getByTestId('key-usage-accounts').getByText('Prod deploy').click()
+  await expect(page.getByTestId('account-detail')).toHaveAttribute(
+    'data-account-name',
+    'Prod deploy'
+  )
   await page.keyboard.press('Escape')
 
   // Host mới chọn tài khoản: username lấy từ tài khoản (chỉ đọc), không nhập gì về xác thực.
@@ -87,10 +102,19 @@ test('tài khoản dùng chung: tạo ở Settings (key + passphrase) → host c
   await expect(form).toHaveCount(0)
 
   // Tài khoản đang dùng: xoá phải chọn cách xử lý host.
-  await page.getByTestId('open-settings').click()
-  await page.getByTestId('settings-nav-accounts').click()
-  await expect(accountRow.getByTestId('account-usage')).toHaveText('Used by 1 host')
-  await accountRow.getByTestId('account-delete').click()
+  // Mở thẳng từ form host: "Manage accounts…" → Keychain lọc sẵn Accounts.
+  await page.getByTestId('add-host').click()
+  await form.getByTestId('host-account').click()
+  await form.getByTestId('host-account-manage').click()
+  const manage = page.getByTestId('accounts-dialog')
+  await expect(manage.getByTestId('keychain-filter-accounts')).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+  await expect(accountRow.getByTestId('account-row-usage')).toHaveText('Used by 1 host')
+  // Bàn phím: chọn tài khoản, Delete → hỏi cách xử lý host đang dùng.
+  await accountRow.click()
+  await page.keyboard.press('Delete')
   const dialog = page.getByTestId('account-delete-dialog')
   await expect(dialog).toContainText('acct-host')
   await dialog.getByTestId('account-delete-submit').click()

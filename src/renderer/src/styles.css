@@ -4,6 +4,8 @@
 /* Font tự host (CSP chỉ cho phép 'self'); variable font: một file cho mọi độ đậm. */
 @import '@fontsource-variable/inter';
 @import '@fontsource-variable/jetbrains-mono';
+/* Token của giao diện mới (--ds-*, lớp bg-ds-…): không ảnh hưởng giao diện hiện tại. */
+@import './ds/tokens.css';
 
 /* Dark variant đi theo data-theme trên <html> (do cài đặt Appearance quyết định), không theo media query. */
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
@@ -156,6 +158,54 @@ body {
   /* Ứng dụng desktop: không bôi đen chữ giao diện khi kéo chuột; ô nhập / terminal vẫn chọn được. */
   user-select: none;
 }
+/*
+ * Cửa sổ không có thanh tiêu đề của hệ điều hành (src/main/window-chrome.ts): thanh trên cùng
+ * (.sh-titlebar: thanh công cụ, đầu thanh bên) là vùng kéo cửa sổ; nhấp đúp = phóng to (hành vi gốc
+ * của hệ điều hành). Mọi thứ bấm được bên trong phải là no-drag, nếu không sẽ không nhận chuột.
+ */
+.sh-titlebar {
+  -webkit-app-region: drag;
+}
+.sh-titlebar :where(button, input, select, textarea, a, label, form, summary, [role], [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+/*
+ * Lớp nổi (hộp thoại, menu, popover, tooltip, tay nắm đổi cỡ) đè lên vùng kéo vẫn phải bấm được:
+ * Chromium chỉ trừ vùng kéo khi phần tử phía trên khai báo no-drag.
+ */
+.fixed,
+[role='dialog'],
+[role='alertdialog'],
+[role='menu'],
+[role='listbox'],
+[role='tooltip'],
+[role='separator'],
+[data-radix-popper-content-wrapper] {
+  -webkit-app-region: no-drag;
+}
+/* macOS: chừa chỗ cho ba nút đèn giao thông ở góc trái thanh trên cùng. */
+html[data-platform='darwin'] .sh-titlebar-lead,
+html[data-platform='darwin'] .sh-titlebar[data-lead='window'] {
+  padding-left: 80px;
+}
+/* Thanh bên dạng gọn (48 px): đèn giao thông tràn sang thanh công cụ. */
+html[data-platform='darwin'] .sh-titlebar[data-lead='rail'] {
+  padding-left: 36px;
+}
+html[data-platform='darwin'] .sh-titlebar-logo {
+  visibility: hidden;
+}
+/*
+ * Windows / Linux: chừa chỗ cho nút điều khiển cửa sổ (titleBarOverlay) ở góc phải. env(titlebar-area-*)
+ * cho bề rộng thật; không có (hệ thống không hỗ trợ) → ước lượng 3 nút × 46 px.
+ */
+html:is([data-platform='win32'], [data-platform='linux']) .sh-titlebar-trail {
+  padding-right: calc(
+    100vw - env(titlebar-area-x, 0px) -
+      env(titlebar-area-width, calc(100vw - var(--sh-window-controls, 138px)))
+  );
+}
+
 input,
 textarea,
 [contenteditable='true'],

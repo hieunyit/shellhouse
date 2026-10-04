@@ -82,6 +82,50 @@ export function AppearanceSection(): React.JSX.Element {
           onChange={(startup) => void update({ appearance: { startup } })}
         />
       </div>
+      <NewInterface />
+    </div>
+  )
+}
+
+/**
+ * Giao diện mới (beta) — đang xây dựng sau cờ này; bật / tắt có hiệu lực ngay, không cần khởi động
+ * lại. Phase 1: chỉ có Design kit (bảng lệnh → "Open design kit") và mật độ hiển thị.
+ */
+function NewInterface(): React.JSX.Element {
+  const { settings, update } = useSettings()
+  const { newUi, density } = settings.appearance
+  return (
+    <div className="mt-6">
+      <SectionTitle
+        description={t(
+          'A calmer, keyboard-first redesign. Screens move over one by one; turning it on or off takes effect right away.'
+        )}
+      >
+        {t('New interface (beta)')}
+      </SectionTitle>
+      <Checkbox
+        label={t('Use the new interface')}
+        description={
+          newUi ? t('Preview the components in the command palette: “Open design kit”.') : undefined
+        }
+        checked={newUi}
+        data-testid="setting-new-ui"
+        onChange={(e) => void update({ appearance: { newUi: e.target.checked } })}
+      />
+      {newUi && (
+        <div className="mt-3 pl-6.5">
+          <h4 className="mb-1.5 text-xs font-medium text-muted">{t('Density')}</h4>
+          <Segmented
+            value={density}
+            testIdPrefix="setting-density"
+            options={[
+              { value: 'comfortable', label: t('Comfortable') },
+              { value: 'compact', label: t('Compact') }
+            ]}
+            onChange={(value) => void update({ appearance: { density: value } })}
+          />
+        </div>
+      )}
     </div>
   )
 }

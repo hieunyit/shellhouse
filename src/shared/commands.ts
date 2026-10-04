@@ -28,6 +28,7 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: 'snippets.open', title: 'Open snippets', keys: ['Meta+S', 'Ctrl+Shift+S'] },
   { id: 'palette.open', title: 'Command palette', keys: ['Meta+Shift+P', 'Ctrl+Shift+P'] },
   { id: 'settings.open', title: 'Open settings', keys: ['Meta+,', 'Ctrl+,'] },
+  { id: 'keychain.open', title: 'Keychain: accounts and SSH keys', keys: [null, null] },
   { id: 'vault.lock', title: 'Lock vault', keys: ['Meta+Shift+L', 'Ctrl+Shift+L'] },
   {
     id: 'multiexec.toggle',

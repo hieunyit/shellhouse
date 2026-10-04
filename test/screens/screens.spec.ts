@@ -216,7 +216,7 @@ test('chụp màn hình giao diện', async () => {
         'terminal',
         'security',
         'files',
-        'keys',
+        'keychain',
         'shortcuts',
         'updates'
       ]) {

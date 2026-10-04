@@ -1,0 +1,426 @@
+/*
+ * Design tokens của giao diện mới (design system "ds", prototype trong design/prototype/tokens.css).
+ *
+ * - Mọi biến mang tiền tố --ds-* để không đụng token của giao diện hiện tại (--sh-*). Giao diện cũ
+ *   không dùng biến nào ở đây → nhập file này không đổi gì trên màn hình cũ.
+ * - Theme theo cùng thuộc tính data-theme của <html> (stores/appearance) và lồng được (Design kit
+ *   đặt sáng / tối cạnh nhau). Density theo data-ds-density (comfortable mặc định / compact).
+ * - Component trong src/renderer/src/ds và src/renderer/src/shell CHỈ dùng các token này qua lớp
+ *   Tailwind ánh xạ ở cuối file (bg-ds-surface-1, text-ds-fg-2, h-ds-ctl…) — ESLint chặn lớp màu thô.
+ *
+ * Quy tắc màu (prototype v0.3 — màu của v0.1, "đơn giản & hiện đại"): màu luôn mang nghĩa.
+ * - Trạng thái: --ds-success (xanh lá: Running / Healthy / Ready), --ds-warning (vàng: Pending /
+ *   Updating / Degraded), --ds-danger (đỏ: lỗi), --ds-info (xanh dương: thông tin / tiến trình),
+ *   --ds-status-off (xám: dừng / không rõ). Mỗi màu có -soft (nền chip / callout) và -border.
+ *   Chữ màu và chữ trong chip đều ≥ 4.5:1 trên surface-0…2 và nền khung của theme.
+ * - Một chỉ báo trạng thái mỗi hàng; chip cùng một hình dạng (StatusChip / Badge).
+ * - Accent teal chỉ cho: nút primary, vòng focus, hàng / mục đang chọn, chỉ báo nav, link.
+ * - Môi trường (đặt theo nhóm): PROD đỏ · STG vàng · DEV xanh dương · TEST tím (--ds-env-*);
+ *   PROD thêm vạch 2px ở đỉnh vùng nội dung.
+ * - Biểu đồ / meter: --ds-chart (xanh dương), --ds-chart-2 (tím); vượt ngưỡng → warning / danger.
+ * - Không gradient, không glow; bóng đổ chỉ cho popover / dialog.
+ */
+
+/* ---------- Không phụ thuộc theme ---------- */
+:root {
+  /* Cỡ chữ (6 bậc): 13px là mặc định của app. */
+  --ds-fs-xs: 11px;
+  --ds-lh-xs: 16px;
+  --ds-fs-sm: 12px;
+  --ds-lh-sm: 16px;
+  --ds-fs-base: 13px;
+  --ds-lh-base: 20px;
+  --ds-fs-md: 14px;
+  --ds-lh-md: 20px;
+  --ds-fs-lg: 16px;
+  --ds-lh-lg: 24px;
+  --ds-fs-xl: 20px;
+  --ds-lh-xl: 28px;
+  --ds-fw-regular: 400;
+  --ds-fw-medium: 500;
+  --ds-fw-semibold: 600;
+  --ds-tracking: -0.011em;
+  --ds-tracking-title: -0.018em;
+
+  /* Khoảng cách — lưới 4px (trùng thang spacing mặc định của Tailwind: p-1 = 4px, p-1.5 = 6px…). */
+  --ds-sp-0-5: 2px;
+  --ds-sp-1: 4px;
+  --ds-sp-1-5: 6px;
+  --ds-sp-2: 8px;
+  --ds-sp-2-5: 10px;
+  --ds-sp-3: 12px;
+  --ds-sp-4: 16px;
+  --ds-sp-5: 20px;
+  --ds-sp-6: 24px;
+  --ds-sp-8: 32px;
+  --ds-sp-10: 40px;
+  --ds-sp-12: 48px;
+  --ds-sp-16: 64px;
+
+  /* Bo góc: kbd/tag 3 · badge/chip 4 · button/input/menu item 6 · card/panel/menu 8 · dialog 12. */
+  --ds-r-xs: 3px;
+  --ds-r-sm: 4px;
+  --ds-r-md: 6px;
+  --ds-r-lg: 8px;
+  --ds-r-xl: 12px;
+
+  /* Icon 16px, nét 1.5 (14px trong control nhỏ). */
+  --ds-icon: 16px;
+  --ds-icon-sm: 14px;
+  --ds-icon-stroke: 1.5;
+
+  /* Chuyển động ≤ 150ms, chỉ opacity / transform. */
+  --ds-dur-fast: 100ms;
+  --ds-dur-base: 150ms;
+  --ds-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ds-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Lớp z. */
+  --ds-z-sticky: 10;
+  --ds-z-resizer: 20;
+  --ds-z-dropdown: 100;
+  --ds-z-overlay: 200;
+  --ds-z-dialog: 300;
+  --ds-z-palette: 400;
+  --ds-z-toast: 500;
+  --ds-z-tooltip: 600;
+
+  /* Khung app (phase 2). */
+  --ds-topbar-h: 44px;
+  --ds-activitybar-w: 48px;
+  --ds-explorer-w: 260px;
+  --ds-inspector-w: 380px;
+  --ds-statusbar-h: 26px;
+  --ds-env-line: 2px;
+}
+
+/* ---------- Density ---------- */
+:root,
+[data-ds-density='comfortable'] {
+  --ds-row-h: 32px;
+  --ds-tree-row-h: 28px;
+  --ds-ctl-h: 28px;
+  --ds-ctl-h-sm: 24px;
+  --ds-ctl-h-lg: 36px;
+  --ds-header-h: 44px;
+  --ds-toolbar-h: 44px;
+  --ds-tab-h: 36px;
+  --ds-menu-item-h: 30px;
+  --ds-cell-px: 12px;
+  --ds-prop-row-h: 28px;
+  --ds-table-fs: var(--ds-fs-base);
+}
+[data-ds-density='compact'] {
+  --ds-row-h: 28px;
+  --ds-tree-row-h: 26px;
+  --ds-ctl-h: 24px;
+  --ds-ctl-h-sm: 20px;
+  --ds-ctl-h-lg: 32px;
+  --ds-header-h: 40px;
+  --ds-toolbar-h: 38px;
+  --ds-tab-h: 32px;
+  --ds-menu-item-h: 28px;
+  --ds-cell-px: 8px;
+  --ds-prop-row-h: 24px;
+  --ds-table-fs: var(--ds-fs-sm);
+}
+
+/* ---------- Sáng ---------- */
+:root,
+[data-theme='light'] {
+  --ds-bg: #f3f3f4;
+  --ds-surface-0: #ffffff;
+  --ds-surface-1: #fafafa;
+  --ds-surface-2: #f3f3f4;
+  --ds-surface-3: #ebebed;
+  --ds-overlay: rgb(20 21 24 / 0.28);
+  /* Menu / popover / tooltip nổi trên surface-0. */
+  --ds-popover: #ffffff;
+
+  --ds-border-subtle: rgb(15 16 20 / 0.06);
+  --ds-border: rgb(15 16 20 / 0.09);
+  --ds-border-strong: rgb(15 16 20 / 0.16);
+
+  /* Chữ: chính / phụ (7.6:1) / mờ (≥ 4.76:1) / disabled (miễn AA) — đều trên mọi surface. */
+  --ds-fg: #18191b;
+  --ds-fg-2: #50545b;
+  --ds-fg-3: #636770;
+  --ds-fg-disabled: #a8abb0;
+  --ds-fg-inverse: #ffffff;
+
+  --ds-hover: rgb(15 16 20 / 0.04);
+  --ds-active: rgb(15 16 20 / 0.07);
+
+  /* Accent (teal thương hiệu). Chữ trên accent: trắng 5.0:1. */
+  --ds-accent: #0d7d71;
+  --ds-accent-hover: #0b6e64;
+  --ds-accent-press: #095e55;
+  --ds-accent-contrast: #ffffff;
+  --ds-accent-text: #0b7468;
+  --ds-accent-soft: rgb(13 125 113 / 0.09);
+  --ds-accent-soft-strong: rgb(13 125 113 / 0.16);
+  --ds-accent-ring: rgb(13 125 113 / 0.5);
+
+  /* Trạng thái (theme sáng dùng tông đậm để chữ trong chip ≥ 4.5:1 cả trên nền khung #f3f3f4). */
+  --ds-success: #146c42;
+  --ds-success-soft: rgb(20 108 66 / 0.1);
+  --ds-success-border: rgb(20 108 66 / 0.26);
+  --ds-info: #1a60b8;
+  --ds-info-soft: rgb(26 96 184 / 0.09);
+  --ds-info-border: rgb(26 96 184 / 0.24);
+  --ds-warning: #8a4f00;
+  --ds-warning-soft: rgb(214 140 20 / 0.13);
+  --ds-warning-border: rgb(138 79 0 / 0.26);
+  --ds-danger: #bc2b27;
+  --ds-danger-soft: rgb(201 48 44 / 0.08);
+  --ds-danger-border: rgb(201 48 44 / 0.26);
+  --ds-danger-solid: #c9302c;
+  --ds-danger-solid-hover: #b42824;
+  --ds-danger-contrast: #ffffff;
+  --ds-purple: #6a40c2;
+  --ds-purple-soft: rgb(106 64 194 / 0.09);
+  /* Dừng / không rõ: vòng rỗng (đồ hoạ, đi kèm chữ). */
+  --ds-status-off: #8b8f97;
+
+  /* Môi trường: PROD đỏ · STG vàng · DEV xanh dương · TEST tím. */
+  --ds-env-prod: var(--ds-danger);
+  --ds-env-prod-soft: var(--ds-danger-soft);
+  --ds-env-staging: var(--ds-warning);
+  --ds-env-staging-soft: var(--ds-warning-soft);
+  --ds-env-dev: var(--ds-info);
+  --ds-env-dev-soft: var(--ds-info-soft);
+  --ds-env-test: var(--ds-purple);
+  --ds-env-test-soft: var(--ds-purple-soft);
+
+  /* Biểu đồ / meter: chuỗi 1 xanh dương, chuỗi 2 tím. */
+  --ds-chart: #2b7bd9;
+  --ds-chart-2: #7d55d6;
+  --ds-chart-track: #ebebed;
+  --ds-chart-grid: rgb(15 16 20 / 0.06);
+
+  --ds-shadow-popover:
+    0 0 0 1px var(--ds-border), 0 8px 24px -4px rgb(15 16 20 / 0.14), 0 2px 6px rgb(15 16 20 / 0.06);
+  --ds-shadow-dialog: 0 0 0 1px var(--ds-border), 0 24px 64px -8px rgb(15 16 20 / 0.24);
+  --ds-focus-ring: 0 0 0 2px var(--ds-surface-0), 0 0 0 4px var(--ds-accent-ring);
+  --ds-scrollbar: rgb(15 16 20 / 0.14);
+}
+
+/* ---------- Tối ---------- */
+[data-theme='dark'] {
+  --ds-bg: #08090a;
+  --ds-surface-0: #0e0f11;
+  --ds-surface-1: #141518;
+  --ds-surface-2: #1a1b1f;
+  --ds-surface-3: #222328;
+  --ds-overlay: rgb(4 5 6 / 0.64);
+  --ds-popover: #1a1b1f;
+
+  --ds-border-subtle: rgb(255 255 255 / 0.055);
+  --ds-border: rgb(255 255 255 / 0.085);
+  --ds-border-strong: rgb(255 255 255 / 0.14);
+
+  --ds-fg: #ecedee;
+  --ds-fg-2: #a1a4ab;
+  --ds-fg-3: #8a8e97;
+  --ds-fg-disabled: #4e5157;
+  --ds-fg-inverse: #0e0f11;
+
+  --ds-hover: rgb(255 255 255 / 0.04);
+  --ds-active: rgb(255 255 255 / 0.07);
+
+  /* Teal sáng trên nền tối: chữ trắng không đạt AA → nút primary dùng chữ gần đen (6.9:1). */
+  --ds-accent: #19b3a3;
+  --ds-accent-hover: #2cc2b2;
+  --ds-accent-press: #14a193;
+  --ds-accent-contrast: #04201c;
+  --ds-accent-text: #3fcfbe;
+  --ds-accent-soft: rgb(25 179 163 / 0.14);
+  --ds-accent-soft-strong: rgb(25 179 163 / 0.22);
+  --ds-accent-ring: rgb(45 205 188 / 0.6);
+
+  --ds-success: #4cc38a;
+  --ds-success-soft: rgb(76 195 138 / 0.12);
+  --ds-success-border: rgb(76 195 138 / 0.28);
+  --ds-info: #4ea7fc;
+  --ds-info-soft: rgb(78 167 252 / 0.12);
+  --ds-info-border: rgb(78 167 252 / 0.28);
+  --ds-warning: #e5a83b;
+  --ds-warning-soft: rgb(229 168 59 / 0.12);
+  --ds-warning-border: rgb(229 168 59 / 0.28);
+  --ds-danger: #f5656a;
+  --ds-danger-soft: rgb(245 101 106 / 0.12);
+  --ds-danger-border: rgb(245 101 106 / 0.32);
+  --ds-danger-solid: #d93a40;
+  --ds-danger-solid-hover: #e5484d;
+  --ds-danger-contrast: #ffffff;
+  --ds-purple: #b48cf2;
+  --ds-purple-soft: rgb(180 140 242 / 0.13);
+  --ds-status-off: #6a6e76;
+
+  --ds-env-prod: var(--ds-danger);
+  --ds-env-prod-soft: var(--ds-danger-soft);
+  --ds-env-staging: var(--ds-warning);
+  --ds-env-staging-soft: var(--ds-warning-soft);
+  --ds-env-dev: var(--ds-info);
+  --ds-env-dev-soft: var(--ds-info-soft);
+  --ds-env-test: var(--ds-purple);
+  --ds-env-test-soft: var(--ds-purple-soft);
+
+  --ds-chart: #4ea7fc;
+  --ds-chart-2: #b48cf2;
+  --ds-chart-track: #222328;
+  --ds-chart-grid: rgb(255 255 255 / 0.06);
+
+  --ds-shadow-popover:
+    0 0 0 1px var(--ds-border-strong), 0 8px 24px -4px rgb(0 0 0 / 0.6), 0 2px 6px rgb(0 0 0 / 0.4);
+  --ds-shadow-dialog: 0 0 0 1px var(--ds-border-strong), 0 24px 64px -8px rgb(0 0 0 / 0.72);
+  --ds-focus-ring: 0 0 0 2px var(--ds-surface-0), 0 0 0 4px var(--ds-accent-ring);
+  --ds-scrollbar: rgb(255 255 255 / 0.1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --ds-dur-fast: 0ms;
+    --ds-dur-base: 0ms;
+  }
+}
+
+/*
+ * Ánh xạ sang Tailwind v4: lớp tiện ích chỉ sinh khi có code dùng (giao diện cũ không dùng → CSS
+ * không lớn thêm đáng kể). Tên lớp luôn có "ds-": bg-ds-surface-1, text-ds-fg-3, border-ds-border,
+ * rounded-ds-md, shadow-ds-popover, h-ds-ctl, h-ds-row, px-ds-cell, text-ds-sm…
+ */
+@theme inline {
+  --color-ds-bg: var(--ds-bg);
+  --color-ds-surface-0: var(--ds-surface-0);
+  --color-ds-surface-1: var(--ds-surface-1);
+  --color-ds-surface-2: var(--ds-surface-2);
+  --color-ds-surface-3: var(--ds-surface-3);
+  --color-ds-overlay: var(--ds-overlay);
+  --color-ds-popover: var(--ds-popover);
+  --color-ds-border-subtle: var(--ds-border-subtle);
+  --color-ds-border: var(--ds-border);
+  --color-ds-border-strong: var(--ds-border-strong);
+  --color-ds-fg: var(--ds-fg);
+  --color-ds-fg-2: var(--ds-fg-2);
+  --color-ds-fg-3: var(--ds-fg-3);
+  --color-ds-fg-disabled: var(--ds-fg-disabled);
+  --color-ds-fg-inverse: var(--ds-fg-inverse);
+  --color-ds-hover: var(--ds-hover);
+  --color-ds-active: var(--ds-active);
+  --color-ds-accent: var(--ds-accent);
+  --color-ds-accent-hover: var(--ds-accent-hover);
+  --color-ds-accent-press: var(--ds-accent-press);
+  --color-ds-accent-contrast: var(--ds-accent-contrast);
+  --color-ds-accent-text: var(--ds-accent-text);
+  --color-ds-accent-soft: var(--ds-accent-soft);
+  --color-ds-accent-soft-strong: var(--ds-accent-soft-strong);
+  --color-ds-accent-ring: var(--ds-accent-ring);
+  --color-ds-success: var(--ds-success);
+  --color-ds-success-soft: var(--ds-success-soft);
+  --color-ds-success-border: var(--ds-success-border);
+  --color-ds-info: var(--ds-info);
+  --color-ds-info-soft: var(--ds-info-soft);
+  --color-ds-info-border: var(--ds-info-border);
+  --color-ds-status-off: var(--ds-status-off);
+  --color-ds-warning: var(--ds-warning);
+  --color-ds-warning-soft: var(--ds-warning-soft);
+  --color-ds-warning-border: var(--ds-warning-border);
+  --color-ds-danger: var(--ds-danger);
+  --color-ds-danger-soft: var(--ds-danger-soft);
+  --color-ds-danger-border: var(--ds-danger-border);
+  --color-ds-danger-solid: var(--ds-danger-solid);
+  --color-ds-danger-solid-hover: var(--ds-danger-solid-hover);
+  --color-ds-danger-contrast: var(--ds-danger-contrast);
+  --color-ds-purple: var(--ds-purple);
+  --color-ds-purple-soft: var(--ds-purple-soft);
+  --color-ds-env-prod: var(--ds-env-prod);
+  --color-ds-env-prod-soft: var(--ds-env-prod-soft);
+  --color-ds-env-staging: var(--ds-env-staging);
+  --color-ds-env-staging-soft: var(--ds-env-staging-soft);
+  --color-ds-env-dev: var(--ds-env-dev);
+  --color-ds-env-dev-soft: var(--ds-env-dev-soft);
+  --color-ds-env-test: var(--ds-env-test);
+  --color-ds-env-test-soft: var(--ds-env-test-soft);
+  --color-ds-chart: var(--ds-chart);
+  --color-ds-chart-2: var(--ds-chart-2);
+  --color-ds-chart-track: var(--ds-chart-track);
+  --color-ds-chart-grid: var(--ds-chart-grid);
+
+  --text-ds-xs: var(--ds-fs-xs);
+  --text-ds-xs--line-height: var(--ds-lh-xs);
+  --text-ds-sm: var(--ds-fs-sm);
+  --text-ds-sm--line-height: var(--ds-lh-sm);
+  --text-ds-base: var(--ds-fs-base);
+  --text-ds-base--line-height: var(--ds-lh-base);
+  --text-ds-md: var(--ds-fs-md);
+  --text-ds-md--line-height: var(--ds-lh-md);
+  --text-ds-lg: var(--ds-fs-lg);
+  --text-ds-lg--line-height: var(--ds-lh-lg);
+  --text-ds-xl: var(--ds-fs-xl);
+  --text-ds-xl--line-height: var(--ds-lh-xl);
+  --text-ds-table: var(--ds-table-fs);
+
+  --radius-ds-xs: var(--ds-r-xs);
+  --radius-ds-sm: var(--ds-r-sm);
+  --radius-ds-md: var(--ds-r-md);
+  --radius-ds-lg: var(--ds-r-lg);
+  --radius-ds-xl: var(--ds-r-xl);
+
+  --shadow-ds-popover: var(--ds-shadow-popover);
+  --shadow-ds-dialog: var(--ds-shadow-dialog);
+  --shadow-ds-focus: var(--ds-focus-ring);
+
+  --spacing-ds-row: var(--ds-row-h);
+  --spacing-ds-tree-row: var(--ds-tree-row-h);
+  --spacing-ds-ctl: var(--ds-ctl-h);
+  --spacing-ds-ctl-sm: var(--ds-ctl-h-sm);
+  --spacing-ds-ctl-lg: var(--ds-ctl-h-lg);
+  --spacing-ds-header: var(--ds-header-h);
+  --spacing-ds-toolbar: var(--ds-toolbar-h);
+  --spacing-ds-tab: var(--ds-tab-h);
+  --spacing-ds-menu-item: var(--ds-menu-item-h);
+  --spacing-ds-cell: var(--ds-cell-px);
+  --spacing-ds-prop-row: var(--ds-prop-row-h);
+  --spacing-ds-topbar: var(--ds-topbar-h);
+
+  --ease-ds-standard: var(--ds-ease-standard);
+  --ease-ds-out: var(--ds-ease-out);
+
+  --animate-ds-pop: ds-pop var(--ds-dur-fast) var(--ds-ease-out);
+  --animate-ds-fade: ds-fade var(--ds-dur-base) var(--ds-ease-out);
+  --animate-ds-dialog: ds-dialog var(--ds-dur-base) var(--ds-ease-out);
+}
+
+@keyframes ds-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(-2px);
+  }
+}
+@keyframes ds-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes ds-dialog {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.99);
+  }
+}
+@keyframes ds-shimmer {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Vòng focus chung của DS: 2px accent + khe 2px, chỉ khi focus bằng bàn phím. */
+.ds-focus:focus-visible,
+.ds-focus-within:has(:focus-visible) {
+  outline: none;
+  box-shadow: var(--ds-focus-ring);
+}

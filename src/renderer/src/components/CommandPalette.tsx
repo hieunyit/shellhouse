@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   CornerDownLeft,
   LayoutGrid,
+  Palette,
   Search,
   Server,
   SquareChevronRight,
@@ -54,6 +55,7 @@ export function CommandPalette({
   const shells = useShells((s) => s.shells)
   const workspaces = useSettings((s) => s.settings.workspaces)
   const moduleStates = useModules((s) => s.states)
+  const newUi = useSettings((s) => s.settings.appearance.newUi)
 
   const items = useMemo<Item[]>(() => {
     const commands: Item[] = COMMANDS.filter((c) => c.id !== 'palette.open').map((c) => ({
@@ -133,7 +135,31 @@ export function CommandPalette({
     const enabledCommands = modules
       .filter((m) => m.enabled)
       .flatMap((m) => moduleCommands(m.manifest.id))
-    const all = [...commands, ...enabledCommands, ...layouts, ...terminals, ...connect]
+    // Giao diện mới (beta): trang Design kit — mọi component của design system.
+    const designKit: Item[] = newUi
+      ? [
+          {
+            id: 'designkit.open',
+            title: t('Open design kit'),
+            alias: 'Design kit',
+            hint: '',
+            group: 'Commands' as const,
+            icon: <Palette size={14} />,
+            shortcut: false,
+            run: () => {
+              runCommand('designkit.open')
+            }
+          }
+        ]
+      : []
+    const all = [
+      ...commands,
+      ...designKit,
+      ...enabledCommands,
+      ...layouts,
+      ...terminals,
+      ...connect
+    ]
     if (!query.trim()) return all
     const matchedModules = searchModules(modules, query)
     const moduleItems = matchedModules.flatMap((m) =>
@@ -152,7 +178,7 @@ export function CommandPalette({
         .sort((a, b) => b.score - a.score)
         .map((r) => r.item)
     ]
-  }, [query, overrides, hosts, shells, workspaces, runCommand, moduleStates])
+  }, [query, overrides, hosts, shells, workspaces, runCommand, moduleStates, newUi])
 
   // Giữ mục đang chọn trong vùng nhìn thấy khi di chuyển bằng phím mũi tên.
   useEffect(() => {

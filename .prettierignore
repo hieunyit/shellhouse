@@ -3,3 +3,5 @@ dist
 pnpm-lock.yaml
 playwright-report
 test-results
+# Prototype thiết kế (HTML / script tham khảo), không phải mã của app.
+design

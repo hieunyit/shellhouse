@@ -63,7 +63,7 @@ export function DeployKeyDialog({
       <div className="flex flex-col gap-3">
         {keys.length === 0 ? (
           <p className="text-[13px] text-muted">
-            {t('No keys in the vault yet. Create one in Settings → SSH keys.')}
+            {t('No keys in the vault yet. Create one in Settings → Keychain.')}
           </p>
         ) : (
           <Select

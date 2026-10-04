@@ -14,8 +14,8 @@ import { launchApp, type LaunchedApp } from './fixtures'
  * container, chạy kèm SHELLHOUSE_TEST_RDP_TLS="TLS 1.2 (RSA)".
  *
  * Với Windows: bật Remote Desktop (NLA bật / tắt đều được), dùng địa chỉ + tài khoản của máy đó.
- * xrdp: IronRDP không gửi cờ autologon nên xrdp hiện hộp đăng nhập riêng (vẽ bằng drawing order —
- * IronRDP chưa hỗ trợ nên hộp này hiển thị lỗi hình); sau khi đăng nhập, desktop Xfce vẽ bình thường.
+ * xrdp: proxy bật cờ autologon trong Client Info (có mật khẩu) nên vào thẳng desktop Xfce, không
+ * qua hộp đăng nhập riêng của xrdp. Đo hiệu năng: test/bench/rdp.spec.ts.
  */
 const server = process.env['SHELLHOUSE_TEST_RDP_SERVER'] ?? ''
 const [host = '', port = '3389'] = server.split(/:(?=\d+$)/)

@@ -209,6 +209,8 @@ export function VaultGate({ children }: { children: ReactNode }): React.JSX.Elem
           data-testid="vault-gate"
           data-vault-state={state ?? 'loading'}
         >
+          {/* Cửa sổ không có thanh tiêu đề: dải trên cùng vẫn kéo được cửa sổ khi đang khoá. */}
+          <div aria-hidden className="sh-titlebar absolute inset-x-0 top-0 h-11" />
           {overlay}
         </div>
       )}

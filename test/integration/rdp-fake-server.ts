@@ -195,3 +195,50 @@ export async function startFakeRdp(options: FakeRdpOptions = {}): Promise<FakeRd
       })
   }
 }
+
+/** Client Info PDU ([MS-RDPBCGR] 2.2.1.11) như IronRDP gửi: TPKT + X.224 + MCS + security header. */
+export function clientInfoPdu(
+  opts: { password?: string; perf?: number; extended?: boolean; longLength?: boolean } = {}
+): Buffer {
+  const utf16 = (s: string): Buffer => Buffer.from(s, 'utf16le')
+  const domain = utf16('CORP')
+  const user = utf16('alice')
+  const password = utf16(opts.password ?? '')
+  const head = Buffer.alloc(18)
+  head.writeUInt32LE(0, 0) // CodePage
+  head.writeUInt32LE(0x0010 /* INFO_UNICODE */ | 0x0100 /* INFO_MOUSE */, 4)
+  head.writeUInt16LE(domain.length, 8)
+  head.writeUInt16LE(user.length, 10)
+  head.writeUInt16LE(password.length, 12)
+  head.writeUInt16LE(0, 14)
+  head.writeUInt16LE(0, 16)
+  const z = Buffer.alloc(2)
+  const parts = [head, domain, z, user, z, password, z, z, z]
+  if (opts.extended !== false) {
+    const address = utf16('127.0.0.1\0')
+    const dir = utf16('C:\\Windows\\System32\\mstscax.dll\0')
+    const ext = Buffer.alloc(4)
+    ext.writeUInt16LE(2, 0)
+    ext.writeUInt16LE(address.length, 2)
+    const cbDir = Buffer.alloc(2)
+    cbDir.writeUInt16LE(dir.length, 0)
+    const tz = Buffer.alloc(172, 0x11)
+    const sessionId = Buffer.alloc(4)
+    const perf = Buffer.alloc(4)
+    perf.writeUInt32LE(opts.perf ?? 0x86, 0)
+    parts.push(ext, address, cbDir, dir, tz, sessionId, perf, Buffer.alloc(4, 0x77))
+  }
+  const info = Buffer.concat(parts)
+  const sec = Buffer.from([0x40, 0x00, 0x00, 0x00]) // SEC_INFO_PKT
+  const user_data = Buffer.concat([sec, info])
+  const len =
+    user_data.length < 0x80 && !opts.longLength
+      ? Buffer.from([user_data.length])
+      : Buffer.from([0x80 | (user_data.length >> 8), user_data.length & 0xff])
+  const mcs = Buffer.concat([Buffer.from([0x64, 0x00, 0x06, 0x03, 0xeb, 0x70]), len, user_data])
+  const x224 = Buffer.from([0x02, 0xf0, 0x80])
+  const tpkt = Buffer.alloc(4)
+  tpkt.writeUInt8(3, 0)
+  tpkt.writeUInt16BE(4 + x224.length + mcs.length, 2)
+  return Buffer.concat([tpkt, x224, mcs])
+}

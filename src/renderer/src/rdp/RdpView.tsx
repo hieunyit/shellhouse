@@ -19,10 +19,11 @@ import {
   Shrink,
   ShieldAlert,
   ShieldQuestion,
-  Unplug
+  Unplug,
+  X
 } from 'lucide-react'
 import { t } from '@shared/i18n'
-import { formatDateTime, formatDuration } from '@shared/i18n/format'
+import { formatDateTime, formatDuration, formatNumber, formatRate } from '@shared/i18n/format'
 import { PasswordInput } from '../components/PasswordInput'
 import {
   Button,
@@ -41,7 +42,14 @@ import { useTabStatus } from '../stores/tab-status'
 import { useTabs } from '../stores/tabs'
 import { openRdpHost } from '../stores/rdp'
 import { toast } from '../stores/toasts'
-import { RdpController, tlsLabel, type RdpScale, type RdpViewState } from './controller'
+import {
+  imageRendering,
+  RdpController,
+  tlsLabel,
+  type RdpScale,
+  type RdpViewState
+} from './controller'
+import { codecLabel } from './perf'
 import { rdpControllers } from './registry'
 
 const dotOf: Record<RdpViewState['phase'], ConnectionState> = {
@@ -112,6 +120,22 @@ export function RdpView({
     else if (state.phase === 'connected') controller.focus()
   }, [active, visible, controller, state.phase])
 
+  // Phím ẩn Ctrl+Shift+Alt+P: bảng đo hiệu năng (bắt ở pha capture — không gửi sang máy từ xa).
+  useEffect(() => {
+    const root = rootRef.current
+    if (!root) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.code !== 'KeyP' || !(e.ctrlKey || e.metaKey) || !e.shiftKey || !e.altKey) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (!e.repeat) controller.togglePerf()
+    }
+    root.addEventListener('keydown', onKey, { capture: true })
+    return () => {
+      root.removeEventListener('keydown', onKey, { capture: true })
+    }
+  }, [controller])
+
   useEffect(() => {
     const onChange = (): void => {
       setFullScreen(document.fullscreenElement === rootRef.current && rootRef.current !== null)
@@ -180,9 +204,22 @@ export function RdpView({
             data-testid="rdp-view-canvas"
             aria-label={t('Remote desktop of {name}', { name: state.label })}
             className={cx('block outline-none', !connected && 'invisible')}
-            style={canvasStyle ?? { width: 0, height: 0 }}
+            style={
+              canvasStyle
+                ? { ...canvasStyle, imageRendering: imageRendering(state, canvasStyle) }
+                : { width: 0, height: 0 }
+            }
           />
         </div>
+        {connected && state.perfOpen && (
+          <PerfPanel
+            state={state}
+            onClose={() => {
+              controller.togglePerf(false)
+              controller.focus()
+            }}
+          />
+        )}
         {!connected && <Overlay state={state} controller={controller} hostId={hostId} />}
         {state.prompt && (
           <div className="absolute inset-0 z-10">
@@ -208,9 +245,94 @@ function canvasSize(
   const d = state.desktop
   if (!d || area.width === 0 || area.height === 0) return null
   const dpr = window.devicePixelRatio || 1
-  if (state.scale === 'actual') return { width: d.width / dpr, height: d.height / dpr }
+  // 100% = 1 pixel từ xa ↔ 1 pixel CSS (HiDPI: ↔ 1 pixel màn hình).
+  if (state.scale === 'actual') {
+    const k = state.hidpi ? dpr : 1
+    return { width: d.width / k, height: d.height / k }
+  }
   const k = Math.min(area.width / d.width, area.height / d.height)
   return { width: Math.floor(d.width * k), height: Math.floor(d.height * k) }
+}
+
+const EXPERIENCE_LABEL = {
+  performance: () => t('Best performance'),
+  balanced: () => t('Balanced'),
+  quality: () => t('Best quality')
+} as const
+
+/** Bảng đo hiệu năng (Ctrl+Shift+Alt+P): số liệu cập nhật 2 lần / giây. */
+function PerfPanel({
+  state,
+  onClose
+}: {
+  state: RdpViewState
+  onClose: () => void
+}): React.JSX.Element {
+  const p = state.perf
+  const dpr = window.devicePixelRatio || 1
+  const rows: [string, string][] = [
+    [t('Frames'), p ? t('{n} fps', { n: formatNumber(p.fps, 0) }) : '…'],
+    [t('Screen updates'), p ? t('{n}/s', { n: formatNumber(p.updates, 0) }) : '…'],
+    [
+      t('Decode + draw'),
+      p
+        ? t('{ms} ms per frame · {busy} of main thread', {
+            ms: formatNumber(p.frameMs, 1),
+            busy: `${formatNumber(p.busy, 0)}%`
+          })
+        : '…'
+    ],
+    [
+      t('Bandwidth'),
+      p ? t('↓ {down} · ↑ {up}', { down: formatRate(p.inRate), up: formatRate(p.outRate) }) : '…'
+    ],
+    [
+      t('Input → screen'),
+      p?.latencyMs != null ? `${formatNumber(p.latencyMs, 0)} ms` : t('type or click to measure')
+    ],
+    [
+      t('Resolution'),
+      state.desktop
+        ? `${state.desktop.width}×${state.desktop.height} · DPR ${formatNumber(dpr, 2)} · ${
+            state.hidpi ? t('HiDPI on') : t('HiDPI off')
+          }`
+        : '—'
+    ],
+    [
+      t('Encoding'),
+      p && p.codecs.length > 0
+        ? p.codecs
+            .slice(0, 3)
+            .map((c) => `${codecLabel(c.key)} ${formatNumber(c.share * 100, 0)}%`)
+            .join(', ')
+        : '…'
+    ],
+    [t('Visual experience'), EXPERIENCE_LABEL[state.experience]()]
+  ]
+  return (
+    <div
+      className="absolute top-2 right-2 z-10 w-80 rounded-lg border border-line bg-elevated/90 p-3 text-[11px] shadow-elevated backdrop-blur-sm"
+      data-testid="rdp-view-perf"
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium">{t('Performance')}</span>
+        <IconButton label={t('Close')} onClick={onClose}>
+          <X size={13} />
+        </IconButton>
+      </div>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-faint">{k}</dt>
+            <dd className="sh-selectable min-w-0 font-mono break-words text-fg tabular-nums">
+              {v}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-2 text-[10px] text-faint">{t('Ctrl+Shift+Alt+P to hide')}</p>
+    </div>
+  )
 }
 
 function Toolbar({

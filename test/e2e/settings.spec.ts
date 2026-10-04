@@ -119,11 +119,22 @@ test('tạo key → triển khai lên server bằng mật khẩu → đăng nh�
   dirs.push(home)
   server = await startTestSshServer([{ username: 'u', password: 'pw' }], { execHome: home })
 
-  // Tạo key trong vault.
-  await openSettings(page, 'keys')
+  // Tạo key trong vault: Settings → Keychain → New → Generate SSH key.
+  await openSettings(page, 'keychain')
+  await page.getByTestId('keychain-new').click()
+  await page.getByTestId('menu-keychain-generate-key').click()
   await page.getByTestId('keygen-name').fill('laptop-e2e')
   await page.getByTestId('keygen-create').click()
-  await expect(page.locator('[data-testid="key-row"][data-key-name="laptop-e2e"]')).toBeVisible()
+  await expect(page.getByTestId('keygen-dialog')).toHaveCount(0)
+  const keyRow = page.locator('[data-testid="key-row"][data-key-name="laptop-e2e"]')
+  await expect(keyRow).toBeVisible()
+  // Key mới được chọn sẵn: khung chi tiết có public key + fingerprint SHA256.
+  const detail = page.getByTestId('key-detail')
+  await expect(detail).toHaveAttribute('data-key-name', 'laptop-e2e')
+  await expect(detail.getByTestId('key-type')).toHaveText('ED25519')
+  await expect(detail.getByTestId('key-fingerprint')).toContainText('SHA256:')
+  await expect(detail.getByTestId('key-public')).toHaveValue(/^ssh-ed25519 AAAA\S+ laptop-e2e$/)
+  await expect(keyRow.getByTestId('key-row-usage')).toHaveText('Not used by any account or host')
   await page.keyboard.press('Escape')
 
   // Host dùng mật khẩu; kết nối và triển khai key.
@@ -142,11 +153,23 @@ test('tạo key → triển khai lên server bằng mật khẩu → đăng nh�
   await page.getByTestId('hostkey-accept').click()
   await waitForText(page, tab, 'welcome to test server')
 
-  await page.getByTestId('open-deploy-key').last().click()
-  await page.getByTestId('deploy-key-run').click()
-  await expect(page.getByTestId('deploy-key-result')).toHaveText(
+  // Keychain → Deploy to server…: chọn phiên SSH đang kết nối.
+  await openSettings(page, 'keychain')
+  await keyRow.click()
+  await page.getByTestId('key-deploy').click()
+  const deploy = page.getByTestId('keychain-deploy-dialog')
+  await expect(deploy.getByTestId('keychain-deploy-session')).toHaveCount(1)
+  await deploy.getByTestId('keychain-deploy-run').click()
+  await expect(deploy.getByTestId('keychain-deploy-result')).toHaveText(
     'Key added to ~/.ssh/authorized_keys.'
   )
+  await page.keyboard.press('Escape')
+  await expect(deploy).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings-dialog')).toHaveCount(0)
+
+  // Nút "Deploy key" trên thanh công cụ terminal: key đã có trên server.
+  await page.getByTestId('open-deploy-key').last().click()
   await page.getByTestId('deploy-key-run').click()
   await expect(page.getByTestId('deploy-key-result')).toHaveText(
     'The key is already on the server.'
@@ -168,6 +191,16 @@ test('tạo key → triển khai lên server bằng mật khẩu → đăng nh�
   expect(server.events.authAttempts.filter((a) => a.method === 'publickey').length).toBeGreaterThan(
     0
   )
+
+  // Keychain biết host đang dùng key; xoá bị chặn kèm lý do.
+  await openSettings(page, 'keychain')
+  await page.getByTestId('keychain-filter-keys').click()
+  await expect(keyRow.getByTestId('key-row-usage')).toHaveText('Used by: 1 host')
+  await keyRow.click()
+  await page.keyboard.press('Delete')
+  await expect(page.getByTestId('key-in-use')).toContainText('Used by: 1 host')
+  await page.keyboard.press('Escape')
+  await expect(keyRow).toBeVisible()
 })
 
 test('xuất bản sao lưu', async ({ app, page }) => {

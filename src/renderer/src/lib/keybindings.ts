@@ -74,6 +74,8 @@ export function commandTitle(id: string): string {
       return t('Command palette')
     case 'settings.open':
       return t('Open settings')
+    case 'keychain.open':
+      return t('Keychain: accounts and SSH keys')
     case 'vault.lock':
       return t('Lock vault')
     case 'multiexec.toggle':

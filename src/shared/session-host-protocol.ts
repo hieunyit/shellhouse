@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { ResolvedSessionSpec } from './stream-protocol'
 import { ForwardSpec } from './forwards'
 import { HostOs } from './host-os'
-import { RdpViewTarget } from './rdp-viewer'
+import { RdpSessionTuning, RdpViewTarget } from './rdp-viewer'
 
 export const HostKeyCheck = z.discriminatedUnion('status', [
   z.object({ status: z.literal('match') }),
@@ -108,7 +108,9 @@ export const HostRequest = z.discriminatedUnion('type', [
     type: z.literal('rdp:open'),
     id: z.number().int(),
     target: RdpViewTarget,
-    pin: z.string().max(128)
+    pin: z.string().max(128),
+    /** Cờ hiệu năng / tự đăng nhập proxy áp vào Client Info (không có = giữ của client). */
+    tuning: RdpSessionTuning.optional()
   }),
   /** Chỉ dùng trong dev/E2E để kiểm tra cơ chế tự phục hồi. */
   z.object({ type: z.literal('crash') })

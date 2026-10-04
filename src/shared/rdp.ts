@@ -63,9 +63,26 @@ export const RDP_SIZES = [
 export const RdpOpenWith = z.enum(['tab', 'native'])
 export type RdpOpenWith = z.infer<typeof RdpOpenWith>
 
+/**
+ * Engine vẽ tab Remote Desktop (khi `openWith` = 'tab'): 'auto' = control RDP gốc của Windows
+ * (mstscax, như mstsc) nếu có, nơi khác IronRDP; 'native' = luôn control gốc (chỉ Windows);
+ * 'ironrdp' = luôn trình xem tích hợp (IronRDP/WASM). Không có (host cũ) = 'auto'.
+ */
+export const RdpEngine = z.enum(['auto', 'native', 'ironrdp'])
+export type RdpEngine = z.infer<typeof RdpEngine>
+
+/**
+ * Trình xem trong tab: hiệu ứng hình ảnh của phiên (cờ hiệu năng RDP như "Experience" của mstsc).
+ * 'performance' = tắt hình nền, hiệu ứng, kéo cửa sổ kèm nội dung, theme, làm mượt chữ;
+ * 'balanced' = tắt hình nền + hiệu ứng, giữ làm mượt chữ; 'quality' = như ngồi trước máy.
+ */
+export const RdpExperience = z.enum(['performance', 'balanced', 'quality'])
+export type RdpExperience = z.infer<typeof RdpExperience>
+
 export const RdpSettings = z
   .object({
     openWith: RdpOpenWith,
+    engine: RdpEngine.optional(),
     /** '' = không có domain. */
     domain: RdpDomain.or(z.literal('')),
     fullScreen: z.boolean(),
@@ -84,7 +101,14 @@ export const RdpSettings = z
     /** RD Gateway (host[:port]); null = kết nối thẳng. */
     gateway: GatewayHost.nullable(),
     /** Đi qua SSH host đã lưu (forward cổng local → đích); null = kết nối thẳng. */
-    viaHostId: z.string().min(1).max(64).nullable()
+    viaHostId: z.string().min(1).max(64).nullable(),
+    /** Trình xem trong tab: hiệu ứng hình ảnh. Không có (host cũ) = 'balanced'. */
+    experience: RdpExperience.optional(),
+    /**
+     * Trình xem trong tab: độ phân giải theo pixel vật lý trên màn hình HiDPI (nét hơn, nhưng số
+     * pixel phải mã hoá / truyền / giải mã gấp DPR² lần). Không có = tắt (pixel CSS, co giãn).
+     */
+    hidpi: z.boolean().optional()
   })
   .refine((s) => !(s.gateway && s.viaHostId), {
     message: 'Use either an RD Gateway or an SSH tunnel, not both',

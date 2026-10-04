@@ -43,6 +43,8 @@ import { KnownHosts } from './known-hosts'
 import { registerHostIpc } from './hosts/ipc'
 import { registerRdpIpc } from './rdp/ipc'
 import { registerRdpViewIpc } from './rdp-viewer/ipc'
+import { registerRdpNativeIpc } from './rdp-native/ipc'
+import type { RdpNativeController } from './rdp-native/controller'
 import type { RdpLauncher } from './rdp/launcher'
 import { HostService } from './hosts/service'
 import { SnippetService } from './snippets'
@@ -57,6 +59,7 @@ import { registerSecurityIpc } from './vault/security-ipc'
 import { Updater } from './updater'
 import { listWslDistros, wslFileExists, type WslDistro } from './wsl'
 import { TmuxSlots } from './tmux-slots'
+import { applyWindowTheme, windowBackground, windowChromeOptions } from './window-chrome'
 
 log.initialize()
 log.transports.file.level = 'info'
@@ -127,6 +130,7 @@ let history: CommandHistory | null = null
 let modules: MainModuleRegistry | null = null
 let programGrants: ModuleProgramGrants | null = null
 let rdpLauncher: RdpLauncher | null = null
+let rdpNative: RdpNativeController | null = null
 
 function requireModules(): MainModuleRegistry {
   if (!modules) throw new Error(t('Data is not ready yet'))
@@ -511,6 +515,26 @@ function registerIpc(): void {
         : null
   })
 
+  // Remote Desktop trong tab trên Windows: control RDP gốc (mstscax) trong tiến trình phụ, gắn vào
+  // cửa sổ app. E2E: tắt (giữ test IronRDP) trừ khi SHELLHOUSE_TEST_RDP_NATIVE = selftest | real.
+  const nativeTest = process.env['SHELLHOUSE_TEST_RDP_NATIVE']
+  rdpNative = registerRdpNativeIpc({
+    hosts: requireHosts,
+    isTrustedSender,
+    getWindow: () => mainWindow,
+    emit: (event) => {
+      send('rdpNative:event', event)
+    },
+    notifyChanged: () => {
+      send('hosts:changed', null)
+    },
+    packaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+    testHooks,
+    testMode: testHooks && (nativeTest === 'selftest' || nativeTest === 'real') ? nativeTest : null
+  })
+
   // Remote Desktop trong tab: IronRDP (WASM) ở renderer ↔ proxy RDCleanPath trong Session Host.
   if (db)
     registerRdpViewIpc({
@@ -710,7 +734,9 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     title: 'Shellhouse',
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0d0f12' : '#f4f5f7',
+    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
+    // Không có thanh tiêu đề của hệ điều hành: thanh trên cùng của app là vùng kéo (window-chrome.ts).
+    ...windowChromeOptions(process.platform, nativeTheme.shouldUseDarkColors),
     webPreferences: secureWebPreferences(join(__dirname, '../preload/index.js'), [
       `--shellhouse-lang=${uiLanguage}`,
       `--shellhouse-locale=${uiLocale}`
@@ -836,7 +862,13 @@ if (!app.requestSingleInstanceLock()) {
     settings.onChange((s) => {
       send('settings:changed', s)
       nativeTheme.themeSource = s.appearance.theme
-      mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#0d0f12' : '#f4f5f7')
+      if (mainWindow)
+        applyWindowTheme(mainWindow, process.platform, nativeTheme.shouldUseDarkColors)
+    })
+    // Theme "System" và hệ điều hành đổi sáng / tối → nút điều khiển cửa sổ đổi màu theo.
+    nativeTheme.on('updated', () => {
+      if (mainWindow)
+        applyWindowTheme(mainWindow, process.platform, nativeTheme.shouldUseDarkColors)
     })
     const settingsRef = settings
     deviceKeys = new DeviceKeyStore(db, electronProtector)
@@ -974,6 +1006,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     rdpLauncher?.disposeAll()
+    rdpNative?.disposeAll()
     modules?.stop()
     supervisor.stop()
     vault?.lock()

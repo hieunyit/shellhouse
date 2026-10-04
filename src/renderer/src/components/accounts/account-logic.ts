@@ -11,7 +11,7 @@ import { RdpUsername } from '@shared/rdp'
 
 /**
  * Logic thuần của tài khoản dùng chung phía renderer (chọn tài khoản trong form host, danh sách ở
- * Settings → Accounts) — tách khỏi component để test không cần DOM.
+ * Settings → Keychain) — tách khỏi component để test không cần DOM.
  */
 
 export type AccountBadgeKind = 'key' | 'password' | 'passphrase' | 'domain'

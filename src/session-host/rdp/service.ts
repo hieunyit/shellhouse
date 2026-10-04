@@ -1,12 +1,16 @@
 import type { Client } from 'ssh2'
-import type { RdpViewTarget } from '@shared/rdp-viewer'
+import type { RdpSessionTuning, RdpViewTarget } from '@shared/rdp-viewer'
 import { createDialer } from './dial'
 import { PROXY_PATH, RdpProxy } from './proxy'
 
 /** Phần Session Host của trình xem RDP: dò chứng chỉ + cấp token cho proxy RDCleanPath. */
 export interface RdpService {
   probe(target: RdpViewTarget): ReturnType<RdpProxy['probe']>
-  open(target: RdpViewTarget, pin: string): Promise<{ proxyAddress: string; token: string }>
+  open(
+    target: RdpViewTarget,
+    pin: string,
+    tuning?: RdpSessionTuning
+  ): Promise<{ proxyAddress: string; token: string }>
   close(): void
 }
 
@@ -30,8 +34,8 @@ export function createRdpService(deps: {
   const proxy = new RdpProxy({ dial: createDialer({ sshClient: waitClient }), log: deps.log })
   return {
     probe: (target) => proxy.probe(target),
-    open: async (target, pin) => {
-      const { port, token } = await proxy.open(target, pin)
+    open: async (target, pin, tuning) => {
+      const { port, token } = await proxy.open(target, pin, tuning)
       return { proxyAddress: `ws://127.0.0.1:${port}${PROXY_PATH}`, token }
     },
     close: () => {

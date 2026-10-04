@@ -45,6 +45,8 @@ void preloadTerminal().catch(() => undefined)
 
 void Promise.all([window.shellhouse.getInfo(), loadFonts()]).then(([info]) => {
   setAppInfo(info)
+  // CSS chừa chỗ cho nút điều khiển cửa sổ theo nền tảng (cửa sổ không có thanh tiêu đề).
+  document.documentElement.dataset['platform'] = info.platform
   if (info.testHooks) {
     installTestHooks()
     applyTestDefaults()

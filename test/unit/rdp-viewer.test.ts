@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_RDP } from '../../src/shared/rdp'
-import type { RdpCertInfo, RdpViewTarget } from '../../src/shared/rdp-viewer'
+import {
+  performanceFlagsFor,
+  type RdpCertInfo,
+  type RdpSessionTuning,
+  type RdpViewTarget
+} from '../../src/shared/rdp-viewer'
 import { RdpCertStore } from '../../src/main/rdp-viewer/cert-store'
 import { RdpViewController } from '../../src/main/rdp-viewer/controller'
 import type { ResolvedRdp } from '../../src/main/hosts/service'
@@ -25,7 +30,7 @@ async function setup(host: Partial<ResolvedRdp> = {}) {
   await migrate(db, MIGRATIONS)
   const certs = new RdpCertStore(db)
   let serverCert = FP_A
-  const opened: { target: RdpViewTarget; pin: string }[] = []
+  const opened: { target: RdpViewTarget; pin: string; tuning?: RdpSessionTuning }[] = []
   const disposed: string[] = []
   const resolve = (): ResolvedRdp => ({
     label: 'Win',
@@ -48,8 +53,8 @@ async function setup(host: Partial<ResolvedRdp> = {}) {
         cert: cert(serverCert),
         tls: { protocol: 'TLSv1.3', cipher: 'TLS_AES_256_GCM_SHA384', legacyRsa: false }
       }),
-    open: (target, pin) => {
-      opened.push({ target, pin })
+    open: (target, pin, tuning) => {
+      opened.push({ target, pin, tuning })
       return Promise.resolve({ proxyAddress: 'ws://127.0.0.1:9/rdcleanpath', token: 'tok' })
     }
   })
@@ -96,7 +101,15 @@ describe('RdpViewController (main)', () => {
       domain: 'CORP',
       password: 'secret'
     })
-    expect(s.opened).toEqual([{ target: { host: 'Win.Corp', port: 3389 }, pin: FP_A }])
+    // Host chưa chọn mức hiệu ứng → Balanced; có mật khẩu → bật autologon (server không NLA).
+    expect(s.opened).toEqual([
+      {
+        target: { host: 'Win.Corp', port: 3389 },
+        pin: FP_A,
+        tuning: { performanceFlags: performanceFlagsFor('balanced'), autologon: true }
+      }
+    ])
+    expect(s.controller.prepare('h')).toMatchObject({ hidpi: false, experience: 'balanced' })
     expect(s.disposed.length).toBeGreaterThan(0)
     // Gõ "DOMAIN\\user" tách domain.
     const typed = await s.controller.open({ hostId: 'h', username: 'OTHER\\bob', password: 'x' })

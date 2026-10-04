@@ -225,7 +225,7 @@ port.on('message', (event) => {
       replyRdp(request.id, rdp.probe(request.target))
       break
     case 'rdp:open':
-      replyRdp(request.id, rdp.open(request.target, request.pin))
+      replyRdp(request.id, rdp.open(request.target, request.pin, request.tuning))
       break
     case 'crash':
       log('warn', 'Received crash command (test)')

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shellhouse — UI prototype</title>
+  <link rel="stylesheet" href="assets/fonts.css" />
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="components.css" />
+</head>
+<body data-theme="dark" data-density="comfortable" data-os="win">
+  <a class="sr-only" href="#content">Skip to content</a>
+  <div class="app" id="app">
+    <!-- Title bar tự vẽ (cửa sổ frameless): vùng kéo, nút cửa sổ macOS/Windows, command center -->
+    <header class="titlebar" id="titlebar"></header>
+
+    <!-- Activity bar -->
+    <nav class="activitybar" id="activitybar" aria-label="Modules"></nav>
+
+    <!-- Explorer -->
+    <aside class="explorer" id="explorer" aria-label="Explorer">
+      <div class="explorer__head" id="explorer-head"></div>
+      <div class="explorer__search" id="explorer-search"></div>
+      <div class="explorer__body" id="explorer-body"></div>
+      <div class="resizer" data-resize="explorer" role="separator" aria-orientation="vertical" aria-label="Resize explorer" tabindex="-1"></div>
+    </aside>
+
+    <!-- Main inset panel -->
+    <main class="main" id="main">
+      <header class="main-header" id="main-header"></header>
+      <div class="main-body">
+        <section class="content" id="content" tabindex="-1"></section>
+        <aside class="inspector hidden" id="inspector" aria-label="Inspector">
+          <div class="resizer" data-resize="inspector" role="separator" aria-orientation="vertical" aria-label="Resize inspector" tabindex="-1"></div>
+          <div id="inspector-inner" style="display:contents"></div>
+        </aside>
+      </div>
+    </main>
+
+    <!-- Status bar -->
+    <footer class="statusbar" id="statusbar" role="status" aria-live="polite"></footer>
+  </div>
+
+  <!-- Overlays -->
+  <div id="layer-menu"></div>
+  <div id="layer-dialog"></div>
+  <div class="toasts" id="toasts" aria-live="polite" aria-relevant="additions"></div>
+  <div class="tooltip" id="tooltip" role="tooltip"></div>
+
+  <script src="icons.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

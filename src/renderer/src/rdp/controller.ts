@@ -1,8 +1,11 @@
 import { t } from '@shared/i18n'
+import type { RdpExperience } from '@shared/rdp'
 import type { RdpTlsInfo, RdpViewPrepare, RdpViewProbeResult } from '@shared/rdp-viewer'
 import type { ActivePrompt } from '../terminal/controller'
 import type { IronRdpModule } from './ironrdp'
+import { InputCoalescer } from './input'
 import { SCANCODE, scancodeOf } from './keymap'
+import { RdpPerfMeter, type RdpPerfSnapshot } from './perf'
 import { SshTunnel } from './tunnel'
 
 /**
@@ -53,6 +56,12 @@ export interface RdpViewState {
   dynamic: boolean
   scale: RdpScale
   connectedAt: number | null
+  /** Độ phân giải theo pixel vật lý (HiDPI) — tuỳ chọn của host. */
+  hidpi: boolean
+  experience: RdpExperience
+  /** Bảng đo hiệu năng đang mở (Ctrl+Shift+Alt+P) và số đo gần nhất. */
+  perfOpen: boolean
+  perf: RdpPerfSnapshot | null
 }
 
 /** "TLS 1.3", "TLS 1.2", "TLS 1.2 (RSA)" — chưa rõ thì chỉ "TLS". */
@@ -152,12 +161,49 @@ export function describeConnectError(error: unknown): ConnectFailure {
   }
 }
 
-/** Kích thước desktop từ khung tab (pixel CSS): chẵn, trong giới hạn của RDP. */
+/**
+ * Độ phân giải phiên cho khung tab `width`×`height` (pixel CSS). Mặc định theo pixel CSS: trên màn
+ * hình HiDPI (DPR 1.25–2) hình được trình duyệt phóng lên, nhưng server chỉ phải mã hoá / gửi và
+ * IronRDP chỉ phải giải mã 1/DPR² số pixel. `hidpi` = pixel vật lý + hệ số scale cho Windows (nét
+ * như máy thật, chậm hơn).
+ */
+export function sessionResolution(
+  width: number,
+  height: number,
+  dpr: number,
+  hidpi: boolean
+): { width: number; height: number; scale: number | null } {
+  const k = hidpi ? Math.min(Math.max(dpr || 1, 1), 4) : 1
+  const size = desktopSizeFor(width * k, height * k)
+  return { ...size, scale: k > 1 ? Math.min(500, Math.max(100, Math.round(k * 100))) : null }
+}
+
+/**
+ * Cách phóng canvas lên màn hình: đúng bội số nguyên (DPR 2, 100%) → giữ pixel sắc nét; tỉ lệ lẻ
+ * (DPR 1.25 / 1.5, vừa khung) → nội suy mượt, chữ đều nét hơn lặp pixel không đều.
+ */
+export function imageRendering(
+  state: Pick<RdpViewState, 'desktop'>,
+  css: { width: number },
+  dpr = window.devicePixelRatio || 1
+): 'pixelated' | 'auto' {
+  const d = state.desktop
+  if (!d || d.width === 0) return 'auto'
+  const ratio = (css.width * dpr) / d.width
+  const whole = Math.round(ratio)
+  return whole >= 2 && Math.abs(ratio - whole) < 0.02 ? 'pixelated' : 'auto'
+}
+
+/**
+ * Kích thước desktop từ khung tab (pixel CSS) trong giới hạn của RDP: cao chẵn, rộng chia hết cho 4
+ * — server đệm bitmap cho đủ bội số 4 pixel, ô ở mép phải khi đó rộng hơn khung đích và IronRDP vẽ
+ * lệch (xem session-host/rdp/bitmap-fix.ts).
+ */
 export function desktopSizeFor(width: number, height: number): { width: number; height: number } {
   const clamp = (v: number, min: number, max: number): number => Math.min(max, Math.max(min, v))
   const even = (v: number): number => v - (v % 2)
   return {
-    width: even(clamp(Math.floor(width), 640, 8192)),
+    width: clamp(Math.floor(width), 640, 8192) & ~3,
     height: even(clamp(Math.floor(height), 480, 8192))
   }
 }
@@ -197,6 +243,17 @@ export class RdpController {
   private credAnswer: ((value: TypedCredentials | null) => void) | null = null
   private lastClipboard: string | null = null
   private resizeTimer: number | null = null
+  private readonly input = new InputCoalescer({
+    move: (x, y) => {
+      this.sendMove(x, y)
+    },
+    wheel: (vertical, amount, unit) => {
+      this.sendWheel(vertical, amount, unit)
+    }
+  })
+  private readonly perf = new RdpPerfMeter((perf) => {
+    this.set({ perf })
+  })
   private disposed = false
   private userClosing = false
 
@@ -220,7 +277,11 @@ export class RdpController {
       clipboard: false,
       dynamic: true,
       scale: 'fit',
-      connectedAt: null
+      connectedAt: null,
+      hidpi: false,
+      experience: 'balanced',
+      perfOpen: false,
+      perf: null
     }
   }
 
@@ -245,6 +306,9 @@ export class RdpController {
     this.detach?.()
     this.canvas = canvas
     this.container = container
+    // Màn hình từ xa luôn đục: compositor khỏi trộn alpha. Context tạo trước nên IronRDP dùng lại
+    // đúng context này (getContext trả context đã có).
+    canvas.getContext('2d', { alpha: false })
     const on = <K extends keyof HTMLElementEventMap>(
       target: HTMLElement,
       type: K,
@@ -257,7 +321,7 @@ export class RdpController {
     }
     const offs = [
       on(canvas, 'mousemove', (e) => {
-        this.mouseMove(e)
+        if (this.session) this.input.pointer(e.clientX, e.clientY)
       }),
       on(canvas, 'mousedown', (e) => {
         e.preventDefault()
@@ -285,6 +349,7 @@ export class RdpController {
         void this.pushClipboard(false)
       }),
       on(canvas, 'blur', () => {
+        this.input.flush()
         this.session?.releaseAllInputs()
       }),
       on(canvas, 'mouseleave', () => {
@@ -293,6 +358,7 @@ export class RdpController {
       })
     ]
     const onWindowBlur = (): void => {
+      this.input.flush()
       this.session?.releaseAllInputs()
     }
     window.addEventListener('blur', onWindowBlur)
@@ -358,7 +424,9 @@ export class RdpController {
         address: prep.address,
         via: prep.via?.label ?? null,
         clipboard: prep.clipboard,
-        dynamic: prep.dynamicResolution
+        dynamic: prep.dynamicResolution,
+        hidpi: prep.hidpi,
+        experience: prep.experience
       })
 
       let viaSessionId: string | undefined
@@ -468,7 +536,7 @@ export class RdpController {
       })
       if (this.stale(gen)) return
       this.set({ detail: t('Starting the Remote Desktop client…') })
-      const { loadIronRdp } = await import('./ironrdp')
+      const { loadIronRdp, onIronRdpPanic } = await import('./ironrdp')
       const mod = await loadIronRdp()
       if (this.stale(gen)) return
       this.mod = mod
@@ -501,7 +569,8 @@ export class RdpController {
           })
       let session: WasmSession
       try {
-        session = await builder.connect()
+        // Bộ đo hiệu năng đếm byte trên WebSocket IronRDP mở tới proxy.
+        session = await this.perf.track(opened.proxyAddress, () => builder.connect())
       } catch (error) {
         if (this.stale(gen)) return
         const failure = describeConnectError(error)
@@ -533,6 +602,20 @@ export class RdpController {
         return
       }
       this.session = session
+      // Panic của WASM: phiên đứng im mà không báo lỗi → ngắt hẳn, cho kết nối lại.
+      const offPanic = onIronRdpPanic((message) => {
+        if (this.session !== session) return
+        offPanic()
+        this.fail(
+          t(
+            'The Remote Desktop client stopped on an internal error ({detail}). Reconnect to continue.',
+            {
+              detail: message.replace(/^panicked at /, '')
+            }
+          )
+        )
+      })
+      this.offPanic = offPanic
       this.syncDesktopSize()
       this.set({ phase: 'connected', detail: null, connectedAt: Date.now(), error: null })
       if (typed?.save && typed.password) {
@@ -540,7 +623,8 @@ export class RdpController {
         this.typed = { ...typed, save: false }
       }
       canvas.focus({ preventScroll: true })
-      // Kênh Display Control mở sau khi đăng nhập xong — đổi độ phân giải theo khung (và HiDPI).
+      // Kênh Display Control mở sau khi đăng nhập xong — đổi độ phân giải theo khung (HiDPI: kèm
+      // hệ số scale).
       window.setTimeout(() => {
         if (this.session === session) this.applyResize()
       }, 1500)
@@ -575,6 +659,7 @@ export class RdpController {
     const rect = this.container?.getBoundingClientRect()
     if (!prep.dynamicResolution || !rect || rect.width < 50 || rect.height < 50)
       return desktopSizeFor(prep.width, prep.height)
+    // Pixel CSS kể cả khi bật HiDPI: hệ số scale chỉ gửi được qua Display Control (applyResize).
     return desktopSizeFor(rect.width, rect.height)
   }
 
@@ -609,22 +694,24 @@ export class RdpController {
     }, 400)
   }
 
-  /** Độ phân giải phiên = kích thước khung (pixel vật lý, kèm hệ số scale cho màn hình HiDPI). */
+  /** Độ phân giải phiên = kích thước khung (pixel CSS; HiDPI: pixel vật lý kèm hệ số scale). */
   private applyResize(): void {
     const session = this.session
     const rect = this.container?.getBoundingClientRect()
     if (!session || !rect || !this.state.dynamic || this.state.scale !== 'fit') return
     if (rect.width < 50 || rect.height < 50) return // tab đang ẩn
-    const dpr = Math.min(window.devicePixelRatio || 1, 4)
-    const logical = desktopSizeFor(rect.width, rect.height)
-    const physical = desktopSizeFor(rect.width * dpr, rect.height * dpr)
+    const target = sessionResolution(
+      rect.width,
+      rect.height,
+      window.devicePixelRatio,
+      this.state.hidpi
+    )
     const current = this.state.desktop
-    if (current && current.width === physical.width && current.height === physical.height) return
-    const scale = Math.min(500, Math.max(100, Math.round(dpr * 100)))
+    if (current && current.width === target.width && current.height === target.height) return
     try {
       // Kích thước vật lý của màn hình (mm) không biết → để server tự tính từ hệ số scale.
-      if (dpr > 1) session.resize(physical.width, physical.height, scale)
-      else session.resize(logical.width, logical.height)
+      if (target.scale !== null) session.resize(target.width, target.height, target.scale)
+      else session.resize(target.width, target.height)
     } catch {
       // Server không có Display Control (máy cũ / xrdp) — giữ nguyên, canvas tự co giãn.
     }
@@ -695,9 +782,14 @@ export class RdpController {
     })
   }
 
+  private offPanic: (() => void) | null = null
+
   private stopSession(): void {
     const session = this.session
     this.session = null
+    this.offPanic?.()
+    this.offPanic = null
+    this.input.reset()
     if (session) {
       try {
         session.shutdown()
@@ -721,6 +813,7 @@ export class RdpController {
     this.close(null)
     this.disposed = true
     this.typed = null
+    this.perf.dispose()
     this.detach?.()
     if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer)
   }
@@ -736,14 +829,15 @@ export class RdpController {
     session.applyInputs(tx)
   }
 
-  private mouseMove(e: MouseEvent): void {
+  /** Vị trí chuột (đã gom theo khung hình) → toạ độ desktop. Một lần đọc layout mỗi khung hình. */
+  private sendMove(clientX: number, clientY: number): void {
     const canvas = this.canvas
     const mod = this.mod
     if (!canvas || !mod || !this.session) return
     const rect = canvas.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) return
-    const x = Math.round(((e.clientX - rect.left) * canvas.width) / rect.width)
-    const y = Math.round(((e.clientY - rect.top) * canvas.height) / rect.height)
+    const x = Math.round(((clientX - rect.left) * canvas.width) / rect.width)
+    const y = Math.round(((clientY - rect.top) * canvas.height) / rect.height)
     this.transaction([
       mod.Backend.DeviceEvent.mouseMove(
         Math.max(0, Math.min(canvas.width - 1, x)),
@@ -755,6 +849,9 @@ export class RdpController {
   private mouseButton(button: number, pressed: boolean): void {
     const mod = this.mod
     if (!mod || button > 4) return
+    // Vị trí đang chờ đi trước — server bấm đúng chỗ con trỏ.
+    this.input.flush()
+    if (pressed) this.perf.noteInput()
     this.transaction([
       pressed
         ? mod.Backend.DeviceEvent.mouseButtonPressed(button)
@@ -763,13 +860,16 @@ export class RdpController {
   }
 
   private wheel(e: WheelEvent): void {
+    if (!this.session || (e.deltaX === 0 && e.deltaY === 0)) return
+    this.perf.noteInput()
+    this.input.wheel(e.deltaX, e.deltaY, e.deltaMode)
+  }
+
+  private sendWheel(vertical: boolean, amount: number, unit: number): void {
     const mod = this.mod
     if (!mod) return
-    const vertical = e.deltaY !== 0
-    const amount = vertical ? e.deltaY : e.deltaX
-    if (amount === 0) return
     // RotationUnit: 0 pixel, 1 line, 2 page — trùng WheelEvent.deltaMode.
-    this.transaction([mod.Backend.DeviceEvent.wheelRotations(vertical, -amount, e.deltaMode)])
+    this.transaction([mod.Backend.DeviceEvent.wheelRotations(vertical, -amount, unit)])
   }
 
   private key(e: KeyboardEvent, pressed: boolean): void {
@@ -781,6 +881,8 @@ export class RdpController {
     if (code === null) return
     const mod = this.mod
     if (!mod) return
+    this.input.flush()
+    if (pressed) this.perf.noteInput()
     if (pressed && (e.code === 'CapsLock' || e.code === 'NumLock' || e.code === 'ScrollLock'))
       this.session.synchronizeLockKeys(
         e.getModifierState('ScrollLock'),
@@ -819,8 +921,16 @@ export class RdpController {
     this.canvas?.focus({ preventScroll: true })
   }
 
+  /** Bật / tắt bảng đo hiệu năng (fps, băng thông, độ trễ…). */
+  togglePerf(open = !this.state.perfOpen): void {
+    if (open && this.canvas) this.perf.start(this.canvas)
+    else this.perf.stop()
+    this.set({ perfOpen: open, perf: open ? this.state.perf : null })
+  }
+
   /** Tab bị ẩn / mất focus: nhả mọi phím, nút đang giữ. */
   releaseInputs(): void {
+    this.input.flush()
     this.session?.releaseAllInputs()
   }
 

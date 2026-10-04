@@ -1,4 +1,4 @@
-/** Bản dịch tiếng Việt — Tài khoản dùng chung (Settings → Accounts, ô chọn tài khoản trong form host). */
+/** Bản dịch tiếng Việt — Keychain: tài khoản dùng chung và SSH key (Settings → Keychain, ô chọn tài khoản trong form host). */
 export const accounts: Readonly<Record<string, string>> = {
   // Service (main)
   '“{value}” is not a valid Windows username': '“{value}” không phải tên đăng nhập Windows hợp lệ',
@@ -84,7 +84,6 @@ export const accounts: Readonly<Record<string, string>> = {
   'The hosts sign in with the account you pick instead.':
     'Các host sẽ đăng nhập bằng tài khoản bạn chọn.',
   Accounts: 'Tài khoản',
-  'Shared sign-in details for your hosts.': 'Thông tin đăng nhập dùng chung cho các host.',
   'Used by {n} host': 'Đang được {n} host dùng',
   'Used by {n} hosts': 'Đang được {n} host dùng',
   '{n} host uses this account. Choose what happens to it.':
@@ -93,9 +92,64 @@ export const accounts: Readonly<Record<string, string>> = {
     '{n} host đang dùng tài khoản này. Chọn cách xử lý các host đó.',
   'Delete account': 'Xoá tài khoản',
   'SSH key (deleted)': 'SSH key (đã xoá)',
-  'Pick an account when you create or edit a host instead of typing the username, password and key again. Secrets are stored encrypted in the vault.':
-    'Chọn tài khoản khi tạo hoặc sửa host, khỏi gõ lại tên đăng nhập, mật khẩu và key. Secret được mã hoá trong vault.',
-  'Used by accounts: {names}': 'Tài khoản đang dùng: {names}',
   'Saved to the account {account} once you are signed in — every host using this account gets it.':
-    'Lưu vào tài khoản {account} sau khi đăng nhập thành công — mọi host dùng tài khoản này đều nhận.'
+    'Lưu vào tài khoản {account} sau khi đăng nhập thành công — mọi host dùng tài khoản này đều nhận.',
+  // Keychain (Settings → Keychain: tài khoản + SSH key)
+  Keychain: 'Keychain',
+  'Keychain: accounts and SSH keys': 'Keychain: tài khoản và SSH key',
+  'Accounts and SSH keys shared by your hosts.': 'Tài khoản và SSH key dùng chung cho các host.',
+  'Accounts and SSH keys for your hosts, in one place. Secrets are stored encrypted in the vault.':
+    'Tài khoản và SSH key cho các host, gom về một chỗ. Secret được mã hoá trong vault.',
+  'Search accounts and keys': 'Tìm tài khoản và key',
+  'Your keychain is empty': 'Keychain đang trống',
+  'Nothing matches “{query}”': 'Không có gì khớp “{query}”',
+  'Add an account or an SSH key to get started.': 'Thêm tài khoản hoặc SSH key để bắt đầu.',
+  'Select an account or a key to see its details.': 'Chọn một tài khoản hoặc key để xem chi tiết.',
+  'Generate SSH key…': 'Tạo SSH key…',
+  'Import SSH key…': 'Import SSH key…',
+  'Imported the SSH key': 'Đã import SSH key',
+  '{names} +{n}': '{names} +{n}',
+  'Used by: {list}': 'Đang dùng: {list}',
+  'Not used by any account or host': 'Chưa tài khoản hay host nào dùng',
+  '“{name}” is still in use': '“{name}” vẫn đang được dùng',
+  '{usage}. Choose another key or remove it from them first.':
+    '{usage}. Hãy chọn key khác hoặc bỏ key khỏi chúng trước.',
+  'This cannot be undone. Export it first if you may need it again.':
+    'Không hoàn tác được. Export ra trước nếu có thể cần dùng lại.',
+  'Deleted the key {name}': 'Đã xoá key {name}',
+  'It is the default key of {n} group — hosts there will no longer sign in with it.':
+    'Đây là key mặc định của {n} nhóm — host trong nhóm sẽ không đăng nhập bằng key này nữa.',
+  'It is the default key of {n} groups — hosts there will no longer sign in with it.':
+    'Đây là key mặc định của {n} nhóm — host trong các nhóm sẽ không đăng nhập bằng key này nữa.',
+  // Chi tiết tài khoản
+  'Sign-in': 'Đăng nhập',
+  'Saved in the vault': 'Đã lưu trong vault',
+  'Asked when connecting': 'Hỏi khi kết nối',
+  // Chi tiết SSH key
+  'Protected with a passphrase': 'Có passphrase bảo vệ',
+  'No passphrase': 'Không có passphrase',
+  'Deploy to server…': 'Deploy lên server…',
+  'Copy fingerprint': 'Sao chép fingerprint',
+  'Export private key…': 'Export private key…',
+  'Copied the fingerprint': 'Đã sao chép fingerprint',
+  'Public key': 'Public key',
+  'Add this line to ~/.ssh/authorized_keys on the server.':
+    'Thêm dòng này vào ~/.ssh/authorized_keys trên server.',
+  'Could not read the public key': 'Không đọc được public key',
+  'through an account': 'qua tài khoản',
+  '{n} account': '{n} tài khoản',
+  '{n} accounts': '{n} tài khoản',
+  'Default key of {n} group': 'Key mặc định của {n} nhóm',
+  'Default key of {n} groups': 'Key mặc định của {n} nhóm',
+  // Tạo key / deploy key
+  'Generate SSH key': 'Tạo SSH key',
+  'Confirm passphrase': 'Nhập lại passphrase',
+  'The passphrases do not match': 'Hai passphrase không khớp',
+  'Deploy “{name}” to a server': 'Deploy “{name}” lên server',
+  'No SSH session is connected. Connect to the server (password sign-in is fine), then deploy the key from here or from the terminal toolbar.':
+    'Chưa có phiên SSH nào đang kết nối. Kết nối tới server (đăng nhập bằng mật khẩu cũng được), rồi deploy key ở đây hoặc trên thanh công cụ của terminal.',
+  Session: 'Phiên',
+  'Add the key through this session': 'Thêm key qua phiên này',
+  'No keys in the vault yet. Create one in Settings → Keychain.':
+    'Vault chưa có key nào. Tạo key ở Cài đặt → Keychain.'
 }

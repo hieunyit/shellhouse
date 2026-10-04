@@ -10,6 +10,15 @@ const MODULES = readdirSync('src/modules', { withFileTypes: true })
   .filter((d) => d.isDirectory() && d.name !== 'registry')
   .map((d) => d.name)
 
+// Lớp màu Tailwind (có thể kèm biến thể hover:, dark:…) — chặn trong giao diện mới.
+const COLOR_UTILS =
+  'bg|text|border|border-[trblxy]|border-[se]|ring|ring-offset|outline|fill|stroke|from|via|to|shadow|divide|decoration|accent|caret|placeholder'
+const PALETTE =
+  'red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone|black|white'
+const RAW_COLOR_CLASS = `/(^|[\\s:!])(${COLOR_UTILS})-(${PALETTE})(-[0-9]+)?(?=$|[\\s/])/`
+const ARBITRARY_COLOR_CLASS = `/(^|[\\s:!])(${COLOR_UTILS})-\\[(#|rgb|hsl|oklch|color)/`
+const LEGACY_TOKEN_CLASS = `/(^|[\\s:!])(bg|text|border|ring|outline|fill|stroke|divide)-(canvas|surface|elevated|subtle|line|line-strong|fg|muted|faint|accent|accent-solid|accent-soft|accent-fg|danger|danger-soft|danger-solid|warning|warning-soft|success|success-soft|terminal)(\\/[0-9]+)?(\\s|$)/`
+
 /** Ranh giới import của module: lõi chỉ đi qua registry; module không đụng module khác. */
 const moduleZones = [
   // Lõi → module: chỉ qua src/modules/registry.
@@ -70,7 +79,17 @@ const moduleZones = [
 ]
 
 export default tseslint.config(
-  { ignores: ['out/**', 'dist/**', 'node_modules/**', 'playwright-report/**', 'test-results/**'] },
+  {
+    // design/: prototype HTML / script tham khảo của thiết kế, không phải mã của app.
+    ignores: [
+      'out/**',
+      'dist/**',
+      'node_modules/**',
+      'playwright-report/**',
+      'test-results/**',
+      'design/**'
+    ]
+  },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   {
@@ -130,6 +149,41 @@ export default tseslint.config(
           selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
           message: 'Không render HTML từ dữ liệu. Xem mục 7.3 kế hoạch.'
         }
+      ]
+    }
+  },
+  {
+    // Giao diện mới (design system + shell): chỉ dùng token (bg-ds-surface-1, text-ds-fg-2…), không
+    // dùng màu Tailwind thô (text-red-500, bg-green-50…), mã màu tuỳ ý (bg-[#fff]) hay token của giao
+    // diện cũ (bg-surface, text-muted…) — quy tắc màu theo ngữ nghĩa (text-ds-success, bg-ds-env-dev-soft…)
+    // chỉ giữ được nhất quán khi màu đi qua token.
+    files: ['src/renderer/src/ds/**/*.{ts,tsx}', 'src/renderer/src/shell/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+          message: 'Không render HTML từ dữ liệu. Xem mục 7.3 kế hoạch.'
+        },
+        ...['Literal', 'TemplateElement'].flatMap((node) => {
+          const value = node === 'Literal' ? 'value' : 'value.raw'
+          return [
+            {
+              selector: `${node}[${value}=${RAW_COLOR_CLASS}]`,
+              message:
+                'Dùng token của design system (bg-ds-*, text-ds-*, border-ds-*…), không dùng màu Tailwind thô.'
+            },
+            {
+              selector: `${node}[${value}=${ARBITRARY_COLOR_CLASS}]`,
+              message: 'Không dùng mã màu tuỳ ý trong class — thêm token vào ds/tokens.css.'
+            },
+            {
+              selector: `${node}[${value}=${LEGACY_TOKEN_CLASS}]`,
+              message:
+                'Giao diện mới dùng token --ds-* (bg-ds-surface-1, text-ds-fg-2…), không dùng token của giao diện cũ.'
+            }
+          ]
+        })
       ]
     }
   },

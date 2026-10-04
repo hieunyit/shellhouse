@@ -24,6 +24,7 @@ import { parseQuickConnect } from '@shared/quick-connect'
 import { keybindingFor } from '@shared/commands'
 import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useSettings } from '../stores/settings'
+import { useSidebarLayout, useSidebarMode } from '../stores/sidebar-layout'
 import { useShells } from '../stores/shells'
 import { useTabs } from '../stores/tabs'
 import { useContextMenu, type MenuEntry } from './ContextMenu'
@@ -99,10 +100,17 @@ export const TabBar = memo(function TabBar({
   const sidebarHidden = useSettings((s) => s.settings.appearance.sidebarHidden)
   const overrides = useSettings((s) => s.settings.keybindings)
   const updateSettings = useSettings((s) => s.update)
+  // Góc trái của thanh này nằm dưới nút cửa sổ macOS khi thanh bên ẩn / ở dạng gọn (styles.css).
+  const sidebarMode = useSidebarMode()
+  const sidebarCompact = useSidebarLayout((s) => s.compact[sidebarMode])
+  const lead = sidebarHidden ? 'window' : sidebarCompact ? 'rail' : undefined
   const key = (id: string): string => displayKeybinding(keybindingFor(id, overrides, isMac))
 
   return (
-    <nav className="@container flex h-11 min-w-0 shrink-0 items-center gap-1 overflow-hidden border-b border-line bg-surface px-2">
+    <nav
+      data-lead={lead}
+      className="@container sh-titlebar sh-titlebar-trail flex h-11 min-w-0 shrink-0 items-center gap-1 overflow-hidden border-b border-line bg-surface px-2"
+    >
       <IconButton
         label={
           sidebarHidden

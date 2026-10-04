@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { RdpExperience } from './rdp'
 
 /**
  * Trình xem Remote Desktop nhúng trong tab (IronRDP WASM trong renderer + proxy RDCleanPath trong
@@ -60,7 +61,10 @@ export const RdpViewPrepare = z.discriminatedUnion('ok', [
     clipboard: z.boolean(),
     dynamicResolution: z.boolean(),
     width: z.number().int(),
-    height: z.number().int()
+    height: z.number().int(),
+    /** Độ phân giải theo pixel vật lý (HiDPI). */
+    hidpi: z.boolean(),
+    experience: RdpExperience
   }),
   z.object({
     ok: z.literal(false),
@@ -108,3 +112,46 @@ export const RdpViewOpenResult = z.object({
   password: z.string()
 })
 export type RdpViewOpenResult = z.infer<typeof RdpViewOpenResult>
+
+/** Cờ hiệu năng ([MS-RDPBCGR] 2.2.1.11.1.1.1 TS_EXTENDED_INFO_PACKET.performanceFlags). */
+export const RDP_PERF = {
+  DISABLE_WALLPAPER: 0x0001,
+  DISABLE_FULLWINDOWDRAG: 0x0002,
+  DISABLE_MENUANIMATIONS: 0x0004,
+  DISABLE_THEMING: 0x0008,
+  DISABLE_CURSOR_SHADOW: 0x0020,
+  ENABLE_FONT_SMOOTHING: 0x0080,
+  ENABLE_DESKTOP_COMPOSITION: 0x0100
+} as const
+
+/** Cờ hiệu năng gửi server theo mức hiệu ứng hình ảnh của host. */
+export function performanceFlagsFor(experience: RdpExperience): number {
+  const P = RDP_PERF
+  switch (experience) {
+    case 'performance':
+      return (
+        P.DISABLE_WALLPAPER |
+        P.DISABLE_FULLWINDOWDRAG |
+        P.DISABLE_MENUANIMATIONS |
+        P.DISABLE_THEMING |
+        P.DISABLE_CURSOR_SHADOW
+      )
+    case 'balanced':
+      return (
+        P.DISABLE_WALLPAPER |
+        P.DISABLE_MENUANIMATIONS |
+        P.DISABLE_CURSOR_SHADOW |
+        P.ENABLE_FONT_SMOOTHING
+      )
+    case 'quality':
+      return P.ENABLE_FONT_SMOOTHING | P.ENABLE_DESKTOP_COMPOSITION
+  }
+}
+
+/** Tuỳ chỉnh phiên proxy áp vào Client Info PDU của IronRDP (WASM không tự chỉnh được). */
+export const RdpSessionTuning = z.object({
+  performanceFlags: z.number().int().min(0).max(0xffff),
+  /** Bật INFO_AUTOLOGON khi có mật khẩu (server không NLA — xrdp — khỏi hộp đăng nhập riêng). */
+  autologon: z.boolean()
+})
+export type RdpSessionTuning = z.infer<typeof RdpSessionTuning>

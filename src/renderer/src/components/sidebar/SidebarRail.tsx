@@ -89,8 +89,9 @@ export function SidebarRail({
         onPeek(false)
       }}
     >
-      <div className="flex h-11 w-full shrink-0 items-center justify-center border-b border-line">
-        <Logo size={22} />
+      {/* Vùng kéo cửa sổ; macOS: nút đèn giao thông nằm đè ở đây nên ẩn logo. */}
+      <div className="sh-titlebar flex h-11 w-full shrink-0 items-center justify-center border-b border-line">
+        <Logo size={22} className="sh-titlebar-logo" />
       </div>
       <nav
         aria-label={t('Sidebar')}

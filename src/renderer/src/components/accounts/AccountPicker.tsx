@@ -11,7 +11,7 @@ import {
 import { t } from '@shared/i18n'
 import type { AccountSummary, HostProtocol, KeySummary } from '@shared/hosts'
 import { cx } from '../ui'
-import { AccountBadges } from './AccountsManager'
+import { AccountBadges } from './AccountBadges'
 import { accountProblem, filterAccounts } from './account-logic'
 
 /**

@@ -35,6 +35,11 @@ electronFuses:
 
 win:
   target: [nsis, zip]
+  # Tiến trình phụ Remote Desktop (control RDP gốc của Windows) — build bởi scripts/build-rdp-host.mjs
+  # trước bước đóng gói; app tìm ở process.resourcesPath/rdp-host (src/main/rdp-native/locate.ts).
+  extraResources:
+    - from: native/rdp-host-win/bin/shellhouse-rdp-host.exe
+      to: rdp-host/shellhouse-rdp-host.exe
   # Bản node-pty tự build (build/, bin/) là của máy build — Windows dùng prebuild win32-x64 có sẵn
   # (N-API, kèm conpty). Bỏ file debug .pdb cho gói nhỏ hơn.
   files:

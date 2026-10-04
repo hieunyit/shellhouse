@@ -17,6 +17,8 @@ function apply(): void {
   const dark = mode === 'dark' || (mode === 'system' && systemDark.matches)
   const root = document.documentElement
   root.dataset['theme'] = dark ? 'dark' : 'light'
+  // Mật độ của design system mới (token --ds-*); giao diện hiện tại không đọc thuộc tính này.
+  root.dataset['dsDensity'] = settings.appearance.density
   // Nền quanh terminal = nền của theme terminal đang dùng, để khung và terminal liền mạch.
   const terminal = resolveTheme(settings.terminal, settings.customThemes, dark)
   root.style.setProperty('--sh-terminal', terminal.colors.background)

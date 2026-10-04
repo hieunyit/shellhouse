@@ -6,6 +6,34 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.13] - 2026-10-04
+
+### Added
+
+- **Native Remote Desktop on Windows** — RDP tabs on Windows now use Microsoft's own RDP engine
+  (the one inside mstsc), embedded in the tab: native speed (GPU, modern codecs), NLA and the
+  Windows sign-in experience. Each tab runs in its own small helper process. New host option
+  "Remote Desktop engine: Automatic / Windows RDP / Built-in (IronRDP)". Overlays (menus,
+  dialogs) temporarily show a snapshot of the remote screen.
+- **Keychain** — Accounts and SSH keys are now one place in Settings: one searchable list with
+  filters, details side by side (copy public key, deploy to server, export, usage), "+ New" for
+  accounts and keys.
+- RDP in a tab: "Visual experience" (Best performance / Balanced / Best quality) and an optional
+  "HiDPI (sharper, slower)" mode; a performance overlay (Ctrl+Shift+Alt+P) shows fps, bandwidth,
+  latency and codec.
+- **Frameless window** like modern apps: no OS title bar; window controls sit in Shellhouse's top
+  bar (macOS traffic lights inset).
+- Settings → Appearance → "New interface (beta)": the first building blocks of the redesigned UI
+  and a design kit (more coming in the next betas).
+
+### Fixed
+
+- **RDP in a tab was slow on HiDPI screens**: the remote desktop was requested at physical pixels
+  (2.25× more at 150 % scaling); it now uses the window's logical size by default — about 2× the
+  frame rate in our tests.
+- RDP in a tab could show striped / corrupted images (e.g. on xrdp login) or freeze; IronRDP
+  crashes now end the session with a Reconnect button instead of a frozen screen.
+
 ## [1.2.0-beta.12] - 2026-10-04
 
 ### Added

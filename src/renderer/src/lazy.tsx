@@ -86,6 +86,13 @@ const rdpView = preloadable(
 )
 export const RdpView = rdpView.Component
 
+/**
+ * Design kit của giao diện mới (design system trong ds/ + Radix): chunk riêng, chỉ nạp khi mở từ bảng
+ * lệnh — không nạp sẵn, không nằm trong bundle khởi động.
+ */
+const designKit = preloadable(() => import('./ds/kit/DesignKit').then((m) => m.DesignKit))
+export const DesignKit = designKit.Component
+
 /** Nạp chunk terminal sớm nhất có thể (gọi một lần lúc khởi động; gọi lại không tốn gì). */
 export function preloadTerminal(): Promise<void> {
   return terminalView.preload()
