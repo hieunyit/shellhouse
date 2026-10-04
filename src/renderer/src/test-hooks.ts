@@ -31,13 +31,17 @@ export function installTestHooks(): void {
       const start = lastLines ? Math.max(0, buffer.length - lastLines) : 0
       // Dòng bị ngắt vì quá rộng (isWrapped) nối lại liền — chữ dài không bị cắt giữa chừng.
       const lines: string[] = []
+      let current: string | null = null
       for (let i = start; i < buffer.length; i++) {
         const line = buffer.getLine(i)
         const text = line?.translateToString(true) ?? ''
-        const prev = lines.pop()
-        if (prev !== undefined && line?.isWrapped) lines.push(prev + text)
-        else lines.push(...(prev === undefined ? [] : [prev]), text)
+        if (current !== null && line?.isWrapped) current += text
+        else {
+          if (current !== null) lines.push(current)
+          current = text
+        }
       }
+      if (current !== null) lines.push(current)
       return lines.join('\n')
     },
     size: (tabId) => {
