@@ -6,6 +6,34 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- **New interface (design v0.5)** is now the interface — no setting to turn it on:
+  - Custom 38 px title bar with back / forward, a command center (Ctrl+Shift+P) and Quick connect
+    (Ctrl+Shift+O: saved host names, `user@host:port` or an `ssh` command; Alt+Enter opens it
+    split).
+  - Activity bar: Home, Hosts, Files, one area per module (Kubernetes, Docker, S3), Transfers,
+    Settings. Click the current area again (or Ctrl+Shift+B) to hide / show its sidebar.
+  - Context sidebar (Explorer) per area: host tree, pinned / recent hosts, file managers, clusters
+    / endpoints / accounts together with the module's own navigation (Pods, Containers…).
+  - Kubernetes, Docker and S3 tabs open in their own area instead of between terminal tabs; closing
+    a tab you opened from somewhere else takes you back there.
+  - Settings is a page (Esc goes back) with a table of contents; Transfers collects every SFTP /
+    S3 upload and download with status filters; the status bar shows sessions, the vault and
+    transfer progress.
+  - Home: greeting, quick connect, Favorites, Recent, dropped sessions and "get started" links.
+  - Calmer colors: semantic status colors only (green healthy, amber warning, red failing, blue
+    progress), teal reserved for actions / focus / selection, one-line host rows with monochrome OS
+    icons, pill-shaped session tabs, neutral selected rows, 11 px minimum text, control borders that
+    meet 3:1 contrast, softer "Match app" terminal colors.
+
+### Added
+
+- **Environments** (Settings → Environments): Production, Staging, Development, Test — or your
+  own — with a short label, highlighted or neutral style, an optional line at the top of the
+  content, how deleting is confirmed and read-only by default. Set one on a host group (subgroups
+  and hosts inherit it); groups that only had a color keep their environment.
+
 ## [1.2.0-beta.13] - 2026-10-04
 
 ### Added

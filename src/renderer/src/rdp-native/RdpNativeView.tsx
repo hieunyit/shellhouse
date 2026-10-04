@@ -371,7 +371,7 @@ function Toolbar({
           controller.sendCtrlAltDel()
         }}
       >
-        <span className="text-[10px] font-semibold tracking-tight">CAD</span>
+        <span className="text-[11px] font-semibold tracking-tight">CAD</span>
       </IconButton>
       <IconButton
         label={

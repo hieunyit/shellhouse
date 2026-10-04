@@ -774,7 +774,7 @@ function TopologyInner({
         </div>
         {searchOpen && (results.length > 0 || hiddenResults.length > 0) && (
           <div
-            className="absolute top-8 right-0 left-0 z-40 max-h-80 overflow-auto rounded-lg border border-line bg-elevated p-1 shadow-lg"
+            className="absolute top-8 right-0 left-0 z-40 max-h-80 overflow-auto rounded-lg bg-ds-popover p-1 shadow-ds-popover"
             data-testid="k8s-topo-results"
           >
             {results.map((n) => (
@@ -1242,7 +1242,7 @@ function LaneHeaders({ layout }: { layout: TopoLayout }): React.JSX.Element {
           key={c.lane}
           className={cx(
             'pointer-events-auto absolute top-0 flex h-7 items-center truncate font-semibold text-faint uppercase',
-            zoom < FAR_ZOOM ? 'text-[10px] tracking-normal' : 'text-[11px] tracking-wider'
+            zoom < FAR_ZOOM ? 'text-[11px] tracking-normal' : 'text-[11px] tracking-wider'
           )}
           // Rộng tới làn kế (gồm khoảng trống): thu nhỏ vẫn đủ chỗ cho tên làn.
           style={{

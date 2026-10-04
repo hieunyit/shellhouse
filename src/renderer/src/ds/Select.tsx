@@ -160,7 +160,7 @@ export function Combobox<T extends string>({
       <PopoverPrimitive.Anchor asChild>
         <div
           className={cx(
-            'flex h-ds-ctl min-w-0 items-center gap-1.5 rounded-ds-md border border-ds-border bg-ds-surface-1 pr-1.5 pl-2.5 text-ds-base',
+            'flex h-ds-ctl min-w-0 items-center gap-1.5 rounded-ds-md border border-ds-border-control bg-ds-surface-1 pr-1.5 pl-2.5 text-ds-base',
             'hover:border-ds-border-strong focus-within:border-ds-accent focus-within:ring-3 focus-within:ring-ds-accent-soft',
             transition,
             className

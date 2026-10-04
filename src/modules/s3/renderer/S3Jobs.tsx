@@ -154,10 +154,7 @@ export function JobsPanel({
             </span>
             {pct !== null && (
               <span className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-subtle">
-                <span
-                  className="block h-full rounded-full bg-accent-solid"
-                  style={{ width: `${pct}%` }}
-                />
+                <span className="block h-full rounded-full bg-info" style={{ width: `${pct}%` }} />
               </span>
             )}
             <button

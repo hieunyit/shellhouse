@@ -224,9 +224,7 @@ export function CreateResourceDialog({
           >
             {kindGroups.map((g) => (
               <div key={g.title} className="mb-3">
-                <div className="px-2 pb-1 text-[10.5px] font-semibold tracking-wider text-faint uppercase">
-                  {g.title}
-                </div>
+                <div className="px-2 pb-1 text-xs font-medium text-faint">{g.title}</div>
                 {g.kinds.map((k) => (
                   <button
                     key={k.kind}
@@ -246,7 +244,7 @@ export function CreateResourceDialog({
                     <KindIcon kind={KIND_ID[k.kind]} size={20} />
                     <span className="min-w-0">
                       <span className="block text-[12.5px] font-medium text-fg">{k.label}</span>
-                      <span className="block truncate text-[10.5px] text-faint">{k.hint}</span>
+                      <span className="block truncate text-[11px] text-faint">{k.hint}</span>
                     </span>
                   </button>
                 ))}

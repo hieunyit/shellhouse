@@ -85,7 +85,9 @@ import {
   t,
   tn,
   toBase64,
-  useEditInApp
+  useEditInApp,
+  activateTab,
+  usePublishTransfers
 } from '../../registry/renderer-kit'
 import { objectHttpUrl, type S3Version } from '../shared/manage'
 import { S3DetailsPanel, type DetailsTarget } from './S3Details'
@@ -468,6 +470,20 @@ export function S3View({
       return undefined
     }
   }
+  // Trung tâm Transfers của app thấy lượt tải lên / tải xuống của tab này.
+  usePublishTransfers({
+    id: `s3:${tabId}`,
+    label: account?.name ?? 'S3',
+    kind: 's3',
+    transfers,
+    cancel: (id) => {
+      clientRef.current?.cancel(id)
+    },
+    clear: () => void act({ op: 'clearDone' }),
+    reveal: () => {
+      activateTab(tabId)
+    }
+  })
 
   // ---------- Thống kê bucket (tính khi cần, cập nhật dần trong bảng) ----------
 
@@ -1116,8 +1132,8 @@ export function S3View({
       }}
       onDrop={onDrop}
     >
-      {/* Thanh đường dẫn: tài khoản › bucket ▾ › thư mục */}
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
+      {/* Header (thiết kế v0.5): Storage / tài khoản › bucket ▾ › thư mục */}
+      <div className="flex h-ds-header shrink-0 items-center gap-1 border-b border-ds-border-subtle pr-2 pl-2">
         <IconButton
           label={bucket === null ? t('Go up') : t('Go up (Backspace)')}
           disabled={bucket === null}
@@ -1134,14 +1150,14 @@ export function S3View({
           <button
             type="button"
             className={cx(
-              'flex min-w-0 shrink-[2] items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-hover',
-              bucket === null ? 'font-medium text-fg' : 'text-muted hover:text-fg'
+              'flex min-w-0 shrink-[2] items-center gap-1.5 rounded-ds-sm px-1.5 py-0.5 hover:bg-ds-hover',
+              bucket === null ? 'font-semibold text-fg' : 'font-medium text-muted hover:text-fg'
             )}
             data-testid="s3-crumb-account"
             title={account ? account.endpoint || `AWS ${account.region || 'us-east-1'}` : undefined}
             onClick={goRoot}
           >
-            <Cloud size={14} className="shrink-0" />
+            <Cloud size={14} strokeWidth={1.5} className="shrink-0 text-faint" />
             {/* Trong bucket + khung hẹp: chỉ còn icon, nhường chỗ cho tên bucket / thư mục. */}
             <span className={cx('truncate', bucket !== null && 'hidden @2xl:inline')}>
               {accountName}
@@ -1644,7 +1660,7 @@ export function S3View({
               {/* Đang tải thư mục khác: thanh mảnh trên đầu danh sách (giữ danh sách cũ, không nháy). */}
               {loading && listing && (
                 <div className="absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden bg-accent-soft">
-                  <div className="h-full w-full animate-pulse bg-accent-solid/70" />
+                  <div className="h-full w-full animate-pulse bg-info/70" />
                 </div>
               )}
               <div

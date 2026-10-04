@@ -1,11 +1,8 @@
 import type { HostSummary } from '@shared/hosts'
-import { Monitor } from 'lucide-react'
+import { Monitor, Router, Server } from 'lucide-react'
 import { osTitle, type HostOs } from '@shared/host-os'
 import { OsIcon } from './OsIcon'
-import { hostTileClass } from './hostColors'
 import { cx, StatusDot, type ConnectionState } from './ui'
-
-const PALETTE = Object.keys(hostTileClass) as NonNullable<HostSummary['color']>[]
 
 /** "web-01 production" → "WP", "bastion" → "BA". */
 export function initials(label: string): string {
@@ -20,27 +17,20 @@ export function initials(label: string): string {
   return (a + b).toUpperCase() || '?'
 }
 
-/** Màu ổn định theo tên khi host chưa đặt màu (cùng tên → cùng màu). */
-function colorFor(host: Pick<HostSummary, 'label' | 'color'>): NonNullable<HostSummary['color']> {
-  if (host.color) return host.color
-  let h = 0
-  for (const c of host.label) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  return PALETTE[h % (PALETTE.length - 1)] ?? 'gray'
-}
-
 /**
- * Ảnh đại diện của host: icon hệ điều hành server (đã nhận ra lúc kết nối) hoặc chữ cái đầu, trên
- * nền màu môi trường; chấm trạng thái phiên. Host có màu riêng → icon distro nằm trên nền màu đó.
+ * Biểu tượng của host (thiết kế v0.5 — đơn sắc, theo màu chữ phụ): glyph hệ điều hành server đã nhận
+ * ra lúc kết nối, màn hình cho Remote Desktop, máy chủ cho host còn lại. Màu chỉ dành cho trạng
+ * thái / môi trường, không tô logo. Chấm trạng thái phiên ở góc khi có phiên đang mở.
  */
 export function HostAvatar({
   host,
-  size = 28,
+  size = 16,
   session,
   className
 }: {
   host: Pick<HostSummary, 'label' | 'color'> & {
     os?: HostOs | null | undefined
-    /** Remote Desktop → icon màn hình thay cho chữ cái đầu. */
+    /** Remote Desktop → icon màn hình. */
     protocol?: HostSummary['protocol'] | undefined
   }
   size?: number
@@ -48,36 +38,28 @@ export function HostAvatar({
   className?: string
 }): React.JSX.Element {
   const os = host.os ?? null
+  const glyph = Math.round(size * 0.86)
   return (
     <span
       aria-hidden
       title={os ? osTitle(os) : undefined}
       data-os={os?.id}
-      className={cx(
-        'relative flex shrink-0 items-center justify-center rounded-md font-semibold tracking-tight select-none',
-        os ? (host.color ? hostTileClass[host.color] : 'bg-subtle') : hostTileClass[colorFor(host)],
-        className
-      )}
-      style={{
-        width: size,
-        height: size,
-        // Nhỏ (tab): một chữ cái to cho dễ đọc; lớn: hai chữ cái.
-        fontSize: Math.round(size * (size < 22 ? 0.6 : 0.38))
-      }}
+      className={cx('relative flex shrink-0 items-center justify-center text-faint', className)}
+      style={{ width: size, height: size }}
     >
       {os ? (
-        <OsIcon os={os.id} size={Math.round(size * (size < 22 ? 0.82 : 0.72))} />
+        <OsIcon os={os.id} size={glyph} mono />
       ) : host.protocol === 'rdp' ? (
-        <Monitor size={Math.round(size * (size < 22 ? 0.75 : 0.55))} data-testid="rdp-avatar" />
-      ) : size < 22 ? (
-        initials(host.label).slice(0, 1)
+        <Monitor size={glyph} strokeWidth={1.6} data-testid="rdp-avatar" />
+      ) : host.protocol === 'serial' || host.protocol === 'telnet' ? (
+        <Router size={glyph} strokeWidth={1.6} />
       ) : (
-        initials(host.label)
+        <Server size={glyph} strokeWidth={1.6} />
       )}
       {session && (
         <StatusDot
           state={session}
-          className="absolute -right-0.5 -bottom-0.5 size-2 ring-2 ring-surface"
+          className="absolute -right-0.5 -bottom-0.5 size-1.5 ring-2 ring-surface"
         />
       )}
     </span>

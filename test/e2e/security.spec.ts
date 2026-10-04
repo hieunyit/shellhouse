@@ -59,6 +59,7 @@ test('mật khẩu không bao giờ nằm dạng rõ trong log / DB / file dữ 
   const secrets = [E2E_PASSWORD, 'mat-khau-ssh', 'sai-mat-khau-1', 'luu-trong-vault']
   try {
     // 1) Kết nối nhanh, gõ sai một lần rồi đúng.
+    await page.getByTestId('titlebar-connect').click()
     await page.getByTestId('quick-connect').fill(`alice@127.0.0.1:${server.port}`)
     await page.getByTestId('quick-connect').press('Enter')
     const tab = await activeTab(page)

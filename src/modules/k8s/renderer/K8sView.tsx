@@ -25,7 +25,13 @@ import { formatNumber, language, t, tn, toast } from '../../registry/renderer-ki
 import { tk } from './i18n'
 import { KindIcon } from './icons'
 import type { FormKind } from '../shared/forms'
-import { ConnectionPrompt, setModuleTabParams } from '../../registry/renderer-kit'
+import {
+  ConnectionPrompt,
+  ExplorerNav,
+  setModuleTabParams,
+  useNavPlacement
+} from '../../registry/renderer-kit'
+import { EnvLabel } from '../../../renderer/src/ds'
 import type { ModuleTabProps } from '../../registry/renderer-types'
 import { contextKey, COUNT_CAPPED, type K8sClusterParams } from '../shared/ops'
 import {
@@ -145,6 +151,7 @@ export function ClusterTab({
       return false
     }
   })
+  const navPlacement = useNavPlacement()
   const [helpOpen, setHelpOpen] = useState(false)
   const [tableWidth, setTableWidth] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -674,25 +681,36 @@ export function ClusterTab({
         data-tab={tabId}
         data-ready={ready && (loaded || onOverview || onMap)}
       >
-        {/* Thanh trên: context, namespace, lọc / lệnh, thao tác chung. z-40: gợi ý lệnh / menu thả
-            xuống của thanh này nằm trên thanh công cụ của Map (z-30) và bảng chi tiết. */}
-        <div className="relative z-40 flex h-11 shrink-0 items-center gap-2 border-b border-line px-2">
-          <IconButton
-            label={navHidden ? t('Show the resource list') : t('Hide the resource list')}
-            size="sm"
-            active={!navHidden}
-            data-testid="k8s-nav-toggle"
-            onClick={() => {
-              setNavHidden(!navHidden)
-              try {
-                window.localStorage.setItem(NAV_HIDDEN_KEY, navHidden ? '0' : '1')
-              } catch {
-                // Bỏ qua: không lưu được thì chỉ áp dụng cho lần này.
-              }
-            }}
-          >
-            <PanelLeft size={14} />
-          </IconButton>
+        {/* Header (thiết kế v0.5): Kubernetes / context ⇅ / namespace / loại tài nguyên + nhãn môi
+            trường; thao tác chung bên phải. z-40: menu thả xuống của header nằm trên thanh công cụ của
+            Map (z-30) và bảng chi tiết. */}
+        <div className="relative z-40 flex h-ds-header shrink-0 items-center gap-1 border-b border-ds-border-subtle pr-2 pl-3">
+          {navPlacement === 'inline' && (
+            <IconButton
+              label={navHidden ? t('Show the resource list') : t('Hide the resource list')}
+              size="sm"
+              active={!navHidden}
+              data-testid="k8s-nav-toggle"
+              className="mr-1"
+              onClick={() => {
+                setNavHidden(!navHidden)
+                try {
+                  window.localStorage.setItem(NAV_HIDDEN_KEY, navHidden ? '0' : '1')
+                } catch {
+                  // Bỏ qua: không lưu được thì chỉ áp dụng cho lần này.
+                }
+              }}
+            >
+              <PanelLeft size={14} />
+            </IconButton>
+          )}
+          <span className="flex shrink-0 items-center gap-1.5 px-1 text-[13px] font-medium text-muted">
+            <Ship size={14} strokeWidth={1.5} className="text-faint" aria-hidden />
+            Kubernetes
+          </span>
+          <span aria-hidden className="shrink-0 text-ds-fg-disabled">
+            /
+          </span>
           <ContextPicker
             current={contextKey(params.ref)}
             label={params.label}
@@ -708,91 +726,56 @@ export function ClusterTab({
               }))}
             onPick={switchContext}
           />
-          <NamespacePicker
-            all={allNamespaces}
-            value={namespaces ?? []}
-            onChange={(v) => {
-              setNamespaces(v)
-              setSelected(new Set())
-            }}
-          />
-          <div className="relative min-w-0 flex-1">
-            <div
+          <span aria-hidden className="shrink-0 text-ds-fg-disabled">
+            /
+          </span>
+          <div
+            className="flex min-w-0 shrink items-center gap-1 px-1 text-[13px]"
+            data-testid="k8s-breadcrumb"
+          >
+            <button
+              type="button"
               className={cx(
-                'flex h-8 items-center gap-1.5 rounded-md border bg-subtle px-2',
-                commandMode ? 'border-accent ring-3 ring-accent/20' : 'border-line'
+                'shrink-0 truncate rounded-ds-sm font-semibold',
+                top ? 'text-muted hover:text-fg' : 'text-fg'
               )}
+              onClick={() => {
+                setDrill([])
+              }}
             >
-              {commandMode ? (
-                <Terminal size={13} className="text-accent" />
-              ) : (
-                <Search size={13} className="text-faint" />
-              )}
-              <input
-                ref={inputRef}
-                type="search"
-                spellCheck={false}
-                placeholder={t('Filter…   ( : command · / filter )')}
-                data-testid="k8s-filter"
-                className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-faint"
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value)
-                  setSuggestAt(0)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    e.preventDefault()
-                    setQuery('')
-                    focusGrid(rootRef.current)
-                  } else if (commandMode && e.key === 'ArrowDown') {
-                    e.preventDefault()
-                    setSuggestAt((i) => Math.min(i + 1, suggestions.length - 1))
-                  } else if (commandMode && e.key === 'ArrowUp') {
-                    e.preventDefault()
-                    setSuggestAt((i) => Math.max(i - 1, 0))
-                  } else if (commandMode && e.key === 'Tab') {
-                    e.preventDefault()
-                    const sg = suggestions[suggestAt]
-                    if (sg) setQuery(`:${sg.value}`)
-                  } else if (e.key === 'Enter') {
-                    e.preventDefault()
-                    if (commandMode) {
-                      const typed = query.slice(1).trim()
-                      const sg = suggestions[suggestAt]
-                      // Gõ đủ lệnh → chạy đúng lệnh đã gõ; không thì lấy gợi ý đang chọn.
-                      runCommand(parseCommand(typed, kinds ?? []) || !sg ? typed : sg.value)
-                    } else focusGrid(rootRef.current)
-                  }
-                }}
-              />
-            </div>
-            {commandMode && suggestions.length > 0 && (
-              <div
-                className="absolute top-9 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md border border-line bg-elevated p-1 shadow-lg"
-                data-testid="k8s-command-suggestions"
-              >
-                {suggestions.map((sg, i) => (
-                  <button
-                    key={`${sg.value}${sg.label}`}
-                    type="button"
-                    className={cx(
-                      'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs',
-                      i === suggestAt ? 'bg-accent-soft text-fg' : 'text-muted hover:bg-hover'
-                    )}
-                    onMouseDown={(e) => {
-                      e.preventDefault()
-                      if (sg.value.endsWith(' ')) setQuery(`:${sg.value}`)
-                      else runCommand(sg.value)
-                    }}
-                  >
-                    <span className="flex-1 text-fg">{sg.label}</span>
-                    <span className="font-mono text-faint">:{sg.hint}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+              {titleOf(view)}
+            </button>
+            {drill.map((d, i) => (
+              <span key={d.label} className="flex min-w-0 items-center gap-1">
+                <ChevronRight size={12} className="shrink-0 text-faint" />
+                <button
+                  type="button"
+                  className={cx(
+                    'truncate',
+                    i === drill.length - 1 ? 'font-semibold text-fg' : 'text-muted hover:text-fg'
+                  )}
+                  onClick={() => {
+                    setDrill((x) => x.slice(0, i + 1))
+                  }}
+                >
+                  {d.label}
+                </button>
+                <span className="shrink-0 text-faint">· pods</span>
+              </span>
+            ))}
           </div>
+          <span className="ml-1 shrink-0">
+            <NamespacePicker
+              all={allNamespaces}
+              value={namespaces ?? []}
+              onChange={(v) => {
+                setNamespaces(v)
+                setSelected(new Set())
+              }}
+            />
+          </span>
+          {production && <EnvLabel env="prod" size="md" className="ml-1.5" />}
+          <div className="min-w-2 flex-1" />
           {readOnly && (
             <span
               className="flex items-center gap-1 rounded bg-warning-soft px-1.5 py-px text-xs font-medium text-warning"
@@ -858,63 +841,122 @@ export function ClusterTab({
 
         {/* Chi tiết phóng to (trang đầy đủ) → ẩn bảng. */}
         <div className="flex min-h-0 flex-1 [&:has(>aside[data-expanded])>[data-main]]:hidden">
-          {!navHidden && (
-            <ResourceNav
-              kinds={kinds}
-              view={view}
-              drilled={Boolean(top)}
-              counts={navCounts}
-              onGo={go}
-            />
-          )}
+          <ExplorerNav active={active}>
+            {(placement) =>
+              placement === 'explorer' || !navHidden ? (
+                <ResourceNav
+                  kinds={kinds}
+                  view={view}
+                  drilled={Boolean(top)}
+                  counts={navCounts}
+                  onGo={go}
+                  placement={placement}
+                />
+              ) : null
+            }
+          </ExplorerNav>
 
           <div ref={tableRef} data-main className="@container flex min-w-0 flex-1 flex-col">
-            {!onOverview && !onMap && (
-              <div
-                className="flex h-8 shrink-0 items-center gap-1 border-b border-line px-3 text-xs"
-                data-testid="k8s-breadcrumb"
-              >
-                {!onHelm && kindId !== 'events' && rows.length > 0 && (
+            {/* Thanh công cụ: chọn tất cả · lọc / lệnh (:) · đếm. */}
+            <div className="relative z-30 flex h-ds-toolbar shrink-0 items-center gap-2 border-b border-ds-border-subtle px-3 text-xs">
+              {!onOverview && !onMap && !onHelm && kindId !== 'events' && rows.length > 0 && (
+                <input
+                  type="checkbox"
+                  className="mr-1 size-3.5 shrink-0 accent-[var(--ds-accent)]"
+                  aria-label={allChecked ? t('Clear the selection') : t('Select all rows')}
+                  title={allChecked ? t('Clear the selection') : t('Select all rows (Ctrl+A)')}
+                  data-testid="k8s-select-all"
+                  checked={allChecked}
+                  ref={(el) => {
+                    if (el) el.indeterminate = selectedRows.length > 0 && !allChecked
+                  }}
+                  onChange={() => {
+                    setSelected(allChecked ? new Set() : new Set(rows.map((r) => r.row.key)))
+                  }}
+                />
+              )}
+              <div className="relative w-72 max-w-[55%] min-w-40">
+                <div
+                  className={cx(
+                    'flex h-ds-ctl items-center gap-1.5 rounded-ds-md border bg-subtle px-2',
+                    commandMode
+                      ? 'border-ds-accent ring-3 ring-ds-accent-soft'
+                      : 'border-ds-border-control hover:border-faint'
+                  )}
+                >
+                  {commandMode ? (
+                    <Terminal size={13} className="text-accent" />
+                  ) : (
+                    <Search size={13} className="text-faint" />
+                  )}
                   <input
-                    type="checkbox"
-                    className="mr-1.5 size-3.5 shrink-0 accent-[var(--sh-accent)]"
-                    aria-label={allChecked ? t('Clear the selection') : t('Select all rows')}
-                    title={allChecked ? t('Clear the selection') : t('Select all rows (Ctrl+A)')}
-                    data-testid="k8s-select-all"
-                    checked={allChecked}
-                    ref={(el) => {
-                      if (el) el.indeterminate = selectedRows.length > 0 && !allChecked
+                    ref={inputRef}
+                    type="search"
+                    spellCheck={false}
+                    placeholder={t('Filter…   ( : command · / filter )')}
+                    data-testid="k8s-filter"
+                    className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-faint"
+                    value={query}
+                    onChange={(e) => {
+                      setQuery(e.target.value)
+                      setSuggestAt(0)
                     }}
-                    onChange={() => {
-                      setSelected(allChecked ? new Set() : new Set(rows.map((r) => r.row.key)))
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        setQuery('')
+                        focusGrid(rootRef.current)
+                      } else if (commandMode && e.key === 'ArrowDown') {
+                        e.preventDefault()
+                        setSuggestAt((i) => Math.min(i + 1, suggestions.length - 1))
+                      } else if (commandMode && e.key === 'ArrowUp') {
+                        e.preventDefault()
+                        setSuggestAt((i) => Math.max(i - 1, 0))
+                      } else if (commandMode && e.key === 'Tab') {
+                        e.preventDefault()
+                        const sg = suggestions[suggestAt]
+                        if (sg) setQuery(`:${sg.value}`)
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (commandMode) {
+                          const typed = query.slice(1).trim()
+                          const sg = suggestions[suggestAt]
+                          // Gõ đủ lệnh → chạy đúng lệnh đã gõ; không thì lấy gợi ý đang chọn.
+                          runCommand(parseCommand(typed, kinds ?? []) || !sg ? typed : sg.value)
+                        } else focusGrid(rootRef.current)
+                      }
                     }}
                   />
+                </div>
+                {commandMode && suggestions.length > 0 && (
+                  <div
+                    className="absolute top-9 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md bg-ds-popover p-1 shadow-ds-popover"
+                    data-testid="k8s-command-suggestions"
+                  >
+                    {suggestions.map((sg, i) => (
+                      <button
+                        key={`${sg.value}${sg.label}`}
+                        type="button"
+                        className={cx(
+                          'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs',
+                          i === suggestAt ? 'bg-accent-soft text-fg' : 'text-muted hover:bg-hover'
+                        )}
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          if (sg.value.endsWith(' ')) setQuery(`:${sg.value}`)
+                          else runCommand(sg.value)
+                        }}
+                      >
+                        <span className="flex-1 text-fg">{sg.label}</span>
+                        <span className="font-mono text-faint">:{sg.hint}</span>
+                      </button>
+                    ))}
+                  </div>
                 )}
-                <button
-                  type="button"
-                  className={cx('font-medium', top ? 'text-muted hover:text-fg' : 'text-fg')}
-                  onClick={() => {
-                    setDrill([])
-                  }}
-                >
-                  {titleOf(view)}
-                </button>
-                {drill.map((d, i) => (
-                  <span key={d.label} className="flex items-center gap-1">
-                    <ChevronRight size={12} className="text-faint" />
-                    <button
-                      type="button"
-                      className={i === drill.length - 1 ? 'text-fg' : 'text-muted hover:text-fg'}
-                      onClick={() => {
-                        setDrill((x) => x.slice(0, i + 1))
-                      }}
-                    >
-                      {d.label}
-                    </button>
-                    <span className="text-faint">· pods</span>
-                  </span>
-                ))}
-                <span className="ml-auto text-faint tabular-nums" data-testid="k8s-count">
+              </div>
+              <div className="flex-1" />
+              {!onOverview && !onMap && (
+                <span className="text-faint tabular-nums" data-testid="k8s-count">
                   {list.objects
                     ? q
                       ? t('{shown} of {total}', {
@@ -924,8 +966,8 @@ export function ClusterTab({
                       : formatNumber(rows.length)
                     : ''}
                 </span>
-              </div>
-            )}
+              )}
+            </div>
             {multi && !onOverview && !onMap && !onHelm && (
               <BulkBar
                 count={selectedRows.length}
@@ -1095,7 +1137,7 @@ export function ClusterTab({
                         toggleRow(r.row.key)
                       }}
                     />
-                    <Box size={14} className={TONE_TEXT[TONE[r.row.tone]]} />
+                    <Box size={14} strokeWidth={1.6} className="shrink-0 text-faint" />
                   </>
                 )}
                 columns={columns}

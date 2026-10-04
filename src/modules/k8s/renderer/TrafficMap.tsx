@@ -1087,7 +1087,7 @@ function Panel({
             .sort((x, y) => y.rate - x.rate)
           return (
             <section key={dir} className="mb-3">
-              <h4 className="mb-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
+              <h4 className="mb-1 text-xs font-medium text-faint">
                 {dir === 'in' ? t('Called by') : t('Calls')}{' '}
                 <span className="font-normal">{list.length}</span>
               </h4>
@@ -1128,7 +1128,7 @@ function Panel({
         })}
         {group && (
           <section>
-            <h4 className="mb-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
+            <h4 className="mb-1 text-xs font-medium text-faint">
               {t('Contains')} <span className="font-normal">{node.members.length}</span>
             </h4>
             {node.members.slice(0, 200).map((m) => (

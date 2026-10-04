@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shellhouse — Component kit (design system seed)</title>
+  <link rel="stylesheet" href="assets/fonts.css" />
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="components.css" />
+  <style>
+    html, body { height: auto; }
+    body { overflow: auto; background: var(--bg); }
+    .kit-top { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 24px; background: var(--bg); border-bottom: 1px solid var(--border); }
+    .kit-top h1 { font-size: 14px; font-weight: 600; }
+    .kit-cols { display: grid; grid-template-columns: 1fr 1fr; }
+    .kit-cols.single { grid-template-columns: 1fr; }
+    .kit-pane { padding: 24px 28px 64px; background: var(--surface-0); min-width: 0; }
+    .kit-pane[data-theme='dark'] { border-right: 1px solid var(--border); }
+    .kit-pane > h2 { font-size: 12px; font-weight: 500; color: var(--text-tertiary); letter-spacing: .04em; text-transform: uppercase; margin-bottom: 16px; }
+    .kit-sec { margin-bottom: 36px; }
+    .kit-sec > h3 { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+    .kit-sec > p { color: var(--text-secondary); margin-bottom: 12px; font-size: 12px; }
+    .kit-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .kit-label { width: 84px; flex: none; font-size: 11px; color: var(--text-tertiary); }
+    .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(116px, 1fr)); gap: 8px; }
+    .swatch { border-radius: 8px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--border); background: var(--surface-1); }
+    .swatch i { display: block; height: 40px; border-bottom: 1px solid var(--border-subtle); }
+    .swatch div { padding: 6px 8px; font-size: 11px; line-height: 15px; }
+    .swatch code { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-tertiary); letter-spacing: 0; }
+    .type-row { display: flex; align-items: baseline; gap: 16px; padding: 6px 0; border-bottom: 1px solid var(--border-subtle); }
+    .type-row code { width: 120px; flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); letter-spacing: 0; }
+    .demo-box { border-radius: 8px; box-shadow: inset 0 0 0 1px var(--border); overflow: hidden; background: var(--surface-0); }
+    .menu.static { position: static; animation: none; display: inline-block; }
+    .tooltip.static { position: static; opacity: 1; transform: none; display: inline-flex; }
+    .dialog.static { position: static; transform: none; animation: none; width: 100%; }
+    .toast.static { animation: none; }
+    .space-row { display: flex; align-items: flex-end; gap: 10px; }
+    .space-row div { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); border-radius: 2px; }
+    .space-row span { display: block; font-size: 10px; color: var(--text-tertiary); text-align: center; margin-top: 4px; font-family: var(--font-mono); }
+  </style>
+</head>
+<body data-theme="dark" data-density="comfortable">
+  <header class="kit-top">
+    <span class="ab-logo" style="margin:0" id="logo"></span>
+    <h1>Shellhouse Kit <span class="subtle" style="font-weight:400">· v0.3 · design system seed</span></h1>
+    <span class="spacer"></span>
+    <div class="segmented" role="radiogroup" aria-label="Layout">
+      <button class="segmented__item" role="radio" aria-checked="true" data-layout="both">Dark + Light</button>
+      <button class="segmented__item" role="radio" aria-checked="false" data-layout="dark">Dark</button>
+      <button class="segmented__item" role="radio" aria-checked="false" data-layout="light">Light</button>
+    </div>
+    <div class="segmented" role="radiogroup" aria-label="Density">
+      <button class="segmented__item" role="radio" aria-checked="true" data-density="comfortable">Comfortable</button>
+      <button class="segmented__item" role="radio" aria-checked="false" data-density="compact">Compact</button>
+    </div>
+    <a class="btn btn--sm" href="index.html">Open app prototype</a>
+  </header>
+  <main class="kit-cols" id="cols">
+    <section class="kit-pane" data-theme="dark" id="pane-dark"></section>
+    <section class="kit-pane" data-theme="light" id="pane-light"></section>
+  </main>
+  <script src="icons.js"></script>
+  <script>
+  (function () {
+    const ic = window.icon;
+    const kbd = (s) => '<span class="kbd-group">' + s.split(' ').map((k) => '<kbd class="kbd">' + k + '</kbd>').join('') + '</span>';
+    const sec = (title, desc, body) => `<div class="kit-sec"><h3>${title}</h3><p>${desc}</p>${body}</div>`;
+    const row = (label, body) => `<div class="kit-row"><span class="kit-label">${label}</span>${body}</div>`;
+    const TOKENS = {
+      Surfaces: ['--bg', '--surface-0', '--surface-1', '--surface-2', '--surface-3', '--surface-terminal'],
+      Borders: ['--border-subtle', '--border', '--border-strong'],
+      Text: ['--text-primary', '--text-secondary', '--text-tertiary', '--text-disabled'],
+      Accent: ['--accent', '--accent-hover', '--accent-press', '--accent-text', '--accent-soft', '--accent-contrast'],
+      Status: ['--success', '--success-soft', '--warning', '--warning-soft', '--danger', '--danger-soft', '--info', '--info-soft', '--danger-solid'],
+      'Environment · chart': ['--env-prod', '--env-staging', '--env-dev', '--env-test', '--chart-1', '--chart-2']
+    };
+    function content(theme) {
+      let h = `<h2>${theme} theme</h2>`;
+      h += sec('Màu theo ngữ nghĩa — quy tắc (v0.3)', 'Màu luôn mang nghĩa: xanh lá = khỏe/chạy, vàng = chờ/cảnh báo, đỏ = lỗi, xanh dương = thông tin/tiến trình, xám = dừng. Một chỉ báo trạng thái mỗi hàng; chip cùng một hình dạng. Accent teal chỉ cho: primary (≤1/view), focus, mục đang chọn, chỉ báo nav, link.', `<div class="demo-box" style="padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:6px 24px;font-size:12px" class="muted">
+        ${[['Trong bảng', '<span class="status status--success"><span class="status__dot"></span>Running</span> <span class="status status--warning"><span class="status__dot"></span>Pending</span> <span class="status status--danger"><span class="status__dot"></span>Failed</span>'], ['Inspector (chip)', '<span class="badge badge--success">Running</span> <span class="badge badge--danger">CrashLoopBackOff</span>'], ['Cảnh báo', '<span class="badge badge--warning">Expires in 9 days</span>'], ['Môi trường (nhóm)', '<span class="env env--prod">Prod</span> <span class="env env--staging">Stg</span> <span class="env env--dev">Dev</span> <span class="env env--test">Test</span>'], ['Header', '<span class="env-badge">Prod</span>'], ['Đếm', '<span class="tree__meta">14</span> <span class="tree__meta tree__meta--warning">1 pending</span> <span class="tree__meta tree__meta--danger">2 failing</span>'], ['Logo OS/vendor', ic('ubuntu', 16) + ic('windows', 16) + ic('docker', 16) + ic('aws', 16)], ['Meter', '<span style="width:120px;display:inline-block"><span class="meter"><span class="meter__track"><span class="meter__fill" style="width:40%"></span></span><span class="meter__value">40%</span></span></span> <span style="width:120px;display:inline-block"><span class="meter"><span class="meter__track"><span class="meter__fill meter__fill--danger" style="width:96%"></span></span><span class="meter__value">96%</span></span></span>']].map(([k, v]) => `<div class="row" style="min-height:26px"><span class="kit-label">${k}</span>${v}</div>`).join('')}</div>`);
+      h += sec('Title bar (frameless)', 'Vùng kéo cửa sổ 38px. Windows/Linux: nút −/□/× bên phải. macOS: đèn giao thông inset bên trái. Command center ở giữa.', ['win', 'mac'].map((os) => `<div class="demo-box" style="margin-bottom:8px"><div class="titlebar" style="position:relative;height:38px;background:var(--bg)">${os === 'mac' ? '<span class="tb-traffic"><i></i><i></i><i></i></span>' : ''}<span class="tb-brand"><span class="ab-logo">${ic('terminal', 12)}</span>${os === 'mac' ? '' : 'Shellhouse'}</span><span class="tb-nav"><button class="btn btn--ghost btn--sm btn--icon">${ic('arrow-left', 14)}</button><button class="btn btn--ghost btn--sm btn--icon">${ic('arrow-right', 14)}</button></span><div class="tb-center" style="width:40%"><span class="tb-search">${ic('search', 14)}<span>Search…</span>${kbd('Ctrl K')}</span></div><div class="tb-right">${os === 'mac' ? '' : '<div class="tb-winctl"><button>—</button><button>☐</button><button class="close">✕</button></div>'}</div></div></div>`).join(''));
+      h += sec('Color tokens', 'Semantic only — components never use raw hex. Values resolve per theme.', Object.entries(TOKENS).map(([g, list]) => `<div class="field__label" style="margin:10px 0 6px">${g}</div><div class="swatches">${list.map((t) => `<div class="swatch"><i style="background:var(${t})"></i><div>${t.replace('--', '')}<br/><code data-token="${t}"></code></div></div>`).join('')}</div>`).join(''));
+      h += sec('Typography', 'Inter Variable, 6 steps. 13px is the app default; 12px for meta/table compact.', [['--fs-xl / 600', 20, 28, 600, 'Accounts'], ['--fs-lg / 600', 16, 24, 600, 'Delete Deployment web?'], ['--fs-md / 600', 14, 20, 600, 'web-7d9f8c6b5-h8sdl'], ['--fs-base / 400', 13, 20, 400, 'Shared credentials reused across hosts.'], ['--fs-sm / 500', 12, 16, 500, 'Namespace · Ready · Restarts'], ['--fs-xs / 500', 11, 16, 500, 'PRODUCTION · 2 transfers · 45%']].map(([n, s, l, w, t]) => `<div class="type-row"><code>${n}</code><span style="font-size:${s}px;line-height:${l}px;font-weight:${w}">${t}</span></div>`).join('') + `<div class="type-row"><code>--font-mono 12</code><span class="mono">deploy@prod-web-01:/srv/shop$ kubectl get pods -n shop</span></div>`);
+      h += sec('Spacing · radius · elevation', '4px grid. Radii 3/4/6/8/12. Không gradient/glow. Chỉ popover/dialog có bóng mềm; còn lại là viền 1px hoặc khoảng trắng.', `<div class="space-row">${[2, 4, 6, 8, 12, 16, 20, 24, 32, 48].map((n) => `<div><div style="width:${n}px;height:${n}px"></div><span>${n}</span></div>`).join('')}</div>
+        <div class="kit-row" style="margin-top:14px">${['--r-xs', '--r-sm', '--r-md', '--r-lg', '--r-xl'].map((r) => `<div style="width:56px;height:40px;border-radius:var(${r});background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--border-strong);display:grid;place-items:center;font-size:10px" class="subtle">${r.slice(2)}</div>`).join('')}</div>
+        <div class="kit-row">${['--shadow-popover', '--shadow-dialog'].map((s) => `<div style="width:120px;height:56px;border-radius:8px;background:var(--surface-1);box-shadow:var(${s});display:grid;place-items:center;font-size:11px" class="muted">${s.slice(2)}</div>`).join('')}</div>`);
+      const B = (cls, label, icon, extra = '') => `<button class="btn ${cls} ${extra}">${icon ? ic(icon, 16) : ''}<span>${label}</span></button>`;
+      h += sec('Button', 'Heights follow density (28/24). Primary = one per view. Danger only for destructive confirm.', ['', 'is-hover', 'is-focus'].map((st) => row(st ? st.replace('is-', '') : 'default', B('btn--primary', 'New host', 'plus', st) + B('', 'Import', 'import', st) + B('btn--ghost', 'Filter', 'filter', st) + B('btn--danger', 'Delete', 'trash', st) + `<button class="btn btn--ghost btn--icon ${st}" aria-label="More">${ic('more', 16)}</button>`)).join('') +
+        row('disabled', `<button class="btn btn--primary" disabled>New host</button><button class="btn" disabled>Import</button><button class="btn btn--danger" disabled>${ic('trash', 16)}<span>Delete</span></button>`) +
+        row('small', `<button class="btn btn--sm">${ic('logs', 14)}<span>Logs</span></button><button class="btn btn--sm btn--ghost">${ic('restart', 14)}<span>Restart</span></button><button class="btn btn--sm btn--icon" aria-label="Copy">${ic('copy', 14)}</button>`) +
+        row('with kbd', `<button class="btn btn--primary">${ic('plus', 16)}<span>New</span>${kbd('N')}</button><button class="btn btn--ghost" style="color:var(--text-tertiary)">${ic('search', 14)}<span>Search…</span>${kbd('Ctrl K')}</button><span class="spinner"></span>`));
+      h += sec('Input · Select · Field', 'Filter inputs show the "/" shortcut. Error state = red ring + message with icon.', row('default', `<label class="input" style="width:220px">${ic('search', 14)}<input placeholder="Filter…"/>${kbd('/')}</label><label class="input is-focus" style="width:180px"><input value="deploy@10.10.1.11"/></label>`) +
+        row('states', `<label class="input" data-state="error" style="width:180px"><input value="prod-web-0"/></label><label class="input" aria-disabled="true" style="width:160px"><input placeholder="Disabled" disabled/></label><button class="btn select">ap-southeast-1${ic('chevron-down', 14)}</button>`) +
+        `<div class="field" style="max-width:320px"><label class="field__label">Type <span class="code-inline">web</span> to confirm</label><label class="input" data-state="error"><input value="wbe"/></label><span class="field__error">${ic('alert-circle', 12)}Doesn't match. Case-sensitive.</span></div>`);
+      h += sec('Checkbox · Switch · Segmented', 'All are native-semantic (checkbox, role=switch, role=radiogroup) and keyboard operable.', row('controls', `<label class="check-label"><input type="checkbox" class="checkbox"/>Off</label><label class="check-label"><input type="checkbox" class="checkbox" checked/>On</label><label class="check-label"><input type="checkbox" class="checkbox ind"/>Mixed</label><button class="switch" role="switch" aria-checked="false" aria-label="off"></button><button class="switch" role="switch" aria-checked="true" aria-label="on"></button>`) +
+        row('segmented', `<div class="segmented"><button class="segmented__item" aria-checked="true">${ic('list', 14)}Containers</button><button class="segmented__item" aria-checked="false">${ic('layers', 14)}Compose</button></div><div class="segmented segmented--icon"><button class="segmented__item" aria-checked="true" aria-label="Table">${ic('list', 14)}</button><button class="segmented__item" aria-checked="false" aria-label="Graph">${ic('network', 14)}</button></div>`));
+      h += sec('Status · Badge · Env tag · Chip', 'Status luôn có chữ (chấm + chữ cùng màu trong bảng; chip nền nhạt ở header Inspector). Một chỉ báo trạng thái mỗi hàng. Env theo nhóm: PROD đỏ · STG vàng · DEV xanh dương · TEST tím.', row('status', ['success:Running', 'danger:CrashLoopBackOff', 'warning:Pending', 'info:Updating', 'neutral:Completed'].map((x) => { const [k, t] = x.split(':'); return `<span class="status status--${k}"><span class="status__dot"></span>${t}</span>`; }).join('')) +
+        row('chip', `<span class="badge badge--success">Running</span><span class="badge badge--info">Updating</span><span class="badge badge--warning">Rotate</span><span class="badge badge--danger">Unhealthy</span><span class="badge">Private</span><span class="badge badge--outline">2/3 ready</span>`) +
+        row('env', `<span class="env env--prod">Prod</span><span class="env env--staging">Stg</span><span class="env env--dev">Dev</span><span class="env env--test">Test</span><span class="env-badge">Prod</span><span class="env-badge env-badge--staging">Stg</span>`) +
+        row('chip', `<button class="chip">Status: <b>Any</b></button><button class="chip chip--active">${ic('alert-circle', 12)}Status: <b>Failing</b><span class="chip__x">${ic('x', 12)}</span></button><button class="chip chip--add">${ic('plus', 12)}Filter</button><span class="tag">app=<b>web</b></span>`) +
+        row('meter', `<span style="width:120px">${'<span class="meter"><span class="meter__track"><span class="meter__fill" style="width:40%"></span></span><span class="meter__value">190m</span></span>'}</span><span style="width:120px"><span class="meter"><span class="meter__track"><span class="meter__fill meter__fill--warning" style="width:80%"></span></span><span class="meter__value">405m</span></span></span><span style="width:120px"><span class="meter"><span class="meter__track"><span class="meter__fill meter__fill--danger" style="width:98%"></span></span><span class="meter__value">251Mi</span></span></span><span class="progress" style="width:100px"><span class="progress__bar" style="width:45%;display:block"></span></span>`) +
+        row('kbd', kbd('Ctrl K') + kbd('G') + '<span class="kbd-then">then</span>' + kbd('K') + kbd('/') + kbd('Esc') + kbd('⌫')));
+      h += sec('Tabs', 'Underline tabs for Inspector sections; pill tabs for workspace sessions.', `<div class="demo-box"><div class="tabs" role="tablist"><button class="tab" aria-selected="true">Overview</button><button class="tab" aria-selected="false">Events<span class="tab__count tab__count--warning">7</span></button><button class="tab" aria-selected="false">Logs</button><button class="tab" aria-selected="false">YAML</button></div>
+        <div class="wtabs"><div class="wtab" aria-selected="true">${ic('terminal-square', 14)}<span class="wtab__label">prod-web-01</span><span class="env-dot"></span><span class="wtab__close">${ic('x', 12)}</span></div><div class="wtab" aria-selected="false">${ic('windows', 14)}<span class="wtab__label">prod-ad-01</span><span class="wtab__close">${ic('x', 12)}</span></div><div class="wtab" aria-selected="false">${ic('file-text', 14)}<span class="wtab__label">nginx.conf</span><span class="wtab__close">${ic('x', 12)}</span></div></div></div>`);
+      h += sec('Tree item (Explorer)', 'Row 28/26px. Indent 14px/level. Môi trường chỉ ở hàng NHÓM (host kế thừa). Host online = chấm xanh lá; tải cao = chấm vàng; offline = vòng rỗng. Logo OS màu thương hiệu.', `<div class="demo-box tree" style="padding:6px">
+        <button class="tree__item" aria-expanded="true"><span class="tree__chev">${ic('chevron-down', 12)}</span>${ic('folder', 16)}<span class="tree__label">Production</span><span class="env env--prod">Prod</span><span class="tree__meta">5</span></button>
+        <button class="tree__item" aria-selected="true" style="--indent:14px"><span class="tree__chev-spacer"></span>${ic('ubuntu', 16)}<span class="tree__label">prod-web-01 · online</span><span class="dot dot--success" aria-label="Online"></span></button>
+        <button class="tree__item is-hover" style="--indent:14px"><span class="tree__chev-spacer"></span>${ic('windows', 16)}<span class="tree__label">prod-ad-01 · hover</span><span class="tree__meta">RDP</span></button>
+        <button class="tree__item is-focus" style="--indent:14px"><span class="tree__chev-spacer"></span>${ic('debian', 16)}<span class="tree__label">prod-db-01 · focus</span><span class="tree__meta"><span class="dot dot--off"></span></span></button>
+        <button class="tree__item" style="--indent:28px"><span class="tree__chev-spacer"></span>${ic('pod', 16)}<span class="tree__label">Pods</span><span class="tree__meta tree__meta--danger">2 ${ic('alert-circle', 12)}</span><span class="tree__meta">14</span></button></div>`);
+      h += sec('DataTable rows', 'Header 32. Rows 32/28. Hover, selected (accent soft), active (left bar), keyboard focus (ring).', `<div class="demo-box"><table class="dtable"><colgroup><col style="width:36px"/><col/><col style="width:150px"/><col style="width:70px"/></colgroup>
+        <thead><tr><th class="col-check"><input type="checkbox" class="checkbox"/></th><th aria-sort="ascending" class="is-sortable"><span class="th-inner">Name${ic('arrow-up', 12, 'sort-ic')}</span></th><th>Status</th><th class="is-num">Restarts</th></tr></thead><tbody>
+        <tr><td class="col-check"><input type="checkbox" class="checkbox" style="opacity:1"/></td><td class="cell-primary">default row</td><td><span class="status status--success"><span class="status__dot"></span>Running</span></td><td class="is-num restarts-0">0</td></tr>
+        <tr aria-selected="true"><td class="col-check"><input type="checkbox" class="checkbox" checked/></td><td class="cell-primary">selected row</td><td><span class="status status--warning"><span class="status__dot"></span>Pending</span></td><td class="is-num restarts-warn">2</td></tr>
+        <tr class="is-active"><td class="col-check"></td><td class="cell-primary">active (open in inspector)</td><td><span class="status status--danger"><span class="status__dot"></span>CrashLoopBackOff</span></td><td class="is-num restarts-danger">23</td></tr>
+        <tr class="is-focused"><td class="col-check"></td><td class="cell-primary">keyboard focus (j/k)</td><td><span class="status status--neutral status--muted"><span class="status__dot"></span>Completed</span></td><td class="is-num restarts-0">0</td></tr>
+        <tr><td colspan="4" style="height:auto;border:0"><div style="padding:10px 12px;display:grid;gap:8px"><span class="skeleton" style="width:60%"></span><span class="skeleton" style="width:40%"></span><span class="skeleton" style="width:52%"></span></div></td></tr></tbody></table></div>
+        <div class="bulkbar" style="margin-top:10px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--border)"><span class="bulkbar__count">3 selected<span class="chip__x">${ic('x', 12)}</span></span><span class="header-sep"></span><button class="btn btn--ghost btn--sm">${ic('restart', 14)}<span>Restart</span></button><button class="btn btn--ghost btn--sm">${ic('copy', 14)}<span>Copy names</span></button><span class="spacer"></span><button class="btn btn--ghost btn--sm" style="color:var(--danger)">${ic('trash', 14)}<span>Delete…</span></button></div>`);
+      h += sec('PropertyList · Callout · Section', 'Label column 96–128px, tertiary. Values primary, copy on hover.', `<div class="demo-box"><div class="section"><div class="callout callout--danger">${ic('alert-circle', 16)}<div><div class="callout__title">Container web keeps getting OOMKilled</div><div class="callout__desc">Exit code 137 · 23 restarts in 3h.</div></div></div></div>
+        <div class="section"><dl class="props"><dt>Status</dt><dd><span class="status status--danger"><span class="status__dot"></span>CrashLoopBackOff</span></dd><dt>Node</dt><dd>pool-a-7xk2</dd><dt>Pod IP</dt><dd><span class="mono">10.244.3.18</span></dd></dl></div>
+        <div class="section"><div class="callout callout--warning">${ic('alert', 16)}<div class="callout__desc" style="margin:0">Password is 215 days old.</div></div><div class="callout callout--info" style="margin-top:8px">${ic('info', 16)}<div class="callout__desc" style="margin:0">From metrics-server · 30s resolution.</div></div></div></div>`);
+      h += sec('Menu · Tooltip · Toast', 'Menus: 30/28px items, shortcut right-aligned, destructive last after a separator.', `<div class="kit-row" style="align-items:flex-start;gap:16px"><div class="menu static" role="menu"><div class="menu__label">Pod</div><button class="menu__item is-hover">${ic('logs', 14)}<span>Logs</span>${kbd('L')}</button><button class="menu__item">${ic('terminal-square', 14)}<span>Open shell</span>${kbd('S')}</button><button class="menu__item" aria-checked="true" role="menuitemcheckbox">${ic('check', 14, 'menu__check')}<span>Show node</span></button><button class="menu__item" aria-disabled="true">${ic('scale', 14)}<span>Scale…</span></button><div class="menu__sep"></div><button class="menu__item menu__item--danger">${ic('trash', 14)}<span>Delete Pod…</span>${kbd('Ctrl ⌫')}</button></div>
+        <div class="stack" style="gap:12px;flex:1;min-width:0"><span class="tooltip static">Toggle inspector ${kbd(']')}</span>
+        <div class="toast static toast--success"><span class="toast__icon">${ic('check-circle', 16)}</span><div class="toast__body"><div class="toast__title">Restarting web</div><div class="toast__desc">Rolling restart started · 0/3 updated</div></div><div class="toast__actions"><button class="btn btn--sm">Undo</button></div></div>
+        <div class="toast static toast--info"><span class="toast__icon">${ic('info', 16)}</span><div class="toast__body"><div class="toast__title">Pulling registry.shop.vn/api:5.2.1</div><div class="toast__desc">Continues in the background · see Transfers</div></div></div>
+        <div class="toast static toast--danger"><span class="toast__icon">${ic('x-circle', 16)}</span><div class="toast__body"><div class="toast__title">Connection lost</div><div class="toast__desc">prod-web-01 · retrying in 5s</div></div><div class="toast__actions"><button class="btn btn--sm">Retry now</button></div></div></div></div>`);
+      h += sec('Dialog (risk level 3)', 'Production + destructive → type-to-confirm. Button stays disabled until exact match.', `<div class="dialog static dialog--danger" role="dialog"><div class="dialog__head"><span class="itile itile--lg">${ic('trash', 16)}</span><div style="flex:1"><h2 class="dialog__title">Delete Deployment web?</h2><p class="dialog__desc">This cannot be undone.</p></div><span class="env-badge"><span class="dot"></span>Production</span></div><div class="dialog__body"><div class="field"><label class="field__label">Type <span class="code-inline">web</span> to confirm</label><label class="input is-focus"><input value="we"/></label></div></div><div class="dialog__foot"><span class="subtle">${kbd('Esc')} to cancel</span><button class="btn">Cancel</button><button class="btn btn--danger" disabled>${ic('trash', 14)}<span>Delete Deployment</span></button></div></div>`);
+      h += sec('Empty · Error · Loading', 'Every list has 3 non-happy states. Empty states always offer the next action.', `<div class="kit-row" style="align-items:stretch">${[['search', 'No Pods match “api”', 'Try a different name or clear filters.', 'Clear filters'], ['plug', 'Can’t reach prod-cluster', 'TLS handshake timeout after 10s.', 'Retry']].map(([i, t, d, a]) => `<div class="demo-box" style="flex:1;min-width:220px"><div class="empty" style="padding:28px 16px"><div class="empty__art">${ic(i, 20)}</div><div class="empty__title">${t}</div><div class="empty__desc">${d}</div><div class="empty__actions"><button class="btn btn--sm">${a}</button></div></div></div>`).join('')}</div>`);
+      h += sec('Graph node', 'Same card language as the rest of the app: icon tile + name + meta, problem pill explained in words.', `<div style="position:relative;height:84px">${[['workload', 'web', 'Deployment · 2/3', 'Degraded', 'warning', 0], ['pod', 'web-…-h8sdl', '23 restarts · OOMKilled', 'CrashLoop', 'danger', 200]].map(([i, n, m, p, s, x]) => `<div class="gnode${s === 'danger' ? ' gnode--problem' : ''}" style="left:${x}px;top:16px;width:184px;height:48px"><span class="itile itile--${s}">${ic(i, 14)}</span><span class="gnode__body"><span class="gnode__name" style="display:block">${n}</span><span class="gnode__meta">${m}</span></span><span class="gnode__problem${s === 'warning' ? ' gnode__problem--warning' : ''}">${p}</span></div>`).join('')}</div>`);
+      h += sec('Patterns — diff · transfer · setting row · disk usage', 'Diff: xanh/đỏ nhạt chỉ cho dòng thêm/xóa. Transfer lỗi: thanh đỏ + Resume/Discard. Cài đặt: hàng phẳng, không card.', `<div class="diff" style="margin-bottom:10px"><div class="hunk"><span class="ln"></span><span class="mk"></span><span>@@ resources @@</span></div><div><span class="ln">41</span><span class="mk"></span><span>  limits:</span></div><div class="del"><span class="ln"></span><span class="mk">−</span><span>    memory: 256Mi</span></div><div class="add"><span class="ln">42</span><span class="mk">+</span><span>    memory: 512Mi</span></div></div>
+        <div class="demo-box"><div class="xfer" style="grid-template-columns:20px minmax(0,1fr) 120px 90px 80px"><span class="sev-ic sev-ic--danger" style="margin:0">${ic('alert-circle', 16)}</span><div style="min-width:0"><div class="xfer__name">access-2026-10.log</div><div class="xfer__sub">SFTP · download · <span style="color:var(--danger)">Connection reset by peer</span></div></div><span class="progress"><span class="progress__bar" style="width:41%;display:block;background:var(--danger)"></span></span><span class="xfer__num">41% of 612 MB</span><span class="xfer__actions"><button class="btn btn--ghost btn--sm">Resume</button></span></div>
+        <div class="xfer" style="grid-template-columns:20px minmax(0,1fr) 120px 90px 80px">${ic('download', 16)}<div style="min-width:0"><div class="xfer__name">db-backup.sql.gz</div><div class="xfer__sub">SFTP · download</div></div><span class="progress"><span class="progress__bar" style="width:28%;display:block"></span></span><span class="xfer__num">28% · 11.8 MB/s</span><span class="xfer__actions"></span></div></div>
+        <div class="setting-row" style="padding:12px 0;border-bottom:1px solid var(--border-subtle)"><div class="setting-row__text"><div class="setting-row__title">Copy on select</div><div class="setting-row__desc">Hàng cài đặt: tiêu đề + mô tả + control bên phải.</div></div><button class="switch" role="switch" aria-checked="true" aria-label="Copy on select"></button></div>
+        <div class="usage" style="grid-template-columns:90px 1fr 150px"><span>Images</span><span class="usage__bar"><i style="width:40%"></i><i class="rec" style="left:40%;width:22%"></i></span><span class="num muted" style="text-align:right">4.9 GB <span class="subtle">· 1.6 GB reclaimable</span></span></div>`);
+      h += sec('Icons', 'Lucide-style, stroke 1.6 @16 / 1.75 @14, màu chữ phụ. Glyph OS/nhà cung cấp dùng màu thương hiệu (Ubuntu cam, Debian/RHEL đỏ, Windows/Alpine/Docker xanh, AWS cam, MinIO đỏ).', `<div class="kit-row">${Object.keys(window.SH_ICONS.P).slice(0, 64).map((n) => `<span title="${n}" style="width:28px;height:28px;display:grid;place-items:center;border-radius:6px;color:var(--text-secondary)">${ic(n, 16)}</span>`).join('')}</div><div class="kit-row">${Object.keys(window.SH_ICONS.OS).map((n) => `<span title="${n}" style="width:28px;height:28px;display:grid;place-items:center">${ic(n, 18)}</span>`).join('')}</div>`);
+      return h;
+    }
+    function fillTokens() {
+      document.querySelectorAll('[data-token]').forEach((el) => { const pane = el.closest('[data-theme]'); el.textContent = getComputedStyle(pane).getPropertyValue(el.dataset.token).trim().slice(0, 26); });
+    }
+    function draw() {
+      document.getElementById('pane-dark').innerHTML = content('Dark');
+      document.getElementById('pane-light').innerHTML = content('Light');
+      document.getElementById('logo').innerHTML = ic('terminal', 16);
+      document.querySelectorAll('.checkbox.ind').forEach((c) => (c.indeterminate = true));
+      fillTokens();
+    }
+    draw();
+    document.querySelector('.kit-top').addEventListener('click', (e) => {
+      const b = e.target.closest('.segmented__item'); if (!b) return;
+      b.parentElement.querySelectorAll('.segmented__item').forEach((x) => x.setAttribute('aria-checked', x === b));
+      if (b.dataset.layout) {
+        const cols = document.getElementById('cols');
+        cols.classList.toggle('single', b.dataset.layout !== 'both');
+        document.getElementById('pane-dark').hidden = b.dataset.layout === 'light';
+        document.getElementById('pane-light').hidden = b.dataset.layout === 'dark';
+      }
+      if (b.dataset.density) document.body.dataset.density = b.dataset.density;
+    });
+  })();
+  </script>
+</body>
+</html>

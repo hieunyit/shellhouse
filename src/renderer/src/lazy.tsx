@@ -40,7 +40,7 @@ function preloadable<P extends object>(
 }
 
 const settings = preloadable(() =>
-  import('./components/settings/SettingsDialog').then((m) => m.SettingsDialog)
+  import('./components/settings/SettingsPage').then((m) => m.SettingsPage)
 )
 const snippets = preloadable(() =>
   import('./components/SnippetsDialog').then((m) => m.SnippetsDialog)
@@ -98,7 +98,7 @@ export function preloadTerminal(): Promise<void> {
   return terminalView.preload()
 }
 
-export const SettingsDialog = settings.Component
+export const SettingsPage = settings.Component
 export const SnippetsDialog = snippets.Component
 export const HostForm = hostForm.Component
 export const GroupForm = groupForm.Component

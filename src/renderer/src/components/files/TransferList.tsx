@@ -328,7 +328,7 @@ function TransferRow({
           aria-valuenow={Math.floor(ratio * 100)}
         >
           <div
-            className="h-1 rounded-full bg-accent-solid transition-[width] duration-200"
+            className="h-1 rounded-full bg-info transition-[width] duration-200"
             style={{ width: `${String(ratio * 100)}%` }}
           />
         </div>

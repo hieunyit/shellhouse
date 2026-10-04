@@ -51,16 +51,16 @@ export function ToolButton({
       data-testid={testId}
       disabled={disabled}
       className={cx(
-        'inline-flex h-7 min-w-7 shrink-0 items-center justify-center gap-1.5 rounded-md px-1.5 text-xs font-medium whitespace-nowrap transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40',
+        'inline-flex h-ds-ctl min-w-7 shrink-0 items-center justify-center gap-1.5 rounded-ds-md px-1.5 text-xs font-medium whitespace-nowrap transition-colors duration-(--ds-dur-fast) outline-none focus-visible:shadow-ds-focus disabled:pointer-events-none disabled:opacity-40',
         primary
-          ? 'bg-accent-solid px-2.5 text-accent-fg shadow-xs hover:bg-accent-solid-hover'
+          ? 'bg-accent-solid px-2.5 text-accent-fg hover:bg-accent-solid-hover'
           : danger
             ? 'text-danger hover:bg-danger-soft'
             : tone === 'warning'
               ? 'bg-warning-soft text-warning'
               : pressed
-                ? 'bg-hover text-fg'
-                : 'text-muted hover:bg-hover hover:text-fg'
+                ? 'bg-ds-active text-fg'
+                : 'text-muted hover:bg-ds-hover hover:text-fg'
       )}
       onClick={onClick}
     >
@@ -84,11 +84,11 @@ export function Empty({
 }): React.JSX.Element {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 py-12 text-center">
-      <span className="flex size-10 items-center justify-center rounded-xl border border-line bg-subtle text-muted">
+      <span className="flex size-10 items-center justify-center rounded-ds-lg border border-ds-border text-faint">
         {icon}
       </span>
-      <p className="mt-1 text-[13px] font-medium text-fg">{title}</p>
-      <p className="max-w-xs text-xs text-muted">{text}</p>
+      <p className="mt-1 text-ds-md font-semibold text-fg">{title}</p>
+      <p className="max-w-80 text-[13px] text-muted">{text}</p>
       {action && <div className="mt-2">{action}</div>}
     </div>
   )

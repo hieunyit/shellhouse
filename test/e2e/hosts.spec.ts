@@ -9,7 +9,15 @@ import {
 } from '@playwright/test'
 import { startTestSshServer, type TestSshServer } from '../integration/ssh-test-server'
 import { startTelnetTestServer } from '../integration/telnet-test-server'
-import { activeTab, E2E_PASSWORD, expect, sendLine, test, waitForText } from './fixtures'
+import {
+  activeTab,
+  E2E_PASSWORD,
+  expect,
+  expectHostAddress,
+  sendLine,
+  test,
+  waitForText
+} from './fixtures'
 
 let server: TestSshServer | null = null
 test.afterEach(async () => {
@@ -47,7 +55,7 @@ test('tạo host có mật khẩu → kết nối không cần nhập mật kh�
     password: 'luu-trong-vault'
   })
   const row = page.locator('[data-testid="host-row"][data-host-label="Máy test"]')
-  await expect(row).toContainText(`alice@127.0.0.1:${server.port}`)
+  await expectHostAddress(row, `alice@127.0.0.1:${server.port}`)
 
   await row.dblclick()
   await expect(page.getByTestId('tab').last()).toContainText('Máy test')
@@ -192,7 +200,7 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     await dialog.getByRole('button', { name: 'Done' }).click()
 
     const row = page.locator('[data-testid="host-row"][data-host-label="web"]')
-    await baseExpect(row).toContainText('deploy@web.example.com')
+    await expectHostAddress(row, 'deploy@web.example.com')
 
     // MobaXterm: nhóm lồng nhau theo thư mục bookmark.
     await page.getByTestId('import-ssh-config').click()
@@ -209,9 +217,10 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     await baseExpect(
       page.locator('[data-testid="group-row"][data-group-name="Database"]')
     ).toBeVisible()
-    await baseExpect(
-      page.locator('[data-testid="host-row"][data-host-label="pg-main"]')
-    ).toContainText('postgres@db.example.com')
+    await expectHostAddress(
+      page.locator('[data-testid="host-row"][data-host-label="pg-main"]'),
+      'postgres@db.example.com'
+    )
 
     // CSV (kiểu Termius): cột Password bị bỏ qua.
     const csv = join(home, 'termius.csv')
@@ -233,9 +242,10 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     await dialog.getByTestId('import-run').click()
     await baseExpect(dialog.getByTestId('import-result')).toContainText('Imported 1 host')
     await dialog.getByRole('button', { name: 'Done' }).click()
-    await baseExpect(
-      page.locator('[data-testid="host-row"][data-host-label="api-stg"]')
-    ).toContainText('ubuntu@api.stg.example.com')
+    await expectHostAddress(
+      page.locator('[data-testid="host-row"][data-host-label="api-stg"]'),
+      'ubuntu@api.stg.example.com'
+    )
   } finally {
     await app.close()
     rmSync(home, { recursive: true, force: true })
@@ -478,7 +488,7 @@ test('host Telnet: tạo bằng form, đăng nhập như console router; ẩn SF
     await form.getByTestId('host-label').fill('core-switch')
     await form.getByTestId('host-save').click()
     const row = page.locator('[data-testid="host-row"][data-host-label="core-switch"]')
-    await expect(row).toContainText(`telnet 127.0.0.1:${telnet.port}`)
+    await expectHostAddress(row, `telnet 127.0.0.1:${telnet.port}`)
 
     await row.dblclick()
     const tab = await activeTab(page)
@@ -507,7 +517,7 @@ test('host Serial: cấu hình cổng + tốc độ; cổng không có → báo 
   await form.getByTestId('host-label').fill('switch console')
   await form.getByTestId('host-save').click()
   const row = page.locator('[data-testid="host-row"][data-host-label="switch console"]')
-  await expect(row).toContainText(`${missing} · 115200 8N1`)
+  await expectHostAddress(row, `${missing} · 115200 8N1`)
 
   await row.dblclick()
   const tab = await activeTab(page)

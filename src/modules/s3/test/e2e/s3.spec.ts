@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startS3TestServer, type S3TestServer } from '../s3-test-server'
-import { expect, test } from '../../../../../test/e2e/fixtures'
+import { expect, expectActiveTab, openArea, test } from '../../../../../test/e2e/fixtures'
 
 let server: S3TestServer | null = null
 test.afterEach(async () => {
@@ -20,6 +20,7 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
     writeFileSync(join(local, 'bao-cao.txt'), 'nội dung báo cáo')
 
     // Thêm tài khoản (secret không bao giờ quay về renderer).
+    await openArea(page, 's3')
     await page.getByTestId('s3-add-account').click()
     const form = page.getByTestId('s3-account-form')
     await form.getByTestId('s3-account-name').fill('MinIO test')
@@ -49,10 +50,10 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
     // Mở tab S3 → bảng bucket; bấm đúp để vào bucket, tên tab theo vị trí.
     await account.dblclick()
     const view = page.getByTestId('s3-view')
-    await expect(page.getByTestId('tab').last()).toContainText('MinIO test')
+    await expectActiveTab(page, 'MinIO test')
     await view.locator('[data-testid="s3-bucket"][data-name="demo"]').dblclick()
     await expect(view.getByTestId('s3-crumb-bucket')).toHaveText('demo')
-    await expect(page.getByTestId('tab').last()).toContainText('demo')
+    await expectActiveTab(page, 'demo')
 
     // Thư mục mới, vào trong, tải file lên.
     await view.getByTestId('s3-mkdir').click()
@@ -136,14 +137,14 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
     const pin = page.locator('[data-testid="s3-pin"][data-name="demo / reports"]')
     await expect(pin).toBeVisible()
     await pin.click()
-    await expect(page.getByTestId('tab')).toHaveCount(3)
+    await expect(page.getByTestId('s3-view')).toHaveCount(2)
     const pinnedView = page.getByTestId('s3-view').last()
     await expect(
       pinnedView.locator('[data-testid="s3-entry"][data-name="bao-cao-2024.txt"]')
     ).toBeVisible()
-    await expect(page.getByTestId('tab').last()).toContainText('demo/reports')
+    await expectActiveTab(page, 'demo/reports')
     await page.getByTestId('tab').last().getByTestId('tab-close').click()
-    await expect(page.getByTestId('tab')).toHaveCount(2)
+    await expect(page.getByTestId('s3-view')).toHaveCount(1)
 
     // Về bảng bucket (bấm tên tài khoản) → tính dung lượng: 2 object (reports/ + gốc).
     await view.getByTestId('s3-crumb-account').click()
@@ -197,6 +198,7 @@ test('sắp xếp: menu Sort (dung lượng, thời gian, đảo chiều), nhớ
       })
     await page.keyboard.press('Escape')
 
+    await openArea(page, 's3')
     await page.getByTestId('s3-add-account').click()
     const form = page.getByTestId('s3-account-form')
     await form.getByTestId('s3-account-name').fill('Sort test')
@@ -293,6 +295,7 @@ test('S3: export danh sách bucket (CSV) và đồng bộ sang tài khoản khá
       )) as { ok: boolean }
       expect(r.ok).toBe(true)
     }
+    await openArea(page, 's3')
     const account = page.locator('[data-testid="s3-account"][data-name="Source"]')
     await account.dblclick()
     const view = page.getByTestId('s3-view')
@@ -380,6 +383,7 @@ test('S3: bảng chi tiết (tag, metadata, địa chỉ), cài đặt bucket (C
       }
     )) as { ok: boolean }
     expect(r.ok).toBe(true)
+    await openArea(page, 's3')
     await page.locator('[data-testid="s3-account"][data-name="Details test"]').dblclick()
     const view = page.getByTestId('s3-view')
     await view.locator('[data-testid="s3-bucket"][data-name="demo"]').dblclick()

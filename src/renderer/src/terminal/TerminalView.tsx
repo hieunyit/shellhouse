@@ -8,12 +8,12 @@ import { LocalPanel } from './LocalPanel'
 import type { LocalTarget, SftpActions } from './SftpPanel'
 import { connectionLabel, cx, StatusDot } from '../components/ui'
 import type { ForwardStatus } from '@shared/forwards'
-import { hostBorderClass, hostTileClass } from '../components/hostColors'
 import { hostAddress, useHosts } from '../stores/hosts'
 import { useTabStatus } from '../stores/tab-status'
 import { useBroadcast } from './broadcast'
 import { useTerminalMenu } from './TerminalMenu'
 import { setCloseGuard, useTabs, type TerminalTarget } from '../stores/tabs'
+import { usePublishTransfers } from '../stores/transfers'
 import { useSettings } from '../stores/settings'
 import { TerminalController, type ActivePrompt } from './controller'
 import { DeployKeyDialog, ForwardsPanel, SftpPanel } from '../lazy'
@@ -123,6 +123,21 @@ export function TerminalView({
       controllers.get(tabId)?.sftp(op) ?? Promise.reject(new Error(t('The tab was closed'))),
     [tabId]
   )
+  // Trung tâm Transfers (khu vực Transfers + status bar) thấy lượt truyền của phiên này.
+  usePublishTransfers({
+    id: `sftp:${tabId}`,
+    label: sftpOrigin.label,
+    kind: 'sftp',
+    transfers,
+    cancel: (id) => void runSftp({ op: 'cancel', transferId: id }).catch(() => undefined),
+    retry: (id) => void runSftp({ op: 'retry', transferId: id }).catch(() => undefined),
+    discard: (id) => void runSftp({ op: 'discard', transferId: id }).catch(() => undefined),
+    clear: (keepParts) =>
+      void runSftp({ op: 'clearDone', keepParts: keepParts === true }).catch(() => undefined),
+    reveal: () => {
+      useTabs.getState().activate(tabId)
+    }
+  })
 
   useEffect(() => {
     const container = ref.current
@@ -233,26 +248,35 @@ export function TerminalView({
         <div
           className={cx(
             // @container: ô hẹp (lưới, chia màn hình) → chỉ còn icon, không vỡ dòng.
-            '@container flex h-8 shrink-0 items-center gap-1 overflow-hidden border-b border-line bg-surface px-2 text-xs whitespace-nowrap',
-            env?.color && 'border-t-2',
-            env?.color && hostBorderClass[env.color]
+            // Session header (thiết kế v0.5): trạng thái · địa chỉ · độ trễ — môi trường đã có ở
+            // breadcrumb + vạch trên cùng của vùng chính, không tô lại ở đây.
+            '@container flex h-9 shrink-0 items-center gap-1 overflow-hidden border-b border-ds-border-subtle bg-surface px-2 text-xs whitespace-nowrap'
           )}
           data-env-color={env?.color ?? ''}
         >
           <span className="flex items-center gap-2 pl-1" data-testid="session-state">
             <StatusDot state={state} />
-            <span className="hidden text-muted @xs:inline">{connectionLabel[state]}</span>
+            <span
+              className={cx(
+                'hidden @xs:inline',
+                state === 'connected'
+                  ? 'text-success'
+                  : state === 'disconnected'
+                    ? 'text-danger'
+                    : state === 'connecting' || state === 'reconnecting'
+                      ? 'text-warning'
+                      : 'text-muted'
+              )}
+            >
+              {connectionLabel[state]}
+            </span>
             {/* Đồng hồ phiên: gắn lại mỗi lần kết nối (key) — đếm từ lúc vào được server. */}
             {state === 'connected' && <SessionClock key={`clock-${String(connectedSeq)}`} />}
             {state === 'connected' && typeof latency === 'number' && (
               <span
                 className={cx(
-                  'hidden rounded px-1 font-mono text-[10.5px] tabular-nums @sm:inline',
-                  latency < 100
-                    ? 'bg-success-soft text-success'
-                    : latency < 300
-                      ? 'bg-warning-soft text-warning'
-                      : 'bg-danger-soft text-danger'
+                  'hidden tabular-nums @sm:inline',
+                  latency < 100 ? 'text-muted' : latency < 300 ? 'text-warning' : 'text-danger'
                 )}
                 data-testid="session-latency"
                 title={t('Round-trip time to the server (SSH keepalive)')}
@@ -263,7 +287,7 @@ export function TerminalView({
           </span>
           {address && (
             <span
-              className="ml-2 hidden min-w-0 truncate font-mono text-[11px] text-faint @lg:inline"
+              className="ml-2 hidden min-w-0 truncate font-mono text-xs text-muted @lg:inline"
               data-testid="session-address"
               title={address}
             >
@@ -298,10 +322,7 @@ export function TerminalView({
           )}
           {env?.path && (
             <span
-              className={cx(
-                'ml-2 hidden min-w-0 truncate rounded px-1.5 py-px text-xs font-medium @md:inline',
-                env.color ? hostTileClass[env.color] : 'bg-subtle text-muted'
-              )}
+              className="ml-2 hidden min-w-0 truncate text-xs text-faint @md:inline"
               data-testid="session-group-path"
               title={t('Group')}
             >
@@ -310,7 +331,7 @@ export function TerminalView({
           )}
           {encoding && encoding !== 'utf-8' && (
             <span
-              className="ml-2 hidden shrink-0 rounded bg-subtle px-1.5 py-px font-mono text-[10.5px] text-muted uppercase @sm:inline"
+              className="ml-2 hidden shrink-0 rounded bg-subtle px-1.5 py-px font-mono text-[11px] text-muted uppercase @sm:inline"
               data-testid="session-encoding"
               title={t('Character encoding of this host (Edit host → Advanced)')}
             >
@@ -508,8 +529,10 @@ function ToolbarButton({
       aria-pressed={pressed}
       disabled={disabled}
       className={cx(
-        'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 font-medium transition-colors duration-150 disabled:opacity-40',
-        pressed ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-hover hover:text-fg'
+        'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-ds-sm px-2 font-medium transition-colors duration-(--ds-dur-fast) outline-none focus-visible:shadow-ds-focus disabled:opacity-40 [&_svg]:text-faint',
+        pressed
+          ? 'bg-ds-active text-fg [&_svg]:text-fg'
+          : 'text-muted hover:bg-ds-hover hover:text-fg'
       )}
       onClick={onClick}
     >

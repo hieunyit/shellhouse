@@ -16,6 +16,7 @@ import { cleanError } from '../../../renderer/src/lib/format'
 import { formatDateTime, formatRelative, t, tn } from '../../registry/renderer-kit'
 import { tk } from './i18n'
 import { TY } from './typography'
+import { KindIcon } from './icons'
 import type { K8sOp, RelatedGroup, RelatedItem, RelatedResult, Usage } from '../shared/ops'
 import {
   age,
@@ -143,25 +144,33 @@ export function Detail({
 
   return (
     <SidePanel storageKey="k8s-detail" testId="k8s-describe" expanded={wide}>
-      <div className="flex items-start gap-2 border-b border-line px-3 py-2">
+      {/* Header Inspector (thiết kế v0.5): ô icon · tên · Kind · namespace · tuổi; chip trạng thái. */}
+      <div className="flex items-start gap-3 px-4 pt-3 pb-2">
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-ds-lg border border-ds-border text-faint">
+          <KindIcon kind={kindId} size={16} />
+        </span>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="truncate text-[13px] font-semibold text-fg" title={obj.metadata.name}>
-              {obj.metadata.name}
-            </span>
-            {statusText && <Pill tone={statusTone}>{statusText}</Pill>}
+          <div className="truncate text-ds-md font-semibold text-fg" title={obj.metadata.name}>
+            {obj.metadata.name}
           </div>
           <div className="truncate text-xs text-faint">
             {obj.kind}
             {ns ? ` · ${ns}` : ''} ·{' '}
             {t('{age} old', { age: age(Date.parse(obj.metadata.creationTimestamp ?? '')) })}
           </div>
+          {statusText && (
+            <div className="mt-1.5">
+              <Pill tone={statusTone} dot={false}>
+                {statusText}
+              </Pill>
+            </div>
+          )}
         </div>
         <button
           type="button"
           aria-label={wide ? t('Restore panel') : t('Expand to full width')}
           title={wide ? t('Restore panel') : t('Expand to full width')}
-          className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+          className="rounded-ds-md p-1.5 text-muted hover:bg-ds-hover hover:text-fg"
           data-testid="k8s-detail-wide"
           onClick={() => {
             setWide((w) => {
@@ -179,7 +188,7 @@ export function Detail({
         <button
           type="button"
           aria-label={t('More actions')}
-          className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+          className="rounded-ds-md p-1.5 text-muted hover:bg-ds-hover hover:text-fg"
           data-testid="k8s-detail-more"
           onClick={(e) => {
             openMenu(e, toMenu(actions))
@@ -190,21 +199,21 @@ export function Detail({
         <button
           type="button"
           aria-label={t('Close')}
-          className="rounded p-1 text-muted hover:bg-hover hover:text-fg"
+          className="rounded-ds-md p-1.5 text-muted hover:bg-ds-hover hover:text-fg"
           onClick={onClose}
         >
           <X size={15} />
         </button>
       </div>
       {primary.length > 0 && (
-        <div className="flex gap-1 overflow-hidden border-b border-line px-2 py-1.5">
+        <div className="flex gap-1 overflow-hidden px-3 pb-2">
           {primary.map((x) => (
             <button
               key={x.id}
               type="button"
               data-testid={`k8s-action-${x.id}`}
               title={x.key ? `${x.label} (${keyLabel(x.key)})` : x.label}
-              className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium whitespace-nowrap text-muted hover:bg-hover hover:text-fg"
+              className="inline-flex h-ds-ctl shrink-0 items-center gap-1.5 rounded-ds-md border border-ds-border bg-subtle px-2 text-xs font-medium whitespace-nowrap text-fg hover:border-ds-border-strong hover:bg-hover [&_svg]:text-muted"
               onClick={() => {
                 x.run()
               }}
@@ -468,7 +477,7 @@ const CONTAINER_DOT: Record<Tone, string> = {
   ok: 'bg-success',
   warn: 'bg-warning',
   bad: 'bg-danger-solid',
-  info: 'bg-accent',
+  info: 'bg-info',
   muted: 'bg-line-strong'
 }
 const CONTAINER_TEXT: Record<Tone, string> = {
@@ -500,7 +509,7 @@ function MetaHeader({ obj }: { obj: K8sObject }): React.JSX.Element | null {
       )}
       {Object.keys(meta.labels ?? {}).length > 0 && (
         <details className="text-xs" data-testid="k8s-labels">
-          <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-faint uppercase">
+          <summary className="cursor-pointer text-xs font-medium text-faint">
             {t('Labels ({n})', { n: Object.keys(meta.labels ?? {}).length })}
           </summary>
           <div className="mt-1.5">
@@ -510,7 +519,7 @@ function MetaHeader({ obj }: { obj: K8sObject }): React.JSX.Element | null {
       )}
       {annotations.length > 0 && (
         <details className="text-xs" data-testid="k8s-annotations">
-          <summary className="cursor-pointer text-[11px] font-semibold tracking-wider text-faint uppercase">
+          <summary className="cursor-pointer text-xs font-medium text-faint">
             {t('Annotations ({n})', { n: annotations.length })}
           </summary>
           <div className={cx('mt-1.5 flex flex-col gap-1', TY.id)}>

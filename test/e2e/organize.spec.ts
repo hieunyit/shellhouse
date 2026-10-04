@@ -1,7 +1,7 @@
 import type { Locator, Page } from '@playwright/test'
 import type { GroupDefaults } from '../../src/shared/hosts'
 import { startTestSshServer, type TestSshServer } from '../integration/ssh-test-server'
-import { expect, test, waitForText } from './fixtures'
+import { expect, openArea, test, waitForText } from './fixtures'
 
 let server: TestSshServer | null = null
 test.afterEach(async () => {
@@ -80,7 +80,11 @@ test('nhóm đặt username / port / màu → host để trống kế thừa; ta
   await form.getByTestId('host-password').fill('pw')
   await form.getByTestId('host-save').click()
   await expect(form).toHaveCount(0)
-  await expect(hostRow(page, 'inherits')).toContainText(`deploy@127.0.0.1:${server.port}`)
+  // Địa chỉ (đã kế thừa user / port của nhóm) nằm trong tooltip của hàng một dòng.
+  await expect(hostRow(page, 'inherits')).toHaveAttribute(
+    'title',
+    new RegExp(`deploy@127\\.0\\.0\\.1:${String(server.port)}`)
+  )
 
   await hostRow(page, 'inherits').dblclick()
   await page.getByTestId('hostkey-accept').click()
@@ -97,7 +101,8 @@ test('nhóm đặt username / port / màu → host để trống kế thừa; ta
   await groupRow(page, 'Production').click({ button: 'right' })
   await page.getByTestId('menu-edit').click()
   await expect(page.getByTestId('group-default-username')).toHaveValue('deploy')
-  await expect(page.getByTestId('group-color-red')).toHaveAttribute('aria-checked', 'true')
+  // Nhóm cũ chỉ có màu đỏ → môi trường Production được chọn sẵn.
+  await expect(page.getByTestId('group-env-prod')).toHaveAttribute('aria-checked', 'true')
 })
 
 test('menu chuột phải: yêu thích, copy lệnh ssh, nhân bản, mở SFTP; mục Recent', async ({
@@ -133,6 +138,8 @@ test('menu chuột phải: yêu thích, copy lệnh ssh, nhân bản, mở SFTP;
   await page.getByTestId('menu-sftp').click()
   await page.getByTestId('hostkey-accept').click()
   await expect(page.getByTestId('sftp-panel')).toBeVisible()
+  // Trình quản lý file thuộc khu vực Files; cây host ở khu vực Hosts.
+  await openArea(page, 'hosts')
   // Đang nằm trong Favorites → Recent không lặp lại; bỏ yêu thích thì hiện ở Recent.
   await expect(page.locator('[data-testid="recent-row"][data-host-label="web"]')).toHaveCount(0)
   await hostRow(page, 'web').click({ button: 'right' })
@@ -190,8 +197,9 @@ test('kéo thả để sắp xếp host thủ công', async ({ page }) => {
     targetPosition: { x: 40, y: 3 }
   })
   await expect.poll(order).toEqual(['charlie', 'alpha', 'bravo'])
+  // Hàng host một dòng (28px): nửa dưới của bravo = thả sau bravo.
   await hostRow(page, 'charlie').dragTo(hostRow(page, 'bravo'), {
-    targetPosition: { x: 40, y: 30 }
+    targetPosition: { x: 40, y: 24 }
   })
   await expect.poll(order).toEqual(['alpha', 'bravo', 'charlie'])
 })

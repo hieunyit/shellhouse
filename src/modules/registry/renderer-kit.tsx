@@ -64,6 +64,12 @@ export function whenHostRunning(timeoutMs = 15_000): Promise<void> {
 
 /** Thông báo nổi (toast) của app — module dùng để báo kết quả thao tác. */
 export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
+export { usePublishTransfers } from '../../renderer/src/stores/transfers'
+export {
+  ExplorerNav,
+  useNavPlacement,
+  type NavPlacement
+} from '../../renderer/src/shell/ExplorerNav'
 /** Đa ngôn ngữ + định dạng ngày / số / dung lượng theo locale — xem src/shared/i18n. */
 export { t, tn, language, locale } from '@shared/i18n'
 export {
@@ -323,6 +329,11 @@ export function openModuleTab(module: string, tab: string, params: unknown): str
 }
 
 /** Tab module đổi tham số (vị trí đang xem…) → cập nhật đích (nhân bản / workspace) và tiêu đề. */
+/** Chuyển tới tab (vd. từ trung tâm Transfers về đúng tab đang truyền). */
+export function activateTab(tabId: string): void {
+  useTabs.getState().activate(tabId)
+}
+
 export function setModuleTabParams(tabId: string, params: unknown): void {
   const tab = useTabs.getState().tabs.find((t) => t.id === tabId)
   if (tab?.target.kind !== 'module') return

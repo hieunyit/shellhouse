@@ -30,16 +30,25 @@ test('hộp thoại: focus bị giữ bên trong khi Tab, Esc trả focus về t
   await page.getByTestId(`terminal-${tab}`).click()
   expect(await focusedIn(page, `terminal-${tab}`)).toBe(true)
 
+  // Trang Settings (không phải hộp thoại): mở bằng phím → focus vào trang; Esc → quay lại terminal.
   await page.keyboard.press(isMac ? 'Meta+Comma' : 'Control+Comma')
   await expect(page.getByTestId('settings-dialog')).toBeVisible()
-  expect(await focusedIn(page, 'settings-dialog')).toBe(true)
-  for (let i = 0; i < 60; i++) {
-    await page.keyboard.press(i % 7 === 6 ? 'Shift+Tab' : 'Tab')
-    expect(await focusedIn(page, 'settings-dialog')).toBe(true)
-  }
+  await expect.poll(() => focusedIn(page, 'settings-dialog')).toBe(true)
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('settings-dialog')).toHaveCount(0)
-  expect(await focusedIn(page, `terminal-${tab}`)).toBe(true)
+  await expect.poll(() => focusedIn(page, `terminal-${tab}`)).toBe(true)
+
+  // Hộp thoại thật (Snippets): Tab / Shift+Tab xoay vòng bên trong, Esc trả focus về terminal.
+  await page.keyboard.press(isMac ? 'Meta+S' : 'Control+Shift+S')
+  const snippets = page.getByTestId('snippets-dialog')
+  await expect(snippets).toBeVisible()
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press(i % 7 === 6 ? 'Shift+Tab' : 'Tab')
+    expect(await focusedIn(page, 'snippets-dialog')).toBe(true)
+  }
+  await page.keyboard.press('Escape')
+  await expect(snippets).toHaveCount(0)
+  await expect.poll(() => focusedIn(page, `terminal-${tab}`)).toBe(true)
 
   // Bảng lệnh: mở, chọn bằng phím mũi tên / Enter, không cần chuột.
   await page.keyboard.press(isMac ? 'Meta+Shift+P' : 'Control+Shift+P')
@@ -51,7 +60,9 @@ test('hộp thoại: focus bị giữ bên trong khi Tab, Esc trả focus về t
 
 test('kết nối SSH chỉ bằng bàn phím: host key → mật khẩu → gõ lệnh', async ({ page }) => {
   server = await startTestSshServer([{ username: 'kb', password: 'ban-phim' }])
-  await page.getByTestId('quick-connect').focus()
+  // Quick connect bằng phím (Ctrl+Shift+O): ô nhập có focus sẵn.
+  await page.keyboard.press(isMac ? 'Meta+Shift+O' : 'Control+Shift+O')
+  await expect(page.getByTestId('quick-connect')).toBeFocused()
   await page.keyboard.type(`kb@127.0.0.1:${server.port}`)
   await page.keyboard.press('Enter')
   const dialog = page.getByTestId('prompt-dialog')

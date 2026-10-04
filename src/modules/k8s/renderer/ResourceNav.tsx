@@ -3,7 +3,7 @@ import { ChevronRight, LayoutDashboard, Map as MapIcon } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { COUNT_CAPPED, type DiscoveredKind } from '../shared/ops'
 import { BUILTIN_KINDS, CRD_SECTIONS, type ResourceSection } from '../shared/resources'
-import { formatNumber, t } from '../../registry/renderer-kit'
+import { formatNumber, t, type NavPlacement } from '../../registry/renderer-kit'
 import { HELM, MAP, OVERVIEW } from './nav'
 
 /** Thứ tự nhóm như Rancher; CRD có nhóm riêng (Gateway API, Argo CD) đứng sau, rồi Apps. */
@@ -61,7 +61,8 @@ export const ResourceNav = memo(function ResourceNav({
   view,
   drilled,
   counts,
-  onGo
+  onGo,
+  placement = 'inline'
 }: {
   kinds: DiscoveredKind[] | null
   view: string
@@ -70,6 +71,8 @@ export const ResourceNav = memo(function ResourceNav({
   /** Số đối tượng theo loại (namespace đang chọn); thiếu / null = chưa biết. */
   counts: Readonly<Record<string, number | null>>
   onGo: (id: string) => void
+  /** Trong Explorer của khung app (không khung riêng) hay cột bên trái của view. */
+  placement?: NavPlacement
 }): React.JSX.Element {
   const [choices, setChoices] = useState<Record<string, boolean>>(loadChoices)
   const visible = (kinds ?? BUILTIN_KINDS.map((x) => ({ ...x, forbidden: false }))).filter(
@@ -133,8 +136,8 @@ export const ResourceNav = memo(function ResourceNav({
           'flex w-full items-center gap-2 rounded-md py-1 pr-2 text-left text-[13px]',
           indent ? 'pl-9' : 'pl-7',
           current
-            ? 'bg-surface font-medium text-fg shadow-sm'
-            : 'text-muted hover:bg-hover hover:text-fg'
+            ? 'bg-ds-active font-medium text-fg'
+            : 'text-muted hover:bg-ds-hover hover:text-fg'
         )}
         onClick={() => {
           onGo(x.id)
@@ -193,7 +196,11 @@ export const ResourceNav = memo(function ResourceNav({
   const customOpen = isOpen(CUSTOM, customItems, false)
   return (
     <nav
-      className="flex w-60 shrink-0 flex-col gap-0.5 overflow-auto border-r border-line bg-subtle p-2"
+      className={cx(
+        'flex flex-col gap-0.5',
+        placement === 'inline' &&
+          'w-60 shrink-0 overflow-auto border-r border-ds-border-subtle bg-ds-bg p-2'
+      )}
       data-testid="k8s-nav"
     >
       <button

@@ -5,6 +5,8 @@ import type { SftpOp } from './sftp'
 export interface ShellhouseTestHooks {
   tabIds(): string[]
   activeTabId(): string | null
+  /** Tiêu đề tab đang chọn (tab module không có dải tab riêng khi chỉ có một). */
+  activeTabTitle(): string | null
   /** Toàn bộ nội dung buffer (đã bỏ khoảng trắng cuối dòng). */
   bufferText(tabId: string, lastLines?: number): string
   size(tabId: string): { cols: number; rows: number } | null

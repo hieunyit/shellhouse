@@ -103,7 +103,7 @@ function Section({
 }): React.JSX.Element {
   return (
     <section className="border-t border-line px-3 py-3" data-testid={testId}>
-      <h3 className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold tracking-wider text-faint uppercase">
+      <h3 className="mb-1.5 flex items-center gap-2 text-xs font-medium text-faint">
         <span className="flex-1">{title}</span>
         {aside}
       </h3>
@@ -753,7 +753,7 @@ export function S3DetailsPanel({
                           {v.modified ? formatDateTime(v.modified) : '—'}
                         </span>
                         {v.isLatest && (
-                          <span className="rounded bg-accent-soft px-1 text-[10px] font-medium text-accent">
+                          <span className="rounded bg-accent-soft px-1 text-[11px] font-medium text-accent">
                             {v.deleteMarker ? t('Deleted') : t('Current')}
                           </span>
                         )}

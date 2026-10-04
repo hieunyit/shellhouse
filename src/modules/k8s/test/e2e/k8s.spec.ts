@@ -6,7 +6,9 @@ import type { Page } from '@playwright/test'
 import {
   activeTab,
   expect,
+  expectActiveTab,
   launchApp,
+  openArea,
   setWindowSize,
   test,
   waitForText
@@ -21,6 +23,7 @@ async function enableK8s(page: Page): Promise<void> {
   await page.getByTestId('module-enable-confirm').click()
   await expect(page.getByTestId('module-toggle-k8s')).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Escape')
+  await openArea(page, 'k8s')
 }
 
 function kubeconfig(server: ApiTestServer): string {
@@ -76,14 +79,14 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await expect(rows).toHaveCount(3)
 
     // Tab ẩn: sự kiện được giữ lại, hiện tab thì bảng cập nhật đúng.
-    await page.getByTestId('tab').first().click()
+    await openArea(page, 'hosts')
     server.upsert('pods', {
       apiVersion: 'v1',
       kind: 'Pod',
       metadata: { name: 'web-4', namespace: 'shop' }
     })
     await page.waitForTimeout(300)
-    await page.getByTestId('tab').filter({ hasText: 'test' }).first().click()
+    await openArea(page, 'k8s')
     await expect(rows).toHaveCount(4)
     server.remove('pods', 'shop', 'web-4')
     await expect(rows).toHaveCount(3)
@@ -110,10 +113,16 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await page.mouse.move(handle.x - 98, handle.y + 200, { steps: 5 })
     await page.mouse.up()
     expect(Math.round(((await describe.boundingBox())?.width ?? 0) - before)).toBe(100)
-    await view.getByTestId('k8s-nav-toggle').click()
-    await expect(view.getByTestId('k8s-nav')).toHaveCount(0)
-    await view.getByTestId('k8s-nav-toggle').click()
+    // Thanh điều hướng nằm ở Explorer; ẩn Explorer → điều hướng về trong view, thu gọn được.
+    await expect(page.getByTestId('explorer').getByTestId('k8s-nav')).toBeVisible()
+    await page.keyboard.press('Control+Shift+B')
     await expect(view.getByTestId('k8s-nav')).toBeVisible()
+    await page.getByTestId('k8s-nav-toggle').click()
+    await expect(page.getByTestId('k8s-nav')).toHaveCount(0)
+    await page.getByTestId('k8s-nav-toggle').click()
+    await expect(page.getByTestId('k8s-nav')).toBeVisible()
+    await page.keyboard.press('Control+Shift+B')
+    await expect(page.getByTestId('explorer').getByTestId('k8s-nav')).toBeVisible()
     await describe.getByTestId('k8s-detail-tab-events').click()
     await expect(view.getByTestId('k8s-events')).toContainText('BackOff')
     await page.keyboard.press('Escape')
@@ -145,7 +154,7 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await page.getByTestId('tab').filter({ hasText: 'test' }).first().click()
     await web1.click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'Open shell' }).click()
-    await expect(page.getByTestId('tab').last()).toContainText('web-1/app (shell)')
+    await expectActiveTab(page, 'web-1/app (shell)')
     const tab = await activeTab(page)
     await waitForText(page, tab, 'exec: sh -c')
     await page.evaluate((id) => {
@@ -154,10 +163,10 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await waitForText(page, tab, 'echo xin-chao')
 
     // Thanh lệnh kiểu k9s: ":deploy" → Deployments; scale bằng phím S; Enter → pod của deployment.
-    await page.getByTestId('tab').filter({ hasText: 'test' }).first().click()
+    await openArea(page, 'k8s')
     await view.getByTestId('k8s-filter').fill(':deploy')
     await page.keyboard.press('Enter')
-    await expect(view.getByTestId('k8s-nav-deployments.apps')).toHaveAttribute(
+    await expect(page.getByTestId('k8s-nav-deployments.apps')).toHaveAttribute(
       'aria-current',
       'true'
     )
@@ -194,16 +203,16 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     // Bấm vào service liên quan → sang Services, mở chi tiết của nó.
     await deploy.dblclick()
     await related.locator('[data-testid="k8s-related-item"][data-name="web"]').click()
-    await expect(view.getByTestId('k8s-nav-services')).toHaveAttribute('aria-current', 'true')
+    await expect(page.getByTestId('k8s-nav-services')).toHaveAttribute('aria-current', 'true')
     await expect(view.getByTestId('k8s-describe')).toContainText('web')
     await page.keyboard.press('Escape')
 
     // Thanh bên: nhóm thu gọn được — chỉ Workloads mở sẵn; lựa chọn được nhớ.
-    await expect(view.getByTestId('k8s-nav-secrets')).toHaveCount(0)
-    await view.getByTestId('k8s-nav-group-Workloads').click()
-    await expect(view.getByTestId('k8s-nav-pods')).toHaveCount(0)
-    await view.getByTestId('k8s-nav-group-Workloads').click()
-    await expect(view.getByTestId('k8s-nav-pods')).toBeVisible()
+    await expect(page.getByTestId('k8s-nav-secrets')).toHaveCount(0)
+    await page.getByTestId('k8s-nav-group-Workloads').click()
+    await expect(page.getByTestId('k8s-nav-pods')).toHaveCount(0)
+    await page.getByTestId('k8s-nav-group-Workloads').click()
+    await expect(page.getByTestId('k8s-nav-pods')).toBeVisible()
 
     // Bảng phím tắt đầy đủ (phím ?) — thanh dưới chỉ hiện vài phím chính.
     await view.getByTestId('key-hints-all').click()
@@ -213,7 +222,7 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
 
     // Số đối tượng cạnh từng loại (như Rancher).
     await expect(
-      view.getByTestId('k8s-nav-deployments.apps').getByTestId('k8s-nav-count')
+      page.getByTestId('k8s-nav-deployments.apps').getByTestId('k8s-nav-count')
     ).toHaveText('1')
 
     // Helm releases (đọc Secret của Helm 3) — nhóm Apps.
@@ -246,8 +255,8 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
         ).toString('base64')
       }
     })
-    await view.getByTestId('k8s-nav-group-Apps').click()
-    await view.getByTestId('k8s-nav-helm-releases').click()
+    await page.getByTestId('k8s-nav-group-Apps').click()
+    await page.getByTestId('k8s-nav-helm-releases').click()
     const release = view.locator('[data-testid="k8s-helm-release"][data-name="shop/shop-db"]')
     await expect(release).toContainText('postgresql-15.1.0')
     await expect(release).toContainText('deployed')
@@ -261,18 +270,18 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await expect(page.getByTestId('k8s-helm-uninstall-dialog')).toContainText('Uninstall shop-db?')
     await page.keyboard.press('Escape')
     await expect(page.getByTestId('k8s-helm-uninstall-dialog')).toHaveCount(0)
-    await view.getByTestId('k8s-nav-group-Apps').click()
+    await page.getByTestId('k8s-nav-group-Apps').click()
 
     // Tổng quan cluster.
-    await view.getByTestId('k8s-nav-overview').click()
+    await page.getByTestId('k8s-nav-overview').click()
     await expect(view.getByTestId('k8s-ov-nodes')).toContainText('1/2')
     // Vấn đề theo nhóm: pod crash-loop, node chưa Ready — bấm để mở.
     await expect(view.getByTestId('k8s-ov-problem-failing')).toContainText('web-2')
     await expect(view.getByTestId('k8s-ov-problem-nodes')).toBeVisible()
 
     // Secret: giá trị ẩn, bấm mới hiện.
-    await view.getByTestId('k8s-nav-group-Storage').click()
-    await view.getByTestId('k8s-nav-secrets').click()
+    await page.getByTestId('k8s-nav-group-Storage').click()
+    await page.getByTestId('k8s-nav-secrets').click()
     await view.locator('[data-testid="k8s-row"][data-name="shop/db"]').click()
     await page.keyboard.press('d')
     await view.getByTestId('k8s-detail-tab-data').click()
@@ -282,7 +291,7 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await expect(view.getByTestId('k8s-secret-value').first()).toHaveText('s3cr3t')
 
     // Port-forward tới pod.
-    await view.getByTestId('k8s-nav-pods').click()
+    await page.getByTestId('k8s-nav-pods').click()
     await web1.click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'Forward a port…' }).click()
     await page.getByTestId('k8s-forward-start').click()
@@ -454,7 +463,7 @@ test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi t
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
     await setWindowSize(launched, 1366, 820)
-    await view.getByTestId('k8s-nav-map').click()
+    await page.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
     // Mặc định là Topology — chuyển sang bản đồ workload.
     await expect(map.getByTestId('k8s-map-view-topology')).toHaveAttribute('aria-checked', 'true')
@@ -511,7 +520,7 @@ test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi t
 
     // Mở chi tiết → bảng Deployments, chi tiết của web.
     await panel.getByTestId('k8s-map-open').click()
-    await expect(view.getByTestId('k8s-nav-deployments.apps')).toHaveAttribute(
+    await expect(page.getByTestId('k8s-nav-deployments.apps')).toHaveAttribute(
       'aria-current',
       'true'
     )
@@ -536,7 +545,7 @@ test('Kubernetes: Topology tĩnh — vấn đề giải thích bằng lời, tì
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
     await setWindowSize(launched, 1366, 820)
-    await view.getByTestId('k8s-nav-map').click()
+    await page.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
     // Topology là mặc định: làn có tên, thẻ Ingress ghi từng luật host / path.
     await expect(map.getByTestId('k8s-topo-canvas')).toBeVisible()
@@ -642,7 +651,7 @@ test('Kubernetes: bản đồ cluster lớn — gom vùng theo nhãn, lọc nhã
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
     await setWindowSize(launched, 1366, 820)
-    await view.getByTestId('k8s-nav-map').click()
+    await page.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
     await map.getByTestId('k8s-map-view-workloads').click()
     const summary = map.getByTestId('k8s-map-summary')
@@ -729,8 +738,8 @@ test('Kubernetes: trang Deployment (Status / Resources / Pods / ReplicaSets), To
     await setWindowSize(launched, 1366, 820)
     // Đợi bảng pod tải xong lần đầu rồi mới đổi loại (không đua với lần tải đầu).
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toBeVisible()
-    await view.getByTestId('k8s-nav-deployments.apps').click()
-    await expect(view.getByTestId('k8s-nav-deployments.apps')).toHaveAttribute(
+    await page.getByTestId('k8s-nav-deployments.apps').click()
+    await expect(page.getByTestId('k8s-nav-deployments.apps')).toHaveAttribute(
       'aria-current',
       'true'
     )
@@ -825,7 +834,7 @@ test('Kubernetes: trang Deployment (Status / Resources / Pods / ReplicaSets), To
     // Overview: bấm node của pod → mở Node.
     await detail.getByTestId('k8s-detail-tab-overview').click()
     await detail.getByTestId('k8s-pod-node').first().click()
-    await expect(view.getByTestId('k8s-nav-nodes')).toHaveAttribute('aria-current', 'true')
+    await expect(page.getByTestId('k8s-nav-nodes')).toHaveAttribute('aria-current', 'true')
     await expect(view.getByTestId('k8s-describe')).toContainText('node-1')
   } finally {
     await launched.close()
@@ -846,7 +855,7 @@ test('Kubernetes: Metrics lấy lịch sử từ Prometheus trong cluster (chọ
     await enableK8s(page)
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
-    await view.getByTestId('k8s-nav-deployments.apps').click()
+    await page.getByTestId('k8s-nav-deployments.apps').click()
     await view.locator('[data-testid="k8s-row"][data-name="shop/web"]').click()
     await page.keyboard.press('d')
     const detail = view.getByTestId('k8s-describe')
@@ -875,7 +884,7 @@ test('Kubernetes: Metrics lấy lịch sử từ Prometheus trong cluster (chọ
 
     // Trang Pod: dòng tóm tắt + Usage (cùng biểu đồ), không còn QoS / Restart policy.
     await page.keyboard.press('Escape')
-    await view.getByTestId('k8s-nav-pods').click()
+    await page.getByTestId('k8s-nav-pods').click()
     await view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]').click()
     await page.keyboard.press('d')
     await expect(detail.getByTestId('k8s-pod-summary')).toContainText('node-1')
@@ -907,7 +916,7 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await view.getByTestId('k8s-ns-default').click()
     await expect(view.getByTestId('k8s-ns-default')).toBeChecked()
     await page.keyboard.press('Escape')
-    await view.getByTestId('k8s-nav-map').click()
+    await page.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
     // Lấy hai mẫu (5 s) → live; traffic shop → default: nối đúng thẻ web → thẻ pod lẻ của default
     // (không gộp thành đường giữa hai đảo).
@@ -971,7 +980,7 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
 
     // Map → Traffic: service map dựng từ Caretta trên mọi namespace (luồng đo dùng chung → có ngay).
     await page.keyboard.press('Escape')
-    await view.getByTestId('k8s-nav-map').click()
+    await page.getByTestId('k8s-nav-map').click()
     await map.getByTestId('k8s-map-view-traffic').click()
     const tmap = view.getByTestId('k8s-traffic-map')
     await expect(tmap.locator('[data-testid="k8s-traffic-node"][data-name="web"]')).toHaveCount(1)
@@ -1010,7 +1019,7 @@ test('Kubernetes: service map — phạm vi theo namespace đang chọn, gộp E
     await view.getByTestId('k8s-ns-shop').click()
     await view.getByTestId('k8s-ns-console-stg').click()
     await page.keyboard.press('Escape')
-    await view.getByTestId('k8s-nav-map').click()
+    await page.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
     await map.getByTestId('k8s-map-view-traffic').click()
     const tmap = view.getByTestId('k8s-traffic-map')
@@ -1075,7 +1084,7 @@ test('Kubernetes: Session Host chết giữa chừng → tab tự kết nối l�
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toBeVisible({
       timeout: 20_000
     })
-    await view.getByTestId('k8s-nav-deployments.apps').click()
+    await page.getByTestId('k8s-nav-deployments.apps').click()
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web"]')).toBeVisible({
       timeout: 20_000
     })
@@ -1100,7 +1109,7 @@ test('Kubernetes: tạo Deployment + Service bằng form (kiểu Rancher / Lens)
     await setWindowSize(launched, 1366, 820)
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-1"]')).toBeVisible()
     // Trang trống có hành động gợi ý: Jobs (chưa có) → "Create Job" mở đúng form.
-    await view.getByTestId('k8s-nav-jobs.batch').click()
+    await page.getByTestId('k8s-nav-jobs.batch').click()
     await view.getByTestId('k8s-empty-create').click()
     await expect(
       page.getByTestId('k8s-create-dialog').getByTestId('k8s-create-kind-Job')
@@ -1110,7 +1119,7 @@ test('Kubernetes: tạo Deployment + Service bằng form (kiểu Rancher / Lens)
     await view.getByTestId('k8s-filter').fill('khong-co-gi')
     await view.getByRole('button', { name: 'Clear filter' }).click()
     await expect(view.getByTestId('k8s-filter')).toHaveValue('')
-    await view.getByTestId('k8s-nav-deployments.apps').click()
+    await page.getByTestId('k8s-nav-deployments.apps').click()
     await view.getByTestId('k8s-create').click()
     const dialog = page.getByTestId('k8s-create-dialog')
     // Đang xem Deployments → form Deployment; namespace mặc định = namespace đang xem.

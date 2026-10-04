@@ -3,6 +3,9 @@ import { t } from '@shared/i18n'
 import type { WorkspaceItem } from '@shared/workspaces'
 import { shellName } from './shells'
 import { confirmAction } from './confirm'
+import { sharesDockview, tabArea, type Area } from '../shell/areas'
+
+const sameArea = (a: Area, b: Area): boolean => a === b || (sharesDockview(a) && sharesDockview(b))
 
 /**
  * Terminal của module (shell vào container / pod — ADR-014 mục 3.7). `hostId` = chạy trên kết nối
@@ -199,8 +202,20 @@ export const useTabs = create<TabsState>((set, get) => {
       if (index === -1) return s
       const tabs = s.tabs.filter((t) => t.id !== id)
       let activeId = s.activeId
-      if (activeId === id) activeId = (tabs[index] ?? tabs[index - 1] ?? null)?.id ?? null
       const gone = s.tabs[index]
+      if (activeId === id) {
+        // Ưu tiên tab kề bên cùng khu vực (Hosts / module…) — đóng tab Kubernetes không nhảy sang
+        // terminal.
+        const area = gone ? tabArea(gone) : null
+        const same = (t: Tab | undefined): Tab | undefined =>
+          t && area !== null && sameArea(tabArea(t), area) ? t : undefined
+        const after = tabs.slice(index).find((t) => same(t))
+        const before = tabs
+          .slice(0, index)
+          .reverse()
+          .find((t) => same(t))
+        activeId = (after ?? before ?? tabs[index] ?? tabs[index - 1] ?? null)?.id ?? null
+      }
       return { tabs, activeId, closed: gone ? remember(s.closed, [gone]) : s.closed }
     })
   }

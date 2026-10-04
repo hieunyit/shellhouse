@@ -715,7 +715,7 @@ export function SyncDialog({
             <div className="flex flex-col gap-1">
               <div className="h-1.5 overflow-hidden rounded-full bg-subtle">
                 <div
-                  className="h-full rounded-full bg-accent-solid transition-[width]"
+                  className="h-full rounded-full bg-info transition-[width]"
                   style={{ width: `${Math.round(fraction * 100)}%` }}
                 />
               </div>
@@ -755,7 +755,7 @@ export function SyncDialog({
                       {!p.serverSide && a.size > 0 && (
                         <span className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-subtle">
                           <span
-                            className="block h-full bg-accent-solid"
+                            className="block h-full bg-info"
                             style={{
                               width: `${Math.min(100, Math.round((a.done / a.size) * 100))}%`
                             }}

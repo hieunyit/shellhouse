@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test as base } from '@playwright/test'
-import { launchApp, type LaunchedApp } from './fixtures'
+import { expectHostAddress, launchApp, type LaunchedApp } from './fixtures'
 
 /**
  * Host Remote Desktop: tạo bằng form, hiện trên thanh bên với icon riêng, Connect mở client RDP.
@@ -35,7 +35,7 @@ test('host RDP: form, thanh bên, kết nối bằng client ngoài, Disconnect',
   await expect(form).toHaveCount(0)
 
   const row = page.locator('[data-testid="host-row"][data-host-label="win-server"]')
-  await expect(row).toContainText('rdp john@10.0.0.5')
+  await expectHostAddress(row, 'rdp john@10.0.0.5')
   await expect(row.getByTestId('rdp-avatar')).toBeVisible()
 
   // Sửa lại: form mở đúng tab RDP, domain đã tách từ CORP\john.

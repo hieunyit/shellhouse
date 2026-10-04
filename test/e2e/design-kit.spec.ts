@@ -22,16 +22,13 @@ const active = (
   })
 
 async function openKit(page: Page): Promise<void> {
-  // Bật "New interface (beta)" trong Settings → Appearance.
+  // Mật độ mặc định: Comfortable (Settings → Appearance).
   await page.keyboard.press(isMac ? 'Meta+Comma' : 'Control+Comma')
   await expect(page.getByTestId('settings-dialog')).toBeVisible()
-  await page.getByTestId('setting-new-ui').check()
   await expect(page.getByTestId('setting-density-comfortable')).toHaveAttribute(
     'aria-checked',
     'true'
   )
-  await page.keyboard.press('Escape')
-  await expect(page.getByTestId('settings-dialog')).toHaveCount(0)
 
   // Bảng lệnh → "Open design kit".
   await page.keyboard.press(isMac ? 'Meta+Shift+P' : 'Control+Shift+P')
@@ -43,17 +40,9 @@ async function openKit(page: Page): Promise<void> {
   await expect(page.getByTestId('kit-pane-light')).toBeVisible()
 }
 
-test('Design kit: chỉ có khi bật giao diện mới; Esc đóng lớp trên cùng rồi mới đóng trang', async ({
-  page
-}) => {
+test('Design kit: mở từ bảng lệnh; Esc đóng lớp trên cùng rồi mới đóng trang', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(e.message))
-
-  // Chưa bật cờ: không có trong bảng lệnh.
-  await page.keyboard.press(isMac ? 'Meta+Shift+P' : 'Control+Shift+P')
-  await page.getByTestId('palette-input').fill('design kit')
-  await expect(page.locator('[data-command="designkit.open"]')).toHaveCount(0)
-  await page.keyboard.press('Escape')
 
   await openKit(page)
   // Phần còn lại của app bị inert trong lúc mở.

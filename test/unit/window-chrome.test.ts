@@ -14,17 +14,17 @@ describe('cửa sổ không có thanh tiêu đề', () => {
     expect(o.titleBarStyle).toBe('hiddenInset')
     expect(o.titleBarOverlay).toBeUndefined()
     const y = o.trafficLightPosition?.y ?? 0
-    // Nút ~14 px nằm giữa thanh 44 px (±2 px).
+    // Nút ~14 px nằm giữa title bar (±2 px).
     expect(Math.abs(y + 7 - TOP_BAR_HEIGHT / 2)).toBeLessThanOrEqual(2)
   })
 
-  it('Windows / Linux: hidden + overlay theo theme, thấp hơn thanh 1 px (giữ viền dưới)', () => {
+  it('Windows / Linux: hidden + overlay theo theme, cao bằng title bar', () => {
     for (const platform of ['win32', 'linux'] as const) {
       const dark = windowChromeOptions(platform, true)
       expect(dark.titleBarStyle).toBe('hidden')
       expect(dark.titleBarOverlay).toEqual(titleBarOverlay(true))
     }
-    expect(titleBarOverlay(true).height).toBe(TOP_BAR_HEIGHT - 1)
+    expect(titleBarOverlay(true).height).toBe(TOP_BAR_HEIGHT)
     expect(titleBarOverlay(true).color).not.toBe(titleBarOverlay(false).color)
     expect(windowBackground(true)).not.toBe(windowBackground(false))
   })
@@ -49,16 +49,12 @@ describe('cửa sổ không có thanh tiêu đề', () => {
   })
 })
 
-describe('cài đặt giao diện mới', () => {
-  it('mặc định tắt, mật độ comfortable; giá trị hỏng rơi về mặc định', () => {
-    expect(DEFAULT_SETTINGS.appearance.newUi).toBe(false)
+describe('cài đặt mật độ hiển thị', () => {
+  it('mặc định comfortable; giá trị hỏng rơi về mặc định', () => {
     expect(DEFAULT_SETTINGS.appearance.density).toBe('comfortable')
-    const s = parseSettings({ appearance: { newUi: 'yes', density: 'tiny', theme: 'dark' } })
-    expect(s.appearance.newUi).toBe(false)
+    const s = parseSettings({ appearance: { density: 'tiny', theme: 'dark' } })
     expect(s.appearance.density).toBe('comfortable')
     expect(s.appearance.theme).toBe('dark')
-    expect(
-      parseSettings({ appearance: { newUi: true, density: 'compact' } }).appearance
-    ).toMatchObject({ newUi: true, density: 'compact' })
+    expect(parseSettings({ appearance: { density: 'compact' } }).appearance.density).toBe('compact')
   })
 })

@@ -1,5 +1,6 @@
 import type { GroupTree } from './group-tree'
 import type { GroupDefaults, HostColor } from './hosts'
+import { environmentFromColor } from './environments'
 
 /**
  * Kế thừa giá trị mặc định theo cây nhóm (ADR-010). Dùng chung cho main (khi kết nối) và renderer
@@ -26,7 +27,7 @@ export type InheritedDefaults = {
   [K in keyof Required<GroupDefaults>]: Inherited<NonNullable<GroupDefaults[K]>> | undefined
 }
 
-const FIELDS = ['username', 'port', 'keyId', 'jumpHostIds', 'color'] as const
+const FIELDS = ['username', 'port', 'keyId', 'jumpHostIds', 'color', 'environment'] as const
 
 /** Giá trị mỗi trường lấy từ nhóm gần nhất (tính từ `groupId` đi lên gốc) có đặt trường đó. */
 export function inheritedDefaults(
@@ -66,8 +67,19 @@ export interface EffectiveHost {
   /** Jump host đã lưu (id) sẽ dùng; rỗng = kết nối thẳng hoặc dùng proxyJump của host. */
   jumpHostIds: readonly string[]
   color: HostColor | null
+  /**
+   * Id môi trường (Settings › Environments) của nhóm gần nhất có đặt; không nhóm nào đặt → suy từ màu
+   * cũ (đỏ = Production…); null = không có môi trường.
+   */
+  environment: string | null
   /** Trường nào đang lấy từ nhóm (để hiển thị). */
-  from: { username?: string; port?: string; jumpHostIds?: string; color?: string }
+  from: {
+    username?: string
+    port?: string
+    jumpHostIds?: string
+    color?: string
+    environment?: string
+  }
 }
 
 /** Giá trị thực tế của host sau khi áp kế thừa. */
@@ -94,5 +106,10 @@ export function effectiveHost(own: HostOwnValues, inherited: InheritedDefaults):
     color = inherited.color.value
     from.color = inherited.color.groupName
   }
-  return { username, port, jumpHostIds, color, from }
+  let environment: string | null
+  if (inherited.environment) {
+    environment = inherited.environment.value
+    from.environment = inherited.environment.groupName
+  } else environment = environmentFromColor(color) ?? null
+  return { username, port, jumpHostIds, color, environment, from }
 }

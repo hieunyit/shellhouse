@@ -330,7 +330,7 @@ function PerfPanel({
           </div>
         ))}
       </dl>
-      <p className="mt-2 text-[10px] text-faint">{t('Ctrl+Shift+Alt+P to hide')}</p>
+      <p className="mt-2 text-[11px] text-faint">{t('Ctrl+Shift+Alt+P to hide')}</p>
     </div>
   )
 }
@@ -382,7 +382,7 @@ function Toolbar({
           controller.sendCtrlAltDel()
         }}
       >
-        <span className="text-[10px] font-semibold tracking-tight">CAD</span>
+        <span className="text-[11px] font-semibold tracking-tight">CAD</span>
       </IconButton>
       <IconButton
         label={t('Send the Windows key')}

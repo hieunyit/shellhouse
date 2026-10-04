@@ -15,7 +15,7 @@ export function DetailSection({
 }): React.JSX.Element {
   return (
     <section className="flex flex-col gap-1.5" data-testid={testId}>
-      <h4 className="text-[11px] font-semibold tracking-wide text-faint uppercase">{title}</h4>
+      <h4 className="text-xs font-medium text-faint">{title}</h4>
       {children}
       {hint && <p className="text-[11px] text-faint">{hint}</p>}
     </section>

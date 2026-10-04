@@ -20,8 +20,10 @@ test('màn chào + thẻ bắt đầu ở thanh bên: mở đúng hộp thoại,
   await expect(page.getByTestId('import-dialog')).toBeVisible()
   await closeWithEscape(page, 'import-dialog')
 
-  // Đóng tab cuối → màn chào.
+  // Đóng tab cuối → trạng thái rỗng của Hosts; Home là màn chào.
   await page.getByTestId('tab-close').first().click()
+  await expect(page.getByTestId('hosts-empty')).toBeVisible()
+  await page.getByTestId('open-home').click()
   const welcome = page.getByTestId('welcome')
   await expect(welcome).toContainText('Welcome to Shellhouse')
   await welcome.getByTestId('welcome-add-host').click()
@@ -30,11 +32,11 @@ test('màn chào + thẻ bắt đầu ở thanh bên: mở đúng hộp thoại,
   await welcome.getByTestId('welcome-import').click()
   await expect(page.getByTestId('import-dialog')).toBeVisible()
   await closeWithEscape(page, 'import-dialog')
-  await welcome.getByTestId('welcome-quick-connect').click()
+  await welcome.getByTestId('home-quick-connect').click()
   await expect(welcome.getByTestId('home-quick-connect')).toBeFocused()
 
   // Thanh bên đang ẩn: "Add a host" vẫn mở được (tự hiện thanh bên).
-  await page.getByTestId('toggle-sidebar').click()
+  await page.getByTestId('sidebar-collapse').click()
   await expect(page.getByTestId('sidebar-get-started')).toHaveCount(0)
   await welcome.getByTestId('welcome-add-host').click()
   await expect(page.getByTestId('host-form')).toBeVisible()

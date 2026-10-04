@@ -34,11 +34,12 @@ import { Button, cx, Notice } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
 import { FileTable, type FileColumn } from '../../../renderer/src/components/files/FileTable'
 import { Empty, ToolButton } from '../../../renderer/src/components/files/parts'
-import { KeyHints, Pill, TONE_TEXT } from '../../../renderer/src/components/panels'
+import { KeyHints, Pill } from '../../../renderer/src/components/panels'
 import type { SortState } from '../../../renderer/src/components/SortMenu'
 import { cleanError } from '../../../renderer/src/lib/format'
 import {
   ConnectionPrompt,
+  ExplorerNav,
   formatBytes,
   formatDateTime,
   formatPercent,
@@ -1709,64 +1710,101 @@ export function DockerTab({
       data-ready={ready && list !== null}
     >
       <div className="flex min-h-0 flex-1">
-        <nav
-          className="flex w-44 shrink-0 flex-col gap-0.5 border-r border-line bg-subtle p-2"
-          aria-label={t('Docker sections')}
-        >
-          {SECTIONS.map((s) => (
-            <button
-              key={s}
-              type="button"
-              data-testid={`docker-nav-${s}`}
-              aria-current={section === s}
+        <ExplorerNav active={active}>
+          {(placement) => (
+            <nav
               className={cx(
-                'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[13px]',
-                section === s
-                  ? 'bg-surface font-medium text-fg shadow-sm'
-                  : 'text-muted hover:bg-hover hover:text-fg'
+                'flex flex-col gap-0.5',
+                placement === 'inline'
+                  ? 'w-44 shrink-0 border-r border-ds-border-subtle bg-ds-bg p-2'
+                  : 'pt-1'
               )}
-              onClick={() => {
-                setSection(s)
-                setFilter('')
-                setSelected(new Set())
-              }}
+              aria-label={t('Docker sections')}
+              data-testid="docker-nav"
             >
-              {SECTION_ICONS[s]}
-              <span className="flex-1">{sectionLabel(s)}</span>
-              {counts[s] !== undefined && (
-                <span className="text-[11px] text-faint tabular-nums">{counts[s]}</span>
-              )}
-            </button>
-          ))}
-          <div
-            className="mt-auto px-1 text-[11px] leading-snug text-faint"
-            data-testid="docker-engine-info"
-          >
-            {info ? (
-              <>
-                <div className="text-muted">{info.version}</div>
-                <div>{info.os}</div>
-                {info.via === 'cli' && <div>{t('via docker CLI')}</div>}
-                <div className="mt-1">{params.label}</div>
-                {statsError && (
-                  <div
-                    className="mt-1 text-warning"
-                    title={statsError}
-                    data-testid="docker-stats-error"
-                  >
-                    {t('CPU / memory unavailable')}
-                  </div>
+              {SECTIONS.map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  data-testid={`docker-nav-${s}`}
+                  aria-current={section === s}
+                  className={cx(
+                    'flex h-(--ds-tree-row-h) items-center gap-2 rounded-ds-md px-2 text-left text-[13px] [&_svg]:text-faint',
+                    section === s
+                      ? 'bg-ds-active font-medium text-fg'
+                      : 'text-muted hover:bg-ds-hover hover:text-fg'
+                  )}
+                  onClick={() => {
+                    setSection(s)
+                    setFilter('')
+                    setSelected(new Set())
+                  }}
+                >
+                  {SECTION_ICONS[s]}
+                  <span className="flex-1">{sectionLabel(s)}</span>
+                  {counts[s] !== undefined && (
+                    <span className="text-[11px] text-faint tabular-nums">{counts[s]}</span>
+                  )}
+                </button>
+              ))}
+              <div
+                className={cx(
+                  'px-2 text-[11px] leading-snug text-faint',
+                  placement === 'inline' ? 'mt-auto' : 'mt-3'
                 )}
-              </>
-            ) : (
-              session.status
-            )}
-          </div>
-        </nav>
+                data-testid="docker-engine-info"
+              >
+                {info ? (
+                  <>
+                    <div className="text-muted">{info.version}</div>
+                    <div>{info.os}</div>
+                    {info.via === 'cli' && <div>{t('via docker CLI')}</div>}
+                    <div className="mt-1">{params.label}</div>
+                    {statsError && (
+                      <div
+                        className="mt-1 text-warning"
+                        title={statsError}
+                        data-testid="docker-stats-error"
+                      >
+                        {t('CPU / memory unavailable')}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  session.status
+                )}
+              </div>
+            </nav>
+          )}
+        </ExplorerNav>
         <div className="@container flex min-w-0 flex-1 flex-col">
-          <div className="flex h-11 shrink-0 items-center gap-1.5 border-b border-line px-2">
+          {/* Header (thiết kế v0.5): Docker / endpoint / mục đang xem; thao tác bên phải. */}
+          <div className="flex h-ds-header shrink-0 items-center gap-1 border-b border-ds-border-subtle pr-2 pl-3">
+            <span className="flex shrink-0 items-center gap-1.5 px-1 text-[13px] font-medium text-muted">
+              <Container size={14} strokeWidth={1.5} className="text-faint" aria-hidden />
+              Docker
+            </span>
+            <span aria-hidden className="shrink-0 text-ds-fg-disabled">
+              /
+            </span>
+            <span className="min-w-0 truncate px-1 text-[13px] font-medium text-muted">
+              {params.label}
+            </span>
+            <span aria-hidden className="shrink-0 text-ds-fg-disabled">
+              /
+            </span>
+            <span
+              className="shrink-0 px-1 text-[13px] font-semibold text-fg"
+              data-testid="docker-section-title"
+            >
+              {sectionLabel(section)}
+            </span>
+            <div className="min-w-2 flex-1" />
+            {toolbar}
+          </div>
+          <div className="flex h-ds-toolbar shrink-0 items-center gap-2 border-b border-ds-border-subtle px-3 empty:hidden">
             {section !== 'overview' && (
-              <div className="flex h-8 w-40 min-w-24 shrink items-center gap-1.5 rounded-md border @2xl:w-60 border-line bg-subtle px-2">
+              <div className="flex h-ds-ctl w-40 min-w-24 shrink items-center gap-1.5 rounded-ds-md border border-ds-border-control bg-subtle px-2 focus-within:border-ds-accent focus-within:ring-3 focus-within:ring-ds-accent-soft hover:border-faint @2xl:w-60">
                 <Search size={13} className="text-faint" />
                 <input
                   ref={filterRef}
@@ -1792,7 +1830,7 @@ export function DockerTab({
               <div
                 role="radiogroup"
                 aria-label={t('Show')}
-                className="inline-flex rounded-md border border-line bg-subtle p-0.5"
+                className="inline-flex gap-0.5 rounded-ds-md border border-ds-border-strong bg-subtle p-0.5"
               >
                 {(['all', 'running', 'stopped', 'unhealthy'] as const)
                   .filter((st) => st !== 'unhealthy' || unhealthyCount > 0 || status === st)
@@ -1804,8 +1842,8 @@ export function DockerTab({
                       aria-checked={status === st}
                       data-testid={`docker-status-${st}`}
                       className={cx(
-                        'h-7 rounded px-2 text-xs font-medium whitespace-nowrap',
-                        status === st ? 'bg-surface text-fg shadow-sm' : 'text-muted hover:text-fg',
+                        'h-6 rounded-ds-sm px-2 text-xs font-medium whitespace-nowrap',
+                        status === st ? 'bg-ds-surface-3 text-fg' : 'text-muted hover:text-fg',
                         st === 'unhealthy' && status !== st && 'text-danger'
                       )}
                       onClick={() => {
@@ -1825,8 +1863,6 @@ export function DockerTab({
                   ))}
               </div>
             )}
-            <div className="flex-1" />
-            {toolbar}
           </div>
           {loadError && (
             <div className="border-b border-line p-2">
@@ -1878,15 +1914,12 @@ export function DockerTab({
                         toggleCheck(visibleKeys ?? [], c.name, range)
                       }}
                     />
-                    <Container
-                      size={14}
-                      className={cx('shrink-0', TONE_TEXT[stateTone(c.state)])}
-                    />
+                    <Container size={14} strokeWidth={1.6} className="shrink-0 text-faint" />
                   </>
                 )}
                 badge={(c) =>
                   c.project ? (
-                    <span className="shrink-0 rounded bg-subtle px-1 text-[10px] text-faint">
+                    <span className="shrink-0 rounded-ds-xs bg-ds-active px-1 text-[11px] text-faint">
                       {c.project}
                     </span>
                   ) : null
@@ -1957,12 +1990,12 @@ export function DockerTab({
                 )}
                 badge={(i) =>
                   i.dangling ? (
-                    <span className="rounded bg-subtle px-1 text-[10px] text-faint">
+                    <span className="rounded bg-subtle px-1 text-[11px] text-faint">
                       {t('dangling')}
                     </span>
                   ) : i.tags.length > 1 ? (
                     <span
-                      className="rounded bg-subtle px-1 text-[10px] text-faint"
+                      className="rounded bg-subtle px-1 text-[11px] text-faint"
                       title={i.tags.join('\n')}
                     >
                       {`+${String(i.tags.length - 1)}`}
@@ -2163,7 +2196,7 @@ export function DockerTab({
                 )}
                 badge={(n) =>
                   n.builtin ? (
-                    <span className="rounded bg-subtle px-1 text-[10px] text-faint">
+                    <span className="rounded bg-subtle px-1 text-[11px] text-faint">
                       {t('built-in')}
                     </span>
                   ) : null

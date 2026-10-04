@@ -1,0 +1,345 @@
+/* ==========================================================================
+   Shellhouse — Design tokens (prototype v0.3)
+   Tầng 1 (primitive) được nhúng thẳng vào tầng 2 (semantic) để prototype gọn.
+   Mọi component CHỈ được dùng token semantic bên dưới, không dùng mã màu trực tiếp.
+   Theme:   [data-theme="dark" | "light"]   (có thể lồng — kit.html đặt 2 theme cạnh nhau)
+   Density: [data-density="comfortable" | "compact"]
+   Accent:  Shellhouse teal (duy nhất — đã bỏ indigo theo quyết định 2026-10-04)
+   ========================================================================== */
+
+
+/* Fonts: xem assets/fonts.css (Inter + JetBrains Mono nhúng base64). */
+
+/* --------------------------------------------------------------------------
+   Theme-independent tokens
+   -------------------------------------------------------------------------- */
+:root {
+  /* Typography */
+  --font-sans: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --fs-xs: 11px;  --lh-xs: 16px;   /* nhãn phụ, kbd, badge */
+  --fs-sm: 12px;  --lh-sm: 16px;   /* bảng compact, meta, header cột */
+  --fs-base: 13px; --lh-base: 20px; /* chữ mặc định của ứng dụng */
+  --fs-md: 14px;  --lh-md: 20px;   /* tiêu đề panel, tên trong Inspector */
+  --fs-lg: 16px;  --lh-lg: 24px;   /* tiêu đề trang phụ, dialog */
+  --fs-xl: 20px;  --lh-xl: 28px;   /* tiêu đề trang (Home, Settings) */
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --tracking-tight: -0.011em;
+  --tracking-xl: -0.018em;
+
+  /* Spacing — lưới 4px */
+  --sp-0: 0;
+  --sp-0-5: 2px;
+  --sp-1: 4px;
+  --sp-1-5: 6px;
+  --sp-2: 8px;
+  --sp-2-5: 10px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  /* Radii */
+  --r-xs: 3px;
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
+  --r-full: 999px;
+
+  /* Icon sizes */
+  --icon-sm: 14px;
+  --icon-md: 16px;
+
+  /* Motion */
+  --dur-instant: 80ms;
+  --dur-fast: 120ms;
+  --dur-base: 150ms;
+  --dur-slow: 180ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Z-index layers */
+  --z-base: 0;
+  --z-raised: 1;
+  --z-sticky: 10;
+  --z-resizer: 20;
+  --z-dropdown: 100;
+  --z-overlay: 200;
+  --z-dialog: 300;
+  --z-palette: 400;
+  --z-toast: 500;
+  --z-tooltip: 600;
+
+  /* Layout */
+  --activitybar-w: 48px;
+  --explorer-w: 260px;
+  --inspector-w: 380px;
+  --statusbar-h: 26px;
+  --titlebar-h: 38px;    /* thanh tiêu đề tự vẽ (frameless) — vùng kéo cửa sổ */
+  --inset: 8px;          /* khoảng hở quanh panel chính (Linear-style inset) */
+  --menu-item-h: 30px;
+  --gnode-w: 208px;      /* đồng bộ với hằng số layout trong app.js (graph) */
+  --gnode-h: 52px;
+}
+
+/* --------------------------------------------------------------------------
+   Density
+   -------------------------------------------------------------------------- */
+:root,
+[data-density='comfortable'] {
+  --row-h: 32px;          /* hàng bảng, hàng tree */
+  --tree-row-h: 28px;
+  --ctl-h: 28px;          /* button, input, select, segmented */
+  --ctl-h-sm: 24px;
+  --ctl-h-lg: 36px;
+  --header-h: 44px;       /* header của main */
+  --toolbar-h: 44px;
+  --tab-h: 36px;
+  --cell-px: 12px;
+  --prop-row-h: 28px;
+  --table-fs: var(--fs-base);
+}
+[data-density='compact'] {
+  --row-h: 28px;
+  --tree-row-h: 26px;
+  --ctl-h: 24px;
+  --ctl-h-sm: 20px;
+  --ctl-h-lg: 32px;
+  --header-h: 40px;
+  --toolbar-h: 38px;
+  --tab-h: 32px;
+  --cell-px: 8px;
+  --prop-row-h: 24px;
+  --table-fs: var(--fs-sm);
+  --menu-item-h: 28px;
+}
+
+/* --------------------------------------------------------------------------
+   Dark theme (mặc định)
+   -------------------------------------------------------------------------- */
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #08090a;                 /* nền khung app (activity bar, explorer, status bar) */
+  --surface-0: #0e0f11;          /* panel chính (inset) */
+  --surface-1: #141518;          /* card, input, header bảng sticky */
+  --surface-2: #1a1b1f;          /* menu, popover, hover mạnh */
+  --surface-3: #222328;          /* item đang chọn trong popover, kbd */
+  --surface-overlay: rgba(4, 5, 6, 0.64);
+  --surface-terminal: #0a0b0c;
+
+  --border-subtle: rgba(255, 255, 255, 0.055);
+  --border: rgba(255, 255, 255, 0.085);
+  --border-strong: rgba(255, 255, 255, 0.14);
+
+  --text-primary: #ecedee;
+  --text-secondary: #a1a4ab;
+  --text-tertiary: #8a8e97;      /* ≥4.5:1 trên bg, surface-0…2 và hàng đang chọn */
+  --text-disabled: #4e5157;
+  --text-inverse: #0e0f11;
+
+  --hover: rgba(255, 255, 255, 0.04);
+  --active: rgba(255, 255, 255, 0.07);
+  --selected: rgba(255, 255, 255, 0.06);
+
+  /* Màu ngữ nghĩa (v0.3 — màu của v0.1): xanh lá = khỏe/chạy, vàng = chờ/cảnh báo, đỏ = lỗi,
+     xanh dương = thông tin/tiến trình, xám = không rõ/dừng. Chữ & chip (nền -soft) đều ≥4.5:1. */
+  --success: #4cc38a;  --success-soft: rgba(76, 195, 138, 0.12);  --success-border: rgba(76, 195, 138, 0.28);
+  --warning: #e5a83b;  --warning-soft: rgba(229, 168, 59, 0.12);  --warning-border: rgba(229, 168, 59, 0.28);
+  --danger:  #f5656a;  --danger-soft:  rgba(245, 101, 106, 0.12); --danger-border:  rgba(245, 101, 106, 0.32);
+  --info:    #4ea7fc;  --info-soft:    rgba(78, 167, 252, 0.12);  --info-border:    rgba(78, 167, 252, 0.28);
+  --purple:  #b48cf2;  --purple-soft:  rgba(180, 140, 242, 0.13); --purple-border:  rgba(180, 140, 242, 0.28);
+  --neutral: #a1a4ab;  --neutral-soft: rgba(161, 164, 171, 0.12); --neutral-border: rgba(161, 164, 171, 0.24);
+  --danger-solid: #d93a40;       /* nền nút destructive, chữ trắng 4.6:1 */
+  --danger-solid-hover: #e5484d;
+
+  /* Môi trường (đặt theo nhóm): PROD đỏ · STG vàng · DEV xanh dương · TEST tím. */
+  --env-prod: var(--danger);     --env-prod-soft: var(--danger-soft);
+  --env-staging: var(--warning); --env-staging-soft: var(--warning-soft);
+  --env-dev: var(--info);        --env-dev-soft: var(--info-soft);
+  --env-test: var(--purple);     --env-test-soft: var(--purple-soft);
+
+  /* Biểu đồ/meter: chuỗi 1 xanh dương, chuỗi 2 tím; vượt ngưỡng → warning (≥75%) / danger (≥90%). */
+  --chart-1: #4ea7fc;
+  --chart-2: #b48cf2;
+  --chart-fill: rgba(78, 167, 252, 0.12);
+  --chart-grid: rgba(255, 255, 255, 0.06);
+
+  --shadow-xs: none;
+  --shadow-sm: 0 0 0 1px var(--border-subtle);
+  --shadow-popover: 0 0 0 1px var(--border-strong), 0 8px 24px -4px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-dialog: 0 0 0 1px var(--border-strong), 0 24px 64px -8px rgba(0, 0, 0, 0.72);
+  --shadow-panel: 0 0 0 1px var(--border-subtle);
+
+  --focus-ring: 0 0 0 2px var(--surface-0), 0 0 0 4px var(--accent-ring);
+  --scrollbar: rgba(255, 255, 255, 0.1);
+  --scrollbar-hover: rgba(255, 255, 255, 0.18);
+}
+
+/* --------------------------------------------------------------------------
+   Light theme
+   -------------------------------------------------------------------------- */
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f3f3f4;
+  --surface-0: #ffffff;
+  --surface-1: #fafafa;
+  --surface-2: #f3f3f4;
+  --surface-3: #ebebed;
+  --surface-overlay: rgba(20, 21, 24, 0.28);
+  --surface-terminal: #fbfbfb;
+
+  --border-subtle: rgba(15, 16, 20, 0.06);
+  --border: rgba(15, 16, 20, 0.09);
+  --border-strong: rgba(15, 16, 20, 0.16);
+
+  --text-primary: #18191b;
+  --text-secondary: #50545b;
+  --text-tertiary: #636770;      /* ≥4.5:1 trên #f3f3f4 */
+  --text-disabled: #a8abb0;
+  --text-inverse: #ffffff;
+
+  --hover: rgba(15, 16, 20, 0.04);
+  --active: rgba(15, 16, 20, 0.07);
+  --selected: rgba(15, 16, 20, 0.05);
+
+  --success: #146c42;  --success-soft: rgba(20, 108, 66, 0.10);  --success-border: rgba(20, 108, 66, 0.26);
+  --warning: #8a4f00;  --warning-soft: rgba(214, 140, 20, 0.13); --warning-border: rgba(138, 79, 0, 0.26);
+  --danger:  #bc2b27;  --danger-soft:  rgba(201, 48, 44, 0.08);  --danger-border:  rgba(201, 48, 44, 0.26);
+  --info:    #1a60b8;  --info-soft:    rgba(26, 96, 184, 0.09);  --info-border:    rgba(26, 96, 184, 0.24);
+  --purple:  #6a40c2;  --purple-soft:  rgba(106, 64, 194, 0.09); --purple-border:  rgba(106, 64, 194, 0.24);
+  --neutral: #50545b;  --neutral-soft: rgba(80, 84, 91, 0.08);   --neutral-border: rgba(80, 84, 91, 0.2);
+  --danger-solid: #c9302c;
+  --danger-solid-hover: #b42824;
+
+  --env-prod: var(--danger);     --env-prod-soft: var(--danger-soft);
+  --env-staging: var(--warning); --env-staging-soft: var(--warning-soft);
+  --env-dev: var(--info);        --env-dev-soft: var(--info-soft);
+  --env-test: var(--purple);     --env-test-soft: var(--purple-soft);
+
+  --chart-1: #2b7bd9;
+  --chart-2: #7d55d6;
+  --chart-fill: rgba(43, 123, 217, 0.10);
+  --chart-grid: rgba(15, 16, 20, 0.06);
+
+  --shadow-xs: none;
+  --shadow-sm: 0 0 0 1px var(--border);
+  --shadow-popover: 0 0 0 1px var(--border), 0 8px 24px -4px rgba(15, 16, 20, 0.14), 0 2px 6px rgba(15, 16, 20, 0.06);
+  --shadow-dialog: 0 0 0 1px var(--border), 0 24px 64px -8px rgba(15, 16, 20, 0.24);
+  --shadow-panel: 0 0 0 1px var(--border);
+
+  --focus-ring: 0 0 0 2px var(--surface-0), 0 0 0 4px var(--accent-ring);
+  --scrollbar: rgba(15, 16, 20, 0.14);
+  --scrollbar-hover: rgba(15, 16, 20, 0.26);
+}
+
+/* --------------------------------------------------------------------------
+   Accent — Shellhouse teal (duy nhất)
+   Chỉ dùng cho: nút primary (≤1/view), focus ring, hàng/mục đang chọn,
+   vạch chỉ báo nav đang active, link (và logo Shellhouse). Trạng thái dùng màu ngữ nghĩa ở trên.
+   --accent         : nền nút primary, checkbox/switch bật, vạch active
+   --accent-contrast: chữ đặt trên nền --accent (≥4.5:1)
+   --accent-text    : accent dùng làm chữ/link trên surface (≥4.5:1)
+   -------------------------------------------------------------------------- */
+:root,
+[data-theme='dark'] {
+  --accent: #19b3a3;
+  --accent-hover: #2cc2b2;
+  --accent-press: #14a193;
+  --accent-contrast: #04201c;    /* 6.9:1 */
+  --accent-text: #3fcfbe;
+  --accent-soft: rgba(25, 179, 163, 0.12);
+  --accent-soft-strong: rgba(25, 179, 163, 0.2);
+  --accent-ring: rgba(45, 205, 188, 0.6);
+}
+[data-theme='light'] {
+  --accent: #0d7d71;
+  --accent-hover: #0b6e64;
+  --accent-press: #095e55;
+  --accent-contrast: #ffffff;    /* 5.0:1 */
+  --accent-text: #0b7468;
+  --accent-soft: rgba(13, 125, 113, 0.08);
+  --accent-soft-strong: rgba(13, 125, 113, 0.14);
+  --accent-ring: rgba(13, 125, 113, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-instant: 0ms;
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
+}
+
+/* ==========================================================================
+   v0.4 — enterprise refinement
+   • Accent teal dịch về phía xanh lơ (187°) để tách khỏi success (139°); info dịch về 218°.
+   • Màu ngữ nghĩa giảm bão hoà nhẹ; vẫn ≥4.5:1 trên surface-0…2.
+   • --env-prod magenta riêng (không trùng danger). STG/DEV/TEST trung tính.
+   • --border-control ≥3:1 cho ranh giới input/checkbox/switch (WCAG 1.4.11).
+   • Bảng màu terminal thành token.
+   ========================================================================== */
+:root, [data-theme='dark'] {
+  --accent: #1fa5b8; --accent-hover: #2bb5c8; --accent-press: #1993a5;
+  --accent-contrast: #031c21; --accent-text: #52c4d4;
+  --accent-soft: rgba(31,165,184,.12); --accent-soft-strong: rgba(31,165,184,.2); --accent-ring: rgba(82,196,212,.6);
+
+  --success: #5cb87a; --success-soft: rgba(92,184,122,.12); --success-border: rgba(92,184,122,.28);
+  --warning: #d9a441; --warning-soft: rgba(217,164,65,.12); --warning-border: rgba(217,164,65,.28);
+  --danger:  #ef6461; --danger-soft: rgba(239,100,97,.12);  --danger-border: rgba(239,100,97,.32);
+  --info:    #6a9ef5; --info-soft: rgba(106,158,245,.12);   --info-border: rgba(106,158,245,.28);
+  --danger-contrast: #ffffff; --win-close: #c42b1c;
+  --env-prod: #e86aa6; --env-prod-soft: rgba(232,106,166,.10); --env-prod-border: rgba(232,106,166,.34);
+  --env-staging: var(--text-secondary); --env-dev: var(--text-secondary); --env-test: var(--text-secondary);
+  --chart-1: #6a9ef5; --chart-fill: rgba(106,158,245,.12);
+
+  --border-control: #60646c;   /* 3.07:1 trên surface-1 */
+  --border-strong: rgba(255,255,255,.16);
+
+  --term-fg: #d5d8dd; --term-dim: #6e737c; --term-bold: #f0f2f5;
+  --term-green: #6cc58c; --term-blue: #7aaaf7; --term-cyan: #5cc6d4; --term-yellow: #e0b85a; --term-red: #f27a76; --term-mag: #c9a6f5;
+}
+[data-theme='light'] {
+  --bg: #eceef1; --surface-0: #ffffff; --surface-1: #f8f9fa; --surface-2: #f3f4f6; --surface-3: #e7e9ec;
+  --border-subtle: rgba(15,16,20,.07); --border: rgba(15,16,20,.11); --border-strong: rgba(15,16,20,.18);
+  --border-control: #8a8e96;   /* 3.29:1 trên trắng */
+
+  --accent: #0b7a8a; --accent-hover: #096b79; --accent-press: #075c68;
+  --accent-contrast: #ffffff; --accent-text: #0a6f7e;
+  --accent-soft: rgba(11,122,138,.08); --accent-soft-strong: rgba(11,122,138,.14); --accent-ring: rgba(11,122,138,.5);
+
+  --success: #19703a; --success-soft: rgba(25,112,58,.09); --success-border: rgba(25,112,58,.26);
+  --info: #2457c5; --info-soft: rgba(36,87,197,.08); --info-border: rgba(36,87,197,.24);
+  --danger-contrast: #ffffff; --win-close: #c42b1c;
+  --env-prod: #b0306f; --env-prod-soft: rgba(176,48,111,.07); --env-prod-border: rgba(176,48,111,.3);
+  --env-staging: var(--text-secondary); --env-dev: var(--text-secondary); --env-test: var(--text-secondary);
+  --chart-1: #2f6fd6; --chart-fill: rgba(47,111,214,.10);
+
+  --term-fg: #2a2c30; --term-dim: #7b8089; --term-bold: #111111;
+  --term-green: #1a7f4b; --term-blue: #1d5fd1; --term-cyan: #0a6f7e; --term-yellow: #8a5a00; --term-red: #c9302c; --term-mag: #7a4fd0;
+}
+
+/* v0.5 — terminal "Match app": ANSI dịu hơn (giảm bão hoà ~20%, giữ ≥4.5:1 trên nền terminal) + bóng sheet Inspector */
+:root, [data-theme='dark'] {
+  --term-fg: #d0d3d8; --term-dim: #737882; --term-bold: #eceef1;
+  --term-green: #8cc09c; --term-blue: #8aaee6; --term-cyan: #7ebfc8; --term-yellow: #d2b673; --term-red: #e08a86; --term-mag: #b9a3dc;
+  --shadow-sheet: -8px 0 24px -12px rgba(0,0,0,.4), -1px 0 0 var(--border);
+}
+[data-theme='light'] {
+  --term-fg: #2a2c30; --term-dim: #73787f; --term-bold: #111111;
+  --term-green: #2c6e45; --term-blue: #2f5ea8; --term-cyan: #23666f; --term-yellow: #7a5a12; --term-red: #a83a36; --term-mag: #6a4fa8;
+  --shadow-sheet: -12px 0 32px -12px rgba(15,16,20,.18), -1px 0 0 var(--border);
+}

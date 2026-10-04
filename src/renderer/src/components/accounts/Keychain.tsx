@@ -418,7 +418,7 @@ export function Keychain({
     list.length === 0 ? null : (
       <div role="group" aria-label={title}>
         {filter === 'all' && (
-          <div className="sticky top-0 z-[1] border-b border-line bg-surface/95 px-3 py-1 text-[11px] font-semibold tracking-wide text-faint uppercase backdrop-blur">
+          <div className="sticky top-0 z-[1] border-b border-line bg-surface/95 px-3 py-1 text-xs font-medium text-faint backdrop-blur">
             {title}
           </div>
         )}
@@ -489,7 +489,7 @@ export function Keychain({
             {f.label}
             <span
               className={cx(
-                'font-mono text-[10px] tabular-nums',
+                'font-mono text-[11px] tabular-nums',
                 filter === f.value ? 'text-accent' : 'text-faint'
               )}
             >

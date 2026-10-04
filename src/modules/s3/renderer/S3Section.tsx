@@ -28,8 +28,8 @@ export function S3Section(): React.JSX.Element {
   }, [])
 
   return (
-    <div className="mt-2 border-t border-line pt-2" data-testid="s3-section">
-      <div className="flex h-7 items-center gap-1.5 px-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
+    <div data-testid="s3-section">
+      <div className="flex h-7 items-center gap-1.5 px-1 text-xs font-medium text-faint">
         <button
           type="button"
           aria-expanded={open}
@@ -42,8 +42,7 @@ export function S3Section(): React.JSX.Element {
             size={13}
             className={cx('transition-transform duration-150', open && 'rotate-90')}
           />
-          <Cloud size={12} />
-          <span className="flex-1 text-left">{t('S3 storage')}</span>
+          <span className="flex-1 text-left">{t('Accounts')}</span>
         </button>
         <IconButton
           label={t('Add S3 account')}

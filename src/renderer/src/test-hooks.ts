@@ -20,6 +20,10 @@ export function installTestHooks(): void {
   const hooks: ShellhouseTestHooks = {
     tabIds: () => useTabs.getState().tabs.map((t) => t.id),
     activeTabId: () => useTabs.getState().activeId,
+    activeTabTitle: () => {
+      const { tabs, activeId } = useTabs.getState()
+      return tabs.find((t) => t.id === activeId)?.title ?? null
+    },
     bufferText: (tabId, lastLines) => {
       const term = controllers.get(tabId)?.term
       if (!term) return ''

@@ -15,23 +15,23 @@ test('Light / Dark / System: app, dockview và terminal đổi theme cùng lúc'
 
   await page.getByTestId('appearance-light').click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
-  expect(await canvasColor(page)).toBe('rgb(244, 245, 247)')
+  expect(await canvasColor(page)).toBe('rgb(236, 238, 241)')
   await expect
     .poll(() => page.evaluate((id) => window.__shellhouseTest.terminalOptions(id)?.background, tab))
-    .toBe('#fbfbfc') // Shellhouse Light
+    .toBe('#fbfbfb') // Shellhouse Light
 
   await page.getByTestId('appearance-dark').click()
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-  expect(await canvasColor(page)).toBe('rgb(13, 15, 18)')
+  expect(await canvasColor(page)).toBe('rgb(8, 9, 10)')
   await expect
     .poll(() => page.evaluate((id) => window.__shellhouseTest.terminalOptions(id)?.background, tab))
-    .toBe('#0f1115') // Shellhouse Dark
+    .toBe('#0a0b0c') // Shellhouse Dark
 
   // Nền quanh terminal (dockview) lấy đúng màu nền của theme terminal.
   const groupBg = await page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue('--sh-terminal').trim()
   )
-  expect(groupBg).toBe('#0f1115')
+  expect(groupBg).toBe('#0a0b0c')
 
   await page.getByTestId('appearance-system').click()
   await expect(page.getByTestId('appearance-system')).toHaveAttribute('aria-checked', 'true')

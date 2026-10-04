@@ -17,8 +17,8 @@ import { cx, ICON_SM, transition } from './utils'
  * aria-invalid; thông báo lỗi do Field hiển thị (kèm icon, không chỉ dựa màu).
  */
 const frame = cx(
-  'flex h-ds-ctl min-w-0 items-center gap-1.5 rounded-ds-md border border-ds-border bg-ds-surface-1 px-2 text-ds-base text-ds-fg',
-  'hover:border-ds-border-strong focus-within:border-ds-accent focus-within:bg-ds-surface-0 focus-within:ring-3 focus-within:ring-ds-accent-soft',
+  'flex h-ds-ctl min-w-0 items-center gap-1.5 rounded-ds-md border border-ds-border-control bg-ds-surface-1 px-2 text-ds-base text-ds-fg',
+  'hover:border-ds-fg-3 focus-within:border-ds-accent focus-within:bg-ds-surface-0 focus-within:ring-3 focus-within:ring-ds-accent-soft',
   'has-[input:disabled]:border-ds-border-subtle has-[input:disabled]:text-ds-fg-disabled',
   'has-[[aria-invalid=true]]:border-ds-danger has-[[aria-invalid=true]]:focus-within:ring-ds-danger-soft',
   transition

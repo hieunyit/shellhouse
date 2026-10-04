@@ -56,7 +56,7 @@ describe('DS: màu trạng thái theo nghĩa', () => {
     }
   })
 
-  it('môi trường: PROD đỏ, STG vàng, DEV xanh dương, TEST tím; chấm chỉ cho PROD', () => {
+  it('môi trường: ô vuông; chỉ PROD có màu (magenta), STG / DEV / TEST trung tính', () => {
     render(
       <>
         <EnvLabel env="prod" />
@@ -65,12 +65,17 @@ describe('DS: màu trạng thái theo nghĩa', () => {
         <EnvLabel env="test" />
       </>
     )
-    expect(screen.getByText('PROD').className).toContain('text-ds-env-prod')
-    expect(screen.getByText('STG').className).toContain('bg-ds-env-staging-soft')
-    expect(screen.getByText('DEV').className).toContain('text-ds-env-dev')
-    expect(screen.getByText('TEST').className).toContain('text-ds-env-test')
+    expect(screen.getByRole('img', { name: 'Production' }).className).toContain('text-ds-env-prod')
+    for (const name of ['Staging', 'Development', 'Test']) {
+      const el = screen.getByRole('img', { name })
+      expect(el.className).toContain('text-ds-env-other')
+      expect(el.className).not.toContain('ds-env-prod')
+    }
+    expect(screen.getByText('Stg')).toBeTruthy()
     const { container } = render(<EnvLabel env="dev" dot />)
-    expect(container.innerHTML).toBe('')
+    const dot = container.firstElementChild
+    expect(dot?.className).toContain('rounded-[1px]')
+    expect(dot?.className).toContain('bg-ds-fg-3')
   })
 
   it('meter: xanh dương (chuỗi 2 tím), vàng ≥ 75%, đỏ ≥ 90%', () => {

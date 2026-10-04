@@ -268,10 +268,7 @@ function Peers({
                 title={BANDS[band]?.label}
               >
                 <div
-                  className={cx(
-                    'h-full rounded-full',
-                    band >= 4 ? 'bg-warning' : 'bg-accent-solid'
-                  )}
+                  className={cx('h-full rounded-full', band >= 4 ? 'bg-warning' : 'bg-info')}
                   style={{ width: `${Math.max(4, (r.rate / max) * 100)}%` }}
                 />
               </div>

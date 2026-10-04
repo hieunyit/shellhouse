@@ -2,6 +2,7 @@ import { accounts } from './accounts'
 import { core } from './core'
 import { docker } from './docker'
 import { ds } from './ds'
+import { environments } from './environments'
 import { k8s } from './k8s'
 import { k8sMap } from './k8sMap'
 import { main } from './main'
@@ -9,6 +10,7 @@ import { rdp } from './rdp'
 import { rdpNative } from './rdpNative'
 import { rdpViewer } from './rdpViewer'
 import { s3 } from './s3'
+import { shell } from './shell'
 import { terminal } from './terminal'
 
 /**
@@ -27,7 +29,9 @@ export const PARTS = {
   rdpViewer,
   rdpNative,
   accounts,
-  ds
+  ds,
+  shell,
+  environments
 } as const
 
 export const vi: Readonly<Record<string, string>> = Object.assign(

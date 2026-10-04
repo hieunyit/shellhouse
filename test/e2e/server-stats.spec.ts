@@ -20,6 +20,7 @@ test('thanh số liệu server: hiện dưới terminal SSH, tắt được tron
   home = mkdtempSync(join(tmpdir(), 'sh-exec-'))
   server = await startTestSshServer([{ username: 'u', password: 'p' }], { execHome: home })
 
+  await page.getByTestId('titlebar-connect').click()
   await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
   await page.getByTestId('quick-connect').press('Enter')
   const tab = await activeTab(page)

@@ -243,7 +243,7 @@ export function FileTable<T, K extends string>({
   return (
     <div
       ref={listRef}
-      className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset"
+      className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-ds-accent-ring focus-visible:ring-inset"
       role="grid"
       aria-label={ariaLabel}
       aria-multiselectable
@@ -254,7 +254,7 @@ export function FileTable<T, K extends string>({
       <div
         role="row"
         className={cx(
-          'sticky top-0 z-10 grid h-8 items-center gap-3 border-b border-line bg-surface px-3 text-xs font-medium text-faint',
+          'sticky top-0 z-10 grid h-8 items-center gap-3 border-b border-ds-border bg-surface px-3 text-xs font-medium text-faint',
           gridClass
         )}
         style={gridStyle}
@@ -291,9 +291,12 @@ export function FileTable<T, K extends string>({
             data-name={key}
             data-key={key}
             className={cx(
-              'grid h-8 cursor-default items-center gap-3 px-3 text-[13px] select-none',
+              'relative grid h-8 cursor-default items-center gap-3 border-b border-ds-border-subtle px-3 text-[13px] select-none',
               gridClass,
-              isSelected ? 'bg-accent-soft' : 'hover:bg-hover'
+              // Hàng đang chọn (v0.5): nền trung tính + vạch teal 2px bên trái.
+              isSelected
+                ? 'bg-ds-selected before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-ds-accent'
+                : 'hover:bg-ds-hover'
             )}
             style={gridStyle ? { ...extra.style, ...gridStyle } : extra.style}
             onClick={(e) => {

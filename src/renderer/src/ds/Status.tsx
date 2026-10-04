@@ -181,55 +181,78 @@ export function Badge({
 
 export type Environment = 'prod' | 'staging' | 'dev' | 'test'
 
-const envClass: Record<Environment, string> = {
-  prod: 'bg-ds-env-prod-soft text-ds-env-prod',
-  staging: 'bg-ds-env-staging-soft text-ds-env-staging',
-  dev: 'bg-ds-env-dev-soft text-ds-env-dev',
-  test: 'bg-ds-env-test-soft text-ds-env-test'
+/** Môi trường tuỳ biến (Settings › Environments) — chỉ phần cần để vẽ nhãn. */
+export interface EnvLike {
+  name: string
+  short: string
+  /** Highlighted: màu riêng (magenta); còn lại trung tính. */
+  highlight: boolean
+}
+
+function toEnv(env: Environment | EnvLike): EnvLike {
+  return typeof env === 'string'
+    ? { name: envName(env), short: envShort(env), highlight: env === 'prod' }
+    : env
 }
 
 /**
- * Nhãn môi trường (đặt theo nhóm — hàng nhóm, header breadcrumb): chip nhỏ chữ hoa tô màu, PROD đỏ
- * · STG vàng · DEV xanh dương · TEST tím. Trong danh sách host dùng `dot` (chỉ chấm đỏ cho PROD —
- * chấm màu khác dễ bị đọc nhầm thành trạng thái; host không lặp nhãn của nhóm).
+ * Nhãn môi trường (đặt theo nhóm — hàng nhóm, header breadcrumb). v0.4: môi trường là Ô VUÔNG
+ * (trạng thái là chấm tròn) để không đọc nhầm; chỉ môi trường Highlighted (Production) có màu riêng
+ * — magenta, không trùng danger; còn lại trung tính. Trong danh sách host dùng `dot` (ô vuông 6px —
+ * host không lặp nhãn của nhóm).
  */
 export function EnvLabel({
-  env,
+  env: input,
   dot,
+  size = 'sm',
   className
 }: {
-  env: Environment
+  env: Environment | EnvLike
   dot?: boolean
+  /** md = nhãn ở header (cao 20px). */
+  size?: 'sm' | 'md'
   className?: string
-}): React.JSX.Element | null {
-  const name = envName(env)
-  if (dot) {
-    if (env !== 'prod') return null
+}): React.JSX.Element {
+  const env = toEnv(input)
+  const prod = env.highlight
+  if (dot)
     return (
       <span
         role="img"
-        aria-label={name}
-        title={name}
-        className={cx('inline-block size-1.5 shrink-0 rounded-full bg-ds-env-prod', className)}
+        aria-label={env.name}
+        title={env.name}
+        className={cx(
+          'inline-block size-1.5 shrink-0 rounded-[1px]',
+          prod ? 'bg-ds-env-prod' : 'bg-ds-fg-3',
+          className
+        )}
       />
     )
-  }
   return (
     <span
-      aria-label={name}
+      role="img"
+      aria-label={env.name}
+      title={env.name}
       className={cx(
-        'inline-flex h-4.5 shrink-0 items-center rounded-ds-xs px-1.5 text-[10px] leading-none font-semibold tracking-[0.04em] uppercase',
-        envClass[env],
+        'inline-flex shrink-0 items-center gap-[5px] rounded-ds-xs px-1.5 text-ds-xs leading-none font-medium tracking-[0.03em] whitespace-nowrap',
+        size === 'md' ? 'h-5' : 'h-4.5',
+        prod
+          ? 'bg-ds-env-prod-soft text-ds-env-prod shadow-[inset_0_0_0_1px_var(--ds-env-prod-border)]'
+          : 'text-ds-env-other shadow-[inset_0_0_0_1px_var(--ds-border-strong)]',
         className
       )}
     >
-      {envShort(env)}
+      <span
+        aria-hidden
+        className={cx('size-1.5 shrink-0 rounded-[1px]', prod ? 'bg-ds-env-prod' : 'bg-ds-fg-3')}
+      />
+      {env.short}
     </span>
   )
 }
 
 function envShort(env: Environment): string {
-  return { prod: 'PROD', staging: 'STG', dev: 'DEV', test: 'TEST' }[env]
+  return { prod: 'Prod', staging: 'Stg', dev: 'Dev', test: 'Test' }[env]
 }
 
 export function envName(env: Environment): string {
@@ -245,12 +268,26 @@ export function envName(env: Environment): string {
   }
 }
 
-/** Vạch đỏ 2px ở đỉnh vùng nội dung khi đang làm việc trên PROD. */
-export function ProdLine({ className }: { className?: string }): React.JSX.Element {
+/**
+ * Vạch 2px ở đỉnh vùng nội dung khi môi trường đang làm việc bật "Top line": magenta với môi trường
+ * Highlighted (Production), xám với môi trường trung tính.
+ */
+export function ProdLine({
+  className,
+  highlight = true
+}: {
+  className?: string
+  highlight?: boolean
+}): React.JSX.Element {
   return (
     <div
       aria-hidden
-      className={cx('pointer-events-none h-0.5 w-full shrink-0 bg-ds-env-prod', className)}
+      data-testid="env-line"
+      className={cx(
+        'pointer-events-none h-0.5 w-full shrink-0',
+        highlight ? 'bg-ds-env-prod' : 'bg-ds-fg-3',
+        className
+      )}
     />
   )
 }

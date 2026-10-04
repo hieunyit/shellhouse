@@ -103,7 +103,7 @@ export function LookMenu(): React.JSX.Element {
         createPortal(
           <div
             ref={panel}
-            className="fixed z-50 flex w-80 flex-col gap-3 rounded-lg border border-line bg-elevated p-3 text-xs shadow-lg"
+            className="fixed z-50 flex w-80 flex-col gap-3 rounded-lg bg-ds-popover p-3 text-xs shadow-ds-popover"
             style={{ top: anchor.top, right: anchor.right }}
             data-testid="terminal-look-menu"
             role="dialog"

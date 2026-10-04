@@ -31,8 +31,6 @@ import {
   FolderPlus,
   LayoutGrid,
   Maximize2,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pencil,
   Play,
   Plus,
@@ -49,15 +47,12 @@ import { bestScore } from '@shared/fuzzy'
 import { countHostsRecursive, groupMoveProblem } from '@shared/group-tree'
 import type { GroupSummary, HostSummary } from '@shared/hosts'
 import { GroupForm, HostForm, ImportDialog } from '../lazy'
-import { Logo } from './Logo'
 import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
-import { ModuleSections } from './sidebar/ModuleSections'
 import { moduleHostActions } from '../../../modules/registry/renderer-kit'
 import { rdpAddress } from '@shared/rdp'
 import { openRdpHost } from '../stores/rdp'
 import { useContextMenu, type MenuEntry } from './ContextMenu'
-import { hostTextClass } from './hostColors'
 import {
   CONFIRM_OPEN_OVER,
   connect,
@@ -75,14 +70,10 @@ import {
 import { DropLine, HostRow, type DropPos, type HostRowHandlers } from './sidebar/HostRow'
 import { Button, cx, IconButton } from './ui'
 import { useUiRequests } from '../stores/ui-requests'
-import { useSidebarLayout, useSidebarMode } from '../stores/sidebar-layout'
-import { SidebarRail } from './sidebar/SidebarRail'
-
-/** Độ rộng thanh bên dạng gọn (thanh icon). */
-const RAIL_WIDTH = 48
-/** Rê chuột vào thanh icon bao lâu thì mở (tránh bật ra khi chỉ lướt qua). */
-const PEEK_OPEN_MS = 160
-const PEEK_CLOSE_MS = 220
+import { EnvLabel } from '../ds'
+import { findEnvironment } from '@shared/environments'
+import { groupOwnEnvironment, useEnvironments } from '../stores/environments'
+import { LocalModuleSuggestion } from './sidebar/LocalModuleSuggestion'
 
 // ---------- Kéo thả ----------
 
@@ -118,8 +109,6 @@ function store(key: string, value: string): void {
   }
 }
 
-const WIDTH_KEY = 'shellhouse.sidebar.width'
-const WIDTH = { min: 208, default: 272, max: 520 }
 const COLLAPSED_KEY = 'shellhouse.sidebar.collapsed'
 /** Khoá "nhóm" giả cho hai mục đầu sidebar (dùng chung tập thu gọn với nhóm thật). */
 const FAVORITES = '__favorites'
@@ -158,16 +147,16 @@ type Dialog =
   | { kind: 'tags'; hosts: HostSummary[] }
   | { kind: 'open-many'; hosts: HostSummary[]; layout: 'tabs' | 'grid'; broadcast: boolean }
 
-// memo: App vẽ lại mỗi lần đổi tab — thanh bên (hàng nghìn host) không cần vẽ lại theo.
-export interface SidebarProps {
-  /** Nút Cài đặt trên thanh icon (dạng gọn). */
-  onOpenSettings?: () => void
-}
-
+/**
+ * Cây host trong Explorer của khu vực Hosts (khung app mới — shell/Explorer): ô tìm, Favorites /
+ * Recent, cây nhóm lồng nhau, kéo thả, chọn nhiều, các hộp thoại host / nhóm / import.
+ * memo: App vẽ lại mỗi lần đổi tab — cây (hàng nghìn host) không cần vẽ lại theo.
+ */
 export const Sidebar = memo(
-  forwardRef<HTMLInputElement, SidebarProps>(function Sidebar({ onOpenSettings }, searchRef) {
+  forwardRef<HTMLInputElement>(function Sidebar(_props, searchRef) {
     const { groups, hosts } = useHosts((s) => s.tree)
     const tree = useHosts((s) => s.groupTree)
+    const environments = useEnvironments()
     const [query, setQuery] = useState('')
     const [cursor, setCursor] = useState(0)
     const [collapsed, setCollapsed] = useState<Set<string>>(() =>
@@ -182,17 +171,6 @@ export const Sidebar = memo(
         new Set<string>()
       )
     )
-    const [width, setWidth] = useState(() =>
-      stored(
-        WIDTH_KEY,
-        (raw) => {
-          const n = Number(raw)
-          return n >= WIDTH.min && n <= WIDTH.max ? n : WIDTH.default
-        },
-        WIDTH.default
-      )
-    )
-    const [resizing, setResizing] = useState(false)
     const [selection, setSelection] = useState<ReadonlySet<string>>(new Set())
     const anchor = useRef<string | null>(null)
     const [drop, setDrop] = useState<{ key: string; pos: DropPos } | null>(null)
@@ -219,119 +197,6 @@ export const Sidebar = memo(
     const { menu, open: openMenu } = useContextMenu()
     const expandTimer = useRef<number | null>(null)
 
-    // ---------- Dạng gọn (thanh icon) + mở tạm khi rê chuột ----------
-
-    const mode = useSidebarMode()
-    const compact = useSidebarLayout((s) => s.compact[mode])
-    const peek = useSidebarLayout((s) => s.peekOpen)
-    const setPeek = useSidebarLayout((s) => s.setPeekOpen)
-    const asideRef = useRef<HTMLElement>(null)
-    const panelRef = useRef<HTMLDivElement>(null)
-    const peekTimer = useRef<number | null>(null)
-    const hovering = useRef(false)
-    // Vừa đóng phần mở tạm trong khi con trỏ có thể vẫn nằm trên thanh icon → không mở lại theo rê
-    // chuột cho tới khi con trỏ rời thanh icon (hoặc di chuyển ở chỗ khác).
-    const suppressHover = useRef(false)
-    const clearPeekTimer = (): void => {
-      if (peekTimer.current !== null) window.clearTimeout(peekTimer.current)
-      peekTimer.current = null
-    }
-    useEffect(() => clearPeekTimer, [])
-    // Về dạng đầy đủ (tab terminal…) → không còn gì để "mở tạm".
-    useEffect(() => {
-      if (!compact) setPeek(false)
-    }, [compact, setPeek])
-    // Đóng phần mở tạm (bất kể lý do: mở tab, nhấp ra ngoài, Esc…) → quên trạng thái rê chuột, trả
-    // focus khỏi panel (panel thành inert).
-    useEffect(() => {
-      if (peek) return
-      clearPeekTimer()
-      const panel = panelRef.current
-      if (panel?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
-      if (!hovering.current) return
-      hovering.current = false
-      suppressHover.current = true
-      const onMove = (e: PointerEvent): void => {
-        const rail = asideRef.current?.querySelector('[data-testid="sidebar-rail"]')
-        if (e.target instanceof Node && rail?.contains(e.target)) return
-        suppressHover.current = false
-        document.removeEventListener('pointermove', onMove, true)
-      }
-      document.addEventListener('pointermove', onMove, true)
-      return () => {
-        document.removeEventListener('pointermove', onMove, true)
-      }
-    }, [peek])
-    useEffect(() => {
-      if (!compact || !peek) return
-      const aside = asideRef.current
-      const close = (): void => {
-        setPeek(false)
-        const panel = panelRef.current
-        if (panel?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur()
-      }
-      // Nhấp ra ngoài thanh bên (trừ menu chuột phải / hộp thoại mở từ thanh bên) → đóng.
-      const onPointerDown = (e: PointerEvent): void => {
-        const target = e.target
-        if (!(target instanceof Element)) return
-        if (aside?.contains(target)) return
-        if (target.closest('[data-testid="context-menu"], [role="dialog"]')) return
-        close()
-      }
-      // Esc ở bất kỳ đâu (panel tự xử lý Esc của nó — ô tìm đang có chữ thì Esc chỉ xoá chữ).
-      const onKeyDown = (e: KeyboardEvent): void => {
-        if (e.key !== 'Escape' || e.defaultPrevented) return
-        if (e.target instanceof Node && panelRef.current?.contains(e.target)) return
-        if (document.querySelector('[data-testid="context-menu"], [role="dialog"]')) return
-        close()
-      }
-      document.addEventListener('pointerdown', onPointerDown, true)
-      window.addEventListener('keydown', onKeyDown)
-      return () => {
-        document.removeEventListener('pointerdown', onPointerDown, true)
-        window.removeEventListener('keydown', onKeyDown)
-      }
-    }, [compact, peek, setPeek])
-    const schedulePeek = (open: boolean): void => {
-      clearPeekTimer()
-      peekTimer.current = window.setTimeout(
-        () => {
-          peekTimer.current = null
-          if (open) {
-            setPeek(true)
-            return
-          }
-          // Đang gõ trong ô tìm / đang mở menu chuột phải → giữ.
-          const panel = panelRef.current
-          if (hovering.current) return
-          if (panel?.contains(document.activeElement)) return
-          if (document.querySelector('[data-testid="context-menu"]')) return
-          setPeek(false)
-        },
-        open ? PEEK_OPEN_MS : PEEK_CLOSE_MS
-      )
-    }
-    const focusSearch = (): void => {
-      requestAnimationFrame(() => {
-        const input = panelRef.current?.querySelector<HTMLInputElement>(
-          '[data-testid="host-search"]'
-        )
-        input?.focus()
-        input?.select()
-      })
-    }
-    // Nơi khác (phím tắt tìm host) yêu cầu mở tạm.
-    useEffect(
-      () =>
-        useSidebarLayout.subscribe((state, prev) => {
-          if (!state.peek || state.peek === prev.peek) return
-          state.setPeekOpen(true)
-          if (state.peek.focusSearch) focusSearch()
-        }),
-      []
-    )
-    const panelHidden = compact && !peek
-
     const counts = useMemo(() => countHostsRecursive(tree, hosts), [tree, hosts])
     const byId = useMemo(() => new Map(hosts.map((h) => [h.id, h])), [hosts])
     const groupPath = (groupId: string | null): string =>
@@ -351,9 +216,6 @@ export const Sidebar = memo(
     useEffect(() => {
       store(COLLAPSED_KEY, JSON.stringify([...collapsed]))
     }, [collapsed])
-    useEffect(() => {
-      store(WIDTH_KEY, String(width))
-    }, [width])
     // Host bị xoá → bỏ khỏi vùng chọn.
     useEffect(() => {
       setSelection((prev) => {
@@ -985,7 +847,7 @@ export const Sidebar = memo(
       const members = hostsIn(group.id)
       const empty = children.length === 0 && members.length === 0
       const canNest = groupMoveProblem(tree, null, group.id) === null
-      const color = group.defaults.color
+      const groupEnv = findEnvironment(environments, groupOwnEnvironment(group.defaults))
       const hint = drop?.key === group.id ? drop.pos : null
       const FolderIcon = open && !empty ? FolderOpen : Folder
       return (
@@ -997,7 +859,7 @@ export const Sidebar = memo(
           data-tree-item=""
           data-tree-key={`group:${group.id}`}
           data-group-id={group.id}
-          className="rounded-md outline-none [&:focus-visible>div:first-child]:ring-2 [&:focus-visible>div:first-child]:ring-accent/40"
+          className="rounded-ds-md outline-none [&:focus-visible>div:first-child]:shadow-ds-focus"
           onKeyDown={(e) => {
             if (e.target !== e.currentTarget || e.key !== 'Enter') return
             e.preventDefault()
@@ -1006,7 +868,7 @@ export const Sidebar = memo(
         >
           <div
             className={cx(
-              'group relative flex h-8 cursor-default items-center gap-1.5 rounded-md pr-1 pl-1 text-[13px] text-fg transition-colors duration-100 hover:bg-hover',
+              'group relative flex h-(--ds-tree-row-h) cursor-default items-center gap-1.5 rounded-ds-md pr-1 pl-1 text-[13px] text-fg transition-colors duration-100 hover:bg-ds-hover',
               hint === 'into' && 'bg-accent-soft ring-1 ring-accent'
             )}
             draggable
@@ -1049,13 +911,13 @@ export const Sidebar = memo(
                 className={cx('transition-transform duration-150', open && 'rotate-90')}
               />
             </button>
-            <FolderIcon
-              size={15}
-              className={cx('shrink-0', color ? hostTextClass[color] : 'text-muted')}
-            />
-            <span className="min-w-0 flex-1 truncate font-medium">{group.name}</span>
+            <FolderIcon size={15} strokeWidth={1.6} className="shrink-0 text-faint" />
+            <span className="min-w-0 flex-1 truncate">{group.name}</span>
+            {/* Môi trường đặt ở nhóm (thiết kế v0.5): nhãn ô vuông — Prod magenta, còn lại trung
+                tính; nhóm con / host kế thừa, không lặp nhãn. */}
+            {groupEnv && <EnvLabel env={groupEnv} className="group-hover:hidden" />}
             <span
-              className="rounded-full bg-subtle px-1.5 text-[11px] leading-4 text-faint tabular-nums group-hover:hidden"
+              className="min-w-4 text-right text-xs text-faint tabular-nums group-hover:hidden"
               data-testid="group-count"
               title={tn(count, '{n} host including subgroups', '{n} hosts including subgroups')}
             >
@@ -1132,7 +994,7 @@ export const Sidebar = memo(
             type="button"
             aria-expanded={open}
             className={cx(
-              'flex h-7 w-full items-center gap-1.5 rounded-md px-1 text-[11px] font-semibold tracking-wider text-faint uppercase hover:text-muted',
+              'flex h-7 w-full items-center gap-1.5 rounded-ds-md px-1 text-xs font-medium text-faint hover:text-muted',
               drop?.key === id && 'bg-accent-soft text-accent ring-1 ring-accent'
             )}
             onClick={() => {
@@ -1176,38 +1038,6 @@ export const Sidebar = memo(
             ))}
         </div>
       )
-    }
-
-    /** Gỡ listener của lần kéo đổi độ rộng đang dở (thanh bên bị ẩn / gỡ giữa lúc kéo). */
-    const stopResize = useRef<(() => void) | null>(null)
-    useEffect(
-      () => () => {
-        stopResize.current?.()
-      },
-      []
-    )
-    const startResize = (e: React.PointerEvent<HTMLDivElement>): void => {
-      e.preventDefault()
-      const startX = e.clientX
-      const startWidth = width
-      setResizing(true)
-      const move = (ev: PointerEvent): void => {
-        setWidth(
-          Math.round(Math.min(WIDTH.max, Math.max(WIDTH.min, startWidth + ev.clientX - startX)))
-        )
-      }
-      const up = (): void => {
-        stopResize.current = null
-        setResizing(false)
-        window.removeEventListener('pointermove', move)
-        window.removeEventListener('pointerup', up)
-        window.removeEventListener('pointercancel', up)
-      }
-      stopResize.current?.()
-      stopResize.current = up
-      window.addEventListener('pointermove', move)
-      window.addEventListener('pointerup', up)
-      window.addEventListener('pointercancel', up)
     }
 
     // ---------- Bàn phím trong cây (roving tabindex, ↑/↓, ←/→, Home/End) ----------
@@ -1283,147 +1113,10 @@ export const Sidebar = memo(
     }
 
     return (
-      <aside
-        ref={asideRef}
-        className="relative flex shrink-0 border-r border-line bg-surface"
-        style={{ width: compact ? RAIL_WIDTH : width }}
-        data-testid="sidebar"
-        data-compact={compact ? 'true' : undefined}
-      >
-        {compact && (
-          <SidebarRail
-            favorites={favorites}
-            onPeek={(open) => {
-              if (!open) suppressHover.current = false
-              else if (suppressHover.current) return
-              hovering.current = open
-              schedulePeek(open)
-            }}
-            onOpenPanel={() => {
-              setPeek(true)
-            }}
-            onSearch={() => {
-              setPeek(true)
-              focusSearch()
-            }}
-            onNewHost={() => {
-              setDialog({ kind: 'host', host: null, groupId: null })
-            }}
-            onModule={(id) => {
-              setPeek(true)
-              requestAnimationFrame(() => {
-                panelRef.current
-                  ?.querySelector(`[data-module-section="${CSS.escape(id)}"]`)
-                  ?.scrollIntoView({ block: 'start' })
-              })
-            }}
-            onExpand={() => {
-              useSidebarLayout.getState().setCompact(mode, false)
-            }}
-            onOpenSettings={onOpenSettings}
-          />
-        )}
-        {/* Dạng gọn: thanh bên đầy đủ nằm đè lên nội dung (absolute) khi mở tạm — bố cục không đổi. */}
-        <div
-          ref={panelRef}
-          data-testid="sidebar-panel"
-          data-peek={compact ? (peek ? 'open' : 'closed') : undefined}
-          inert={panelHidden}
-          aria-hidden={panelHidden || undefined}
-          className={cx(
-            'flex flex-col bg-surface',
-            compact
-              ? 'shadow-elevated absolute inset-y-0 left-0 z-40 border-r border-line transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none'
-              : 'relative min-w-0 flex-1',
-            panelHidden && 'pointer-events-none -translate-x-2 opacity-0'
-          )}
-          style={compact ? { width } : undefined}
-          onMouseEnter={() => {
-            if (!compact || !peek) return
-            hovering.current = true
-            clearPeekTimer()
-          }}
-          onMouseLeave={() => {
-            if (!compact) return
-            hovering.current = false
-            schedulePeek(false)
-          }}
-          onBlur={(e) => {
-            if (!compact) return
-            const next = e.relatedTarget
-            if (next instanceof Node && e.currentTarget.contains(next)) return
-            if (!hovering.current) schedulePeek(false)
-          }}
-          onKeyDown={(e) => {
-            if (compact && e.key === 'Escape' && !e.defaultPrevented && !query) {
-              setPeek(false)
-              ;(document.activeElement as HTMLElement | null)?.blur()
-            }
-          }}
-        >
-          {/* Tay nắm đổi độ rộng; nhấp đúp để về mặc định. */}
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={t('Resize sidebar')}
-            aria-valuemin={WIDTH.min}
-            aria-valuemax={WIDTH.max}
-            aria-valuenow={width}
-            data-testid="sidebar-resize"
-            className={cx(
-              'absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize transition-colors outline-none focus-visible:bg-accent/40',
-              resizing ? 'bg-accent/40' : 'hover:bg-accent/25'
-            )}
-            tabIndex={0}
-            onPointerDown={startResize}
-            onDoubleClick={() => {
-              setWidth(WIDTH.default)
-            }}
-            onKeyDown={(e) => {
-              // ←/→ đổi 16 px (Shift: 64 px), Home/End = nhỏ / lớn nhất, Enter = mặc định.
-              const step = e.shiftKey ? 64 : 16
-              const next =
-                e.key === 'ArrowLeft'
-                  ? width - step
-                  : e.key === 'ArrowRight'
-                    ? width + step
-                    : e.key === 'Home'
-                      ? WIDTH.min
-                      : e.key === 'End'
-                        ? WIDTH.max
-                        : e.key === 'Enter'
-                          ? WIDTH.default
-                          : null
-              if (next === null) return
-              e.preventDefault()
-              setWidth(Math.min(WIDTH.max, Math.max(WIDTH.min, next)))
-            }}
-          />
-          <div className="sh-titlebar sh-titlebar-lead flex h-11 items-center gap-2 border-b border-line px-3">
-            <Logo size={24} className="shrink-0" />
-            <span className="flex-1 text-sm font-semibold text-fg">Shellhouse</span>
-            <IconButton
-              label={compact ? t('Keep sidebar open') : t('Collapse sidebar')}
-              data-testid={compact ? 'sidebar-pin' : 'sidebar-collapse'}
-              onClick={() => {
-                useSidebarLayout.getState().setCompact(mode, !compact)
-                setPeek(false)
-              }}
-            >
-              {compact ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-            </IconButton>
-            <IconButton
-              label={t('New host')}
-              data-testid="add-host"
-              onClick={() => {
-                setDialog({ kind: 'host', host: null, groupId: null })
-              }}
-            >
-              <Plus size={16} />
-            </IconButton>
-          </div>
-          <div className="flex flex-col gap-2 p-2.5">
-            <div className="flex h-8 items-center gap-2 rounded-md border border-line bg-subtle px-2 transition-[border-color,box-shadow] duration-150 focus-within:border-accent focus-within:ring-3 focus-within:ring-accent/20">
+      <aside className="relative flex min-h-0 flex-1" data-testid="sidebar">
+        <div data-testid="sidebar-panel" className="relative flex min-w-0 flex-1 flex-col">
+          <div className="flex flex-col gap-2 px-2.5 pb-1">
+            <div className="flex h-ds-ctl items-center gap-2 rounded-ds-md border border-ds-border-control bg-ds-surface-1 px-2 transition-[border-color,box-shadow] duration-(--ds-dur-fast) focus-within:border-ds-accent focus-within:ring-3 focus-within:ring-ds-accent-soft hover:border-faint">
               <Search size={14} className="text-faint" />
               <input
                 ref={searchRef}
@@ -1461,32 +1154,32 @@ export const Sidebar = memo(
                 }}
               />
             </div>
-            <div className="flex gap-1">
-              <button
-                type="button"
+            {/* Tiêu đề "Groups" + thao tác (thiết kế v0.5): nhóm mới, nhập host, gập / mở hết. */}
+            <div className="-mb-1 flex h-7 items-center gap-0.5 pl-2 text-xs font-medium text-faint">
+              <span className="flex-1">{t('Groups')}</span>
+              <IconButton
+                label={t('New group')}
+                size="sm"
                 data-testid="add-group"
-                className="inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md text-xs text-muted hover:bg-hover hover:text-fg"
                 onClick={() => {
                   setDialog({ kind: 'group', group: null })
                 }}
               >
-                <FolderPlus size={13} /> {t('New group')}
-              </button>
-              <button
-                type="button"
-                title={t('Import hosts from ~/.ssh/config, MobaXterm or CSV')}
+                <FolderPlus size={14} />
+              </IconButton>
+              <IconButton
+                label={t('Import hosts from ~/.ssh/config, MobaXterm or CSV')}
+                size="sm"
                 data-testid="import-ssh-config"
-                className="inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md text-xs text-muted hover:bg-hover hover:text-fg"
                 onClick={() => {
                   setDialog({ kind: 'import' })
                 }}
               >
-                <FileInput size={13} /> {t('Import')}
-              </button>
+                <FileInput size={14} />
+              </IconButton>
               <IconButton
                 label={allCollapsed ? t('Expand all groups') : t('Collapse all groups')}
                 size="sm"
-                className="size-7"
                 data-testid="toggle-all-groups"
                 disabled={groups.length === 0}
                 onClick={() => {
@@ -1621,7 +1314,7 @@ export const Sidebar = memo(
                     </div>
                   </div>
                 )}
-                <ModuleSections />
+                <LocalModuleSuggestion />
               </>
             )}
           </div>

@@ -37,7 +37,8 @@ export {
   envName,
   type StatusTone,
   type BadgeTone,
-  type Environment
+  type Environment,
+  type EnvLike
 } from './Status'
 export { Kbd } from './Kbd'
 export { Inspector, Breadcrumb, INSPECTOR_WIDTH, type Crumb } from './Layout'

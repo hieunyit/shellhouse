@@ -325,7 +325,7 @@ export function MapPanel({
               ] as const
             ).map(([k, v, tone]) => (
               <div key={k} className="flex flex-col gap-0.5 bg-surface px-2.5 py-1.5">
-                <span className="text-[10px] tracking-wide text-faint uppercase">{k}</span>
+                <span className="text-[11px] tracking-wide text-faint uppercase">{k}</span>
                 <span
                   className={cx('truncate text-[12.5px] font-semibold text-fg tabular-nums', tone)}
                 >
@@ -592,7 +592,7 @@ export function HoverCard({
   )
   return (
     <div
-      className="pointer-events-none absolute z-20 w-72 rounded-xl border border-line bg-elevated/95 p-2.5 text-xs shadow-xl backdrop-blur-sm"
+      className="pointer-events-none absolute z-20 w-72 rounded-xl bg-ds-popover p-2.5 text-xs shadow-ds-popover"
       style={{ left: x, ...(bottom !== undefined ? { bottom } : { top: y }) }}
       data-testid="k8s-map-tooltip"
     >

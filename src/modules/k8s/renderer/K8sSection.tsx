@@ -33,7 +33,7 @@ export const COLOR_DOT: Record<NonNullable<ContextColor>, string> = {
   red: 'bg-danger-solid',
   orange: 'bg-warning',
   green: 'bg-success',
-  blue: 'bg-accent-solid'
+  blue: 'bg-info'
 }
 
 /** "Imported 2 files (5 contexts)" + lỗi từng file. */
@@ -84,8 +84,8 @@ export function K8sSection(): React.JSX.Element {
   }
 
   return (
-    <div className="mt-2 border-t border-line pt-2" data-testid="k8s-section">
-      <div className="flex h-7 items-center gap-1.5 px-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
+    <div data-testid="k8s-section">
+      <div className="flex h-7 items-center gap-1.5 px-1 text-xs font-medium text-faint">
         <button
           type="button"
           aria-expanded={open}
@@ -98,8 +98,7 @@ export function K8sSection(): React.JSX.Element {
             size={13}
             className={cx('transition-transform duration-150', open && 'rotate-90')}
           />
-          <Ship size={12} />
-          <span className="flex-1 text-left">Kubernetes</span>
+          <span className="flex-1 text-left">{t('Clusters')}</span>
         </button>
         <IconButton
           label={t('Refresh (read ~/.kube again)')}
@@ -262,10 +261,10 @@ export function K8sSection(): React.JSX.Element {
             />
             <span className="min-w-0 flex-1 truncate text-[13px] text-fg">{c.name}</span>
             {c.settings.bastionHostId && (
-              <span className="rounded bg-subtle px-1 text-[10px] text-muted">SSH</span>
+              <span className="rounded bg-subtle px-1 text-[11px] text-muted">SSH</span>
             )}
             {c.settings.readOnly && (
-              <span className="rounded bg-subtle px-1 text-[10px] font-medium text-muted">
+              <span className="rounded bg-subtle px-1 text-[11px] font-medium text-muted">
                 {t('read-only')}
               </span>
             )}

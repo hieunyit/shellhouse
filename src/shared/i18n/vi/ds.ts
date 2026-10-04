@@ -1,15 +1,8 @@
 /**
- * Bản dịch tiếng Việt — design system của giao diện mới (src/renderer/src/ds), Design kit và cài
- * đặt "New interface (beta)".
+ * Bản dịch tiếng Việt — design system (src/renderer/src/ds) và Design kit.
  */
 export const ds: Readonly<Record<string, string>> = {
   // Cài đặt → Giao diện
-  'New interface (beta)': 'Giao diện mới (beta)',
-  'A calmer, keyboard-first redesign. Screens move over one by one; turning it on or off takes effect right away.':
-    'Thiết kế lại gọn, dịu mắt, ưu tiên bàn phím. Các màn hình được chuyển dần sang; bật / tắt có hiệu lực ngay.',
-  'Use the new interface': 'Dùng giao diện mới',
-  'Preview the components in the command palette: “Open design kit”.':
-    'Xem trước các component trong bảng lệnh: “Mở Design kit”.',
   Density: 'Mật độ',
   Comfortable: 'Thoáng',
   Compact: 'Gọn',
@@ -145,8 +138,8 @@ export const ds: Readonly<Record<string, string>> = {
   'Can’t reach prod-cluster': 'Không kết nối được tới prod-cluster',
   'TLS handshake timeout after 10s.': 'TLS handshake quá thời gian sau 10 giây.',
   'Breadcrumb · production marker': 'Đường dẫn · dấu hiệu production',
-  'PROD: a thin red line at the top of the content and one small label in the header.':
-    'PROD: một vạch đỏ mảnh ở đỉnh vùng nội dung và một nhãn nhỏ trên header.',
+  'PROD: a thin magenta line at the top of the content and one small label in the header.':
+    'PROD: một vạch hồng tím mảnh ở đỉnh vùng nội dung và một nhãn nhỏ trên header.',
   'DataTable · Inspector': 'DataTable · Inspector',
   '2,000 virtualized rows. Click a header to sort, drag edges to resize, x / Shift+click to select, j/k to move, Enter to open.':
     '2.000 hàng ảo hoá. Bấm tiêu đề cột để sắp xếp, kéo mép để đổi độ rộng, x / Shift+click để chọn, j/k để di chuyển, Enter để mở.',

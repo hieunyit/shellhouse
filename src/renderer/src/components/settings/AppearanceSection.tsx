@@ -2,7 +2,7 @@ import { Monitor, Moon, Sun } from 'lucide-react'
 import { useSettings } from '../../stores/settings'
 import { LANGUAGES, t } from '@shared/i18n'
 import { systemLanguage } from '../../lib/platform'
-import { Button, Checkbox, cx, SectionTitle, Segmented } from '../ui'
+import { Button, cx, Segmented, SettingGroup, SettingRow, Switch } from '../ui'
 
 // Hàm (không phải hằng): dịch lúc render.
 function themeOptions() {
@@ -18,114 +18,97 @@ export function AppearanceSection(): React.JSX.Element {
   const current = settings.appearance.theme
   return (
     <div data-testid="settings-appearance">
-      <SectionTitle
-        description={t('The terminal color theme follows this too when set to “Match app”.')}
-      >
-        {t('Theme')}
-      </SectionTitle>
-      <div className="grid grid-cols-3 gap-3" role="radiogroup">
-        {themeOptions().map((o) => (
-          <button
-            key={o.value}
-            type="button"
-            role="radio"
-            aria-checked={current === o.value}
-            data-testid={`appearance-${o.value}`}
-            className={cx(
-              'flex flex-col items-start gap-3 rounded-xl border p-3 text-left transition-colors',
-              current === o.value ? 'border-accent bg-accent-soft' : 'border-line hover:bg-hover'
-            )}
-            onClick={() => void update({ appearance: { theme: o.value } })}
-          >
-            <Preview mode={o.value} />
-            <span className="flex items-center gap-2 text-[13px] font-medium text-fg">
-              <o.icon size={14} /> {o.label}
-            </span>
-            <span className="-mt-2 text-xs text-muted">{o.hint}</span>
-          </button>
-        ))}
-      </div>
-      <div className="mt-6">
-        <SectionTitle
+      <SettingGroup title={t('Look')}>
+        <SettingRow
+          title={t('Theme')}
+          description={t('The terminal color theme follows this too when set to “Match app”.')}
+          control={
+            <div
+              role="radiogroup"
+              aria-label={t('Theme')}
+              className="inline-flex gap-0.5 rounded-ds-md border border-ds-border-strong bg-subtle p-0.5"
+            >
+              {themeOptions().map((o) => (
+                <button
+                  key={o.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={current === o.value}
+                  title={o.hint}
+                  data-testid={`appearance-${o.value}`}
+                  className={cx(
+                    'flex h-6 items-center gap-1.5 rounded-ds-sm px-2.5 text-xs font-medium outline-none focus-visible:shadow-ds-focus',
+                    current === o.value ? 'bg-ds-surface-3 text-fg' : 'text-muted hover:text-fg'
+                  )}
+                  onClick={() => void update({ appearance: { theme: o.value } })}
+                >
+                  <o.icon size={13} /> {o.label}
+                </button>
+              ))}
+            </div>
+          }
+        />
+        <SettingRow
+          title={t('Density')}
+          description={t('Compact fits more rows on screen; Comfortable is easier to read.')}
+          control={
+            <Segmented
+              value={settings.appearance.density}
+              testIdPrefix="setting-density"
+              options={[
+                { value: 'comfortable', label: t('Comfortable') },
+                { value: 'compact', label: t('Compact') }
+              ]}
+              onChange={(value) => void update({ appearance: { density: value } })}
+            />
+          }
+        />
+        <LanguagePicker />
+      </SettingGroup>
+      <SettingGroup title={t('Sidebar')}>
+        <SettingRow
+          title={t('Show Favorites')}
           description={t(
             'Shortcuts at the top of the sidebar. The hosts stay in their groups either way.'
           )}
-        >
-          {t('Sidebar')}
-        </SectionTitle>
-        <div className="flex flex-col gap-3">
-          <Checkbox
-            label={t('Show Favorites')}
-            checked={settings.appearance.showFavorites}
-            data-testid="setting-show-favorites"
-            onChange={(e) => void update({ appearance: { showFavorites: e.target.checked } })}
-          />
-          <Checkbox
-            label={t('Show Recent (last 5 hosts you connected to)')}
-            checked={settings.appearance.showRecent}
-            data-testid="setting-show-recent"
-            onChange={(e) => void update({ appearance: { showRecent: e.target.checked } })}
-          />
-        </div>
-      </div>
-      <LanguagePicker />
-      <div>
-        <h3 className="text-[13px] font-semibold text-fg">{t('When Shellhouse starts')}</h3>
-        <p className="mt-0.5 mb-2 text-xs text-muted">{t('What the first tab shows.')}</p>
-        <Segmented
-          value={settings.appearance.startup ?? 'home'}
-          testIdPrefix="setting-startup"
-          options={[
-            { value: 'home', label: t('Home') },
-            { value: 'terminal', label: t('Local terminal') }
-          ]}
-          onChange={(startup) => void update({ appearance: { startup } })}
+          control={
+            <Switch
+              label={t('Show Favorites')}
+              checked={settings.appearance.showFavorites}
+              data-testid="setting-show-favorites"
+              onChange={(e) => void update({ appearance: { showFavorites: e.target.checked } })}
+            />
+          }
         />
-      </div>
-      <NewInterface />
-    </div>
-  )
-}
-
-/**
- * Giao diện mới (beta) — đang xây dựng sau cờ này; bật / tắt có hiệu lực ngay, không cần khởi động
- * lại. Phase 1: chỉ có Design kit (bảng lệnh → "Open design kit") và mật độ hiển thị.
- */
-function NewInterface(): React.JSX.Element {
-  const { settings, update } = useSettings()
-  const { newUi, density } = settings.appearance
-  return (
-    <div className="mt-6">
-      <SectionTitle
-        description={t(
-          'A calmer, keyboard-first redesign. Screens move over one by one; turning it on or off takes effect right away.'
-        )}
-      >
-        {t('New interface (beta)')}
-      </SectionTitle>
-      <Checkbox
-        label={t('Use the new interface')}
-        description={
-          newUi ? t('Preview the components in the command palette: “Open design kit”.') : undefined
-        }
-        checked={newUi}
-        data-testid="setting-new-ui"
-        onChange={(e) => void update({ appearance: { newUi: e.target.checked } })}
-      />
-      {newUi && (
-        <div className="mt-3 pl-6.5">
-          <h4 className="mb-1.5 text-xs font-medium text-muted">{t('Density')}</h4>
-          <Segmented
-            value={density}
-            testIdPrefix="setting-density"
-            options={[
-              { value: 'comfortable', label: t('Comfortable') },
-              { value: 'compact', label: t('Compact') }
-            ]}
-            onChange={(value) => void update({ appearance: { density: value } })}
-          />
-        </div>
-      )}
+        <SettingRow
+          title={t('Show Recent (last 5 hosts you connected to)')}
+          control={
+            <Switch
+              label={t('Show Recent (last 5 hosts you connected to)')}
+              checked={settings.appearance.showRecent}
+              data-testid="setting-show-recent"
+              onChange={(e) => void update({ appearance: { showRecent: e.target.checked } })}
+            />
+          }
+        />
+      </SettingGroup>
+      <SettingGroup title={t('Startup')}>
+        <SettingRow
+          title={t('When Shellhouse starts')}
+          description={t('What the first tab shows.')}
+          control={
+            <Segmented
+              value={settings.appearance.startup ?? 'home'}
+              testIdPrefix="setting-startup"
+              options={[
+                { value: 'home', label: t('Home') },
+                { value: 'terminal', label: t('Local terminal') }
+              ]}
+              onChange={(startup) => void update({ appearance: { startup } })}
+            />
+          }
+        />
+      </SettingGroup>
     </div>
   )
 }
@@ -141,23 +124,24 @@ function LanguagePicker(): React.JSX.Element {
   const effective = value === 'system' ? systemLanguage() : value
   const pending = effective !== window.shellhouse.language
   return (
-    <div>
-      <h3 className="text-[13px] font-semibold text-fg">{t('Language')}</h3>
-      <p className="mt-0.5 mb-2 text-xs text-muted">
-        {t('Dates, times and numbers follow the language you pick.')}
-      </p>
-      <Segmented
-        value={value}
-        testIdPrefix="setting-language"
-        options={[
-          { value: 'system', label: t('System ({name})', { name: systemName }) },
-          ...LANGUAGES.map((l) => ({ value: l.value, label: l.label }))
-        ]}
-        onChange={(language) => void update({ appearance: { language } })}
-      />
+    <SettingRow
+      title={t('Language')}
+      description={t('Dates, times and numbers follow the language you pick.')}
+      control={
+        <Segmented
+          value={value}
+          testIdPrefix="setting-language"
+          options={[
+            { value: 'system', label: t('System ({name})', { name: systemName }) },
+            ...LANGUAGES.map((l) => ({ value: l.value, label: l.label }))
+          ]}
+          onChange={(language) => void update({ appearance: { language } })}
+        />
+      }
+    >
       {pending && (
         <div
-          className="mt-2 flex items-center gap-3 rounded-lg border border-line bg-subtle px-3 py-2 text-xs text-muted"
+          className="flex items-center gap-3 rounded-ds-lg bg-subtle px-3 py-2 text-xs text-muted"
           data-testid="language-restart"
         >
           <span className="flex-1">
@@ -168,36 +152,6 @@ function LanguagePicker(): React.JSX.Element {
           </Button>
         </div>
       )}
-    </div>
-  )
-}
-
-/** Hình minh hoạ nhỏ của cửa sổ app ở chế độ sáng / tối. */
-function Preview({ mode }: { mode: 'system' | 'light' | 'dark' }): React.JSX.Element {
-  const pane = (dark: boolean): React.JSX.Element => (
-    <div className={cx('flex h-full flex-1 overflow-hidden', dark ? 'bg-[#14171b]' : 'bg-white')}>
-      <div
-        className={cx(
-          'w-1/3 border-r',
-          dark ? 'border-[#262b33] bg-[#1a1d22]' : 'border-[#e2e5ea] bg-[#f4f5f7]'
-        )}
-      />
-      <div className="flex-1 p-1.5">
-        <div className={cx('mb-1 h-1 w-3/4 rounded', dark ? 'bg-[#2cc9b5]' : 'bg-[#0f766e]')} />
-        <div className={cx('h-1 w-1/2 rounded', dark ? 'bg-[#353b45]' : 'bg-[#cdd2d9]')} />
-      </div>
-    </div>
-  )
-  return (
-    <div className="flex h-16 w-full overflow-hidden rounded-md border border-line">
-      {mode === 'system' ? (
-        <>
-          {pane(false)}
-          {pane(true)}
-        </>
-      ) : (
-        pane(mode === 'dark')
-      )}
-    </div>
+    </SettingRow>
   )
 }

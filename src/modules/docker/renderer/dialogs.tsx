@@ -392,7 +392,7 @@ export function ImageTransferDialog({
                 aria-valuenow={Math.round(progress.progress * 100)}
               >
                 <div
-                  className="h-full bg-accent-solid transition-[width]"
+                  className="h-full bg-info transition-[width]"
                   style={{ width: `${Math.round(progress.progress * 100)}%` }}
                 />
               </div>

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { DEFAULT_ENVIRONMENTS, EnvironmentDef, Environments } from './environments'
 import { Workspace } from './workspaces'
 
 /** Bảng màu terminal (định dạng theo xterm.js ITheme). */
@@ -81,9 +82,7 @@ const AppearanceSettings = z.object({
   showRecent: z.boolean().catch(true),
   /** Mở app: trang Home hay một terminal local; chưa chọn = Home. */
   startup: z.enum(['home', 'terminal']).optional().catch(undefined),
-  /** Giao diện mới (beta, đang xây dựng sau cờ này) — bật / tắt không cần khởi động lại. */
-  newUi: z.boolean().catch(false),
-  /** Mật độ của giao diện mới: hàng 32 px (comfortable, mặc định) hay 28 px (compact). */
+  /** Mật độ hiển thị: hàng 32 px (comfortable, mặc định) hay 28 px (compact). */
   density: z.enum(['comfortable', 'compact']).catch('comfortable')
 })
 
@@ -135,6 +134,10 @@ const ModuleOptions = z.object({
   suggest: z.boolean().catch(true)
 })
 
+/** Khoá nguồn của module: "k8s:<context>", "docker:<endpoint>", "s3:<account>". */
+const SourceKey = z.string().regex(/^[a-z0-9-]{1,40}:.{1,200}$/)
+const SourceEnvironments = z.record(SourceKey, z.string().min(1).max(32))
+
 export const AppSettings = z.object({
   appearance: AppearanceSettings.catch(AppearanceSettings.parse({})),
   terminal: TerminalSettings.catch(TerminalSettings.parse({})),
@@ -148,7 +151,14 @@ export const AppSettings = z.object({
   /** Bố cục tab đã lưu (mở lại bằng bảng lệnh). */
   workspaces: z.array(Workspace).max(50).catch([]),
   modules: z.record(z.string().regex(/^[a-z0-9-]{1,40}$/), ModuleEntry).catch({}),
-  moduleOptions: ModuleOptions.catch(ModuleOptions.parse({}))
+  moduleOptions: ModuleOptions.catch(ModuleOptions.parse({})),
+  /** Môi trường (Settings › Environments) — luôn có Production. */
+  environments: Environments.catch(DEFAULT_ENVIRONMENTS.map((e) => ({ ...e }))),
+  /**
+   * Môi trường của nguồn trong module (cluster, Docker endpoint, tài khoản S3): khoá
+   * `<module>:<id nguồn>` → id môi trường.
+   */
+  sourceEnvironments: SourceEnvironments.catch({})
 })
 export type AppSettings = z.infer<typeof AppSettings>
 
@@ -209,7 +219,11 @@ export const SettingsPatch = z.object({
   workspaces: z.array(Workspace).max(50).optional(),
   /** Mỗi module: gộp nông với giá trị hiện có. */
   modules: z.record(z.string().regex(/^[a-z0-9-]{1,40}$/), ModuleEntry).optional(),
-  moduleOptions: ModuleOptions.partial().optional()
+  moduleOptions: ModuleOptions.partial().optional(),
+  /** Thay cả danh sách. */
+  environments: z.array(EnvironmentDef).min(1).max(20).optional(),
+  /** Gộp vào bảng hiện có; giá trị null = bỏ môi trường của nguồn đó. */
+  sourceEnvironments: z.record(SourceKey, z.string().max(32).nullable()).optional()
 })
 export type SettingsPatch = z.infer<typeof SettingsPatch>
 
@@ -231,6 +245,14 @@ export function applyPatch(current: AppSettings, patch: MainSettingsPatch): AppS
     keybindings: patch.keybindings ?? current.keybindings,
     customThemes: patch.customThemes ?? current.customThemes,
     workspaces: patch.workspaces ?? current.workspaces,
+    environments: patch.environments ?? current.environments,
+    sourceEnvironments: patch.sourceEnvironments
+      ? Object.fromEntries(
+          Object.entries({ ...current.sourceEnvironments, ...patch.sourceEnvironments }).filter(
+            (e): e is [string, string] => e[1] !== null
+          )
+        )
+      : current.sourceEnvironments,
     modules: patch.modules
       ? {
           ...current.modules,

@@ -2,7 +2,7 @@ import { Fragment, useRef, useState, type ReactNode } from 'react'
 import { ChevronRight, X } from 'lucide-react'
 import { t } from '@shared/i18n'
 import { IconButton } from './Button'
-import { EnvLabel } from './Status'
+import { EnvLabel, type EnvLike } from './Status'
 import { cx, focusRing } from './utils'
 
 // ---------- Inspector ----------
@@ -158,7 +158,7 @@ export function Breadcrumb({
   className
 }: {
   items: readonly Crumb[]
-  env?: 'prod' | 'staging' | 'dev' | 'test'
+  env?: 'prod' | 'staging' | 'dev' | 'test' | EnvLike
   className?: string
 }): React.JSX.Element {
   return (
@@ -204,7 +204,7 @@ export function Breadcrumb({
         })}
         {env && (
           <li className="ml-1.5 flex shrink-0">
-            <EnvLabel env={env} />
+            <EnvLabel env={env} size="md" />
           </li>
         )}
       </ol>

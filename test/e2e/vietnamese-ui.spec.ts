@@ -16,7 +16,7 @@ test('giao diện tiếng Việt: thanh bên, form host, cài đặt, định d�
 
     // Thanh bên.
     await expect(page.getByTestId('host-search')).toHaveAttribute('placeholder', 'Tìm host…')
-    await expect(page.getByTestId('add-group')).toContainText('Nhóm mới')
+    await expect(page.getByTestId('add-group')).toHaveAttribute('aria-label', 'Nhóm mới')
     await expect(page.getByTestId('sidebar-get-started')).toContainText('Thêm server của bạn')
 
     // Form host: tiêu đề, nhãn, gợi ý dạng "vd: …", lỗi ngay dưới ô.

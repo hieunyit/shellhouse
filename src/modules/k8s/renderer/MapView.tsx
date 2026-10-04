@@ -869,7 +869,7 @@ function MapInner({
             </div>
             {searchOpen && (matches.length > 0 || hiddenMatches.length > 0) && (
               <div
-                className="absolute top-8 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md border border-line bg-elevated p-1 shadow-lg"
+                className="absolute top-8 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md bg-ds-popover p-1 shadow-ds-popover"
                 data-testid="k8s-map-results"
               >
                 {matches.map((n) => (

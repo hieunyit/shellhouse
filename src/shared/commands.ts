@@ -24,7 +24,8 @@ export const COMMANDS: readonly CommandDef[] = [
     title: 'Import hosts (ssh config, MobaXterm, Termius, CSV)',
     keys: [null, null]
   },
-  { id: 'quickconnect.focus', title: 'Quick connect', keys: [null, null] },
+  // Không dùng Ctrl+O: nano dùng để lưu.
+  { id: 'quickconnect.focus', title: 'Quick connect', keys: ['Meta+Shift+O', 'Ctrl+Shift+O'] },
   { id: 'snippets.open', title: 'Open snippets', keys: ['Meta+S', 'Ctrl+Shift+S'] },
   { id: 'palette.open', title: 'Command palette', keys: ['Meta+Shift+P', 'Ctrl+Shift+P'] },
   { id: 'settings.open', title: 'Open settings', keys: ['Meta+,', 'Ctrl+,'] },

@@ -119,7 +119,7 @@ export function FindBar({ tabId }: { tabId: string }): React.JSX.Element | null 
 
   return (
     <div
-      className="absolute top-2 right-4 z-20 flex items-center gap-1 rounded-lg border border-line bg-elevated p-1 shadow-lg"
+      className="absolute top-2 right-4 z-20 flex items-center gap-1 rounded-lg bg-ds-popover p-1 shadow-ds-popover"
       data-testid="terminal-find"
       role="search"
       aria-label={t('Find in terminal')}

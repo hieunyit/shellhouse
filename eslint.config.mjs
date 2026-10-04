@@ -61,7 +61,9 @@ const moduleZones = [
         './components/LogViewer.tsx',
         './components/panels.tsx',
         './lib/format.ts',
-        './lib/platform.ts'
+        './lib/platform.ts',
+        // Design system (thiết kế v0.5) — component dùng chung, không có store của lõi.
+        './ds'
       ],
       message:
         'Module UI uses src/modules/registry/renderer-kit and shared UI components only (ADR-014).'

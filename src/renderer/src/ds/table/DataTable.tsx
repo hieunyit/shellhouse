@@ -482,7 +482,7 @@ export function DataTable<Row>({
                   data-cursor={isCursor || undefined}
                   className={cx(
                     'group absolute inset-x-0 grid h-ds-row items-center border-b border-ds-border-subtle',
-                    isSelected ? 'bg-ds-accent-soft' : 'hover:bg-ds-hover',
+                    isSelected ? 'bg-ds-selected' : 'hover:bg-ds-hover',
                     isActive &&
                       'bg-ds-active before:absolute before:inset-y-0 before:left-0 before:w-0.5 before:bg-ds-accent',
                     isCursor && focused && 'shadow-[inset_0_0_0_1px_var(--ds-accent-ring)]'
@@ -520,11 +520,6 @@ export function DataTable<Row>({
                         checked={isSelected}
                         tabIndex={-1}
                         aria-label={t('Select row')}
-                        className={cx(
-                          !isSelected &&
-                            selection.selected.size === 0 &&
-                            'opacity-0 group-hover:opacity-100'
-                        )}
                         // Xử lý ở ô cha (biết Shift).
                         onCheckedChange={() => undefined}
                       />

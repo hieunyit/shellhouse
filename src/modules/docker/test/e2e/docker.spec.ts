@@ -6,8 +6,10 @@ import { startTestSshServer } from '../../../../../test/integration/ssh-test-ser
 import {
   activeTab,
   expect,
+  expectActiveTab,
   isWindows,
   launchApp,
+  openArea,
   test,
   waitForText
 } from '../../../../../test/e2e/fixtures'
@@ -24,6 +26,7 @@ async function enableDocker(page: Page): Promise<void> {
   await page.getByTestId('module-enable-confirm').click()
   await expect(page.getByTestId('module-toggle-docker')).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Escape')
+  await openArea(page, 'docker')
 }
 
 test('Docker trên máy này (Engine giả qua DOCKER_HOST): danh sách, stats, restart, log, chỉ đọc, dọn image', async () => {
@@ -39,10 +42,10 @@ test('Docker trên máy này (Engine giả qua DOCKER_HOST): danh sách, stats, 
     const local = page.locator('[data-testid="docker-endpoint"][data-name="This computer"]')
     await local.dblclick()
     const view = page.getByTestId('docker-view')
-    await expect(page.getByTestId('tab').last()).toContainText('Docker · This computer')
+    await expectActiveTab(page, 'Docker · This computer')
     const rows = view.getByTestId('docker-container')
     await expect(rows).toHaveCount(3)
-    await expect(view.getByTestId('docker-engine-info')).toContainText('Docker Engine 27.1.1')
+    await expect(page.getByTestId('docker-engine-info')).toContainText('Docker Engine 27.1.1')
 
     // Chọn container đang chạy → bảng chi tiết có CPU / RAM sống.
     const web = view.locator('[data-testid="docker-container"][data-name="web"]')
@@ -68,7 +71,7 @@ test('Docker trên máy này (Engine giả qua DOCKER_HOST): danh sách, stats, 
 
     // Dọn image dangling: xem trước danh sách rồi mới xoá.
     await page.getByTestId('tab').filter({ hasText: 'Docker · This computer' }).click()
-    await view.getByTestId('docker-nav-images').click()
+    await page.getByTestId('docker-nav-images').click()
     await expect(view.getByTestId('docker-image')).toHaveCount(3)
     await view.getByTestId('docker-prune').click()
     await expect(page.getByTestId('docker-prune-list')).toContainText('dangling1')
@@ -80,12 +83,12 @@ test('Docker trên máy này (Engine giả qua DOCKER_HOST): danh sách, stats, 
     await page.getByRole('menuitem', { name: 'Read-only mode' }).click()
     await expect(view.getByTestId('docker-read-only')).toBeVisible()
     await expect(view.getByTestId('docker-prune')).toHaveCount(0)
-    await view.getByTestId('docker-nav-containers').click()
+    await page.getByTestId('docker-nav-containers').click()
     await expect(rows).toHaveCount(3)
     await expect(view.getByTestId('docker-row-restart')).toHaveCount(0)
 
     // Compose: nhóm theo project.
-    await view.getByTestId('docker-nav-compose').click()
+    await page.getByTestId('docker-nav-compose').click()
     await expect(view.locator('[data-testid="docker-project"][data-name="shop"]')).toContainText(
       '2/2 running'
     )
@@ -110,7 +113,7 @@ test('Docker: tổng quan, lọc trạng thái, chạy container mới, log cả
     await expect(rows).toHaveCount(3)
 
     // Tổng quan: số container đang chạy + dung lượng đĩa; bấm thẻ → danh sách đã lọc.
-    await view.getByTestId('docker-nav-overview').click()
+    await page.getByTestId('docker-nav-overview').click()
     await expect(view.getByTestId('docker-ov-disk')).toContainText('reclaimable')
     const runningCount = engine.containers.filter((c) => c.State === 'running').length
     await expect(view.getByTestId('docker-ov-running')).toContainText(String(runningCount))
@@ -168,14 +171,14 @@ test('Docker: tổng quan, lọc trạng thái, chạy container mới, log cả
     await page.keyboard.press('Escape')
 
     // Volume mới qua hộp thoại → Engine nhận đúng tên / driver.
-    await view.getByTestId('docker-nav-volumes').click()
+    await page.getByTestId('docker-nav-volumes').click()
     await view.getByTestId('docker-new-volume').click()
     await page.getByTestId('docker-volume-name').fill('pgdata')
     await page.getByTestId('docker-volume-create').click()
     await expect(view.locator('[data-testid="docker-volume"][data-name="pgdata"]')).toBeVisible()
 
     // Tổng quan: build cache có nút dọn (xem trước dung lượng).
-    await view.getByTestId('docker-nav-overview').click()
+    await page.getByTestId('docker-nav-overview').click()
     await expect(view.getByTestId('docker-ov-row-buildCache')).toContainText('reclaimable')
     await view.getByTestId('docker-ov-prune-buildCache').click()
     await expect(page.getByTestId('docker-prune-dialog')).toContainText('cache-free')
@@ -183,12 +186,12 @@ test('Docker: tổng quan, lọc trạng thái, chạy container mới, log cả
     await expect.poll(() => engine.buildCache.length).toBe(1)
 
     // Log của cả Compose project: một tab, dòng có tiền tố service.
-    await view.getByTestId('docker-nav-compose').click()
+    await page.getByTestId('docker-nav-compose').click()
     await view
       .locator('[data-testid="docker-project"][data-name="shop"]')
       .getByTestId('docker-compose-logs')
       .click()
-    await expect(page.getByTestId('tab').last()).toContainText('shop (logs)')
+    await expectActiveTab(page, 'shop (logs)')
     await expect(page.getByTestId('docker-logs')).toContainText('hello from stdout')
     // Mỗi service một màu + chip lọc (như stern): ẩn db → chỉ còn dòng của web.
     const sources = page.getByTestId('docker-log-sources')
@@ -264,7 +267,7 @@ test('Docker: chọn nhiều dòng (ô chọn, Shift, Ctrl+A, Esc), thao tác h�
     ).toHaveLength(3)
 
     // Volume: một mục lỗi (đang dùng) → kết quả từng mục, mục khác vẫn xoá.
-    await view.getByTestId('docker-nav-volumes').click()
+    await page.getByTestId('docker-nav-volumes').click()
     await expect(view.getByTestId('docker-volume')).toHaveCount(3)
     await view.getByTestId('docker-select-all').click()
     await view.getByTestId('docker-bulk-remove').click()
@@ -289,7 +292,7 @@ test('Docker: Compose — bảng project, thao tác cạnh tên, service mở r�
     await enableDocker(page)
     await page.locator('[data-testid="docker-endpoint"][data-name="This computer"]').dblclick()
     const view = page.getByTestId('docker-view')
-    await view.getByTestId('docker-nav-compose').click()
+    await page.getByTestId('docker-nav-compose').click()
     const shop = view.locator('[data-testid="docker-project"][data-name="shop"]')
     await expect(shop).toContainText('2/2 running')
     await expect(shop).toHaveAttribute('aria-expanded', 'true')
@@ -374,6 +377,7 @@ test('Docker qua SSH: menu host "Docker…", socket qua streamlocal, shell vào 
     )
     if (!saved.ok) throw new Error(saved.message)
     await enableDocker(page)
+    await openArea(page, 'hosts')
 
     const host = page.locator('[data-testid="host-row"][data-host-label="docker-box"]')
     await host.click({ button: 'right' })
@@ -395,7 +399,7 @@ test('Docker qua SSH: menu host "Docker…", socket qua streamlocal, shell vào 
       .locator('[data-testid="docker-container"][data-name="web"]')
       .getByTestId('docker-row-shell')
       .click()
-    await expect(page.getByTestId('tab').last()).toContainText('web (shell)')
+    await expectActiveTab(page, 'web (shell)')
     await page.getByTestId('prompt-input').fill('p')
     await page.getByTestId('prompt-submit').click()
     const tab = await activeTab(page)
@@ -428,6 +432,7 @@ test('gợi ý đúng lúc: có socket Docker trên máy → một dòng gợi �
     await expect(suggestion).toContainText('Docker detected on this computer')
     await page.getByTestId('module-suggestion-enable').click()
     await page.getByTestId('module-enable-confirm').click()
+    await openArea(page, 'docker')
     await expect(page.getByTestId('docker-section')).toBeVisible()
     // Đã gợi ý → không hiện lại (tối đa một lần / 30 ngày).
     const entry = await page.evaluate(() =>
@@ -456,6 +461,7 @@ test('Docker trong WSL (Windows): gợi ý, distro đang chạy hiện ở thanh
     await expect(page.getByTestId('module-suggestion')).toContainText('Docker detected')
     await page.getByTestId('module-suggestion-enable').click()
     await page.getByTestId('module-enable-confirm').click()
+    await openArea(page, 'docker')
 
     // Distro đang chạy tự hiện; distro đang dừng nằm trong menu ＋.
     const ubuntu = page.locator('[data-testid="docker-endpoint"][data-name="Ubuntu (WSL)"]')
@@ -471,7 +477,7 @@ test('Docker trong WSL (Windows): gợi ý, distro đang chạy hiện ở thanh
     await expect(ubuntu).toBeVisible()
 
     await ubuntu.dblclick()
-    await expect(page.getByTestId('tab').last()).toContainText('Docker · Ubuntu (WSL)')
+    await expectActiveTab(page, 'Docker · Ubuntu (WSL)')
     // Linux / macOS không có wsl.exe: tab báo lỗi dễ hiểu (không treo). Runner Windows có wsl.exe
     // thật (distro giả không tồn tại) — phần này chỉ kiểm ở máy không có WSL.
     if (process.platform !== 'win32')

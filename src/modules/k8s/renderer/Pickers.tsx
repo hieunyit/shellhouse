@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { ChevronDown, ChevronsUpDown, Hash } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { t, tn } from '../../registry/renderer-kit'
 
@@ -100,7 +101,7 @@ function DropMenu({
       aria-label={label}
       data-testid={testId}
       className={cx(
-        'z-50 flex flex-col rounded-md border border-line bg-elevated p-1 shadow-lg',
+        'z-50 flex flex-col rounded-md bg-ds-popover p-1 shadow-ds-popover',
         host === document.body ? 'fixed' : 'absolute',
         className
       )}
@@ -198,7 +199,9 @@ export function ContextPicker({
         data-testid="k8s-context-picker"
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex h-8 max-w-56 items-center gap-2 rounded-md px-2 hover:bg-hover"
+        // Crumb có bộ chuyển (⇅) trong đường dẫn của header (thiết kế v0.5).
+        className="flex h-6.5 max-w-56 items-center gap-1.5 rounded-ds-sm px-1.5 text-muted outline-none hover:bg-ds-hover hover:text-fg focus-visible:shadow-ds-focus aria-expanded:bg-ds-active"
+        title={version ? `${label} · ${version}` : label}
         onClick={() => {
           setOpen(!open)
         }}
@@ -209,17 +212,14 @@ export function ContextPicker({
           }
         }}
       >
-        <span className={cx('size-2 shrink-0 rounded-full', color)} />
         <span
-          className="truncate text-[13px] font-semibold text-fg"
+          className="truncate text-[13px] font-medium"
           data-testid="k8s-context-label"
+          data-color={color}
         >
           {label}
         </span>
-        {version && <span className="text-[11px] text-faint">{version}</span>}
-        <span className="text-faint" aria-hidden>
-          ▾
-        </span>
+        <ChevronsUpDown size={13} strokeWidth={1.5} className="shrink-0 text-faint" aria-hidden />
       </button>
       {open && (
         <DropMenu
@@ -241,8 +241,8 @@ export function ContextPicker({
               data-testid="k8s-context-option"
               data-name={c.name}
               className={cx(
-                'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs outline-none hover:bg-hover focus-visible:bg-hover',
-                c.key === current && 'bg-accent-soft'
+                'flex w-full items-center gap-2 rounded-ds-md px-2 py-1.5 text-left text-xs outline-none hover:bg-ds-active focus-visible:bg-ds-active',
+                c.key === current && 'bg-ds-selected'
               )}
               onClick={() => {
                 setOpen(false)
@@ -311,7 +311,8 @@ export function NamespacePicker({
         data-testid="k8s-namespace"
         aria-haspopup="menu"
         aria-expanded={open}
-        className="h-8 max-w-48 truncate rounded-md border border-line bg-surface px-2 text-xs text-fg hover:border-line-strong"
+        // Chip phạm vi (Namespaces) trong header.
+        className="flex h-6.5 max-w-56 items-center gap-1.5 rounded-ds-md border border-ds-border px-2 text-[13px] text-fg outline-none hover:border-ds-border-strong focus-visible:shadow-ds-focus aria-expanded:bg-ds-active"
         onClick={() => {
           setOpen(!open)
         }}
@@ -322,7 +323,9 @@ export function NamespacePicker({
           }
         }}
       >
-        {label} ▾
+        <Hash size={13} strokeWidth={1.5} className="shrink-0 text-faint" aria-hidden />
+        <span className="truncate">{label}</span>
+        <ChevronDown size={13} strokeWidth={1.5} className="shrink-0 text-faint" aria-hidden />
       </button>
       {open && (
         <DropMenu anchor={box} onClose={close} className="w-60" testId="k8s-namespace-menu">

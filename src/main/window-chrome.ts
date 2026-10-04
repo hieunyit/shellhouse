@@ -5,30 +5,29 @@ import type {
 } from 'electron'
 
 /**
- * Cửa sổ không có thanh tiêu đề của hệ điều hành (kiểu Linear): thanh trên cùng của app (thanh
- * công cụ + đầu thanh bên, cao 44 px) là vùng kéo cửa sổ (`-webkit-app-region: drag` trong
- * styles.css).
+ * Cửa sổ không có thanh tiêu đề của hệ điều hành (kiểu Linear): title bar tự vẽ của app (cao 38 px,
+ * nền khung — shell/TitleBar) là vùng kéo cửa sổ (`-webkit-app-region: drag` trong styles.css).
  * - macOS: `hiddenInset` — ba nút đèn giao thông nằm trong thanh trên cùng, căn giữa theo chiều dọc.
  * - Windows / Linux: `hidden` + `titleBarOverlay` — nút thu nhỏ / phóng to / đóng do Electron vẽ ở góc
  *   phải, màu theo theme của app (renderer chừa chỗ bằng env(titlebar-area-*)).
  * Nhấp đúp vào vùng kéo để phóng to là hành vi gốc của hệ điều hành (theo cài đặt của người dùng).
  */
 
-/** Chiều cao thanh trên cùng của app (TabBar h-11). */
-export const TOP_BAR_HEIGHT = 44
+/** Chiều cao title bar của app (--ds-titlebar-h). */
+export const TOP_BAR_HEIGHT = 38
 
-/** Nút điều khiển cửa sổ (Windows / Linux) cao hơn 1 px thì đè lên viền dưới của thanh trên cùng. */
-const OVERLAY_HEIGHT = TOP_BAR_HEIGHT - 1
+/** Title bar không có viền dưới (cùng nền khung) → nút cửa sổ cao bằng cả thanh. */
+const OVERLAY_HEIGHT = TOP_BAR_HEIGHT
 
-/** Nền / màu biểu tượng của thanh trên cùng — trùng --sh-surface / --sh-muted trong styles.css. */
+/** Nền / màu biểu tượng của title bar — trùng --ds-bg / --ds-fg-2 trong ds/tokens.css. */
 const TOP_BAR_COLORS = {
-  dark: { color: '#14171b', symbolColor: '#a3abb5' },
-  light: { color: '#ffffff', symbolColor: '#4b5360' }
+  dark: { color: '#08090a', symbolColor: '#a1a4ab' },
+  light: { color: '#eceef1', symbolColor: '#50545b' }
 } as const
 
-/** Nền cửa sổ trước khi renderer vẽ — trùng --sh-canvas. */
+/** Nền cửa sổ trước khi renderer vẽ — trùng --ds-bg. */
 export function windowBackground(dark: boolean): string {
-  return dark ? '#0d0f12' : '#f4f5f7'
+  return dark ? '#08090a' : '#eceef1'
 }
 
 export function titleBarOverlay(dark: boolean): TitleBarOverlayOptions {
@@ -44,8 +43,8 @@ export function windowChromeOptions(
   'titleBarStyle' | 'trafficLightPosition' | 'titleBarOverlay'
 > {
   if (platform === 'darwin') {
-    // Đèn giao thông (~14 px) căn giữa trong thanh 44 px; x khớp lề trái của đầu thanh bên.
-    return { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 16, y: 15 } }
+    // Đèn giao thông (~14 px) căn giữa trong title bar 38 px.
+    return { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 14, y: 12 } }
   }
   return { titleBarStyle: 'hidden', titleBarOverlay: titleBarOverlay(dark) }
 }

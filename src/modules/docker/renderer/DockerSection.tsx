@@ -86,8 +86,8 @@ export function DockerSection(): React.JSX.Element {
   ]
 
   return (
-    <div className="mt-2 border-t border-line pt-2" data-testid="docker-section">
-      <div className="flex h-7 items-center gap-1.5 px-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
+    <div data-testid="docker-section">
+      <div className="flex h-7 items-center gap-1.5 px-1 text-xs font-medium text-faint">
         <button
           type="button"
           aria-expanded={open}
@@ -100,8 +100,7 @@ export function DockerSection(): React.JSX.Element {
             size={13}
             className={cx('transition-transform duration-150', open && 'rotate-90')}
           />
-          <Container size={12} />
-          <span className="flex-1 text-left">Docker</span>
+          <span className="flex-1 text-left">{t('Endpoints')}</span>
         </button>
         <IconButton
           label={t('Refresh (find WSL distributions again)')}
@@ -181,7 +180,7 @@ export function DockerSection(): React.JSX.Element {
               {sourceLabel(r.hostId)}
             </span>
             {r.readOnly && (
-              <span className="rounded bg-subtle px-1 text-[10px] font-medium text-muted">
+              <span className="rounded bg-subtle px-1 text-[11px] font-medium text-muted">
                 {t('read-only')}
               </span>
             )}

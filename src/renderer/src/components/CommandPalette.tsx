@@ -55,7 +55,6 @@ export function CommandPalette({
   const shells = useShells((s) => s.shells)
   const workspaces = useSettings((s) => s.settings.workspaces)
   const moduleStates = useModules((s) => s.states)
-  const newUi = useSettings((s) => s.settings.appearance.newUi)
 
   const items = useMemo<Item[]>(() => {
     const commands: Item[] = COMMANDS.filter((c) => c.id !== 'palette.open').map((c) => ({
@@ -135,23 +134,21 @@ export function CommandPalette({
     const enabledCommands = modules
       .filter((m) => m.enabled)
       .flatMap((m) => moduleCommands(m.manifest.id))
-    // Giao diện mới (beta): trang Design kit — mọi component của design system.
-    const designKit: Item[] = newUi
-      ? [
-          {
-            id: 'designkit.open',
-            title: t('Open design kit'),
-            alias: 'Design kit',
-            hint: '',
-            group: 'Commands' as const,
-            icon: <Palette size={14} />,
-            shortcut: false,
-            run: () => {
-              runCommand('designkit.open')
-            }
-          }
-        ]
-      : []
+    // Design kit: mọi component của design system.
+    const designKit: Item[] = [
+      {
+        id: 'designkit.open',
+        title: t('Open design kit'),
+        alias: 'Design kit',
+        hint: '',
+        group: 'Commands' as const,
+        icon: <Palette size={14} />,
+        shortcut: false,
+        run: () => {
+          runCommand('designkit.open')
+        }
+      }
+    ]
     const all = [
       ...commands,
       ...designKit,
@@ -178,7 +175,7 @@ export function CommandPalette({
         .sort((a, b) => b.score - a.score)
         .map((r) => r.item)
     ]
-  }, [query, overrides, hosts, shells, workspaces, runCommand, moduleStates, newUi])
+  }, [query, overrides, hosts, shells, workspaces, runCommand, moduleStates])
 
   // Giữ mục đang chọn trong vùng nhìn thấy khi di chuyển bằng phím mũi tên.
   useEffect(() => {
@@ -243,7 +240,7 @@ export function CommandPalette({
           {items.map((item, i) => (
             <div key={item.id}>
               {!query.trim() && item.group !== items[i - 1]?.group && (
-                <div className="px-2.5 pt-2 pb-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
+                <div className="px-2.5 pt-2 pb-1 text-xs font-medium text-faint">
                   {item.group === 'Hosts' ? t('Hosts') : t('Commands')}
                 </div>
               )}

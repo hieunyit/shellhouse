@@ -11,31 +11,36 @@ import { choiceKeyDown, cx, Kbd } from './ui'
 
 export type Tone = 'ok' | 'warn' | 'bad' | 'info' | 'muted'
 
+// Màu theo ngữ nghĩa (thiết kế v0.5): xanh lá khoẻ · vàng chờ / cảnh báo · đỏ lỗi · xanh dương
+// thông tin / tiến trình · xám dừng / không rõ (vòng rỗng).
 const PILL: Record<Tone, string> = {
   ok: 'bg-success-soft text-success',
   warn: 'bg-warning-soft text-warning',
   bad: 'bg-danger-soft text-danger',
-  info: 'bg-accent-soft text-accent',
-  muted: 'bg-subtle text-muted'
+  info: 'bg-info-soft text-info',
+  muted: 'bg-ds-active text-muted'
 }
 
 const DOT: Record<Tone, string> = {
   ok: 'bg-success',
   warn: 'bg-warning',
   bad: 'bg-danger',
-  info: 'bg-accent',
-  muted: 'bg-line-strong'
+  info: 'bg-info',
+  muted: 'border border-ds-status-off bg-transparent'
 }
 
 export const TONE_TEXT: Record<Tone, string> = {
   ok: 'text-success',
   warn: 'text-warning',
   bad: 'text-danger',
-  info: 'text-accent',
+  info: 'text-info',
   muted: 'text-faint'
 }
 
-/** Nhãn trạng thái (Running, CrashLoopBackOff…). */
+/**
+ * Nhãn trạng thái (Running, CrashLoopBackOff…). Có chấm (mặc định): chấm + chữ cùng màu, không nền
+ * — mỗi hàng bảng chỉ một chỉ báo trạng thái. `dot={false}`: chip nền nhạt (nhãn phụ, header).
+ */
 export function Pill({
   tone,
   children,
@@ -47,15 +52,27 @@ export function Pill({
   dot?: boolean
   title?: string
 }): React.JSX.Element {
+  if (dot)
+    return (
+      <span
+        title={title}
+        className={cx(
+          'inline-flex max-w-full min-w-0 items-center gap-1.5 truncate text-[12px] font-medium',
+          tone === 'muted' ? 'text-muted' : TONE_TEXT[tone]
+        )}
+      >
+        <span className={cx('size-1.5 shrink-0 rounded-full', DOT[tone])} />
+        <span className="truncate">{children}</span>
+      </span>
+    )
   return (
     <span
       title={title}
       className={cx(
-        'inline-flex max-w-full items-center gap-1 truncate rounded-full px-1.5 py-px text-[11px] font-medium',
+        'inline-flex h-5 max-w-full items-center gap-1 truncate rounded-ds-sm px-1.5 text-[11px] font-medium',
         PILL[tone]
       )}
     >
-      {dot && <span className={cx('size-1.5 shrink-0 rounded-full', DOT[tone])} />}
       <span className="truncate">{children}</span>
     </span>
   )
@@ -76,7 +93,7 @@ export function TabStrip<T extends string>({
   return (
     <div
       role="tablist"
-      className="flex shrink-0 gap-3 overflow-x-auto border-b border-line px-3"
+      className="flex shrink-0 gap-4 overflow-x-auto border-b border-ds-border-subtle px-3 [scrollbar-width:none]"
       onKeyDown={(e) => {
         choiceKeyDown(
           e,
@@ -95,9 +112,9 @@ export function TabStrip<T extends string>({
           tabIndex={value === tab.id || !tabs.some((x) => x.id === value) ? 0 : -1}
           data-testid={testIdPrefix ? `${testIdPrefix}-${tab.id}` : undefined}
           className={cx(
-            '-mb-px h-9 shrink-0 border-b-2 text-xs font-medium whitespace-nowrap transition-colors',
+            '-mb-px h-ds-tab shrink-0 border-b-2 text-[13px] font-medium whitespace-nowrap transition-colors focus-visible:shadow-ds-focus focus-visible:outline-none',
             value === tab.id
-              ? 'border-accent text-fg'
+              ? 'border-ds-accent text-fg'
               : 'border-transparent text-muted hover:text-fg'
           )}
           onClick={() => {
@@ -148,7 +165,7 @@ export function KeyHints({
     <div
       ref={ref}
       className={cx(
-        'relative flex h-7 shrink-0 items-center gap-3 border-t border-line bg-subtle px-2 text-[11px] whitespace-nowrap text-faint',
+        'relative flex h-7 shrink-0 items-center gap-3 border-t border-ds-border-subtle px-3 text-[11px] whitespace-nowrap text-faint',
         className
       )}
       data-testid="key-hints"
@@ -181,13 +198,11 @@ export function KeyHints({
           role="dialog"
           aria-label={t('Keyboard shortcuts')}
           data-testid="key-hints-sheet"
-          className="absolute right-2 bottom-8 z-40 grid max-h-[70vh] w-[30rem] max-w-[calc(100%-1rem)] grid-cols-2 gap-x-6 gap-y-3 overflow-auto rounded-lg border border-line bg-elevated p-3 text-xs whitespace-normal shadow-lg"
+          className="absolute right-2 bottom-8 z-40 grid max-h-[70vh] w-[30rem] max-w-[calc(100%-1rem)] grid-cols-2 gap-x-6 gap-y-3 overflow-auto rounded-ds-lg bg-ds-popover p-3 text-xs whitespace-normal shadow-ds-popover"
         >
           {all.map((g) => (
             <div key={g.title} className="flex flex-col gap-1">
-              <div className="text-[11px] font-semibold tracking-wider text-faint uppercase">
-                {g.title}
-              </div>
+              <div className="text-xs font-medium text-faint">{g.title}</div>
               {g.keys.map(([key, label]) => (
                 <div key={key} className="flex items-center justify-between gap-3">
                   <span className="text-muted">{label}</span>
@@ -228,7 +243,7 @@ export function Sparkline({
   return (
     <svg
       viewBox={`0 0 ${w} ${h}`}
-      className={cx('h-10 w-full text-accent', className)}
+      className={cx('h-10 w-full text-chart', className)}
       preserveAspectRatio="none"
       aria-hidden
     >
@@ -264,15 +279,14 @@ export function Meter({
   testId?: string
 }): React.JSX.Element {
   const ratio = max > 0 ? Math.min(1, value / max) : 0
-  const tone =
-    neutral || ratio <= 0.75 ? 'bg-accent-solid' : ratio > 0.9 ? 'bg-danger-solid' : 'bg-warning'
+  const tone = neutral || ratio < 0.75 ? 'bg-chart' : ratio >= 0.9 ? 'bg-danger' : 'bg-warning'
   return (
     <div className="flex flex-col gap-1" data-testid={testId}>
       <div className="flex justify-between text-xs">
         <span className="text-muted">{label}</span>
         <span className="text-fg tabular-nums">{detail ?? formatPercent(ratio)}</span>
       </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-subtle">
+      <div className="h-1 overflow-hidden rounded-full bg-ds-chart-track">
         <div
           className={cx('h-full rounded-full transition-[width]', tone)}
           style={{ width: `${ratio * 100}%` }}
@@ -300,7 +314,7 @@ export function StatCard({
 }): React.JSX.Element {
   const body = (
     <>
-      <span className="text-[11px] font-medium tracking-wide text-faint uppercase">{label}</span>
+      <span className="text-xs font-medium text-faint">{label}</span>
       <span
         className={cx(
           'text-xl font-semibold tabular-nums',
@@ -313,7 +327,7 @@ export function StatCard({
     </>
   )
   const cls =
-    'flex min-w-0 flex-col gap-0.5 rounded-lg border border-line bg-surface p-3 text-left shadow-xs'
+    'flex min-w-0 flex-col gap-0.5 rounded-ds-lg border border-ds-border-subtle bg-surface p-3 text-left'
   return onClick ? (
     <button
       type="button"
@@ -340,13 +354,16 @@ export function DefList({
 }): React.JSX.Element {
   return (
     <dl
-      className={cx('grid grid-cols-[minmax(5.5rem,auto)_1fr] gap-x-3 gap-y-1 text-xs', className)}
+      className={cx(
+        'grid grid-cols-[minmax(6rem,8rem)_1fr] gap-x-3 gap-y-1.5 text-[13px]',
+        className
+      )}
     >
       {items
         .filter((i): i is readonly [string, ReactNode] => Boolean(i))
         .map(([label, value]) => (
           <div key={label} className="contents">
-            <dt className="text-faint">{label}</dt>
+            <dt className="text-muted">{label}</dt>
             <dd className="min-w-0 break-words text-fg">{value}</dd>
           </div>
         ))}
@@ -364,9 +381,7 @@ export function Heading({
 }): React.JSX.Element {
   return (
     <div className="mb-1.5 flex items-center gap-2">
-      <h4 className="flex-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
-        {children}
-      </h4>
+      <h4 className="flex-1 text-[13px] font-medium text-fg">{children}</h4>
       {action}
     </div>
   )
@@ -385,7 +400,7 @@ export function LabelChips({
       {entries.map(([k, v]) => (
         <span
           key={k}
-          className="max-w-full truncate rounded bg-subtle px-1.5 py-px font-mono text-[11px] text-muted"
+          className="max-w-full truncate rounded-ds-xs bg-ds-active px-1.5 py-px font-mono text-[11px] text-muted"
           title={`${k}=${v}`}
         >
           {k}
@@ -448,7 +463,7 @@ export function SidePanel({
   if (expanded)
     return (
       <aside
-        className="relative flex min-w-0 flex-1 flex-col border-l border-line bg-surface"
+        className="relative flex min-w-0 flex-1 flex-col border-l border-ds-border-subtle bg-surface"
         data-testid={testId}
         data-expanded="true"
       >
@@ -459,8 +474,8 @@ export function SidePanel({
     <aside
       className={
         overlay
-          ? 'absolute inset-y-0 right-0 z-20 flex flex-col border-l border-line bg-surface shadow-xl'
-          : 'relative flex max-w-[70%] shrink-0 flex-col border-l border-line bg-surface'
+          ? 'absolute inset-y-0 right-0 z-20 flex flex-col bg-surface shadow-ds-sheet'
+          : 'relative flex max-w-[70%] shrink-0 flex-col border-l border-ds-border-subtle bg-surface'
       }
       style={
         overlay
@@ -478,7 +493,7 @@ export function SidePanel({
         aria-label={t('Resize the panel')}
         title={t('Drag to resize · double-click to reset')}
         data-testid="side-panel-resize"
-        className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize hover:bg-accent/30 active:bg-accent/40"
+        className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize hover:bg-ds-border-strong active:bg-accent/40"
         onPointerDown={(e) => {
           e.preventDefault()
           e.currentTarget.setPointerCapture(e.pointerId)

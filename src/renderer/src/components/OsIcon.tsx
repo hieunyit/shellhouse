@@ -187,11 +187,14 @@ export function OsIcon({
   os,
   size = 16,
   title,
+  mono,
   className
 }: {
   os: OsId
   size?: number
   title?: string
+  /** Đơn sắc (cây host, tab — thiết kế v0.5): bỏ màu thương hiệu, chỉ giữ hình. */
+  mono?: boolean
   className?: string
 }): React.JSX.Element {
   const mark = MARKS[os]
@@ -201,6 +204,7 @@ export function OsIcon({
       width={size}
       height={size}
       className={className}
+      style={mono ? { filter: 'grayscale(1)', opacity: 0.72 } : undefined}
       data-testid="os-icon"
       data-os={os}
       role={title ? 'img' : undefined}

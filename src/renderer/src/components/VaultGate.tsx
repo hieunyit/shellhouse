@@ -40,7 +40,7 @@ function Card({
       <div className="mb-6 flex flex-col items-center gap-4 text-center">
         <div className="relative">
           <Logo size={56} className="drop-shadow-md" />
-          <div className="absolute -right-1.5 -bottom-1.5 flex size-6 items-center justify-center rounded-full border-2 border-elevated bg-accent-solid text-white">
+          <div className="absolute -right-1.5 -bottom-1.5 flex size-6 items-center justify-center rounded-full border-2 border-elevated bg-accent-solid text-accent-fg">
             {icon}
           </div>
         </div>

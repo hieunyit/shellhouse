@@ -437,7 +437,7 @@ export function ComposeView({
                     >
                       <span className="truncate">{config}</span>
                       {p.configFiles.length > 1 && (
-                        <span className="shrink-0 rounded bg-subtle px-1 font-sans text-[10px] text-faint">
+                        <span className="shrink-0 rounded bg-subtle px-1 font-sans text-[11px] text-faint">
                           {`+${String(p.configFiles.length - 1)}`}
                         </span>
                       )}
@@ -535,7 +535,7 @@ const DOT: Record<Tone, string> = {
   ok: 'bg-success',
   warn: 'bg-warning',
   bad: 'bg-danger',
-  info: 'bg-accent',
+  info: 'bg-info',
   muted: 'bg-line-strong'
 }
 

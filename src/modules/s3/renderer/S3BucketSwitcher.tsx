@@ -93,7 +93,7 @@ export function S3BucketSwitcher({
       </div>
       {open && (
         <div
-          className="absolute top-full left-0 z-40 mt-1.5 w-64 rounded-lg border border-line bg-surface p-1 shadow-lg"
+          className="absolute top-full left-0 z-40 mt-1.5 w-64 rounded-lg bg-ds-popover p-1 shadow-ds-popover"
           data-testid="s3-bucket-menu"
         >
           <p className="px-2 pt-1 pb-1.5 text-xs font-medium text-faint">{t('Switch bucket')}</p>

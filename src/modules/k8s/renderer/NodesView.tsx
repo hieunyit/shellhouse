@@ -293,7 +293,7 @@ function NodeCard({
             {info.roles.map((r) => (
               <span
                 key={r}
-                className="shrink-0 rounded bg-subtle px-1 py-px text-[10.5px] font-medium text-muted"
+                className="shrink-0 rounded bg-subtle px-1 py-px text-[11px] font-medium text-muted"
               >
                 {r}
               </span>
@@ -366,7 +366,7 @@ function NodeCard({
           {info.taints.map((taint) => (
             <span
               key={`${taint.key}:${taint.effect}`}
-              className="rounded border border-line px-1 font-mono text-[10.5px] text-muted"
+              className="rounded border border-line px-1 font-mono text-[11px] text-muted"
               title={t('Taint — only pods that tolerate it are scheduled here')}
             >
               {taint.key}
@@ -408,8 +408,7 @@ function AllocBar({
 }): React.JSX.Element {
   const r = ratio(requested, capacity)
   const u = used === null ? null : ratio(used, capacity)
-  const tone =
-    r >= ALLOC_BAD ? 'bg-danger-solid' : r >= ALLOC_WARN ? 'bg-warning' : 'bg-accent-solid'
+  const tone = r >= ALLOC_BAD ? 'bg-danger-solid' : r >= ALLOC_WARN ? 'bg-warning' : 'bg-chart'
   return (
     <div data-testid={testId} data-ratio={r.toFixed(2)}>
       <div className="mb-1 flex justify-between gap-2 text-[11px]">

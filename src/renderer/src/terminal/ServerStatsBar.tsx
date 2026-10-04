@@ -22,11 +22,11 @@ function level(percent: number): string {
 
 function Meter({ percent }: { percent: number }): React.JSX.Element {
   return (
-    <span className="relative hidden h-1.5 w-10 overflow-hidden rounded-full bg-subtle @md:inline-block">
+    <span className="relative hidden h-1 w-10 overflow-hidden rounded-full bg-ds-chart-track @md:inline-block">
       <span
         className={cx(
           'absolute inset-y-0 left-0 rounded-full transition-[width] duration-500',
-          percent >= 90 ? 'bg-danger' : percent >= 75 ? 'bg-warning' : 'bg-accent'
+          percent >= 90 ? 'bg-danger' : percent >= 75 ? 'bg-warning' : 'bg-chart'
         )}
         style={{ width: `${Math.min(100, Math.max(2, percent))}%` }}
       />
@@ -60,7 +60,7 @@ function Item({
 }
 
 const BAR_CLASS =
-  '@container flex h-6 shrink-0 items-center gap-4 overflow-hidden border-t border-line bg-surface px-3 text-xs whitespace-nowrap text-muted tabular-nums'
+  '@container flex h-6 shrink-0 items-center gap-4 overflow-hidden border-t border-ds-border-subtle bg-surface px-3 text-xs whitespace-nowrap text-muted tabular-nums'
 
 /** Ô xám nhấp nháy giữ chỗ cho một số liệu chưa có. */
 function Skeleton({ className }: { className?: string }): React.JSX.Element {

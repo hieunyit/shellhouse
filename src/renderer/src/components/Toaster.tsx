@@ -25,8 +25,8 @@ const BAR: Record<ToastTone, string> = {
   success: 'bg-success',
   error: 'bg-danger-solid',
   warning: 'bg-warning',
-  info: 'bg-accent-solid',
-  loading: 'bg-accent-solid'
+  info: 'bg-info',
+  loading: 'bg-info'
 }
 
 /** Ngăn xếp toast góc dưới phải (trên mọi màn hình). */
@@ -56,7 +56,7 @@ function ToastCard({ toast }: { toast: Toast }): React.JSX.Element {
       role={toast.tone === 'error' ? 'alert' : 'status'}
       data-testid="toast"
       data-tone={toast.tone}
-      className="pointer-events-auto relative flex animate-fade-in gap-2.5 overflow-hidden rounded-lg border border-line bg-elevated py-2.5 pr-2 pl-3.5 text-xs shadow-lg"
+      className="pointer-events-auto relative flex animate-fade-in gap-2.5 overflow-hidden rounded-lg bg-ds-popover py-2.5 pr-2 pl-3.5 text-xs shadow-ds-popover"
       onMouseEnter={() => {
         hold(toast.id, true)
       }}
@@ -79,7 +79,7 @@ function ToastCard({ toast }: { toast: Toast }): React.JSX.Element {
           </div>
         )}
         {open && toast.details && (
-          <pre className="mt-1.5 max-h-40 overflow-auto rounded bg-subtle p-1.5 font-mono text-[10.5px] whitespace-pre-wrap text-muted select-text">
+          <pre className="mt-1.5 max-h-40 overflow-auto rounded bg-subtle p-1.5 font-mono text-[11px] whitespace-pre-wrap text-muted select-text">
             {toast.details}
           </pre>
         )}

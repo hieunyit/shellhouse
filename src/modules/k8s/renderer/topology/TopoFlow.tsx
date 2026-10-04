@@ -606,7 +606,7 @@ export const PodsCard = memo(function PodsCard({
             />
           ))}
           {pods.length > maxDots && (
-            <span className="col-span-3 text-[10.5px] leading-[10px] text-faint">
+            <span className="col-span-3 text-[11px] leading-[10px] text-faint">
               +{pods.length - dots.length}
             </span>
           )}

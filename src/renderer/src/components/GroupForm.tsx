@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react'
 import { X } from 'lucide-react'
 import { buildGroupTree, countHostsRecursive } from '@shared/group-tree'
-import { MAX_JUMPS, type GroupDefaults, type GroupSummary, type HostColor } from '@shared/hosts'
+import { MAX_JUMPS, type GroupDefaults, type GroupSummary } from '@shared/hosts'
 import { inheritedDefaults, type Inherited } from '@shared/inherit'
 import { t, tn } from '@shared/i18n'
 import { useHosts } from '../stores/hosts'
-import { ColorPicker, colorName } from './ColorPicker'
+import { environmentFromColor, findEnvironment } from '@shared/environments'
+import { groupOwnEnvironment, useEnvironments } from '../stores/environments'
+import { useShell } from '../shell/store'
 import { GroupSelect } from './GroupSelect'
-import { Button, Field, IconButton, Input, Modal, Notice, Select } from './ui'
+import { Button, cx, Field, IconButton, Input, Modal, Notice, Select } from './ui'
 
 /** Giá trị kế thừa kèm nguồn: "deploy (from Production)". */
 const withSource = (value: string, i: Inherited<unknown> | undefined): string =>
@@ -64,7 +66,9 @@ export function GroupForm({
   const [port, setPort] = useState(d.port === undefined ? '' : String(d.port))
   const [keyId, setKeyId] = useState<string>(d.keyId ?? '')
   const [jumps, setJumps] = useState<string[]>(d.jumpHostIds ?? [])
-  const [color, setColor] = useState<HostColor | null>(d.color ?? null)
+  // Môi trường do nhóm tự đặt (nhóm cũ chỉ có màu → suy ra môi trường tương ứng).
+  const environments = useEnvironments()
+  const [environment, setEnvironment] = useState<string | null>(groupOwnEnvironment(d) ?? null)
 
   const info = useMemo(() => {
     const tree = buildGroupTree(groups)
@@ -79,6 +83,10 @@ export function GroupForm({
     }
   }, [groups, hosts, group, parentId])
   const inh = info.inherited
+  const inheritedEnv = findEnvironment(
+    environments,
+    inh.environment?.value ?? environmentFromColor(inh.color?.value)
+  )
   const hostLabel = (id: string): string => hosts.find((h) => h.id === id)?.label ?? t('(deleted)')
 
   const nameMissing = !name.trim()
@@ -91,7 +99,7 @@ export function GroupForm({
     if (port.trim()) defaults.port = Number(port)
     if (keyId) defaults.keyId = keyId
     if (jumps.length > 0) defaults.jumpHostIds = jumps
-    if (color) defaults.color = color
+    if (environment) defaults.environment = environment
     void window.shellhouse
       .saveGroup({ ...(group ? { id: group.id } : {}), name, parentId, defaults })
       .then((result) => {
@@ -327,29 +335,72 @@ export function GroupForm({
               )}
             </div>
             <div className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted">{t('Environment color')}</span>
-              <ColorPicker
-                value={color}
-                onChange={setColor}
-                noneLabel={
-                  inh.color
-                    ? t('Use the parent color ({color})', { color: colorName(inh.color.value) })
-                    : t('No color')
-                }
-                testIdPrefix="group-color"
-              />
-              {!color && inh.color && (
-                <p className="text-xs text-muted" data-testid="group-color-inherited">
-                  {t('Using {color} from {group}.', {
-                    color: colorName(inh.color.value),
-                    group: inh.color.groupName
+              <span className="text-xs font-medium text-muted" id="group-env-label">
+                {t('Environment')}
+              </span>
+              <div
+                role="radiogroup"
+                aria-labelledby="group-env-label"
+                className="grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-1.5"
+              >
+                {[null, ...environments].map((env) => {
+                  const checked = (env?.id ?? null) === environment
+                  return (
+                    <button
+                      key={env?.id ?? 'none'}
+                      type="button"
+                      role="radio"
+                      aria-checked={checked}
+                      data-testid={`group-env-${env?.id ?? 'none'}`}
+                      className={cx(
+                        'flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-ds-md px-2 text-xs outline-none focus-visible:shadow-ds-focus',
+                        checked
+                          ? 'bg-ds-surface-2 text-fg shadow-[inset_0_0_0_1.5px_var(--ds-accent)]'
+                          : 'text-muted shadow-[inset_0_0_0_1px_var(--ds-border)] hover:text-fg'
+                      )}
+                      onClick={() => {
+                        setEnvironment(env?.id ?? null)
+                      }}
+                    >
+                      {env && (
+                        <span
+                          aria-hidden
+                          className={cx(
+                            'size-1.5 shrink-0 rounded-[1px]',
+                            env.highlight ? 'bg-ds-env-prod' : 'bg-ds-fg-3'
+                          )}
+                        />
+                      )}
+                      <span className="truncate">
+                        {env ? env.name : inheritedEnv ? t('Inherit') : t('None')}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              {!environment && inheritedEnv && (
+                <p className="text-xs text-muted" data-testid="group-env-inherited">
+                  {t('Using {env} from {group}.', {
+                    env: inheritedEnv.name,
+                    group: inh.environment?.groupName ?? inh.color?.groupName ?? ''
                   })}
                 </p>
               )}
               <p className="text-xs text-faint">
                 {t(
-                  'Tabs and terminals of hosts inside get this color — e.g. red for production, so it is obvious where you are typing.'
-                )}
+                  'Hosts and subgroups inside inherit it: the label, the line at the top and how deleting is confirmed.'
+                )}{' '}
+                <button
+                  type="button"
+                  className="text-ds-accent-text hover:underline"
+                  data-testid="group-env-manage"
+                  onClick={() => {
+                    onClose()
+                    useShell.getState().openSettings('environments')
+                  }}
+                >
+                  {t('Edit environments…')}
+                </button>
               </p>
             </div>
           </fieldset>

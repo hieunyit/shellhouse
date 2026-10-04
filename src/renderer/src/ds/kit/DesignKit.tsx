@@ -265,9 +265,9 @@ const TOKEN_GROUPS: readonly { name: () => string; tokens: readonly string[] }[]
     name: () => t('Environment · chart'),
     tokens: [
       '--ds-env-prod',
-      '--ds-env-staging',
-      '--ds-env-dev',
-      '--ds-env-test',
+      '--ds-env-prod-soft',
+      '--ds-env-other',
+      '--ds-border-control',
       '--ds-chart',
       '--ds-chart-2'
     ]
@@ -293,7 +293,7 @@ function KitContent({ theme }: { theme: 'dark' | 'light' }): React.JSX.Element {
                     className="h-8 border-b border-ds-border-subtle"
                     style={{ background: `var(${token})` }}
                   />
-                  <div className="truncate px-2 py-1 font-mono text-[10.5px] tracking-normal text-ds-fg-3">
+                  <div className="truncate px-2 py-1 font-mono text-ds-xs tracking-normal text-ds-fg-3">
                     {token.slice(5)}
                   </div>
                 </div>
@@ -348,7 +348,7 @@ function KitContent({ theme }: { theme: 'dark' | 'light' }): React.JSX.Element {
                 className="rounded-[2px] border border-ds-border-strong bg-ds-surface-2"
                 style={{ width: n, height: n }}
               />
-              <span className="font-mono text-[10px] text-ds-fg-3">{n}</span>
+              <span className="font-mono text-ds-xs text-ds-fg-3">{n}</span>
             </div>
           ))}
         </div>
@@ -1060,7 +1060,7 @@ function LayoutSection(): React.JSX.Element {
     <Section
       title={t('Breadcrumb · production marker')}
       description={t(
-        'PROD: a thin red line at the top of the content and one small label in the header.'
+        'PROD: a thin magenta line at the top of the content and one small label in the header.'
       )}
     >
       <div className="overflow-hidden rounded-ds-lg border border-ds-border">

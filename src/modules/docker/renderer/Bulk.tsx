@@ -545,7 +545,7 @@ export function BulkDialog({
                 <div
                   className={cx(
                     'h-full rounded-full transition-[width]',
-                    failed.length ? 'bg-warning' : 'bg-accent'
+                    failed.length ? 'bg-warning' : 'bg-info'
                   )}
                   style={{ width: `${String(Math.round(progress * 100))}%` }}
                 />

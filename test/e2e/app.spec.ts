@@ -1,7 +1,14 @@
+import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 
+/** Chẩn đoán: Settings → Diagnostics. */
+async function openDiagnostics(page: Page): Promise<void> {
+  await page.getByTestId('open-settings').click()
+  await page.getByTestId('settings-nav-diagnostics').click()
+}
+
 test('renderer bị sandbox, không có quyền Node', async ({ page }) => {
-  await page.getByTestId('toggle-diagnostics').click()
+  await openDiagnostics(page)
   await expect(page.getByTestId('app-info')).toContainText('Electron')
   const leaks = await page.evaluate(() => ({
     require: typeof (globalThis as Record<string, unknown>)['require'],
@@ -12,7 +19,7 @@ test('renderer bị sandbox, không có quyền Node', async ({ page }) => {
 })
 
 test('Session Host khởi động và tự phục hồi sau khi bị giết', async ({ page }) => {
-  await page.getByTestId('toggle-diagnostics').click()
+  await openDiagnostics(page)
   const state = page.getByTestId('host-state')
   await expect(state).toHaveAttribute('data-state', 'running')
 
@@ -26,7 +33,7 @@ test('Session Host khởi động và tự phục hồi sau khi bị giết', as
 })
 
 test('native modules nạp được trong đúng process', async ({ page }) => {
-  await page.getByTestId('toggle-diagnostics').click()
+  await openDiagnostics(page)
   await expect(page.getByTestId('host-state')).toHaveAttribute('data-state', 'running')
   await page.getByTestId('run-selfcheck').click()
   for (const name of ['better-sqlite3', 'sodium-native', 'node-pty', 'ssh2', 'serialport']) {

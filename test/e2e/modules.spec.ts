@@ -1,4 +1,4 @@
-import { expect, test } from './fixtures'
+import { expect, openArea, test } from './fixtures'
 
 /** Trang Settings → Modules (ADR-014 mục 3.12) và bật / tắt module lúc chạy. */
 test('Modules: tìm kiếm, lọc, quyền; tắt S3 → mục và tab biến mất, bật lại → dữ liệu còn; Remove data hai bước', async ({
@@ -19,6 +19,7 @@ test('Modules: tìm kiếm, lọc, quyền; tắt S3 → mục và tab biến m�
   )) as { ok: boolean }
   expect(saved.ok).toBe(true)
   const account = page.locator('[data-testid="s3-account"][data-name="Keep me"]')
+  await openArea(page, 's3')
   await expect(account).toBeVisible()
 
   await page.getByTestId('open-settings').click()
@@ -58,7 +59,6 @@ test('Modules: tìm kiếm, lọc, quyền; tắt S3 → mục và tab biến m�
   await page.keyboard.press('Escape')
   await account.dblclick()
   await expect(page.getByTestId('s3-view')).toBeVisible()
-  const tabsBefore = await page.getByTestId('tab').count()
   await page.getByTestId('open-settings').click()
   await page.getByTestId('settings-nav-modules').click()
   await page.locator('[data-testid="module-card"][data-id="s3"]').click()
@@ -67,8 +67,10 @@ test('Modules: tìm kiếm, lọc, quyền; tắt S3 → mục và tab biến m�
   await expect(turnOff).toContainText('1 open tab')
   await turnOff.getByTestId('confirm-ok').click()
   await expect(page.getByTestId('module-toggle-s3')).toHaveAttribute('aria-checked', 'false')
-  await expect(page.getByTestId('tab')).toHaveCount(tabsBefore - 1)
+  await expect(page.getByTestId('s3-view')).toHaveCount(0)
   await page.keyboard.press('Escape')
+  // Khu vực S3 biến mất khỏi activity bar cùng với mục của nó.
+  await expect(page.getByTestId('activity-s3')).toHaveCount(0)
   await expect(page.getByTestId('s3-section')).toHaveCount(0)
   // Main từ chối gọi module đã tắt.
   const refused = await page.evaluate(() =>
@@ -88,6 +90,7 @@ test('Modules: tìm kiếm, lọc, quyền; tắt S3 → mục và tab biến m�
   await page.getByTestId('module-enable-confirm').click()
   await expect(page.getByTestId('module-toggle-s3')).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Escape')
+  await openArea(page, 's3')
   await expect(account).toBeVisible()
 
   // Remove data: tắt → bấm hai lần → tài khoản mất hẳn.
@@ -105,6 +108,7 @@ test('Modules: tìm kiếm, lọc, quyền; tắt S3 → mục và tab biến m�
   await page.getByTestId('module-toggle-s3').click()
   await expect(page.getByTestId('module-toggle-s3')).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Escape')
+  await openArea(page, 's3')
   await expect(page.getByTestId('s3-section')).toBeVisible()
   await expect(account).toHaveCount(0)
 })

@@ -1,5 +1,5 @@
 import { startTestSshServer, type TestSshServer } from '../integration/ssh-test-server'
-import { activeTab, expect, setWindowSize, test, waitForText } from './fixtures'
+import { activeTab, expect, openArea, setWindowSize, test, waitForText } from './fixtures'
 
 let server: TestSshServer | null = null
 test.afterEach(async () => {
@@ -25,9 +25,9 @@ test('Home: mở bằng nút Home (một tab duy nhất), kết nối gần đâ
     page.getByTestId('toast').filter({ hasText: 'Added web-01 production' })
   ).toBeVisible()
 
-  // Ảnh đại diện chữ cái + nút Connect hiện khi rê chuột.
+  // Hàng host một dòng; nút Connect hiện khi rê chuột.
   const row = page.locator('[data-testid="host-row"][data-host-label="web-01 production"]')
-  await expect(row).toContainText('WP')
+  await expect(row).toContainText('web-01 production')
   await row.hover()
   await row.getByTestId('host-connect').click()
   await page
@@ -43,10 +43,14 @@ test('Home: mở bằng nút Home (một tab duy nhất), kết nối gần đâ
   await page.keyboard.press('Escape')
   await expect(page.getByTestId('terminal-find')).toHaveCount(0)
 
-  // Home: một tab duy nhất dù bấm hai lần; kết nối gần đây có host vừa dùng.
+  // Home: một tab duy nhất dù vào nhiều lần; kết nối gần đây có host vừa dùng.
   await page.getByTestId('open-home').click()
+  const tabCount = (): Promise<number> =>
+    page.evaluate(() => window.__shellhouseTest.tabIds().length)
+  const once = await tabCount()
+  await openArea(page, 'hosts')
   await page.getByTestId('open-home').click()
-  await expect(page.locator('[data-testid="tab"]').filter({ hasText: 'Home' })).toHaveCount(1)
+  expect(await tabCount()).toBe(once)
   const home = page.getByTestId('welcome')
   const card = home
     .getByTestId('home-recent')
@@ -87,7 +91,7 @@ test('Home: co giãn theo cửa sổ — nhỏ rồi phóng to thì lưới giã
   const small = await home.locator('header').evaluate((el) => el.getBoundingClientRect().width)
 
   await setWindowSize(launched, 1600, 900)
-  await expect.poll(columns).toBe(3)
+  await expect.poll(columns).toBe(4)
   const content = await home.locator('header').evaluate((el) => {
     const box = el.getBoundingClientRect()
     const area = el.closest('[data-testid="welcome"]')?.getBoundingClientRect()

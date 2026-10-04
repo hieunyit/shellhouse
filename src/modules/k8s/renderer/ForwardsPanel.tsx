@@ -43,9 +43,7 @@ export function ForwardsPanel({
       data-testid="k8s-forwards"
     >
       <div className="mb-1 flex items-center gap-2">
-        <span className="text-[11px] font-semibold tracking-wider text-faint uppercase">
-          {t('Port forwards')}
-        </span>
+        <span className="text-xs font-medium text-faint">{t('Port forwards')}</span>
         <div className="flex-1" />
         {forwards.length > 1 && (
           <button
@@ -126,7 +124,7 @@ export function ForwardsPanel({
               data-testid="k8s-forward-toggle"
               className={cx(
                 'relative h-4 w-7 shrink-0 rounded-full transition-colors',
-                f.state === 'paused' ? 'bg-line-strong' : 'bg-accent-solid'
+                f.state === 'paused' ? 'bg-line-strong' : 'bg-info'
               )}
               onClick={() =>
                 void request({

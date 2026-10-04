@@ -180,7 +180,7 @@ function CopyButton({ value, label }: { value: string; label: string }): React.J
       aria-label={copied ? t('Copied') : t('Copy {name}', { name: label })}
       title={copied ? t('Copied') : t('Copy')}
       className={cx(
-        'flex size-5 shrink-0 items-center justify-center rounded-ds-sm text-ds-fg-3 opacity-0 group-hover:opacity-100 hover:bg-ds-hover hover:text-ds-fg focus-visible:opacity-100',
+        'flex size-5 shrink-0 items-center justify-center rounded-ds-sm text-ds-fg-3 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 hover:bg-ds-hover hover:text-ds-fg focus-visible:opacity-100',
         copied && 'opacity-100',
         focusRing
       )}

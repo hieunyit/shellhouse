@@ -38,6 +38,10 @@
   --color-warning-soft: var(--sh-warning-soft);
   --color-success: var(--sh-success);
   --color-success-soft: var(--sh-success-soft);
+  --color-info: var(--sh-info);
+  --color-info-soft: var(--sh-info-soft);
+  --color-chart: var(--ds-chart);
+  --color-chart-2: var(--ds-chart-2);
   --color-terminal: var(--sh-terminal);
   --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
@@ -51,37 +55,41 @@
 :root,
 [data-theme='light'] {
   color-scheme: light;
-  --sh-canvas: #f4f5f7;
-  --sh-surface: #ffffff;
-  --sh-elevated: #ffffff;
-  --sh-subtle: #f0f2f5;
-  --sh-hover: #e9ecf0;
-  --sh-line: #e2e5ea;
-  --sh-line-strong: #cdd2d9;
-  --sh-fg: #1a1d21;
-  /* Chữ phụ / chữ mờ: tương phản ≥ 4.5:1 (WCAG AA) trên mọi nền của theme, kể cả hover. */
-  --sh-muted: #4b5360;
-  --sh-faint: #606977;
-  /* Màu nhấn thương hiệu: xanh ngọc (teal) — gợi terminal, khác màu xanh dương đại trà. */
-  --sh-accent: #0f766e;
-  --sh-accent-hover: #115e59;
-  --sh-accent-fg: #ffffff;
-  /* Nền nút chính (chữ trắng, tương phản ≥ 4.5:1). */
-  --sh-accent-solid: #0f766e;
-  --sh-accent-solid-hover: #115e59;
-  --sh-accent-soft: #dcf3ef;
-  --sh-danger: #c42e17;
-  --sh-danger-solid: #c9311a;
-  --sh-danger-soft: #fdecea;
-  --sh-warning: #a15c07;
-  --sh-warning-soft: #fdf3e2;
-  --sh-success: #137a3f;
-  --sh-success-soft: #e5f5ec;
+  /*
+   * Token cũ (--sh-*) trỏ vào bảng màu của design system v0.5 (--ds-*, ds/tokens.css) → mọi màn
+   * hình dùng bg-surface / text-muted / border-line… đổi theo cùng một nguồn.
+   */
+  --sh-canvas: var(--ds-bg);
+  --sh-surface: var(--ds-surface-0);
+  --sh-elevated: var(--ds-popover);
+  --sh-subtle: var(--ds-surface-1);
+  --sh-hover: var(--ds-surface-2);
+  --sh-line: var(--ds-border);
+  --sh-line-strong: var(--ds-border-strong);
+  --sh-fg: var(--ds-fg);
+  --sh-muted: var(--ds-fg-2);
+  --sh-faint: var(--ds-fg-3);
+  /* accent = chữ / icon / viền focus; accent-solid = nền nút chính (chữ accent-fg). */
+  --sh-accent: var(--ds-accent-text);
+  --sh-accent-hover: var(--ds-accent-hover);
+  --sh-accent-fg: var(--ds-accent-contrast);
+  --sh-accent-solid: var(--ds-accent);
+  --sh-accent-solid-hover: var(--ds-accent-hover);
+  --sh-accent-soft: var(--ds-accent-soft);
+  --sh-danger: var(--ds-danger);
+  --sh-danger-solid: var(--ds-danger-solid);
+  --sh-danger-soft: var(--ds-danger-soft);
+  --sh-warning: var(--ds-warning);
+  --sh-warning-soft: var(--ds-warning-soft);
+  --sh-success: var(--ds-success);
+  --sh-success-soft: var(--ds-success-soft);
+  --sh-info: var(--ds-info);
+  --sh-info-soft: var(--ds-info-soft);
   /* Nền quanh terminal: được TerminalView ghi đè bằng màu nền của theme terminal. */
-  --sh-terminal: #fbfbfc;
-  --sh-shadow: 0 12px 32px rgb(16 24 40 / 0.14), 0 2px 6px rgb(16 24 40 / 0.08);
-  --sh-overlay: rgb(15 20 30 / 0.2);
-  --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%234b5360' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --sh-terminal: var(--ds-terminal);
+  --sh-shadow: var(--ds-shadow-popover);
+  --sh-overlay: var(--ds-overlay);
+  --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2350545b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   /* Tô màu cú pháp của editor (CodeMirror). */
   --sh-syn-keyword: #8b3fc9;
   --sh-syn-string: #2b7a0b;
@@ -95,34 +103,41 @@
 
 [data-theme='dark'] {
   color-scheme: dark;
-  --sh-canvas: #0d0f12;
-  --sh-surface: #14171b;
-  --sh-elevated: #1a1d22;
-  --sh-subtle: #1c2026;
-  --sh-hover: #232830;
-  --sh-line: #262b33;
-  --sh-line-strong: #353b45;
-  --sh-fg: #e7e9ec;
-  --sh-muted: #a3abb5;
-  --sh-faint: #8a929e;
-  --sh-accent: #2cc9b5;
-  --sh-accent-hover: #5eead4;
-  --sh-accent-fg: #ffffff;
-  --sh-accent-solid: #0e7a70;
-  --sh-accent-solid-hover: #0f8a7e;
-  --sh-accent-soft: #12302d;
-  --sh-danger: #ff7a6e;
-  /* Nền nút nguy hiểm (chữ trắng, tương phản ≥ 4.5:1). */
-  --sh-danger-solid: #c4382b;
-  --sh-danger-soft: #3a1d1a;
-  --sh-warning: #f5b544;
-  --sh-warning-soft: #33280f;
-  --sh-success: #4cd38a;
-  --sh-success-soft: #13301f;
-  --sh-terminal: #0f1115;
-  --sh-shadow: 0 16px 40px rgb(0 0 0 / 0.5), 0 2px 8px rgb(0 0 0 / 0.35);
-  --sh-overlay: rgb(0 0 0 / 0.45);
-  --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a3abb5' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  /*
+   * Token cũ (--sh-*) trỏ vào bảng màu của design system v0.5 (--ds-*, ds/tokens.css) → mọi màn
+   * hình dùng bg-surface / text-muted / border-line… đổi theo cùng một nguồn.
+   */
+  --sh-canvas: var(--ds-bg);
+  --sh-surface: var(--ds-surface-0);
+  --sh-elevated: var(--ds-popover);
+  --sh-subtle: var(--ds-surface-1);
+  --sh-hover: var(--ds-surface-2);
+  --sh-line: var(--ds-border);
+  --sh-line-strong: var(--ds-border-strong);
+  --sh-fg: var(--ds-fg);
+  --sh-muted: var(--ds-fg-2);
+  --sh-faint: var(--ds-fg-3);
+  /* accent = chữ / icon / viền focus; accent-solid = nền nút chính (chữ accent-fg). */
+  --sh-accent: var(--ds-accent-text);
+  --sh-accent-hover: var(--ds-accent-hover);
+  --sh-accent-fg: var(--ds-accent-contrast);
+  --sh-accent-solid: var(--ds-accent);
+  --sh-accent-solid-hover: var(--ds-accent-hover);
+  --sh-accent-soft: var(--ds-accent-soft);
+  --sh-danger: var(--ds-danger);
+  --sh-danger-solid: var(--ds-danger-solid);
+  --sh-danger-soft: var(--ds-danger-soft);
+  --sh-warning: var(--ds-warning);
+  --sh-warning-soft: var(--ds-warning-soft);
+  --sh-success: var(--ds-success);
+  --sh-success-soft: var(--ds-success-soft);
+  --sh-info: var(--ds-info);
+  --sh-info-soft: var(--ds-info-soft);
+  /* Nền quanh terminal: được TerminalView ghi đè bằng màu nền của theme terminal. */
+  --sh-terminal: var(--ds-terminal);
+  --sh-shadow: var(--ds-shadow-popover);
+  --sh-overlay: var(--ds-overlay);
+  --sh-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a4ab' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   --sh-syn-keyword: #c792ea;
   --sh-syn-string: #a5d6a7;
   --sh-syn-number: #f6b26b;
@@ -160,7 +175,7 @@ body {
 }
 /*
  * Cửa sổ không có thanh tiêu đề của hệ điều hành (src/main/window-chrome.ts): thanh trên cùng
- * (.sh-titlebar: thanh công cụ, đầu thanh bên) là vùng kéo cửa sổ; nhấp đúp = phóng to (hành vi gốc
+ * (.sh-titlebar: title bar của shell/TitleBar) là vùng kéo cửa sổ; nhấp đúp = phóng to (hành vi gốc
  * của hệ điều hành). Mọi thứ bấm được bên trong phải là no-drag, nếu không sẽ không nhận chuột.
  */
 .sh-titlebar {
@@ -183,17 +198,9 @@ body {
 [data-radix-popper-content-wrapper] {
   -webkit-app-region: no-drag;
 }
-/* macOS: chừa chỗ cho ba nút đèn giao thông ở góc trái thanh trên cùng. */
-html[data-platform='darwin'] .sh-titlebar-lead,
-html[data-platform='darwin'] .sh-titlebar[data-lead='window'] {
+/* macOS: chừa chỗ cho ba nút đèn giao thông ở góc trái title bar. */
+html[data-platform='darwin'] .sh-titlebar-lead {
   padding-left: 80px;
-}
-/* Thanh bên dạng gọn (48 px): đèn giao thông tràn sang thanh công cụ. */
-html[data-platform='darwin'] .sh-titlebar[data-lead='rail'] {
-  padding-left: 36px;
-}
-html[data-platform='darwin'] .sh-titlebar-logo {
-  visibility: hidden;
 }
 /*
  * Windows / Linux: chừa chỗ cho nút điều khiển cửa sổ (titleBarOverlay) ở góc phải. env(titlebar-area-*)
@@ -229,10 +236,10 @@ textarea,
 ::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 999px;
-  background: var(--sh-line-strong) padding-box;
+  background: var(--ds-scrollbar) padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--sh-faint) padding-box;
+  background: var(--ds-scrollbar-hover) padding-box;
 }
 ::-webkit-scrollbar-button {
   display: none;
@@ -326,7 +333,7 @@ select option {
 .dockview-theme-shellhouse {
   --dv-paneview-active-outline-color: var(--sh-accent);
   --dv-tabs-and-actions-container-font-size: 12px;
-  --dv-tabs-and-actions-container-height: 34px;
+  --dv-tabs-and-actions-container-height: var(--ds-tab-h);
   --dv-drag-over-background-color: color-mix(in srgb, var(--sh-accent) 18%, transparent);
   --dv-drag-over-border-color: var(--sh-accent);
   --dv-edge-dock-indicator-color: var(--sh-accent);
@@ -359,13 +366,14 @@ select option {
   --dv-tab-group-line-height: 2px;
   --dv-tab-group-line-opacity: 0.6;
 
+  /* Tab dạng pill (thiết kế v0.5): nền tab đặt trên .dv-tab (bên dưới), không phải cả ô. */
   --dv-group-view-background-color: var(--sh-terminal);
   --dv-tabs-and-actions-container-background-color: var(--sh-surface);
-  --dv-activegroup-visiblepanel-tab-background-color: var(--sh-terminal);
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--sh-surface);
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--sh-subtle);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--sh-surface);
-  --dv-tab-divider-color: var(--sh-line);
+  --dv-activegroup-visiblepanel-tab-background-color: transparent;
+  --dv-activegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-inactivegroup-visiblepanel-tab-background-color: transparent;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: transparent;
+  --dv-tab-divider-color: transparent;
   --dv-activegroup-visiblepanel-tab-color: var(--sh-fg);
   --dv-activegroup-hiddenpanel-tab-color: var(--sh-muted);
   --dv-inactivegroup-visiblepanel-tab-color: var(--sh-muted);
@@ -375,25 +383,28 @@ select option {
 }
 
 .dockview-theme-shellhouse .dv-tabs-and-actions-container {
-  border-bottom: 1px solid var(--sh-line);
+  border-bottom: 1px solid var(--ds-border-subtle);
+  padding: 0 6px;
+}
+.dockview-theme-shellhouse .dv-tabs-container {
+  align-items: center;
+  gap: 2px;
 }
 
-/* Tab đang active: vạch nhấn accent (pane đang focus) hoặc xám (pane khác). */
+/* Tab pill: cao 28px, bo 6px; tab đang hiện trong nhóm đang focus: nền active + chữ chính. */
 .dockview-theme-shellhouse .dv-tab {
   position: relative;
+  height: 28px;
+  border-radius: var(--ds-r-md);
 }
-.dockview-theme-shellhouse .dv-groupview.dv-active-group .dv-tab.dv-active-tab::after,
-.dockview-theme-shellhouse .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab::after {
-  content: '';
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 2px;
+.dockview-theme-shellhouse .dv-tab:hover {
+  background: var(--ds-hover);
 }
-.dockview-theme-shellhouse .dv-groupview.dv-active-group .dv-tab.dv-active-tab::after {
-  background: var(--sh-accent);
+.dockview-theme-shellhouse .dv-groupview.dv-active-group .dv-tab.dv-active-tab {
+  background: var(--ds-active);
 }
-.dockview-theme-shellhouse .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab::after {
-  background: var(--sh-line-strong);
+.dockview-theme-shellhouse .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab {
+  background: var(--ds-hover);
 }
 
 /* Gợi ý lệnh từ lịch sử: chữ mờ ngay sau con trỏ (→ để nhận), không nhận chuột. */

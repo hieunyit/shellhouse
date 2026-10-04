@@ -1,4 +1,4 @@
-import { activeTab, echoComputed, expect, sendLine, test, waitForText } from './fixtures'
+import { activeTab, echoComputed, expect, openArea, sendLine, test, waitForText } from './fixtures'
 
 test('chuột phải tiêu đề tab: Restart shell / Duplicate / Close other tabs; phím tắt kết nối lại', async ({
   page
@@ -44,11 +44,11 @@ test('chuột phải tiêu đề tab: Restart shell / Duplicate / Close other ta
 test('ẩn / hiện thanh bên bằng nút và phím tắt; tìm host thì tự hiện lại', async ({ page }) => {
   const search = page.getByPlaceholder('Search hosts…')
   await expect(search).toBeVisible()
-  await page.getByTestId('toggle-sidebar').click()
+  await page.getByTestId('sidebar-collapse').click()
   await expect(search).toHaveCount(0)
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+B' : 'Control+Shift+B')
   await expect(search).toBeVisible()
-  await page.getByTestId('toggle-sidebar').click()
+  await page.getByTestId('sidebar-collapse').click()
   await expect(search).toHaveCount(0)
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+Shift+K')
   await expect(search).toBeFocused()
@@ -70,7 +70,7 @@ test('cửa sổ hẹp (chia đôi màn hình): không cuộn ngang, nút Settin
       )
       .toBeLessThanOrEqual(0)
     await expect(page.getByTestId('open-settings')).toBeInViewport()
-    await expect(page.getByTestId('quick-connect')).toBeVisible()
+    await expect(page.getByTestId('titlebar-connect')).toBeInViewport()
   }
 })
 
@@ -126,9 +126,11 @@ test('mở lại tab vừa đóng: Ctrl+Alt+T và menu tab; Home không vào dan
     (title ?? '').replace(/\d+$/, '').trim()
   )
 
-  // Đóng Home không thêm gì vào danh sách mở lại.
+  // Đóng Home (phím đóng tab) không thêm gì vào danh sách mở lại; khu vực Home vẫn hiện trang chủ.
   await page.getByTestId('open-home').click()
-  await page.getByTestId('tab').filter({ hasText: 'Home' }).getByTestId('tab-close').click()
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+W' : 'Control+Shift+W')
+  await expect(page.getByTestId('welcome')).toBeVisible()
+  await openArea(page, 'hosts')
   await page.getByTestId('tab').last().click({ button: 'right' })
   await expect(page.getByText('Reopen “Home”')).toHaveCount(0)
 })

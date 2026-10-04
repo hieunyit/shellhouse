@@ -11,6 +11,7 @@ test.afterEach(async () => {
 
 async function quickConnect(page: Page, target: string): Promise<string> {
   const before = await page.getByTestId('tab').count()
+  await page.getByTestId('titlebar-connect').click()
   await page.getByTestId('quick-connect').fill(target)
   await page.getByTestId('quick-connect').press('Enter')
   await expect(page.getByTestId('tab')).toHaveCount(before + 1)

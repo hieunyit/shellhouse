@@ -36,7 +36,7 @@ export const Checkbox = forwardRef<
         onCheckedChange(v === true)
       }}
       className={cx(
-        'flex size-3.5 shrink-0 items-center justify-center rounded-ds-xs border border-ds-border-strong bg-ds-surface-1 text-ds-accent-contrast',
+        'flex size-3.5 shrink-0 items-center justify-center rounded-ds-xs border border-ds-border-control bg-ds-surface-1 text-ds-accent-contrast',
         'hover:border-ds-fg-3 data-[state=checked]:border-ds-accent data-[state=checked]:bg-ds-accent data-[state=indeterminate]:border-ds-accent data-[state=indeterminate]:bg-ds-accent',
         'disabled:opacity-40',
         focusRing,
@@ -96,7 +96,7 @@ export function Switch({
       disabled={disabled}
       onCheckedChange={onCheckedChange}
       className={cx(
-        'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-ds-border-strong bg-ds-surface-3',
+        'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-ds-border-control bg-ds-surface-3',
         'data-[state=checked]:border-ds-accent data-[state=checked]:bg-ds-accent disabled:opacity-40',
         focusRing,
         transition

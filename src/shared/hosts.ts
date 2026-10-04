@@ -57,14 +57,21 @@ export type HostColor = z.infer<typeof HostColor>
  * Giá trị mặc định của một nhóm cho mọi host bên trong (kể cả nhóm con cháu). Host kế thừa từ nhóm
  * GẦN NHẤT có đặt giá trị đó, trừ khi host tự ghi đè (ADR-010).
  * - keyId: key được thử khi host dùng xác thực Automatic
- * - color: màu môi trường (tab + viền terminal), ví dụ Production = đỏ
+ * - color: màu môi trường cũ (trước Settings › Environments) — vẫn đọc để suy ra môi trường
+ * - environment: id môi trường (Settings › Environments); nhóm con kế thừa, có thể ghi đè
  */
 export const GroupDefaults = z.object({
   username: Username.optional(),
   port: Port.optional(),
   keyId: z.string().max(64).optional(),
   jumpHostIds: z.array(z.string().max(64)).min(1).max(MAX_JUMPS).optional(),
-  color: HostColor.optional()
+  color: HostColor.optional(),
+  environment: z
+    .string()
+    .min(1)
+    .max(32)
+    .regex(/^[a-z0-9-]+$/)
+    .optional()
 })
 export type GroupDefaults = z.infer<typeof GroupDefaults>
 

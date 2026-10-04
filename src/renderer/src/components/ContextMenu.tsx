@@ -111,7 +111,7 @@ export function ContextMenu({
       role="menu"
       tabIndex={-1}
       data-testid="context-menu"
-      className="shadow-elevated animate-pop-in fixed z-50 min-w-52 rounded-lg border border-line bg-elevated p-1 text-[13px] outline-none"
+      className="animate-pop-in fixed z-50 min-w-52 rounded-ds-lg bg-ds-popover p-1 text-[13px] shadow-ds-popover outline-none"
       style={pos}
       onContextMenu={(e) => {
         e.preventDefault()
@@ -131,7 +131,7 @@ export function ContextMenu({
     >
       {entries.map((entry, i) => {
         if (entry === 'separator')
-          return <div key={`sep-${i}`} role="separator" className="my-1 h-px bg-line" />
+          return <div key={`sep-${i}`} role="separator" className="-mx-1 my-1 h-px bg-ds-border" />
         index++
         const current = index
         return (
@@ -143,10 +143,10 @@ export function ContextMenu({
             disabled={entry.disabled}
             data-testid={`menu-${entry.id}`}
             className={cx(
-              'flex h-7 w-full items-center gap-2.5 rounded-md px-2 text-left disabled:opacity-40',
+              'flex h-(--ds-menu-item-h) w-full items-center gap-2.5 rounded-ds-md px-2 text-left disabled:opacity-40',
               current === cursor &&
                 !entry.disabled &&
-                (entry.danger ? 'bg-danger-soft' : 'bg-hover'),
+                (entry.danger ? 'bg-danger-soft' : 'bg-ds-active'),
               entry.danger ? 'text-danger' : 'text-fg'
             )}
             onMouseMove={() => {

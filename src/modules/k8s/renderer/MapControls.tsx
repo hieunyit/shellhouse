@@ -240,7 +240,7 @@ export function MenuButton({
           ref={menuRef}
           role="menu"
           className={cx(
-            'absolute top-8 z-40 flex max-w-[calc(100vw-16px)] flex-col gap-0.5 rounded-lg border border-line bg-elevated p-1.5 text-xs shadow-lg',
+            'absolute top-8 z-40 flex max-w-[calc(100vw-16px)] flex-col gap-0.5 rounded-lg bg-ds-popover p-1.5 text-xs shadow-ds-popover',
             align === 'right' ? 'right-0' : 'left-0',
             width
           )}
@@ -297,11 +297,7 @@ export function MenuToggle({
 }
 
 export function MenuHeading({ children }: { children: React.ReactNode }): React.JSX.Element {
-  return (
-    <div className="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold tracking-wider text-faint uppercase">
-      {children}
-    </div>
-  )
+  return <div className="px-2 pt-1.5 pb-0.5 text-xs font-medium text-faint">{children}</div>
 }
 
 export function MenuItem({

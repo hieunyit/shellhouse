@@ -1180,7 +1180,7 @@ export function BuildDialog({
               className={cx(
                 'size-2 rounded-full',
                 phase === 'running'
-                  ? 'animate-pulse bg-accent-solid'
+                  ? 'animate-pulse bg-info'
                   : phase === 'done'
                     ? 'bg-success'
                     : 'bg-danger-solid'

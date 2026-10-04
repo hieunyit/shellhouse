@@ -93,7 +93,7 @@ export function TimeChart({
   const hidden = refs.filter((r) => r.value > 0 && !shown.includes(r))
   return (
     <div className="relative" data-testid={testId}>
-      <div className="flex justify-between text-[10px] text-faint tabular-nums">
+      <div className="flex justify-between text-[11px] text-faint tabular-nums">
         <span>{format(top / 1.15)}</span>
         {hidden.length > 0 && (
           <span title={t("Above the chart's range")}>
@@ -176,7 +176,7 @@ export function TimeChart({
           {shown.map((r) => (
             <span
               key={r.label}
-              className="absolute right-0 -translate-y-full text-[10px] text-warning"
+              className="absolute right-0 -translate-y-full text-[11px] text-warning"
               style={{ top: `${String((y(r.value) / H) * 100)}%` }}
             >
               {r.label}
@@ -184,7 +184,7 @@ export function TimeChart({
           ))}
         </div>
       )}
-      <div className="mt-0.5 flex justify-between text-[10px] text-faint tabular-nums">
+      <div className="mt-0.5 flex justify-between text-[11px] text-faint tabular-nums">
         <span>{fmtTime(t0, t1 - t0)}</span>
         {hit ? (
           <span className="text-fg" data-testid={testId ? `${testId}-hover` : undefined}>
@@ -458,7 +458,7 @@ export function UsagePanel({
       </div>
       {podRows.length > 1 && (
         <section>
-          <div className="mb-1 grid grid-cols-[minmax(0,1fr)_8rem_8rem] gap-3 text-[11px] font-semibold tracking-wider text-faint uppercase">
+          <div className="mb-1 grid grid-cols-[minmax(0,1fr)_8rem_8rem] gap-3 text-xs font-medium text-faint">
             <span>{t('By pod')}</span>
             <span>CPU</span>
             <span>{t('Memory')}</span>
@@ -496,7 +496,7 @@ function Bar({
     <div className="flex items-center gap-1.5">
       <div className="h-1 flex-1 overflow-hidden rounded-full bg-subtle">
         <div
-          className="h-full rounded-full bg-accent-solid"
+          className="h-full rounded-full bg-chart"
           style={{ width: `${String(Math.min(100, (value / max) * 100))}%` }}
         />
       </div>

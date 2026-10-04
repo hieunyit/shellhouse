@@ -36,6 +36,7 @@ test('SFTP: xem nhanh (Space / menu Preview) — văn bản có số dòng, ản
   writeFileSync(join(remote, 'blob.bin'), Buffer.from([0, 1, 2, 3, 0, 255, 0]))
   server = await startTestSshServer([{ username: 'u', password: 'p' }], { sftpRoot: remote })
 
+  await page.getByTestId('titlebar-connect').click()
   await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
   await page.getByTestId('quick-connect').press('Enter')
   const tab = await activeTab(page)
@@ -74,6 +75,7 @@ test('File manager ↔ terminal giữ nguyên phiên SSH (không mở phiên m�
   dirs.push(remote)
   writeFileSync(join(remote, 'a.txt'), 'a')
   server = await startTestSshServer([{ username: 'u', password: 'p' }], { sftpRoot: remote })
+  await page.getByTestId('titlebar-connect').click()
   await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
   await page.getByTestId('quick-connect').press('Enter')
   const tab = await activeTab(page)

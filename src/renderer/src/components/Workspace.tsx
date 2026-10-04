@@ -13,7 +13,7 @@ import { useContextMenu } from './ContextMenu'
 import { controllers } from '../terminal/registry'
 import { useTabStatus } from '../stores/tab-status'
 import { useHosts } from '../stores/hosts'
-import { hostColorClass } from './hostColors'
+import { useHostEnvironment } from '../stores/environments'
 import { keybindingFor } from '@shared/commands'
 import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useSettings } from '../stores/settings'
@@ -29,6 +29,7 @@ import { HostAvatar } from './HostAvatar'
 import { useTabs, type TabTarget } from '../stores/tabs'
 import { ModuleTabView, TabIcon } from './ModuleTabView'
 import { layoutToItems, type WorkspaceItem } from '@shared/workspaces'
+import { inDockview } from '../shell/areas'
 
 interface PanelParams {
   tabId: string
@@ -61,7 +62,7 @@ function TerminalPanel(props: IDockviewPanelProps<PanelParams>): React.JSX.Eleme
   return <ErrorBoundary label="tab">{panelContent(tabId, target, active, visible)}</ErrorBoundary>
 }
 
-function panelContent(
+export function panelContent(
   tabId: string,
   target: TabTarget,
   active: boolean,
@@ -102,6 +103,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
     return found?.kind === 'host' || found?.kind === 'rdp' ? found.hostId : null
   })
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
+  const env = useHostEnvironment(hostId)
   const hostLabel = useHosts((s) =>
     hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.label ?? null) : null
   )
@@ -213,7 +215,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         data-tab-state={state}
         title={`${title} — ${connectionLabel[state]}`}
         data-env-color={envColor ?? ''}
-        className="group relative flex h-full max-w-60 min-w-28 items-center gap-2 pr-1.5 pl-3 text-xs"
+        className="group relative flex h-full max-w-60 min-w-28 items-center gap-2 pr-1 pl-2.5 text-xs"
         onContextMenu={onContextMenu}
         onMouseDown={(e) => {
           // Chuột giữa = đóng tab, như trình duyệt.
@@ -223,12 +225,6 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
           }
         }}
       >
-        {envColor && (
-          <span
-            aria-hidden
-            className={cx('absolute inset-x-0 top-0 h-[3px]', hostColorClass[envColor])}
-          />
-        )}
         <span className="relative flex shrink-0">
           {hostLabel ? (
             <HostAvatar
@@ -250,13 +246,24 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
             />
           )}
         </span>
-        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span className={cx('min-w-0 flex-1 truncate', active ? 'text-fg' : 'text-muted')}>
+          {title}
+        </span>
+        {/* Phiên PROD: một chấm magenta 5px (thiết kế v0.5) — môi trường khác không tô. */}
+        {env?.highlight && (
+          <span
+            role="img"
+            aria-label={env.name}
+            className="size-[5px] shrink-0 rounded-full bg-ds-env-prod"
+            data-testid="tab-env-prod"
+          />
+        )}
         <button
           type="button"
           aria-label={t('Close tab')}
           data-testid="tab-close"
           className={cx(
-            'flex size-5 shrink-0 items-center justify-center rounded text-faint transition-opacity duration-100 hover:bg-hover hover:text-fg',
+            'flex size-5 shrink-0 items-center justify-center rounded-ds-sm text-faint transition-opacity duration-100 hover:bg-ds-active hover:text-fg focus-visible:opacity-100',
             active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
           )}
           onMouseDown={(e) => {
@@ -281,9 +288,23 @@ let currentApi: DockviewApi | null = null
 /** Bố cục tab hiện tại thành danh sách mở lại được (xem @shared/workspaces). */
 export function captureWorkspaceItems(): WorkspaceItem[] {
   const api = currentApi
-  if (!api || api.panels.length === 0) return []
-  const { grid } = api.toJSON()
   const { tabs } = useTabs.getState()
+  // Tab module (Kubernetes, Docker, S3…) không nằm trong dockview: thêm sau, mỗi tab một mục riêng.
+  const modules: WorkspaceItem[] = tabs.flatMap((x) =>
+    x.target.kind === 'module'
+      ? [{ target: x.target, title: x.title, after: null, direction: 'within' as const }]
+      : []
+  )
+  if (!api || api.panels.length === 0) return modules
+  const { grid } = api.toJSON()
+  return [...layoutItems(api, grid, tabs), ...modules]
+}
+
+function layoutItems(
+  _api: DockviewApi,
+  grid: ReturnType<DockviewApi['toJSON']>['grid'],
+  tabs: ReturnType<typeof useTabs.getState>['tabs']
+): WorkspaceItem[] {
   return layoutToItems(grid.root, grid.orientation, (panelId) => {
     const tab = tabs.find((t) => t.id === panelId)
     // Tab Home / editor không thuộc bố cục làm việc — không lưu vào workspace.
@@ -304,7 +325,12 @@ const tabComponents = { tab: TabHeader }
  * Bố cục tab + chia màn hình bằng dockview. Store `useTabs` là nguồn sự thật về tab nào đang mở;
  * dockview chỉ giữ vị trí. Hai chiều đồng bộ qua sự kiện.
  */
-export const Workspace = memo(function Workspace(): React.JSX.Element {
+export const Workspace = memo(function Workspace({
+  Watermark
+}: {
+  /** Vẽ khi không còn tab phiên nào (mặc định: Home). */
+  Watermark?: React.FunctionComponent
+}): React.JSX.Element {
   const apiRef = useRef<DockviewApi | null>(null)
   const [api, setApi] = useState<DockviewApi | null>(null)
 
@@ -312,7 +338,10 @@ export const Workspace = memo(function Workspace(): React.JSX.Element {
   useEffect(() => {
     if (!api) return
     const sync = (): void => {
-      const { tabs, activeId } = useTabs.getState()
+      const { activeId } = useTabs.getState()
+      // Chỉ tab phiên (terminal / RDP / editor) nằm trong dockview; Home và tab module là trang
+      // riêng của khu vực trên activity bar (shell/Main).
+      const tabs = useTabs.getState().tabs.filter((x) => inDockview(x.target))
       for (const tab of tabs) {
         const existing = api.getPanel(tab.id)
         if (existing) {
@@ -347,7 +376,13 @@ export const Workspace = memo(function Workspace(): React.JSX.Element {
     })
     const activated = api.onDidActivePanelChange((event) => {
       const id = event.panel?.id
-      if (id && useTabs.getState().activeId !== id) useTabs.getState().activate(id)
+      const { tabs, activeId } = useTabs.getState()
+      if (!id || activeId === id) return
+      // Đang xem trang Home / module (ngoài dockview): dockview tự chọn panel khác (vd. sau khi đóng
+      // tab) không được kéo người dùng về khu vực phiên.
+      const current = tabs.find((t) => t.id === activeId)
+      if (current && !inDockview(current.target)) return
+      useTabs.getState().activate(id)
     })
     return () => {
       unsubscribe()
@@ -362,7 +397,7 @@ export const Workspace = memo(function Workspace(): React.JSX.Element {
       theme={shellhouseTheme}
       components={components}
       tabComponents={tabComponents}
-      watermarkComponent={HomeView}
+      watermarkComponent={Watermark ?? HomeView}
       defaultRenderer="always"
       onReady={(event) => {
         apiRef.current = event.api

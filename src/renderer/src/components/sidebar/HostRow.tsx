@@ -8,7 +8,7 @@ import { useTabStatus } from '../../stores/tab-status'
 import { useTabs } from '../../stores/tabs'
 import { sessionsByHost } from './sessions'
 import { HostAvatar } from '../HostAvatar'
-import { cx, IconButton, type ConnectionState } from '../ui'
+import { cx, IconButton, StatusDot, type ConnectionState } from '../ui'
 import { connect } from './actions'
 
 /** Trạng thái "tốt nhất" trong các tab đang mở tới host này (null = không có tab nào). */
@@ -99,10 +99,11 @@ export const HostRow = memo(function HostRow({
       ]
         .filter(Boolean)
         .join('\n')}
+      // Một dòng (thiết kế v0.5): icon hệ điều hành đơn sắc · tên · chấm trạng thái phiên bên phải;
+      // địa chỉ / nhóm nằm trong tooltip.
       className={cx(
-        'group relative flex cursor-default items-center rounded-md transition-colors duration-100 outline-none focus-visible:ring-2 focus-visible:ring-accent/40',
-        compact ? 'h-7 gap-2 px-2' : 'gap-2.5 px-2 py-1.5',
-        selected ? 'bg-accent-soft' : active ? 'bg-hover' : 'hover:bg-hover'
+        'group relative flex h-(--ds-tree-row-h) cursor-default items-center gap-2 rounded-ds-md px-2 transition-colors duration-100 outline-none focus-visible:shadow-ds-focus',
+        selected ? 'bg-ds-active font-medium' : active ? 'bg-ds-hover' : 'hover:bg-ds-hover'
       )}
       onClick={(e) => {
         h.select(host, e)
@@ -143,25 +144,23 @@ export const HostRow = memo(function HostRow({
         : {})}
     >
       <DropLine pos={dropPos ?? null} />
-      <HostAvatar host={host} session={session} {...(compact ? { size: 18 } : {})} />
-      {compact ? (
-        <span className="min-w-0 flex-1 truncate text-[13px] text-fg">{host.label}</span>
-      ) : (
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1">
-            <span className="truncate text-[13px] text-fg">{host.label}</span>
-            {host.favorite && testId === 'host-row' && (
-              <Star
-                size={11}
-                className="shrink-0 fill-warning text-warning"
-                aria-label={t('Favorite')}
-              />
-            )}
-          </span>
-          <span className="block truncate font-mono text-xs text-faint">
-            {groupPath && <span className="font-sans">{groupPath} · </span>}
-            {address}
-          </span>
+      <HostAvatar host={host} />
+      <span className="min-w-0 flex-1 truncate text-[13px] text-fg">
+        {host.label}
+        {groupPath && !compact && (
+          <span className="ml-1.5 text-xs font-normal text-faint">{groupPath}</span>
+        )}
+      </span>
+      {host.favorite && testId === 'host-row' && (
+        <Star
+          size={11}
+          className="shrink-0 fill-ds-fg-3 text-faint group-hover:hidden"
+          aria-label={t('Favorite')}
+        />
+      )}
+      {session && (
+        <span className="flex shrink-0 group-focus-within:hidden group-hover:hidden">
+          <StatusDot state={session} />
         </span>
       )}
       {/* Thao tác nhanh khi rê chuột: mở file (SFTP), sửa, kết nối. */}
@@ -197,7 +196,7 @@ export const HostRow = memo(function HostRow({
           size="sm"
           tabIndex={-1}
           data-testid="host-connect"
-          className="text-accent hover:text-accent"
+          className="text-ds-accent-text hover:text-ds-accent-text"
           onClick={(e) => {
             e.stopPropagation()
             h.open(host)

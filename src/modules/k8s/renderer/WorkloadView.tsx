@@ -479,7 +479,7 @@ const DOT_BG: Record<Tone, string> = {
   ok: 'bg-success',
   warn: 'bg-warning',
   bad: 'bg-danger-solid',
-  info: 'bg-accent',
+  info: 'bg-info',
   muted: 'bg-line-strong'
 }
 const TONE_TEXT_CLS: Record<Tone, string> = {

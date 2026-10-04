@@ -159,9 +159,9 @@ for (const theme of ['light', 'dark'] as const) {
       await view.getByTestId('k8s-ns-default').click()
       await page.keyboard.press('Escape')
       const nav = async (id: string, group?: string): Promise<void> => {
-        const item = view.getByTestId(`k8s-nav-${id}`)
+        const item = page.getByTestId(`k8s-nav-${id}`)
         if (group && !(await item.isVisible()))
-          await view.getByTestId(`k8s-nav-group-${group}`).click()
+          await page.getByTestId(`k8s-nav-group-${group}`).click()
         await item.click()
         await page.waitForTimeout(700)
       }
@@ -375,9 +375,9 @@ for (const theme of ['light', 'dark'] as const) {
         await view.locator('[data-testid="docker-container"][data-name="web"]').click()
         await page.waitForTimeout(2000)
       })
-      await shot('docker-03-overview', () => view.getByTestId('docker-nav-overview').click())
-      await shot('docker-04-images', () => view.getByTestId('docker-nav-images').click())
-      await shot('docker-05-compose', () => view.getByTestId('docker-nav-compose').click())
+      await shot('docker-03-overview', () => page.getByTestId('docker-nav-overview').click())
+      await shot('docker-04-images', () => page.getByTestId('docker-nav-images').click())
+      await shot('docker-05-compose', () => page.getByTestId('docker-nav-compose').click())
       // Compose ở các độ rộng hay gặp (laptop 1366, màn hình 1920).
       for (const width of [1366, 1920]) {
         await shot(`docker-05-compose-${String(width)}`, async () => {
@@ -398,7 +398,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page.keyboard.press('Escape')
       // Chọn nhiều dòng → thanh thao tác hàng loạt, hộp xác nhận tóm tắt mục bị bỏ qua.
       await shot('docker-08-bulk', async () => {
-        await view.getByTestId('docker-nav-containers').click()
+        await page.getByTestId('docker-nav-containers').click()
         await view.getByTestId('docker-select-all').click()
       })
       await shot('docker-09-bulk-dialog', async () => {
@@ -408,7 +408,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page.keyboard.press('Escape')
       await view.getByTestId('docker-bulk-clear').click()
       await shot('docker-06-run', async () => {
-        await view.getByTestId('docker-nav-containers').click()
+        await page.getByTestId('docker-nav-containers').click()
         await view.getByTestId('docker-run').click()
         await page.getByTestId('docker-run-dialog').waitFor()
       })
@@ -493,7 +493,7 @@ test('module — Kubernetes map at narrow widths', async () => {
     await view.getByTestId('k8s-namespace').click()
     for (const ns of ['default', 'payments']) await view.getByTestId(`k8s-ns-${ns}`).click()
     await page.keyboard.press('Escape')
-    await view.getByTestId('k8s-nav-map').click()
+    await page.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
     await map.getByTestId('k8s-topo-canvas').waitFor()
     for (const width of [1366, 1180, 1024, 900]) {
@@ -613,7 +613,7 @@ test('module — Kubernetes topology edge routing', async () => {
     await view.getByTestId('k8s-namespace').click()
     await view.getByTestId(`k8s-ns-${ns}`).click()
     await page.keyboard.press('Escape')
-    await view.getByTestId('k8s-nav-map').click()
+    await page.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
     await shot('k8s-19-topology-routing', async () => {
       await map.getByTestId('k8s-topo-canvas').waitFor()

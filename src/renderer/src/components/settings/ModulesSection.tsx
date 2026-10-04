@@ -231,7 +231,7 @@ export function ModulesSection(): React.JSX.Element {
                       <span className="truncate text-[13px] font-semibold text-fg">{m.name}</span>
                       {isNew(m, seen) && (
                         <span
-                          className="rounded bg-accent-solid px-1 py-px text-[10px] font-semibold text-accent-fg"
+                          className="rounded bg-accent-solid px-1 py-px text-[11px] font-semibold text-accent-fg"
                           data-testid="module-new"
                         >
                           {t('NEW')}
@@ -377,7 +377,7 @@ function ModuleDetail({
       </div>
 
       <div>
-        <h4 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold tracking-wider text-faint uppercase">
+        <h4 className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-faint">
           <ShieldCheck size={13} /> {t('Permissions')}
         </h4>
         <ul className="flex flex-col gap-1 text-[13px] text-fg" data-testid="module-permissions">
@@ -397,7 +397,7 @@ function ModuleDetail({
       )}
 
       <div className="flex flex-col gap-2 border-t border-line pt-4">
-        <h4 className="text-xs font-semibold tracking-wider text-faint uppercase">{t('Data')}</h4>
+        <h4 className="text-xs font-medium text-faint">{t('Data')}</h4>
         {removed ? (
           <Notice tone="success">{t('All {name} data was removed.', { name: m.name })}</Notice>
         ) : (

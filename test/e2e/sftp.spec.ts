@@ -48,6 +48,7 @@ test('SFTP qua giao diện: tải lên, tạo thư mục, tải về, xoá', asy
   writeFileSync(join(local, 'tai-len.bin'), payload)
   server = await startTestSshServer([{ username: 'u', password: 'p' }], { sftpRoot: remote })
 
+  await page.getByTestId('titlebar-connect').click()
   await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
   await page.getByTestId('quick-connect').press('Enter')
   const tab = await activeTab(page)
@@ -159,6 +160,7 @@ test('sửa file trên server bằng editor trên máy (menu chuột phải), l�
   const opened = (): Promise<string[]> =>
     app.evaluate(() => (globalThis as unknown as { __opened: string[] }).__opened)
 
+  await page.getByTestId('titlebar-connect').click()
   await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
   await page.getByTestId('quick-connect').press('Enter')
   const tab = await activeTab(page)
@@ -190,6 +192,7 @@ test('editor trong app: bấm đúp file cấu hình, tô màu, Ctrl+S lưu th�
   writeFileSync(join(remote, 'blob.dat'), Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00, 0x01]))
   server = await startTestSshServer([{ username: 'u', password: 'p' }], { sftpRoot: remote })
 
+  await page.getByTestId('titlebar-connect').click()
   await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
   await page.getByTestId('quick-connect').press('Enter')
   const tab = await activeTab(page)
@@ -269,6 +272,7 @@ test('tải cả thư mục lên và về qua giao diện', async ({ app, page }
   writeFileSync(join(local, 'du-an', 'src', 'main.ts'), 'console.log(1)')
   server = await startTestSshServer([{ username: 'u', password: 'p' }], { sftpRoot: remote })
 
+  await page.getByTestId('titlebar-connect').click()
   await page.getByTestId('quick-connect').fill(`u@127.0.0.1:${server.port}`)
   await page.getByTestId('quick-connect').press('Enter')
   const tab = await activeTab(page)

@@ -13,7 +13,6 @@ import './stores/appearance'
 import { registerRendererModules, startModules } from '../../modules/registry/renderer-kit'
 import { RENDERER_MODULES } from '../../modules/registry/all-renderer'
 import { preloadTerminal } from './lazy'
-import { applyTestDefaults } from './stores/sidebar-layout'
 
 // Module chính thức (ADR-014): đăng ký trước lần vẽ đầu, trạng thái bật / tắt lấy từ main.
 registerRendererModules(RENDERER_MODULES)
@@ -49,7 +48,6 @@ void Promise.all([window.shellhouse.getInfo(), loadFonts()]).then(([info]) => {
   document.documentElement.dataset['platform'] = info.platform
   if (info.testHooks) {
     installTestHooks()
-    applyTestDefaults()
   }
   createRoot(root).render(
     <StrictMode>

@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, openArea, test } from './fixtures'
 
 // Ký tự chỉ có trong tiếng Việt (có dấu) — giao diện phải hoàn toàn tiếng Anh.
 const VIETNAMESE = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i
@@ -31,11 +31,12 @@ test('mọi màn hình chính chỉ có tiếng Anh', async ({ page }) => {
   await expect(page.getByTestId('welcome')).toBeVisible()
   await expectEnglish(page, 'home')
 
-  // Thanh bên gọn (thanh icon) + mở tạm.
-  await page.getByTestId('sidebar-collapse').click()
-  await page.getByTestId('rail-search').click()
-  await expectEnglish(page, 'sidebar rail')
-  await page.getByTestId('sidebar-pin').click()
+  // Các khu vực của activity bar: Files, Transfers.
+  await page.getByTestId('activity-files').click()
+  await expectEnglish(page, 'files area')
+  await page.getByTestId('activity-transfers').click()
+  await expectEnglish(page, 'transfers area')
+  await page.getByTestId('open-home').click()
 
   await page.getByTestId('add-host').click()
   await expectEnglish(page, 'host form')
@@ -43,6 +44,7 @@ test('mọi màn hình chính chỉ có tiếng Anh', async ({ page }) => {
   await page.getByTestId('host-auth-key').click()
   await expectEnglish(page, 'host form (auth options)')
   await page.keyboard.press('Escape')
+  await openArea(page, 'hosts')
 
   await page.getByTestId('add-group').click()
   await expectEnglish(page, 'group form')

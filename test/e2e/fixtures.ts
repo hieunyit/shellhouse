@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   _electron as electron,
+  expect,
   test as base,
   type ElectronApplication,
+  type Locator,
   type Page
 } from '@playwright/test'
 import type { ShellhouseTestHooks } from '../../src/shared/test-hooks'
@@ -176,4 +178,34 @@ export async function confirmTabClose(
   const ok = page.getByTestId('close-tab-confirm').getByTestId('confirm-ok')
   if (optional) await ok.click({ timeout }).catch(() => undefined)
   else await ok.click()
+}
+
+/**
+ * Chuyển khu vực trên activity bar (khung app v0.5): 'home', 'hosts', 'files', 'transfers' hoặc id
+ * module ('docker', 'k8s', 's3'). Đang ở khu vực đó thì giữ nguyên (bấm lại sẽ ẩn Explorer).
+ */
+export async function openArea(page: Page, area: string): Promise<void> {
+  const item = page.getByTestId(area === 'home' ? 'open-home' : `activity-${area}`)
+  if ((await item.getAttribute('aria-current')) !== 'page') await item.click()
+  await expect(page.getByTestId('explorer')).toHaveAttribute(
+    'data-area',
+    area === 'home' || area === 'hosts' || area === 'files' || area === 'transfers'
+      ? area
+      : `m:${area}`
+  )
+}
+
+/** Tab đang chọn có tiêu đề chứa `text` (tab module / Home không nằm trong dải tab của dockview). */
+export async function expectActiveTab(page: Page, text: string): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => window.__shellhouseTest.activeTabTitle()))
+    .toContain(text)
+}
+
+/** Hàng host trong cây (một dòng): địa chỉ nằm trong tooltip (title). */
+export async function expectHostAddress(row: Locator, address: string): Promise<void> {
+  await expect(row).toHaveAttribute(
+    'title',
+    new RegExp(address.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  )
 }

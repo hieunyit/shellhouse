@@ -574,12 +574,12 @@ export function S3VersionList({
                   {row.first ? v.name : v.deleteMarker ? t('Delete marker') : t('Older version')}
                 </span>
                 {v.isLatest && (
-                  <span className="shrink-0 rounded bg-accent-soft px-1.5 py-px text-[10.5px] font-medium text-accent">
+                  <span className="shrink-0 rounded bg-accent-soft px-1.5 py-px text-[11px] font-medium text-accent">
                     {v.deleteMarker ? t('Deleted') : t('Current')}
                   </span>
                 )}
                 {row.first && v.deleteMarker && !v.isLatest && (
-                  <span className="shrink-0 rounded bg-warning-soft px-1.5 py-px text-[10.5px] text-warning">
+                  <span className="shrink-0 rounded bg-warning-soft px-1.5 py-px text-[11px] text-warning">
                     {t('Delete marker')}
                   </span>
                 )}
