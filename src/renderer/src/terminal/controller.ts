@@ -957,7 +957,11 @@ export class TerminalController {
         void window.shellhouse.closeSession(sessionId).catch(() => undefined)
         return
       }
-      if (this.hadSession) this.term.write(`${DIM}— ${t('new session')} —${RESET}\r\n`)
+      if (this.hadSession) {
+        // Con trỏ đang giữa dòng (sau prompt cũ) → xuống dòng trước, không dính vào prompt.
+        const nl = this.term.buffer.active.cursorX > 0 ? '\r\n' : ''
+        this.term.write(`${nl}${DIM}— ${t('new session')} —${RESET}\r\n`)
+      }
       this.hadSession = true
       this.sessionsOpened++
       this.hostEpoch = host.restarts

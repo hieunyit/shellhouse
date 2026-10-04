@@ -29,9 +29,14 @@ export function installTestHooks(): void {
       if (!term) return ''
       const buffer = term.buffer.active
       const start = lastLines ? Math.max(0, buffer.length - lastLines) : 0
+      // Dòng bị ngắt vì quá rộng (isWrapped) nối lại liền — chữ dài không bị cắt giữa chừng.
       const lines: string[] = []
       for (let i = start; i < buffer.length; i++) {
-        lines.push(buffer.getLine(i)?.translateToString(true) ?? '')
+        const line = buffer.getLine(i)
+        const text = line?.translateToString(true) ?? ''
+        const prev = lines.pop()
+        if (prev !== undefined && line?.isWrapped) lines.push(prev + text)
+        else lines.push(...(prev === undefined ? [] : [prev]), text)
       }
       return lines.join('\n')
     },

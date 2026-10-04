@@ -1025,7 +1025,8 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
           if (ch === 4)
             ws.send(Buffer.concat([Buffer.from([1]), Buffer.from(`[resize ${payload}]\r\n`)]))
           if (ch !== 0) return
-          ws.send(Buffer.concat([Buffer.from([1]), Buffer.from(payload)]))
+          // Enter → xuống dòng như TTY thật: dòng "[resize …]" tới sau không ghi đè lên chữ vừa dội.
+          ws.send(Buffer.concat([Buffer.from([1]), Buffer.from(payload.replace(/\r/g, '\r\n'))]))
           line += payload
           if (line.includes('exit\r')) {
             ws.send(
