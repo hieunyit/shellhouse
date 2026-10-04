@@ -34,7 +34,14 @@ test.afterEach(async () => {
     await new Promise((r) => {
       child?.once('exit', r)
     })
-  if (home) rmSync(home, { recursive: true, force: true })
+  // Windows: tiến trình con (Session Host…) còn giữ file một lúc sau khi app thoát → thử lại; vẫn
+  // không xoá được thì bỏ qua (thư mục tạm của test, không phải lỗi của bản đóng gói).
+  if (home)
+    try {
+      rmSync(home, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
+    } catch {
+      // bỏ qua
+    }
   child = null
   browser = null
   home = null
