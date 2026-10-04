@@ -384,6 +384,12 @@ export async function startTestSshServer(
                 .join(':')
             }
           })
+          // Không có /bin/sh (Windows CI) → trả lỗi như shell (127), không làm sập tiến trình test.
+          child.on('error', (error) => {
+            channel.stderr.write(`sh: ${error.message}\n`)
+            channel.exit(127)
+            channel.end()
+          })
           channel.pipe(child.stdin)
           child.stdout.pipe(channel)
           child.stderr.pipe(channel.stderr)

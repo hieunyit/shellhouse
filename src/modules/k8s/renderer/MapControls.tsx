@@ -10,6 +10,34 @@ import { type TrafficState } from './useTraffic'
  * Độ rộng hiện tại của một phần tử (ResizeObserver) — gắn `ref` trả về vào phần tử cần đo. Đo
  * ngay khi gắn để thanh công cụ không nháy giữa dạng đầy đủ và dạng gọn.
  */
+/**
+ * Danh sách kết quả tìm kiếm / popover: đóng khi bấm ra NGOÀI `ref` (pha capture — React Flow chặn
+ * mousedown lan lên) — không dựa vào blur của ô nhập: blur xảy ra cả khi cửa sổ mất focus hay
+ * focus bị kéo đi tạm thời, làm danh sách đóng ngay trước cú bấm vào kết quả.
+ */
+export function useCloseOnOutside(
+  open: boolean,
+  ref: React.RefObject<HTMLElement | null>,
+  onClose: () => void
+): void {
+  const latest = useRef(onClose)
+  useEffect(() => {
+    latest.current = onClose
+  })
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent | MouseEvent): void => {
+      const target = e.target as Node | null
+      if (target && ref.current?.contains(target)) return
+      latest.current()
+    }
+    window.addEventListener('pointerdown', onDown, true)
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true)
+    }
+  }, [open, ref])
+}
+
 export function useElementWidth(): [(el: HTMLElement | null) => () => void, number] {
   const [width, setWidth] = useState(0)
   const ref = useCallback((el: HTMLElement | null) => {

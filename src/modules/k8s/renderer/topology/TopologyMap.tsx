@@ -42,6 +42,7 @@ import { parseLabelSelector, selectorMatches, type MapData, type MapPod } from '
 import { WORKLOAD_KIND_ID, byPair, type TrafficPeer } from '../../shared/traffic'
 import { KindIcon } from '../icons'
 import {
+  useCloseOnOutside,
   MapButton,
   MenuButton,
   MenuHeading,
@@ -195,6 +196,10 @@ function TopologyInner({
   const [hover, setHover] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
+  const searchBoxRef = useRef<HTMLDivElement | null>(null)
+  useCloseOnOutside(searchOpen, searchBoxRef, () => {
+    setSearchOpen(false)
+  })
   const [problemsOnly, setProblemsOnly] = useState(false)
   const [yaml, setYaml] = useState<{ title: string; text: string | null; error?: string } | null>(
     null
@@ -731,7 +736,10 @@ function TopologyInner({
       className={cx('flex min-w-0 flex-1 items-center gap-1.5', barFit === 'narrow' && 'flex-wrap')}
       data-testid="k8s-topo-toolbar"
     >
-      <div className={cx('relative min-w-24 shrink-[3]', barFit === 'narrow' ? 'w-40' : 'w-64')}>
+      <div
+        ref={searchBoxRef}
+        className={cx('relative min-w-24 shrink-[3]', barFit === 'narrow' ? 'w-40' : 'w-64')}
+      >
         <div className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent">
           <Search size={12} className="shrink-0 text-faint" />
           <input
@@ -745,14 +753,6 @@ function TopologyInner({
             value={query}
             onFocus={() => {
               setSearchOpen(true)
-            }}
-            onBlur={() => {
-              setTimeout(() => {
-                // Cả cửa sổ mất focus (Alt+Tab, cửa sổ khác) → giữ danh sách; chỉ đóng khi focus
-                // chuyển sang chỗ khác TRONG app.
-                if (!document.hasFocus()) return
-                setSearchOpen(false)
-              }, 150)
             }}
             onChange={(e) => {
               setQuery(e.target.value)

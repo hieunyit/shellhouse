@@ -66,6 +66,7 @@ import {
   DOT
 } from './mapModel'
 import {
+  useCloseOnOutside,
   ZoomLabel,
   MapButton,
   Legend,
@@ -170,6 +171,10 @@ function MapInner({
   } | null>(null)
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
+  const searchBoxRef = useRef<HTMLDivElement | null>(null)
+  useCloseOnOutside(searchOpen, searchBoxRef, () => {
+    setSearchOpen(false)
+  })
   const [band, setBand] = useState<Band>(() =>
     (savedViewports.get(tabId)?.zoom ?? 0.5) >= NEAR_ZOOM ? 'near' : 'far'
   )
@@ -824,6 +829,7 @@ function MapInner({
         )}
         {!nodesView && (
           <div
+            ref={searchBoxRef}
             className={cx('relative min-w-24 shrink-[3]', barFit === 'narrow' ? 'w-40' : 'w-56')}
           >
             <div className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent">
@@ -838,14 +844,6 @@ function MapInner({
                 value={query}
                 onFocus={() => {
                   setSearchOpen(true)
-                }}
-                onBlur={() => {
-                  setTimeout(() => {
-                    // Cả cửa sổ mất focus (Alt+Tab, cửa sổ khác) → giữ danh sách; chỉ đóng khi focus
-                    // chuyển sang chỗ khác TRONG app.
-                    if (!document.hasFocus()) return
-                    setSearchOpen(false)
-                  }, 150)
                 }}
                 onChange={(e) => {
                   setQuery(e.target.value)
