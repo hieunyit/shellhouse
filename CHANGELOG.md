@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.14] - 2026-10-05
+
 ### Changed
 
 - **New interface (design v0.5)** is now the interface — no setting to turn it on:
