@@ -95,6 +95,12 @@ test('bản đóng gói: khởi động, tạo vault, native module + Session Ho
   await expect(page.getByTestId('welcome')).toBeVisible()
   await expect(page.getByTestId('tab')).toHaveCount(0)
 
+  // Mở vào Home: không có terminal nào đợi Session Host → chờ nó chạy xong rồi mới kiểm.
+  await expect
+    .poll(async () => (await page.evaluate(() => window.shellhouse.getSessionHostStatus())).state, {
+      timeout: 30_000
+    })
+    .toBe('running')
   const modules = await page.evaluate(() => window.shellhouse.checkNativeModules())
   expect(modules.filter((m) => !m.ok)).toEqual([])
   expect(modules.map((m) => m.name)).toEqual(
@@ -134,17 +140,6 @@ test('bản đóng gói: khởi động, tạo vault, native module + Session Ho
   }
   expect(most).toBe(before) // không có app thứ hai bật lên
   expect(Date.now() - closedAt).toBeLessThan(4_500)
-
-  // Windows: tiến trình phụ Remote Desktop (control RDP gốc) có trong bản cài → tab RDP dùng nó.
-  if (process.platform === 'win32') {
-    expect(
-      existsSync(join(binary ?? '', '..', 'resources', 'rdp-host', 'shellhouse-rdp-host.exe'))
-    ).toBe(true)
-    expect(await page.evaluate(() => window.shellhouse.rdpNativeAvailable())).toEqual({
-      available: true,
-      reason: null
-    })
-  }
 
   const info = await page.evaluate(() => window.shellhouse.getInfo())
   expect(info.version).toMatch(/^\d+\.\d+\.\d+/)

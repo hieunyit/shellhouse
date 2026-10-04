@@ -64,14 +64,6 @@ export const RdpOpenWith = z.enum(['tab', 'native'])
 export type RdpOpenWith = z.infer<typeof RdpOpenWith>
 
 /**
- * Engine vẽ tab Remote Desktop (khi `openWith` = 'tab'): 'auto' = control RDP gốc của Windows
- * (mstscax, như mstsc) nếu có, nơi khác IronRDP; 'native' = luôn control gốc (chỉ Windows);
- * 'ironrdp' = luôn trình xem tích hợp (IronRDP/WASM). Không có (host cũ) = 'auto'.
- */
-export const RdpEngine = z.enum(['auto', 'native', 'ironrdp'])
-export type RdpEngine = z.infer<typeof RdpEngine>
-
-/**
  * Trình xem trong tab: hiệu ứng hình ảnh của phiên (cờ hiệu năng RDP như "Experience" của mstsc).
  * 'performance' = tắt hình nền, hiệu ứng, kéo cửa sổ kèm nội dung, theme, làm mượt chữ;
  * 'balanced' = tắt hình nền + hiệu ứng, giữ làm mượt chữ; 'quality' = như ngồi trước máy.
@@ -82,7 +74,6 @@ export type RdpExperience = z.infer<typeof RdpExperience>
 export const RdpSettings = z
   .object({
     openWith: RdpOpenWith,
-    engine: RdpEngine.optional(),
     /** '' = không có domain. */
     domain: RdpDomain.or(z.literal('')),
     fullScreen: z.boolean(),

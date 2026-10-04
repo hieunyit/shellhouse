@@ -44,8 +44,6 @@ import { KnownHosts } from './known-hosts'
 import { registerHostIpc } from './hosts/ipc'
 import { registerRdpIpc } from './rdp/ipc'
 import { registerRdpViewIpc } from './rdp-viewer/ipc'
-import { registerRdpNativeIpc } from './rdp-native/ipc'
-import type { RdpNativeController } from './rdp-native/controller'
 import type { RdpLauncher } from './rdp/launcher'
 import { HostService } from './hosts/service'
 import { SnippetService } from './snippets'
@@ -131,7 +129,6 @@ let history: CommandHistory | null = null
 let modules: MainModuleRegistry | null = null
 let programGrants: ModuleProgramGrants | null = null
 let rdpLauncher: RdpLauncher | null = null
-let rdpNative: RdpNativeController | null = null
 
 function requireModules(): MainModuleRegistry {
   if (!modules) throw new Error(t('Data is not ready yet'))
@@ -520,26 +517,6 @@ function registerIpc(): void {
       testHooks && process.env['SHELLHOUSE_TEST_RDP'] === 'stub'
         ? join(app.getPath('userData'), 'rdp-test-launch.json')
         : null
-  })
-
-  // Remote Desktop trong tab trên Windows: control RDP gốc (mstscax) trong tiến trình phụ, gắn vào
-  // cửa sổ app. E2E: tắt (giữ test IronRDP) trừ khi SHELLHOUSE_TEST_RDP_NATIVE = selftest | real.
-  const nativeTest = process.env['SHELLHOUSE_TEST_RDP_NATIVE']
-  rdpNative = registerRdpNativeIpc({
-    hosts: requireHosts,
-    isTrustedSender,
-    getWindow: () => mainWindow,
-    emit: (event) => {
-      send('rdpNative:event', event)
-    },
-    notifyChanged: () => {
-      send('hosts:changed', null)
-    },
-    packaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-    appPath: app.getAppPath(),
-    testHooks,
-    testMode: testHooks && (nativeTest === 'selftest' || nativeTest === 'real') ? nativeTest : null
   })
 
   // Remote Desktop trong tab: IronRDP (WASM) ở renderer ↔ proxy RDCleanPath trong Session Host.
@@ -1022,7 +999,6 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     rdpLauncher?.disposeAll()
-    rdpNative?.disposeAll()
     modules?.stop()
     supervisor.stop()
     vault?.lock()

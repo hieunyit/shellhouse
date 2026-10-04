@@ -22,16 +22,6 @@ import {
   RdpViewProbeRequest,
   RdpViewProbeResult
 } from './rdp-viewer'
-import {
-  RdpNativeAvailability,
-  RdpNativeCommand,
-  RdpNativeEvent,
-  RdpNativeOpenRequest,
-  RdpNativeOpenResult,
-  RdpNativeOverlay,
-  RdpNativePrepare,
-  RdpNativeViewport
-} from './rdp-native'
 import { SnippetInput, SnippetSummary } from './snippets'
 import { AppSettings, SettingsPatch } from './settings'
 import type { UpdateStatus } from './updates'
@@ -345,25 +335,6 @@ export const invokeContract = {
   },
   /** Token proxy dùng một lần + thông tin đăng nhập cho IronRDP. */
   'rdpView:open': { args: z.tuple([RdpViewOpenRequest]), result: RdpViewOpenResult },
-  /** Remote Desktop bằng control gốc của Windows (mstscax): có dùng được trên máy này không. */
-  'rdpNative:available': { args: z.tuple([]), result: RdpNativeAvailability },
-  'rdpNative:prepare': { args: z.tuple([z.string().max(64)]), result: RdpNativePrepare },
-  /** Chạy tiến trình phụ, gắn cửa sổ control vào cửa sổ app và kết nối. */
-  'rdpNative:open': { args: z.tuple([RdpNativeOpenRequest]), result: RdpNativeOpenResult },
-  /** Vùng tab (CSS px + devicePixelRatio) đổi / hiện / ẩn. */
-  'rdpNative:bounds': { args: z.tuple([z.uuid(), RdpNativeViewport]), result: z.void() },
-  /** Lớp phủ của app đè lên vùng RDP (khoét lỗ / ẩn). */
-  'rdpNative:overlay': { args: z.tuple([z.uuid(), RdpNativeOverlay]), result: z.void() },
-  /** Ảnh chụp vùng RDP (data URL JPEG) để hiện thay khi bị che; null = không chụp được. */
-  'rdpNative:snapshot': {
-    args: z.tuple([z.uuid()]),
-    result: z
-      .string()
-      .regex(/^data:image\/jpeg;base64,/)
-      .nullable()
-  },
-  'rdpNative:command': { args: z.tuple([z.uuid(), RdpNativeCommand]), result: z.void() },
-  'rdpNative:close': { args: z.tuple([z.uuid()]), result: z.void() },
   'clipboard:readText': { args: z.tuple([]), result: z.string() },
   'clipboard:writeText': { args: z.tuple([z.string().max(16 * 1024 * 1024)]), result: z.void() }
 } as const
@@ -385,9 +356,7 @@ export const eventContract = {
   /** Sự kiện của module (`ctx.events.emit`). */
   'modules:event': z.object({ module: z.string(), name: z.string(), data: z.unknown() }),
   /** Client RDP đã thoát / đã giao cho ứng dụng khác. */
-  'rdp:status': RdpStatusEvent,
-  /** Sự kiện phiên RDP của control gốc Windows. */
-  'rdpNative:event': RdpNativeEvent
+  'rdp:status': RdpStatusEvent
 } as const
 
 export type EventChannel = keyof typeof eventContract
@@ -514,13 +483,4 @@ export interface ShellhouseApi {
   rdpViewProbe(request: RdpViewProbeRequest): Promise<RdpViewProbeResult>
   rdpViewTrust(hostId: string, fingerprint: string): Promise<void>
   rdpViewOpen(request: RdpViewOpenRequest): Promise<RdpViewOpenResult>
-  rdpNativeAvailable(): Promise<RdpNativeAvailability>
-  rdpNativePrepare(hostId: string): Promise<RdpNativePrepare>
-  rdpNativeOpen(request: RdpNativeOpenRequest): Promise<RdpNativeOpenResult>
-  rdpNativeBounds(sessionId: string, viewport: RdpNativeViewport): Promise<void>
-  rdpNativeOverlay(sessionId: string, overlay: RdpNativeOverlay): Promise<void>
-  rdpNativeSnapshot(sessionId: string): Promise<string | null>
-  rdpNativeCommand(sessionId: string, command: RdpNativeCommand): Promise<void>
-  rdpNativeClose(sessionId: string): Promise<void>
-  onRdpNativeEvent(listener: (event: RdpNativeEvent) => void): () => void
 }

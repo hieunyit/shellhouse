@@ -27,6 +27,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
     icons, pill-shaped session tabs, neutral selected rows, 11 px minimum text, control borders that
     meet 3:1 contrast, softer "Match app" terminal colors.
 
+### Removed
+
+- The Windows Remote Desktop engine (`shellhouse-rdp-host.exe`, the mstsc control) and the
+  "Remote Desktop engine" choice in the host form: Remote Desktop tabs always use the built-in
+  viewer (IronRDP). Opening a host in the system's RDP client is unchanged.
+
 ### Added
 
 - **Environments** (Settings → Environments): Production, Staging, Development, Test — or your

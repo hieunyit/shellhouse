@@ -19,11 +19,9 @@ import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useSettings } from '../stores/settings'
 import { connectionLabel, cx, StatusDot } from './ui'
 import { HomeView } from './Home'
-import { EditorTabView, TerminalView } from '../lazy'
+import { EditorTabView, RdpView, TerminalView } from '../lazy'
 import '../rdp/register'
 import { rdpControllers } from '../rdp/registry'
-import { RdpTabView } from '../rdp-native/RdpTabView'
-import { nativeRdpControllers } from '../rdp-native/registry'
 import { ErrorBoundary } from './ErrorBoundary'
 import { HostAvatar } from './HostAvatar'
 import { useTabs, type TabTarget } from '../stores/tabs'
@@ -70,7 +68,7 @@ export function panelContent(
 ): React.JSX.Element {
   if (target.kind === 'home') return <HomeView />
   if (target.kind === 'rdp')
-    return <RdpTabView tabId={tabId} hostId={target.hostId} active={active} visible={visible} />
+    return <RdpView tabId={tabId} hostId={target.hostId} active={active} visible={visible} />
   if (target.kind === 'editor')
     return <EditorTabView tabId={tabId} docKey={target.key} active={active} />
   if (target.kind === 'module')
@@ -141,7 +139,6 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
             tabs.activate(tabId)
             controllers.get(tabId)?.reconnect()
             rdpControllers.get(tabId)?.reconnect()
-            nativeRdpControllers.get(tabId)?.reconnect()
           }
         },
         {

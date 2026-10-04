@@ -52,11 +52,6 @@ jobs:
           v=$(node -p "require('./package.json').version")
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != package.json $v"; exit 1; }
 
-      # Tiến trình phụ Remote Desktop (control RDP gốc) — đóng gói qua extraResources (chỉ Windows).
-      - name: Build Remote Desktop helper (Windows)
-        if: runner.os == 'Windows'
-        run: node scripts/build-rdp-host.mjs --require
-
       - run: pnpm lint && pnpm typecheck && pnpm test
 
       - run: sudo apt-get update && sudo apt-get install -y rpm

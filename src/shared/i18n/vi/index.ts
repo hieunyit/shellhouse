@@ -8,7 +8,6 @@ import { k8s } from './k8s'
 import { k8sMap } from './k8sMap'
 import { main } from './main'
 import { rdp } from './rdp'
-import { rdpNative } from './rdpNative'
 import { rdpViewer } from './rdpViewer'
 import { s3 } from './s3'
 import { shell } from './shell'
@@ -28,7 +27,6 @@ export const PARTS = {
   s3,
   rdp,
   rdpViewer,
-  rdpNative,
   accounts,
   ds,
   shell,

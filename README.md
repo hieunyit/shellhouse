@@ -48,7 +48,7 @@ like a staging one.
 - **Docker** — local or over SSH; containers, images, volumes, networks, Compose projects, bulk
   actions. Engine API with a CLI fallback.
 - **S3** — AWS S3, MinIO, Wasabi, Cloudflare R2: buckets, objects, folder sync.
-- **Remote Desktop** — RDP inside a tab (IronRDP, or Microsoft's own engine on Windows), optionally
+- **Remote Desktop** — RDP inside a tab (IronRDP), optionally
   tunnelled through an SSH host, or handed to the system client.
 
 **Everything else:** light / dark themes, English and Vietnamese UI, keyboard-first navigation,

@@ -143,16 +143,7 @@ const api: ShellhouseApi = {
   rdpViewPrepare: (hostId) => invoke('rdpView:prepare', hostId),
   rdpViewProbe: (request) => invoke('rdpView:probe', request),
   rdpViewTrust: (hostId, fingerprint) => invoke('rdpView:trust', hostId, fingerprint),
-  rdpViewOpen: (request) => invoke('rdpView:open', request),
-  rdpNativeAvailable: () => invoke('rdpNative:available'),
-  rdpNativePrepare: (hostId) => invoke('rdpNative:prepare', hostId),
-  rdpNativeOpen: (request) => invoke('rdpNative:open', request),
-  rdpNativeBounds: (sessionId, viewport) => invoke('rdpNative:bounds', sessionId, viewport),
-  rdpNativeOverlay: (sessionId, overlay) => invoke('rdpNative:overlay', sessionId, overlay),
-  rdpNativeSnapshot: (sessionId) => invoke('rdpNative:snapshot', sessionId),
-  rdpNativeCommand: (sessionId, command) => invoke('rdpNative:command', sessionId, command),
-  rdpNativeClose: (sessionId) => invoke('rdpNative:close', sessionId),
-  onRdpNativeEvent: (listener) => subscribe('rdpNative:event', listener)
+  rdpViewOpen: (request) => invoke('rdpView:open', request)
 }
 
 // MessagePort không đi qua contextBridge được → chuyển vào main world bằng window.postMessage.
