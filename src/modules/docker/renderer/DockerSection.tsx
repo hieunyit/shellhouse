@@ -12,7 +12,16 @@ import {
 } from 'lucide-react'
 import { cx, IconButton } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
-import { t, useSavedHosts } from '../../registry/renderer-kit'
+import {
+  environmentMenu,
+  setSourceEnvironment,
+  t,
+  useEnvironments,
+  useSavedHosts,
+  useSourceEnvironment,
+  useSourceEnvironmentMap
+} from '../../registry/renderer-kit'
+import { EnvLabel } from '../../../renderer/src/ds'
 import { wslDistroOf, wslSource } from '../shared/ipc'
 import { dockerApi, openDocker, sourceLabel } from './api'
 import { useDocker } from './store'
@@ -57,6 +66,8 @@ export function DockerSection(): React.JSX.Element {
     (h) => h.protocol === 'ssh' && !remote.some((e) => e.hostId === h.id)
   )
 
+  const environments = useEnvironments()
+  const sourceEnvs = useSourceEnvironmentMap()
   const rowMenu = (hostId: string | null, readOnly: boolean): MenuEntry[] => [
     {
       id: 'docker-open',
@@ -70,6 +81,12 @@ export function DockerSection(): React.JSX.Element {
       icon: <Eye size={14} />,
       onSelect: () => void dockerApi.setReadOnly(hostId, !readOnly)
     },
+    'separator',
+    ...environmentMenu(
+      environments,
+      sourceEnvs[`docker:${endpointKey(hostId)}`] ?? null,
+      (id) => void setSourceEnvironment('docker', endpointKey(hostId), id)
+    ),
     ...(hostId
       ? [
           'separator' as const,
@@ -159,7 +176,7 @@ export function DockerSection(): React.JSX.Element {
             tabIndex={0}
             data-testid="docker-endpoint"
             data-name={sourceLabel(r.hostId)}
-            className="group flex h-8 cursor-default items-center gap-2.5 rounded-md px-2 hover:bg-hover"
+            className="group flex h-(--ds-tree-row-h) cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus"
             title={t('Double-click to open')}
             onDoubleClick={() => openDocker(r.hostId)}
             onKeyDown={(e) => {
@@ -179,6 +196,7 @@ export function DockerSection(): React.JSX.Element {
             <span className="min-w-0 flex-1 truncate text-[13px] text-fg">
               {sourceLabel(r.hostId)}
             </span>
+            <EndpointEnv hostId={r.hostId} />
             {r.readOnly && (
               <span className="rounded bg-subtle px-1 text-[11px] font-medium text-muted">
                 {t('read-only')}
@@ -189,4 +207,21 @@ export function DockerSection(): React.JSX.Element {
       {menu}
     </div>
   )
+}
+
+/** Khoá môi trường của endpoint: "local" (máy này) hoặc id host / nguồn WSL. */
+export function endpointKey(hostId: string | null): string {
+  return hostId ?? 'local'
+}
+
+/** Môi trường của endpoint Docker (Settings › Environments). */
+export function useEndpointEnvironment(
+  hostId: string | null
+): ReturnType<typeof useSourceEnvironment> {
+  return useSourceEnvironment('docker', endpointKey(hostId))
+}
+
+function EndpointEnv({ hostId }: { hostId: string | null }): React.JSX.Element | null {
+  const env = useEndpointEnvironment(hostId)
+  return env ? <EnvLabel env={env} /> : null
 }

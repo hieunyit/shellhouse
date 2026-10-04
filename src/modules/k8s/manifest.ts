@@ -49,7 +49,7 @@ export const k8sManifest: ModuleManifest = {
   // Thư mục ~/.kube (file có thể không tên "config" — vd. kubeconfig tải từ Rancher / cloud).
   detect: [{ on: 'startup', probe: 'local-file', path: '~/.kube' }],
   version: 1,
-  icon: 'ship',
+  icon: 'kubernetes',
   enabledByDefault: false,
   binaries: ['aws', 'gcloud', 'gke-gcloud-auth-plugin', 'kubelogin'],
   contributes: {

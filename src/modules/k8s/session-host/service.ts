@@ -572,7 +572,12 @@ export class K8sService implements HostModuleSession {
                           follow: !op.previous,
                           previous: op.previous || undefined,
                           container: t.container,
-                          ...(since ? { sinceTime: since } : { tailLines: op.tail }),
+                          ...(since
+                            ? { sinceTime: since }
+                            : {
+                                tailLines: op.tail,
+                                ...(op.sinceSeconds ? { sinceSeconds: op.sinceSeconds } : {})
+                              }),
                           timestamps: op.timestamps || undefined
                         },
                         signal: s

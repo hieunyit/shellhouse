@@ -8,6 +8,7 @@ import { showOpenDialog, showSaveDialog } from '../dialogs'
 import { writePrivateFile } from '../private-file'
 import { handle } from '../ipc/router'
 import { scanCsv } from './csv-import'
+import { scanShellhouseYaml } from './yaml-import'
 import { decodeMobaIni, scanMobaXterm } from './mobaxterm-import'
 import type { HostService } from './service'
 import { scanSshConfig } from './ssh-config-import'
@@ -395,6 +396,34 @@ export function registerHostIpc(
   handle('csv:import', isTrustedSender, (aliases) => {
     if (!csvFile) throw new Error(t('Choose a CSV file first'))
     const result = importCandidates(service, scanCsvFile(csvFile).candidates, aliases, 'csv')
+    notifyChanged()
+    return result
+  })
+  // Shellhouse YAML (Export hosts) — main giữ đường dẫn, renderer chỉ gửi danh sách đã chọn.
+  let yamlFile: string | null = null
+  const scanYamlFile = (file: string) => {
+    if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error(t('The file is too large'))
+    return scanShellhouseYaml(readFileSync(file, 'utf8'), {
+      existingLabels: service.tree().hosts.map((h) => h.label),
+      defaultUser: currentUser()
+    })
+  }
+  handle('yaml:scan', isTrustedSender, async () => {
+    const picked = await showOpenDialog(getWindow(), {
+      title: t('Choose a Shellhouse hosts file'),
+      filters: [
+        { name: 'YAML', extensions: ['yaml', 'yml'] },
+        { name: t('All files'), extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    })
+    yamlFile = picked.canceled ? null : (picked.filePaths[0] ?? null)
+    if (!yamlFile) return { file: null, candidates: [], ignored: {} }
+    return { file: yamlFile, ...scanYamlFile(yamlFile) }
+  })
+  handle('yaml:import', isTrustedSender, (aliases) => {
+    if (!yamlFile) throw new Error(t('Choose a file first'))
+    const result = importCandidates(service, scanYamlFile(yamlFile).candidates, aliases, 'imported')
     notifyChanged()
     return result
   })

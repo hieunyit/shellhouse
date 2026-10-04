@@ -55,3 +55,8 @@ export function setSourceEnvironment(
 ): Promise<void> {
   return useSettings.getState().update({ sourceEnvironments: { [sourceKey(module, id)]: env } })
 }
+
+/** Bảng môi trường đã chọn cho các nguồn (`<module>:<id>` → id môi trường). */
+export function useSourceEnvironmentMap(): Readonly<Record<string, string>> {
+  return useSettings((s) => s.settings.sourceEnvironments)
+}

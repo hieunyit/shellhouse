@@ -11,6 +11,7 @@ import { HostAvatar } from '../components/HostAvatar'
 import { connect } from '../components/sidebar/actions'
 import { hostAddress, useHosts } from '../stores/hosts'
 import { useTabs } from '../stores/tabs'
+import { openSidebarDialog } from '../stores/ui-requests'
 
 type Item =
   | { kind: 'host'; host: HostSummary; address: string; path: string }
@@ -53,6 +54,21 @@ export function QuickConnectDialog({ onClose }: { onClose: () => void }): React.
     return list
   }, [query, hosts, effective, tree])
   const at = Math.min(cursor, Math.max(0, items.length - 1))
+
+  /** Ctrl+Enter: lưu địa chỉ vừa gõ thành host (form host điền sẵn). */
+  const save = (): void => {
+    const target = parseQuickConnect(query)
+    if (!target) {
+      setInvalid(query.trim().length > 0)
+      return
+    }
+    onClose()
+    void openSidebarDialog('new-host', undefined, {
+      hostname: target.host,
+      port: target.port,
+      username: target.username
+    })
+  }
 
   const run = (item: Item | undefined, split: boolean): void => {
     if (!item) {
@@ -112,6 +128,9 @@ export function QuickConnectDialog({ onClose }: { onClose: () => void }): React.
                 } else if (e.key === 'ArrowUp') {
                   e.preventDefault()
                   setCursor(Math.max(at - 1, 0))
+                } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault()
+                  save()
                 } else if (e.key === 'Enter') {
                   e.preventDefault()
                   run(items[at], e.altKey)
@@ -177,6 +196,9 @@ export function QuickConnectDialog({ onClose }: { onClose: () => void }): React.
             </span>
             <span className="flex items-center gap-1.5">
               <Kbd keys="Alt Enter" /> {t('split')}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Kbd keys="Ctrl Enter" /> {t('save as host')}
             </span>
             <span className="flex items-center gap-1.5">
               <Kbd keys="Esc" /> {t('close')}

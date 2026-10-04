@@ -32,7 +32,8 @@ import {
   Square,
   Trash2,
   Upload,
-  X
+  X,
+  TerminalSquare
 } from 'lucide-react'
 import {
   parentPrefix,
@@ -87,8 +88,13 @@ import {
   toBase64,
   useEditInApp,
   activateTab,
-  usePublishTransfers
+  showCommands,
+  usePublishTransfers,
+  useReportEnvironment
 } from '../../registry/renderer-kit'
+import { objectCommands } from '../shared/commands'
+import { EnvLabel } from '../../../renderer/src/ds'
+import { useAccountEnvironment } from './S3Section'
 import { objectHttpUrl, type S3Version } from '../shared/manage'
 import { S3DetailsPanel, type DetailsTarget } from './S3Details'
 import { S3VersionList } from './S3VersionList'
@@ -194,6 +200,9 @@ export function S3View({
   initialLocation?: { bucket: string; prefix: string } | undefined
 }): React.JSX.Element {
   const account = useS3((s) => s.accounts.find((a) => a.id === accountId))
+  // Môi trường của tài khoản: nhãn trên header + vạch trên cùng (Settings › Environments).
+  const env = useAccountEnvironment(accountId)
+  useReportEnvironment(tabId, env?.id)
   const clientRef = useRef<S3SessionClient | null>(null)
   const [ready, setReady] = useState(false)
   const [buckets, setBuckets] = useState<S3Bucket[] | null>(null)
@@ -783,6 +792,21 @@ export function S3View({
       icon: <Download size={14} />,
       onSelect: () => void download(list)
     })
+    if (one && account)
+      items.push({
+        id: 's3-copy-command',
+        label: t('Copy as command…'),
+        icon: <TerminalSquare size={14} />,
+        onSelect: () => {
+          showCommands(
+            t('{name} as AWS CLI commands', { name: one.key }),
+            objectCommands(account, bucket, one.key, one.isFolder).map((l) => ({
+              label: awsCommandLabel(l.id),
+              command: l.command
+            }))
+          )
+        }
+      })
     if (one && !one.isFolder)
       items.push({
         id: 's3-link',
@@ -1240,6 +1264,7 @@ export function S3View({
             </>
           )}
         </nav>
+        {env && <EnvLabel env={env} size="md" className="mr-1" />}
         <label className="flex h-7 w-28 shrink-0 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent @xl:w-44">
           <Search size={12} className="shrink-0 text-faint" />
           <input
@@ -1934,6 +1959,13 @@ export function S3View({
       {dialog && (
         <S3Dialog
           dialog={dialog}
+          typeName={
+            dialog.kind === 'delete' && env?.confirm === 'type'
+              ? dialog.entries.length === 1
+                ? dialog.entries[0]?.name
+                : tn(dialog.entries.length, '{n} item', '{n} items')
+              : undefined
+          }
           buckets={buckets ?? []}
           bucket={bucket}
           prefix={prefix}
@@ -1957,4 +1989,24 @@ export function S3View({
       )}
     </div>
   )
+}
+
+/** Nhãn của từng lệnh AWS CLI (dịch lúc vẽ). */
+function awsCommandLabel(id: string): string {
+  switch (id) {
+    case 'list':
+      return t('List')
+    case 'download':
+      return t('Download')
+    case 'sync':
+      return t('Sync to a local folder')
+    case 'head':
+      return t('Metadata')
+    case 'presign':
+      return t('Share link (1 hour)')
+    case 'remove':
+      return t('Delete')
+    default:
+      return id
+  }
 }

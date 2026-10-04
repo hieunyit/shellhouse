@@ -1,4 +1,5 @@
 import { accounts } from './accounts'
+import { commands } from './commands'
 import { core } from './core'
 import { docker } from './docker'
 import { ds } from './ds'
@@ -31,7 +32,8 @@ export const PARTS = {
   accounts,
   ds,
   shell,
-  environments
+  environments,
+  commands
 } as const
 
 export const vi: Readonly<Record<string, string>> = Object.assign(

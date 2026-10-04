@@ -817,6 +817,7 @@ export async function logTargets(
   op: {
     pod?: string | undefined
     selector?: string | undefined
+    pods?: readonly string[] | undefined
     container?: string | undefined
     allContainers?: boolean | undefined
   },
@@ -825,20 +826,24 @@ export async function logTargets(
   const containersOf = (p: K8sObject): string[] =>
     ((p.spec?.['containers'] as { name: string }[] | undefined) ?? []).map((c) => c.name)
   if (op.pod && !op.allContainers) return [{ pod: op.pod, container: op.container }]
-  const pods = op.pod
-    ? [
-        await client.json<K8sObject>(
-          'GET',
-          `/api/v1${ns(namespace)}/pods/${encodeURIComponent(op.pod)}`,
-          sig(signal)
-        )
-      ]
-    : (
-        await client.json<List>('GET', `/api/v1${ns(namespace)}/pods`, {
-          query: { labelSelector: op.selector },
-          ...sig(signal)
-        })
-      ).items
+  const pods = op.pods
+    ? (await client.json<List>('GET', `/api/v1${ns(namespace)}/pods`, sig(signal))).items.filter(
+        (p) => op.pods?.includes(p.metadata.name)
+      )
+    : op.pod
+      ? [
+          await client.json<K8sObject>(
+            'GET',
+            `/api/v1${ns(namespace)}/pods/${encodeURIComponent(op.pod)}`,
+            sig(signal)
+          )
+        ]
+      : (
+          await client.json<List>('GET', `/api/v1${ns(namespace)}/pods`, {
+            query: { labelSelector: op.selector },
+            ...sig(signal)
+          })
+        ).items
   if (pods.length === 0) throw new Error('No pods match')
   return pods
     .slice(0, 20)

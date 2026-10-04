@@ -50,6 +50,9 @@ const groupForm = preloadable(() => import('./components/GroupForm').then((m) =>
 const importDialog = preloadable(() =>
   import('./components/ImportDialog').then((m) => m.ImportDialog)
 )
+const exportDialog = preloadable(() =>
+  import('./components/ExportDialog').then((m) => m.ExportDialog)
+)
 const sftp = preloadable(() => import('./terminal/SftpPanel').then((m) => m.SftpPanel))
 const forwards = preloadable(() => import('./terminal/ForwardsPanel').then((m) => m.ForwardsPanel))
 const deployKey = preloadable(() =>
@@ -103,6 +106,7 @@ export const SnippetsDialog = snippets.Component
 export const HostForm = hostForm.Component
 export const GroupForm = groupForm.Component
 export const ImportDialog = importDialog.Component
+export const ExportDialog = exportDialog.Component
 export const SftpPanel = sftp.Component
 export const ForwardsPanel = forwards.Component
 export const DeployKeyDialog = deployKey.Component
@@ -117,6 +121,7 @@ export function preloadLazyParts(): Promise<unknown> {
       hostForm,
       groupForm,
       importDialog,
+      exportDialog,
       sftp,
       forwards,
       deployKey

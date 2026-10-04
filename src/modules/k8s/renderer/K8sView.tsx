@@ -11,7 +11,9 @@ import {
   RefreshCw,
   Search,
   Ship,
+  Tag,
   Terminal,
+  TerminalSquare,
   X
 } from 'lucide-react'
 import { Button, cx, IconButton, Notice } from '../../../renderer/src/components/ui'
@@ -29,9 +31,17 @@ import {
   ConnectionPrompt,
   ExplorerNav,
   setModuleTabParams,
-  useNavPlacement
+  environmentFromColor,
+  showCommands,
+  useEnvironments,
+  useNavPlacement,
+  useReportEnvironment,
+  useSourceEnvironmentMap
 } from '../../registry/renderer-kit'
+import { findEnvironment } from '@shared/environments'
+import { listCommands } from '../shared/commands'
 import { EnvLabel } from '../../../renderer/src/ds'
+import { KubernetesIcon } from '../../registry/renderer-icons'
 import type { ModuleTabProps } from '../../registry/renderer-types'
 import { contextKey, COUNT_CAPPED, type K8sClusterParams } from '../shared/ops'
 import {
@@ -48,7 +58,7 @@ import {
 import { actionsFor, HAS_PODS, keyLabel, toMenu } from './actions'
 import { openPodLogs, openPodShell } from './api'
 import { Detail, RELATED_KINDS, type DetailTab } from './Detail'
-import { COLOR_DOT } from './K8sSection'
+import { useContextEnvironment } from './K8sSection'
 import { HelmView } from './HelmView'
 import { MapView } from './MapView'
 import type { MapRef } from './mapModel'
@@ -120,9 +130,15 @@ export function ClusterTab({
 }: ModuleTabProps<K8sClusterParams>): React.JSX.Element {
   const contexts = useK8s((st) => st.contexts)
   const entry = contexts.find((c) => c.key === contextKey(params.ref))
-  /** Cài đặt chỉ đọc của context (gửi khi connect). */
-  const readOnlySetting = entry?.settings.readOnly ?? false
-  const production = entry?.settings.color === 'red'
+  // Môi trường của context (Settings › Environments; context cũ màu đỏ = Production): nhãn trên
+  // header, vạch trên cùng, chỉ đọc mặc định, mức xác nhận khi xoá ("Type name" = gõ tên).
+  const env = useContextEnvironment(contextKey(params.ref), entry?.settings.color ?? null)
+  const environments = useEnvironments()
+  const sourceEnvs = useSourceEnvironmentMap()
+  useReportEnvironment(tabId, env?.id)
+  /** Cài đặt chỉ đọc của context (gửi khi connect) — hoặc môi trường mặc định chỉ đọc. */
+  const readOnlySetting = (entry?.settings.readOnly ?? false) || env?.readOnly === true
+  const production = env?.confirm === 'type'
   const [view, setView] = useState<string>('pods')
   const [drill, setDrill] = useState<Drill[]>([])
   const [query, setQuery] = useState('')
@@ -257,7 +273,7 @@ export function ClusterTab({
   // ——— Dòng của bảng ———
   const commandMode = query.startsWith(':')
   const objects = list.objects
-  const { rows, q, single, detail } = useResourceRows({
+  const { rows, q, selector, single, detail } = useResourceRows({
     objects,
     kindId,
     query,
@@ -705,7 +721,7 @@ export function ClusterTab({
             </IconButton>
           )}
           <span className="flex shrink-0 items-center gap-1.5 px-1 text-[13px] font-medium text-muted">
-            <Ship size={14} strokeWidth={1.5} className="text-faint" aria-hidden />
+            <KubernetesIcon size={14} strokeWidth={1.5} className="text-faint" aria-hidden />
             Kubernetes
           </span>
           <span aria-hidden className="shrink-0 text-ds-fg-disabled">
@@ -714,16 +730,21 @@ export function ClusterTab({
           <ContextPicker
             current={contextKey(params.ref)}
             label={params.label}
-            color={entry?.settings.color ? COLOR_DOT[entry.settings.color] : 'bg-line-strong'}
             version={cluster?.version}
             contexts={contexts
               .filter((c) => !c.settings.hidden)
-              .map((c) => ({
-                key: c.key,
-                name: c.name,
-                source: c.sourceLabel,
-                color: c.settings.color ? COLOR_DOT[c.settings.color] : 'bg-line-strong'
-              }))}
+              .map((c) => {
+                const ctxEnv = findEnvironment(
+                  environments,
+                  sourceEnvs[`k8s:${c.key}`] ?? environmentFromColor(c.settings.color ?? null)
+                )
+                return {
+                  key: c.key,
+                  name: c.name,
+                  source: c.sourceLabel,
+                  ...(ctxEnv ? { env: ctxEnv } : {})
+                }
+              })}
             onPick={switchContext}
           />
           <span aria-hidden className="shrink-0 text-ds-fg-disabled">
@@ -774,7 +795,7 @@ export function ClusterTab({
               }}
             />
           </span>
-          {production && <EnvLabel env="prod" size="md" className="ml-1.5" />}
+          {env && <EnvLabel env={env} size="md" className="ml-1.5" />}
           <div className="min-w-2 flex-1" />
           {readOnly && (
             <span
@@ -881,11 +902,16 @@ export function ClusterTab({
                     'flex h-ds-ctl items-center gap-1.5 rounded-ds-md border bg-subtle px-2',
                     commandMode
                       ? 'border-ds-accent ring-3 ring-ds-accent-soft'
-                      : 'border-ds-border-control hover:border-faint'
+                      : selector && !selector.ok
+                        ? 'border-ds-danger ring-3 ring-ds-danger-soft'
+                        : 'border-ds-border-control hover:border-faint'
                   )}
+                  data-selector={selector ? (selector.ok ? 'ok' : 'error') : undefined}
                 >
                   {commandMode ? (
                     <Terminal size={13} className="text-accent" />
+                  ) : selector ? (
+                    <Tag size={13} className={selector.ok ? 'text-ds-info' : 'text-ds-danger'} />
                   ) : (
                     <Search size={13} className="text-faint" />
                   )}
@@ -927,7 +953,25 @@ export function ClusterTab({
                       }
                     }}
                   />
+                  {selector?.ok && (
+                    <span
+                      className="shrink-0 rounded-ds-xs bg-ds-info-soft px-1 font-mono text-[11px] text-ds-info"
+                      data-testid="k8s-selector-badge"
+                      title={t('Label selector (kubectl -l)')}
+                    >
+                      -l · {selector.requirements.length}
+                    </span>
+                  )}
                 </div>
+                {selector && !selector.ok && (
+                  <div
+                    role="alert"
+                    className="absolute top-9 right-0 left-0 z-30 rounded-ds-md bg-ds-popover px-2.5 py-1.5 text-xs text-ds-danger shadow-ds-popover"
+                    data-testid="k8s-selector-error"
+                  >
+                    {selector.error}
+                  </div>
+                )}
                 {commandMode && suggestions.length > 0 && (
                   <div
                     className="absolute top-9 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md bg-ds-popover p-1 shadow-ds-popover"
@@ -955,6 +999,26 @@ export function ClusterTab({
                 )}
               </div>
               <div className="flex-1" />
+              {!onOverview && !onMap && !onHelm && (
+                <IconButton
+                  label={t('Copy as command')}
+                  size="sm"
+                  data-testid="k8s-copy-command"
+                  onClick={() => {
+                    showCommands(
+                      t('{kind} as kubectl', { kind: titleOf(view) }),
+                      listCommands({
+                        ref: params.ref,
+                        kindId,
+                        namespaces: namespaces && namespaces.length > 0 ? namespaces : null,
+                        selector: selector?.ok ? selector.text : undefined
+                      }).map((command) => ({ label: t('List'), command }))
+                    )
+                  }}
+                >
+                  <TerminalSquare size={14} />
+                </IconButton>
+              )}
               {!onOverview && !onMap && (
                 <span className="text-faint tabular-nums" data-testid="k8s-count">
                   {list.objects
@@ -972,6 +1036,28 @@ export function ClusterTab({
               <BulkBar
                 count={selectedRows.length}
                 kinds={bulkAvailable}
+                onLogs={
+                  kindId === 'pods'
+                    ? () => {
+                        // Mỗi namespace một tab log (kubectl logs chỉ trong một namespace).
+                        const byNs = new Map<string, string[]>()
+                        for (const r of selectedRows) {
+                          const ns = r.obj.metadata.namespace ?? ''
+                          byNs.set(ns, [...(byNs.get(ns) ?? []), r.obj.metadata.name])
+                        }
+                        for (const [ns, pods] of byNs)
+                          openPodLogs({
+                            ref: params.ref,
+                            ...(params.bastionHostId
+                              ? { bastionHostId: params.bastionHostId }
+                              : {}),
+                            namespace: ns,
+                            pods: pods.slice(0, 20),
+                            title: tn(pods.length, '{n} pod', '{n} pods')
+                          })
+                      }
+                    : undefined
+                }
                 onRun={(k) => {
                   runBulk(k)
                 }}

@@ -17,14 +17,20 @@ const OUT = 'screens'
 const PREFIX = process.env['SHELLHOUSE_LANG'] === 'vi' ? 'vi-' : ''
 test.setTimeout(300_000)
 
+/** Mở Settings (đang ở Settings thì giữ — bấm lại sẽ ẩn mục lục). */
+async function openSettings(page: Page): Promise<void> {
+  if (!(await page.getByTestId('settings-dialog').isVisible()))
+    await page.getByTestId('open-settings').click()
+}
+
 async function setTheme(page: Page, theme: 'light' | 'dark'): Promise<void> {
-  await page.getByTestId('open-settings').click()
+  await openSettings(page)
   await page.getByTestId('settings-nav-appearance').click()
   await page.getByTestId(`appearance-${theme}`).click()
 }
 
 async function enableModule(page: Page, id: string): Promise<void> {
-  await page.getByTestId('open-settings').click()
+  await openSettings(page)
   await page.getByTestId('settings-nav-modules').click()
   await page.getByTestId(`module-toggle-${id}`).click()
   await page.getByTestId('module-enable-confirm').click()

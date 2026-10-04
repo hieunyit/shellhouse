@@ -16,7 +16,8 @@ import {
   Unlock,
   Wind,
   Zap,
-  Bug
+  Bug,
+  TerminalSquare
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import type { MenuEntry } from '../../../renderer/src/components/ContextMenu'
@@ -60,6 +61,8 @@ export interface ActionHandlers {
   /** Argo CD Application. */
   argoSync(obj: K8sObject, prune: boolean): void
   argoRefresh(obj: K8sObject, hard: boolean): void
+  /** "Copy as command": lệnh kubectl tương đương (get / describe / logs / exec…). */
+  copyCommand(obj: K8sObject): void
 }
 
 const WORKLOADS = ['deployments.apps', 'statefulsets.apps', 'daemonsets.apps']
@@ -179,6 +182,15 @@ export function actionsFor(
         h.history(obj)
       }
     })
+  out.push({
+    id: 'copy-command',
+    label: t('Copy as command…'),
+    icon: <TerminalSquare size={14} />,
+    secondary: true,
+    run: () => {
+      h.copyCommand(obj)
+    }
+  })
   if (readOnly) return out
   if (kindId !== 'secrets') {
     out.push({

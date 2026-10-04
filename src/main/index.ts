@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import { release } from 'node:os'
@@ -606,6 +607,15 @@ function registerIpc(): void {
     }
     const result = await showSaveDialog(mainWindow, options)
     return result.canceled || !result.filePath ? null : result.filePath
+  })
+  handle('dialog:saveText', isTrustedSender, async (defaultName, text) => {
+    const result = await showSaveDialog(mainWindow, {
+      title: t('Save file'),
+      defaultPath: join(app.getPath('documents'), defaultName.replace(/[\\/]/g, '_'))
+    })
+    if (result.canceled || !result.filePath) return null
+    await writeFile(result.filePath, text, 'utf8')
+    return result.filePath
   })
 
   const requireHistory = (): CommandHistory => {

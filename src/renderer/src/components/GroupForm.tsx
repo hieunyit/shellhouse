@@ -9,7 +9,8 @@ import { environmentFromColor, findEnvironment } from '@shared/environments'
 import { groupOwnEnvironment, useEnvironments } from '../stores/environments'
 import { useShell } from '../shell/store'
 import { GroupSelect } from './GroupSelect'
-import { Button, cx, Field, IconButton, Input, Modal, Notice, Select } from './ui'
+import { EnvironmentPicker } from './EnvironmentPicker'
+import { Button, Field, IconButton, Input, Modal, Notice, Select } from './ui'
 
 /** Giá trị kế thừa kèm nguồn: "deploy (from Production)". */
 const withSource = (value: string, i: Inherited<unknown> | undefined): string =>
@@ -338,46 +339,12 @@ export function GroupForm({
               <span className="text-xs font-medium text-muted" id="group-env-label">
                 {t('Environment')}
               </span>
-              <div
-                role="radiogroup"
-                aria-labelledby="group-env-label"
-                className="grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-1.5"
-              >
-                {[null, ...environments].map((env) => {
-                  const checked = (env?.id ?? null) === environment
-                  return (
-                    <button
-                      key={env?.id ?? 'none'}
-                      type="button"
-                      role="radio"
-                      aria-checked={checked}
-                      data-testid={`group-env-${env?.id ?? 'none'}`}
-                      className={cx(
-                        'flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-ds-md px-2 text-xs outline-none focus-visible:shadow-ds-focus',
-                        checked
-                          ? 'bg-ds-surface-2 text-fg shadow-[inset_0_0_0_1.5px_var(--ds-accent)]'
-                          : 'text-muted shadow-[inset_0_0_0_1px_var(--ds-border)] hover:text-fg'
-                      )}
-                      onClick={() => {
-                        setEnvironment(env?.id ?? null)
-                      }}
-                    >
-                      {env && (
-                        <span
-                          aria-hidden
-                          className={cx(
-                            'size-1.5 shrink-0 rounded-[1px]',
-                            env.highlight ? 'bg-ds-env-prod' : 'bg-ds-fg-3'
-                          )}
-                        />
-                      )}
-                      <span className="truncate">
-                        {env ? env.name : inheritedEnv ? t('Inherit') : t('None')}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
+              <EnvironmentPicker
+                value={environment}
+                onChange={setEnvironment}
+                noneLabel={inheritedEnv ? t('Inherit') : t('None')}
+                testIdPrefix="group-env"
+              />
               {!environment && inheritedEnv && (
                 <p className="text-xs text-muted" data-testid="group-env-inherited">
                   {t('Using {env} from {group}.', {

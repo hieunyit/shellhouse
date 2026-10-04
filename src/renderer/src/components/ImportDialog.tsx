@@ -5,7 +5,7 @@ import { t, tn } from '@shared/i18n'
 import { formatNumber } from '@shared/i18n/format'
 import { Button, Modal, Notice, Segmented } from './ui'
 
-type Source = 'ssh-config' | 'mobaxterm' | 'csv' | 'rdp'
+type Source = 'ssh-config' | 'mobaxterm' | 'csv' | 'rdp' | 'yaml'
 
 interface Scan {
   candidates: ImportCandidate[]
@@ -28,6 +28,10 @@ function description(source: Source): string {
     case 'csv':
       return t(
         'Termius or spreadsheet export. Columns are matched by name; passwords are never imported.'
+      )
+    case 'yaml':
+      return t(
+        'A file saved with Export hosts (Shellhouse YAML). Groups are recreated; passwords are never in it.'
       )
     case 'rdp':
       return t(
@@ -71,7 +75,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
   const load = (next: Source, pick: boolean): void => {
     setError(null)
     // CSV / .rdp: không có vị trí mặc định — chờ người dùng chọn file.
-    if ((next === 'csv' || next === 'rdp') && !pick) {
+    if ((next === 'csv' || next === 'rdp' || next === 'yaml') && !pick) {
       setScan({ candidates: [], file: null })
       return
     }
@@ -81,9 +85,11 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
         ? scanSshConfig()
         : next === 'csv'
           ? window.shellhouse.scanCsv()
-          : next === 'rdp'
-            ? window.shellhouse.scanRdpFiles()
-            : window.shellhouse.scanMobaXterm(pick)
+          : next === 'yaml'
+            ? window.shellhouse.scanShellhouseYaml()
+            : next === 'rdp'
+              ? window.shellhouse.scanRdpFiles()
+              : window.shellhouse.scanMobaXterm(pick)
     )
   }
 
@@ -106,9 +112,11 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
           ? await window.shellhouse.importSshConfig(aliases)
           : source === 'csv'
             ? await window.shellhouse.importCsv(aliases)
-            : source === 'rdp'
-              ? await window.shellhouse.importRdpFiles(aliases)
-              : await window.shellhouse.importMobaXterm(aliases)
+            : source === 'yaml'
+              ? await window.shellhouse.importShellhouseYaml(aliases)
+              : source === 'rdp'
+                ? await window.shellhouse.importRdpFiles(aliases)
+                : await window.shellhouse.importMobaXterm(aliases)
       setResult(
         tn(imported, 'Imported {n} host.', 'Imported {n} hosts.') +
           (skipped.length ? ' ' + t('Skipped: {names}.', { names: skipped.join(', ') }) : '')
@@ -156,7 +164,8 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
               { value: 'ssh-config', label: '~/.ssh/config' },
               { value: 'mobaxterm', label: 'MobaXterm' },
               { value: 'csv', label: 'CSV / Termius' },
-              { value: 'rdp', label: 'Remote Desktop (.rdp)' }
+              { value: 'rdp', label: 'Remote Desktop (.rdp)' },
+              { value: 'yaml', label: 'Shellhouse YAML' }
             ]}
             onChange={(next) => {
               setSource(next)
@@ -200,13 +209,15 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
               ? t('No SSH sessions found in this file.')
               : source === 'rdp'
                 ? t('Choose one or more .rdp files.')
-                : source === 'csv'
-                  ? t(
-                      'Choose a CSV file. In Termius: export your hosts as CSV. A header row with Hostname (or Host / IP) is required; Label, Port, Username, Group and Tags are used when present.'
-                    )
-                  : t(
-                      'MobaXterm.ini was not found in the usual place. Choose the file — portable MobaXterm keeps it next to MobaXterm.exe.'
-                    )}
+                : source === 'yaml'
+                  ? t('Choose a file saved with Export hosts.')
+                  : source === 'csv'
+                    ? t(
+                        'Choose a CSV file. In Termius: export your hosts as CSV. A header row with Hostname (or Host / IP) is required; Label, Port, Username, Group and Tags are used when present.'
+                      )
+                    : t(
+                        'MobaXterm.ini was not found in the usual place. Choose the file — portable MobaXterm keeps it next to MobaXterm.exe.'
+                      )}
         </p>
       )}
       {!result && ignored.length > 0 && (

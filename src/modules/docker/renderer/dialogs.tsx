@@ -25,6 +25,11 @@ export interface ConfirmRequest {
   confirmLabel: string
   danger?: boolean
   option?: { label: string; initial?: boolean }
+  /**
+   * Môi trường yêu cầu gõ tên (Production): phải gõ đúng chuỗi này (tên tài nguyên, hoặc "3
+   * containers" khi hàng loạt) thì nút xác nhận mới bật; không dán được.
+   */
+  typeName?: string
   onConfirm: (option: boolean) => void
 }
 
@@ -36,6 +41,8 @@ export function ConfirmDialog({
   onClose: () => void
 }): React.JSX.Element {
   const [option, setOption] = useState(request.option?.initial === true)
+  const [typed, setTyped] = useState('')
+  const blocked = request.typeName !== undefined && typed !== request.typeName
   return (
     <Modal
       title={request.title}
@@ -51,6 +58,7 @@ export function ConfirmDialog({
             autoFocus={request.danger !== true}
             variant={request.danger ? 'danger' : 'primary'}
             data-testid="docker-confirm-ok"
+            disabled={blocked}
             onClick={() => {
               onClose()
               request.onConfirm(option)
@@ -63,6 +71,22 @@ export function ConfirmDialog({
     >
       <div className="flex flex-col gap-3 text-[13px] text-muted">
         <div>{request.message}</div>
+        {request.typeName !== undefined && (
+          <Field label={t('Type {name} to confirm', { name: request.typeName })}>
+            <Input
+              autoFocus
+              mono
+              value={typed}
+              data-testid="docker-confirm-typed"
+              onPaste={(e) => {
+                e.preventDefault()
+              }}
+              onChange={(e) => {
+                setTyped(e.target.value)
+              }}
+            />
+          </Field>
+        )}
         {request.option && (
           <Checkbox
             label={request.option.label}

@@ -53,5 +53,9 @@ export const shell: Readonly<Record<string, string>> = {
   '{n} sessions open': '{n} phiên đang mở',
   Groups: 'Nhóm',
   Look: 'Hiển thị',
-  Startup: 'Khởi động'
+  Startup: 'Khởi động',
+  'Focus mode: only the terminal': 'Chế độ tập trung: chỉ còn terminal',
+  Exit: 'Thoát',
+  Focus: 'Tập trung',
+  'save as host': 'lưu thành host'
 }

@@ -1,6 +1,8 @@
 import { memo, useEffect, useMemo } from 'react'
 import {
   ChevronDown,
+  Maximize2,
+  Minimize2,
   Columns2,
   Folder,
   Plus,
@@ -16,7 +18,7 @@ import {
   Zap
 } from 'lucide-react'
 import { t } from '@shared/i18n'
-import { Breadcrumb, Button, EmptyState, IconButton, ProdLine, type Crumb } from '../ds'
+import { Breadcrumb, Button, EmptyState, EnvLabel, IconButton, ProdLine, type Crumb } from '../ds'
 import { cx, ICON, ICON_SM } from '../ds/utils'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { panelContent, Workspace } from '../components/Workspace'
@@ -35,7 +37,7 @@ import { TerminalMenu } from '../terminal/TerminalMenu'
 import { useSettings } from '../stores/settings'
 import { useEnvironment, useHostEnvironment } from '../stores/environments'
 import type { EnvironmentDef } from '@shared/environments'
-import { kbdKeys } from './TitleBar'
+import { kbdKeys } from './keys'
 import { keybindingFor } from '@shared/commands'
 import { displayKeybinding, isMac } from '../lib/keybindings'
 import { TransfersPage } from './TransfersPage'
@@ -107,6 +109,7 @@ function HostsHeader({ onSnippets }: { onSnippets: () => void }): React.JSX.Elem
   const splitKeys = displayKeybinding(keybindingFor('pane.splitRight', overrides, isMac))
   const downKeys = displayKeybinding(keybindingFor('pane.splitDown', overrides, isMac))
   const multiKeys = kbdKeys('multiexec.toggle', overrides)
+  const focusKeys = kbdKeys('view.focus', overrides)
   return (
     <div
       className="flex h-ds-header shrink-0 items-center gap-2 border-b border-ds-border-subtle pr-2 pl-3"
@@ -173,6 +176,17 @@ function HostsHeader({ onSnippets }: { onSnippets: () => void }): React.JSX.Elem
         onClick={toggleMultiExec}
       >
         <Radio {...ICON} />
+      </IconButton>
+      <IconButton
+        label={t('Focus mode: only the terminal')}
+        data-testid="focus-mode"
+        disabled={!tab}
+        {...(focusKeys ? { shortcut: focusKeys } : {})}
+        onClick={() => {
+          useShell.getState().setFocus(true)
+        }}
+      >
+        <Maximize2 {...ICON} />
       </IconButton>
       <div className="mx-1 h-4 w-px bg-ds-border" />
       <span className="flex items-center">
@@ -386,6 +400,41 @@ const StageTab = memo(function StageTab({
 })
 
 /**
+ * Focus mode: pill nổi góc phải — môi trường, phiên đang xem, thoát (nút hoặc Ctrl+Shift+Enter;
+ * Esc không thoát vì thuộc về vim / less).
+ */
+function FocusPill(): React.JSX.Element {
+  const tab = useActiveSessionTab()
+  const hostId =
+    tab && (tab.target.kind === 'host' || tab.target.kind === 'rdp') ? tab.target.hostId : null
+  const env = useHostEnvironment(hostId)
+  const overrides = useSettings((s) => s.settings.keybindings)
+  const keys = kbdKeys('view.focus', overrides)
+  return (
+    <div
+      className="absolute top-2 right-3 z-(--ds-z-dropdown) flex items-center gap-2 rounded-full bg-ds-popover py-1 pr-1 pl-3 text-ds-sm shadow-ds-popover"
+      data-testid="focus-pill"
+    >
+      {env && <EnvLabel env={env} />}
+      <span className="max-w-64 truncate text-ds-fg">{tab?.title ?? ''}</span>
+      <Button
+        size="sm"
+        variant="ghost"
+        icon={<Minimize2 {...ICON_SM} />}
+        className="rounded-full"
+        data-testid="focus-exit"
+        {...(keys ? { title: keys } : {})}
+        onClick={() => {
+          useShell.getState().setFocus(false)
+        }}
+      >
+        {t('Exit')}
+      </Button>
+    </div>
+  )
+}
+
+/**
  * Esc trên trang Cài đặt (không có hộp thoại / menu nào đang mở, không ở ô đang tự bắt phím) → quay
  * lại màn trước — như đóng hộp thoại Cài đặt trước đây.
  */
@@ -451,12 +500,14 @@ export const Main = memo(function Main({
   const sessions = sharesDockview(area)
   const env = useMainEnv(area, stageShown)
   const multiExec = useBroadcast((s) => s.enabled)
+  const focus = useShell((s) => s.focus)
   return (
     <main
       id="main"
       className="relative mr-2 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-ds-lg bg-ds-surface-0 shadow-[0_0_0_1px_var(--ds-border-subtle)]"
       data-area={area}
       data-env={env?.id}
+      data-focus={focus}
       data-testid="main"
     >
       {env?.topLine && (
@@ -467,7 +518,8 @@ export const Main = memo(function Main({
       )}
       <div className="relative min-h-0 flex-1">
         <Layer shown={sessions} testId="sessions-layer">
-          <HostsHeader onSnippets={onSnippets} />
+          {!focus && <HostsHeader onSnippets={onSnippets} />}
+          {focus && <FocusPill />}
           <div className="relative min-h-0 flex-1 overflow-clip">
             <Workspace Watermark={HostsEmpty} />
             {multiExec && <MultiExecView />}

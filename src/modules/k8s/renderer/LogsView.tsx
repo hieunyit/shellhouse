@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Clock, History, RefreshCw } from 'lucide-react'
+import { Clock, Copy, History, RefreshCw } from 'lucide-react'
 import { LogFeed } from '@shared/log-buffer'
-import { Notice, Select } from '../../../renderer/src/components/ui'
+import { IconButton, Notice, Select } from '../../../renderer/src/components/ui'
 import { ToolButton } from '../../../renderer/src/components/files/parts'
 import { LogViewer } from '../../../renderer/src/components/LogViewer'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { ConnectionPrompt, formatNumber, t } from '../../registry/renderer-kit'
 import type { ModuleTabProps } from '../../registry/renderer-types'
+import { logsCommands } from '../shared/commands'
 import { contextKey, type K8sLogsParams } from '../shared/ops'
 import type { K8sObject } from '../shared/resources'
 import { useK8s } from './store'
@@ -26,6 +27,8 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
   const [tail, setTail] = useState(500)
   const [timestamps, setTimestamps] = useState(false)
   const [previous, setPrevious] = useState(false)
+  /** Khoảng thời gian (giây, 0 = không giới hạn) — như kubectl --since. */
+  const [since, setSince] = useState(0)
   const [ended, setEnded] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [restart, setRestart] = useState(0)
@@ -75,11 +78,18 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
     request<{ subscription: string }>({
       op: 'logs.subscribe',
       namespace: params.namespace,
-      ...(pod ? { pod } : params.selector ? { selector: params.selector } : {}),
+      ...(pod
+        ? { pod }
+        : params.selector
+          ? { selector: params.selector }
+          : params.pods
+            ? { pods: params.pods }
+            : {}),
       ...(container === '*' ? { allContainers: true } : container ? { container } : {}),
       previous,
       tail,
-      timestamps
+      timestamps,
+      ...(since ? { sinceSeconds: since } : {})
     }).then(
       (r) => {
         if (cancelled) {
@@ -108,10 +118,12 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
     params.namespace,
     pod,
     params.selector,
+    params.pods,
     container,
     previous,
     tail,
     timestamps,
+    since,
     restart
   ])
 
@@ -124,7 +136,7 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
           (container && container !== '*' ? `-${container}` : '')
         }
         testIdPrefix="k8s"
-        sources={Boolean(params.selector) || container === '*'}
+        sources={Boolean(params.selector) || Boolean(params.pods) || container === '*'}
         controls={
           <>
             {containers.length > 1 && (
@@ -156,6 +168,22 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
               {[100, 500, 1000, 5000, 50_000].map((n) => (
                 <option key={n} value={n}>
                   {t('Last {n}', { n: formatNumber(n) })}
+                </option>
+              ))}
+            </Select>
+            <Select
+              aria-label={t('Time range')}
+              data-testid="k8s-logs-since"
+              className="h-7 w-28 text-xs"
+              value={String(since)}
+              onChange={(e) => {
+                setSince(Number(e.target.value))
+              }}
+            >
+              <option value="0">{t('Any time')}</option>
+              {SINCE.map(([seconds, label]) => (
+                <option key={seconds} value={seconds}>
+                  {t('Last {time}', { time: label })}
                 </option>
               ))}
             </Select>
@@ -205,7 +233,51 @@ export function PodLogsTab({ tabId, params }: ModuleTabProps<K8sLogsParams>): Re
           </p>
         }
       />
+      <CommandFooter
+        commands={logsCommands({
+          ref: params.ref,
+          namespace: params.namespace,
+          ...(params.selector ? { selector: params.selector } : {}),
+          ...(pod ? { pods: [pod] } : params.pods ? { pods: params.pods } : {}),
+          ...(since ? { since: SINCE.find(([s]) => s === since)?.[1] } : {}),
+          previous,
+          follow: !previous
+        })}
+      />
       {session.prompt && <ConnectionPrompt prompt={session.prompt} onAnswer={session.answer} />}
+    </div>
+  )
+}
+
+/** Khoảng thời gian chọn được (giây, nhãn kiểu kubectl --since). */
+const SINCE: readonly (readonly [number, string])[] = [
+  [300, '5m'],
+  [900, '15m'],
+  [3600, '1h'],
+  [6 * 3600, '6h'],
+  [24 * 3600, '24h']
+]
+
+/** Chân trang: lệnh kubectl tương đương của đúng cấu hình đang xem — sao chép một chạm. */
+function CommandFooter({ commands }: { commands: string[] }): React.JSX.Element | null {
+  const command = commands[0]
+  if (!command) return null
+  return (
+    <div
+      className="flex h-8 shrink-0 items-center gap-2 border-t border-ds-border-subtle px-3 text-xs"
+      data-testid="k8s-logs-command"
+    >
+      <span className="shrink-0 text-faint">{t('Same as')}</span>
+      <code className="sh-selectable min-w-0 flex-1 truncate font-mono text-muted" title={command}>
+        {command}
+      </code>
+      <IconButton
+        label={t('Copy')}
+        size="sm"
+        onClick={() => void window.shellhouse.writeClipboard(commands.join('\n'))}
+      >
+        <Copy size={12} />
+      </IconButton>
     </div>
   )
 }

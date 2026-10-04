@@ -45,6 +45,12 @@ interface ShellState {
   openSettings: (section?: SettingsSectionId) => void
   back: () => void
   forward: () => void
+  /**
+   * Focus mode (thiết kế v0.7): chỉ còn terminal + title bar; pill nổi góc phải để thoát. Esc không
+   * thoát (Esc thuộc về vim / less trong terminal).
+   */
+  focus: boolean
+  setFocus: (focus: boolean) => void
   /** Môi trường mà tab module báo (cluster / endpoint / tài khoản đang xem) — nhãn + vạch trên cùng. */
   envByTab: Readonly<Record<string, string | null>>
   reportEnvironment: (tabId: string, env: string | null) => void
@@ -129,6 +135,19 @@ export const useShell = create<ShellState>((set, get) => {
     lastTab: {},
     settingsSection: 'appearance',
     explorerWidth: loadExplorerWidth(),
+    focus: false,
+    setFocus: (focus) => {
+      if (focus) {
+        // Focus mode là cho phiên: đang ở khu vực khác → về khu vực phiên trước.
+        if (!sharesDockview(get().area)) get().go('hosts')
+      }
+      set({ focus })
+      const id = useTabs.getState().activeId
+      if (id)
+        requestAnimationFrame(() => {
+          controllers.get(id)?.activate()
+        })
+    },
     envByTab: {},
     reportEnvironment: (tabId, env) => {
       if (get().envByTab[tabId] === env) return

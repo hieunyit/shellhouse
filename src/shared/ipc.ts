@@ -205,6 +205,12 @@ export const invokeContract = {
     args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
+  /** File "Shellhouse YAML" (Export hosts): luôn cho người dùng chọn file. */
+  'yaml:scan': { args: z.tuple([]), result: FileImportScan },
+  'yaml:import': {
+    args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
+    result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
+  },
   'mobaxterm:import': {
     args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
@@ -215,6 +221,11 @@ export const invokeContract = {
   /** Hộp thoại của hệ điều hành — renderer không tự chọn đường dẫn trên máy. */
   'dialog:openFiles': { args: z.tuple([]), result: z.array(z.string()) },
   'dialog:saveFile': { args: z.tuple([z.string().max(255)]), result: z.string().nullable() },
+  /** Lưu một file văn bản (xuất danh sách host…): main hỏi chỗ lưu rồi ghi; null = huỷ. */
+  'dialog:saveText': {
+    args: z.tuple([z.string().max(255), z.string().max(20_000_000)]),
+    result: z.string().nullable()
+  },
   /** Trạng thái các module (ADR-014). */
   'modules:list': { args: z.tuple([]), result: z.array(ModuleStateSchema) },
   /** Bật / tắt module — có hiệu lực ngay; lỗi bật (migration…) trả về dạng Error. */
@@ -425,6 +436,8 @@ export interface ShellhouseApi {
   scanMobaXterm(pick: boolean): Promise<FileImportScan>
   scanCsv(): Promise<FileImportScan>
   importCsv(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
+  scanShellhouseYaml(): Promise<FileImportScan>
+  importShellhouseYaml(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
   importMobaXterm(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
   onHostsChanged(listener: () => void): () => void
   listForwards(hostId: string): Promise<SavedForward[]>
@@ -432,6 +445,8 @@ export interface ShellhouseApi {
   deleteForward(id: string): Promise<void>
   pickFilesToUpload(): Promise<string[]>
   pickSaveLocation(defaultName: string): Promise<string | null>
+  /** Hỏi chỗ lưu rồi ghi văn bản vào đó (UTF-8). Trả đường dẫn đã lưu, null = huỷ. */
+  saveTextFile(defaultName: string, text: string): Promise<string | null>
   /** Chọn editor ngoài (hộp thoại của main, lưu luôn); null = huỷ. */
   chooseEditor(): Promise<AppSettings | null>
   resetEditor(): Promise<AppSettings>

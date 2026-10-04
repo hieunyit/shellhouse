@@ -1,19 +1,11 @@
 import { memo } from 'react'
 import { ArrowLeft, ArrowRight, LayoutGrid, Search, Zap } from 'lucide-react'
 import { t } from '@shared/i18n'
-import { keybindingFor } from '@shared/commands'
 import { Button, IconButton, Kbd } from '../ds'
 import { cx, ICON_SM } from '../ds/utils'
-import { displayKeybinding, isMac } from '../lib/keybindings'
 import { useSettings } from '../stores/settings'
+import { kbdKeys } from './keys'
 import { useShell } from './store'
-
-/** Phím tắt dạng "Ctrl Shift P" cho <Kbd> (macOS: ký hiệu liền nhau "⇧⌘P" → một ô). */
-export function kbdKeys(id: string, overrides: Readonly<Record<string, string>>): string | null {
-  const key = keybindingFor(id, overrides, isMac)
-  if (!key) return null
-  return isMac ? displayKeybinding(key) : key.split('+').join(' ')
-}
 
 /**
  * Thanh tiêu đề tự vẽ (cửa sổ frameless — window-chrome.ts), cao 38px, nền khung: logo, ← / →

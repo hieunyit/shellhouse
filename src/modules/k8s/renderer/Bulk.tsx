@@ -1,5 +1,16 @@
 import { useRef, useState } from 'react'
-import { Ban, Check, Copy, FileCode, RotateCw, Scale, Trash2, Unlock, X } from 'lucide-react'
+import {
+  Ban,
+  Check,
+  Copy,
+  FileCode,
+  FileText,
+  RotateCw,
+  Scale,
+  Trash2,
+  Unlock,
+  X
+} from 'lucide-react'
 import { Button, cx, Input, Modal, Notice } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { formatNumber, t, tn, toast } from '../../registry/renderer-kit'
@@ -111,23 +122,37 @@ export function BulkBar({
   onRun,
   onCopyNames,
   onCopyYaml,
-  onClear
+  onClear,
+  onLogs
 }: {
   count: number
   kinds: BulkKind[]
   onRun: (kind: BulkKind) => void
+  /** Pod: log của mọi pod đã chọn trong một tab (mỗi dòng có tiền tố tên pod). */
+  onLogs?: (() => void) | undefined
   onCopyNames: () => void
   onCopyYaml: () => void
   onClear: () => void
 }): React.JSX.Element {
   return (
     <div
-      className="flex h-9 shrink-0 items-center gap-1 border-b border-line bg-accent-soft/40 px-3 text-xs"
+      className="flex h-ds-toolbar shrink-0 items-center gap-1 border-b border-ds-border-subtle bg-ds-selected px-3 text-xs"
       data-testid="k8s-bulk-bar"
     >
       <span className="mr-2 font-medium text-fg tabular-nums" data-testid="k8s-bulk-count">
         {tn(count, '{n} selected', '{n} selected')}
       </span>
+      {onLogs && (
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={<FileText size={13} />}
+          data-testid="k8s-bulk-logs"
+          onClick={onLogs}
+        >
+          {t('Logs')}
+        </Button>
+      )}
       {kinds.map((k) => (
         <Button
           key={k}

@@ -43,5 +43,14 @@ export const environments: Readonly<Record<string, string>> = {
   '{n} clusters, endpoints or accounts use it': '{n} cluster, endpoint hoặc tài khoản đang dùng',
   '{n} source': '{n} nguồn',
   '{n} sources': '{n} nguồn',
-  Workspace: 'Không gian làm việc'
+  Workspace: 'Không gian làm việc',
+  'type the name to delete': 'gõ tên để xoá',
+  'confirm before deleting': 'xác nhận trước khi xoá',
+  'delete right away, with Undo': 'xoá ngay, có Hoàn tác',
+  'line at the top': 'vạch trên cùng',
+  'Leave {env}?': 'Rời {env}?',
+  'Deleting things here will no longer ask you to type their name.':
+    'Xoá ở đây sẽ không còn yêu cầu gõ tên nữa.',
+  'Change environment': 'Đổi môi trường',
+  'Environment: {name}': 'Môi trường: {name}'
 }

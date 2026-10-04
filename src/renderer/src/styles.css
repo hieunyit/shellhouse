@@ -670,3 +670,11 @@ select option {
 .k8s-dim-soft {
   opacity: 0.45;
 }
+
+/* Focus mode (thiết kế v0.7): chỉ còn terminal — ẩn dải tab, thanh phiên, thanh số liệu. */
+main[data-focus='true'] .dockview-theme-shellhouse .dv-tabs-and-actions-container,
+main[data-focus='true'] [data-session-bar],
+main[data-focus='true'] [data-testid='server-stats'],
+main[data-focus='true'] [data-testid='server-stats-loading'] {
+  display: none;
+}

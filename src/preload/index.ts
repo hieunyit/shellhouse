@@ -76,6 +76,8 @@ const api: ShellhouseApi = {
   importMobaXterm: (aliases) => invoke('mobaxterm:import', aliases),
   scanCsv: () => invoke('csv:scan'),
   importCsv: (aliases) => invoke('csv:import', aliases),
+  scanShellhouseYaml: () => invoke('yaml:scan'),
+  importShellhouseYaml: (aliases) => invoke('yaml:import', aliases),
   onHostsChanged: (listener) =>
     subscribe('hosts:changed', () => {
       listener()
@@ -85,6 +87,7 @@ const api: ShellhouseApi = {
   deleteForward: (id) => invoke('forwards:delete', id),
   pickFilesToUpload: () => invoke('dialog:openFiles'),
   pickSaveLocation: (defaultName) => invoke('dialog:saveFile', defaultName),
+  saveTextFile: (defaultName, text) => invoke('dialog:saveText', defaultName, text),
   chooseEditor: () => invoke('files:chooseEditor'),
   resetEditor: () => invoke('files:resetEditor'),
   listLocal: (path) => invoke('local:list', path),

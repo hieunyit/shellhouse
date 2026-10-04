@@ -347,7 +347,8 @@ test('Kubernetes: import kubeconfig (mã hoá trong vault), context production p
     // Đánh dấu production (đỏ).
     await context.click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'Context settings…' }).click()
-    await page.getByTestId('k8s-color-red').click()
+    await page.getByTestId('k8s-env-prod').click()
+    await expect(page.getByTestId('k8s-env-rules')).toContainText('type the name to delete')
     await page.getByTestId('k8s-context-save').click()
 
     await context.dblclick()

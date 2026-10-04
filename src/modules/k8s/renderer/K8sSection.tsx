@@ -24,17 +24,25 @@ import {
   TextArea
 } from '../../../renderer/src/components/ui'
 import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
-import { confirmAction, t, tn, useSavedHosts } from '../../registry/renderer-kit'
+import {
+  confirmAction,
+  environmentFromColor,
+  environmentMenu,
+  EnvironmentPicker,
+  environmentRules,
+  setSourceEnvironment,
+  t,
+  tn,
+  useEnvironments,
+  useSavedHosts,
+  useSourceEnvironment,
+  useSourceEnvironmentMap
+} from '../../registry/renderer-kit'
+import { EnvLabel } from '../../../renderer/src/ds'
+import { KubernetesIcon } from '../../registry/renderer-icons'
 import type { ContextColor, ContextEntry, ImportResult } from '../shared/ipc'
 import { k8sApi, openCluster } from './api'
 import { useK8s } from './store'
-
-export const COLOR_DOT: Record<NonNullable<ContextColor>, string> = {
-  red: 'bg-danger-solid',
-  orange: 'bg-warning',
-  green: 'bg-success',
-  blue: 'bg-info'
-}
 
 /** "Imported 2 files (5 contexts)" + lỗi từng file. */
 export function importSummary(r: ImportResult): string | null {
@@ -61,6 +69,10 @@ export function K8sSection(): React.JSX.Element {
   const [deleting, setDeleting] = useState<ContextEntry | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const { menu, open: openMenu } = useContextMenu()
+  const environments = useEnvironments()
+  const sourceEnvs = useSourceEnvironmentMap()
+  const currentEnv = (c: ContextEntry): string | null =>
+    sourceEnvs[`k8s:${c.key}`] ?? environmentFromColor(c.settings.color ?? null) ?? null
 
   // Đọc lại ~/.kube khi mở và mỗi lần quay lại cửa sổ (kubeconfig mới tải về / kubectl vừa sửa).
   useEffect(() => {
@@ -182,7 +194,7 @@ export function K8sSection(): React.JSX.Element {
             tabIndex={0}
             data-testid="k8s-context"
             data-name={c.name}
-            className="group flex h-8 cursor-default items-center gap-2 rounded-md px-2 hover:bg-hover"
+            className="group flex h-(--ds-tree-row-h) cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus"
             title={`${c.server}\n${c.sourceLabel}${c.settings.bastionHostId ? `\n${t('Through an SSH host')}` : ''}`}
             onDoubleClick={() => openCluster(c)}
             onKeyDown={(e) => {
@@ -216,6 +228,12 @@ export function K8sSection(): React.JSX.Element {
                     setEditing(c)
                   }
                 },
+                'separator',
+                ...environmentMenu(
+                  environments,
+                  currentEnv(c),
+                  (id) => void setSourceEnvironment('k8s', c.key, id)
+                ),
                 'separator',
                 {
                   id: 'delete',
@@ -253,13 +271,9 @@ export function K8sSection(): React.JSX.Element {
               ])
             }}
           >
-            <span
-              className={cx(
-                'size-2 shrink-0 rounded-full',
-                c.settings.color ? COLOR_DOT[c.settings.color] : 'bg-line-strong'
-              )}
-            />
+            <KubernetesIcon size={15} strokeWidth={1.6} className="shrink-0 text-faint" />
             <span className="min-w-0 flex-1 truncate text-[13px] text-fg">{c.name}</span>
+            <ContextEnv c={c} />
             {c.settings.bastionHostId && (
               <span className="rounded bg-subtle px-1 text-[11px] text-muted">SSH</span>
             )}
@@ -373,16 +387,21 @@ function ContextDialog({
   const [bastion, setBastion] = useState(c.settings.bastionHostId ?? '')
   const [namespace, setNamespace] = useState(c.settings.namespace ?? '')
   const [readOnly, setReadOnly] = useState(c.settings.readOnly)
-  const [color, setColor] = useState<ContextColor>(c.settings.color)
+  // Môi trường (Settings › Environments) thay cho màu cũ; context cũ màu đỏ → Production.
+  const environments = useEnvironments()
+  const legacy = useContextEnvironment(c.key, c.settings.color)
+  const [environment, setEnvironment] = useState<string | null>(legacy?.id ?? null)
+  const chosenEnv = environments.find((e) => e.id === environment)
   const save = (): void => {
-    void k8sApi
-      .setContext(c.ref, {
+    void Promise.all([
+      k8sApi.setContext(c.ref, {
         bastionHostId: bastion || null,
         namespace: namespace.trim() || null,
         readOnly,
-        color
-      })
-      .then(onClose)
+        color: null
+      }),
+      setSourceEnvironment('k8s', c.key, environment)
+    ]).then(onClose)
   }
   return (
     <Modal
@@ -438,33 +457,15 @@ function ContextDialog({
             }}
           />
         </Field>
-        <Field
-          label={t('Color')}
-          hint={t('Red marks production: deleting or scaling asks you to type the resource name.')}
-        >
-          <div className="flex gap-2">
-            {([null, 'red', 'orange', 'green', 'blue'] as const).map((k) => (
-              <button
-                key={k ?? 'none'}
-                type="button"
-                aria-label={k ? t(k) : t('No color')}
-                aria-pressed={color === k}
-                data-testid={`k8s-color-${k ?? 'none'}`}
-                className={cx(
-                  'flex size-7 items-center justify-center rounded-full border',
-                  color === k ? 'border-accent ring-2 ring-accent/30' : 'border-line'
-                )}
-                onClick={() => {
-                  setColor(k)
-                }}
-              >
-                <span
-                  className={cx('size-3.5 rounded-full', k ? COLOR_DOT[k] : 'bg-line-strong')}
-                />
-              </button>
-            ))}
-          </div>
-        </Field>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted">{t('Environment')}</span>
+          <EnvironmentPicker value={environment} onChange={setEnvironment} testIdPrefix="k8s-env" />
+          {chosenEnv && (
+            <p className="text-xs text-muted" data-testid="k8s-env-rules">
+              {environmentRules(chosenEnv)}
+            </p>
+          )}
+        </div>
         <Checkbox
           label={t('Read-only mode')}
           description={t(
@@ -479,6 +480,19 @@ function ContextDialog({
       </div>
     </Modal>
   )
+}
+
+/** Môi trường của context: chọn trong Shellhouse, chưa chọn thì suy từ màu cũ (đỏ = Production). */
+export function useContextEnvironment(
+  key: string,
+  color: ContextColor
+): ReturnType<typeof useSourceEnvironment> {
+  return useSourceEnvironment('k8s', key, environmentFromColor(color ?? null))
+}
+
+function ContextEnv({ c }: { c: ContextEntry }): React.JSX.Element | null {
+  const env = useContextEnvironment(c.key, c.settings.color)
+  return env ? <EnvLabel env={env} /> : null
 }
 
 /**

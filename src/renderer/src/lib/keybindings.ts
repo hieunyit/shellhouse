@@ -66,6 +66,8 @@ export function commandTitle(id: string): string {
       return t('New host')
     case 'hosts.import':
       return t('Import hosts (ssh config, MobaXterm, Termius, CSV)')
+    case 'hosts.export':
+      return t('Export hosts (Shellhouse YAML, OpenSSH config, CSV)')
     case 'quickconnect.focus':
       return t('Quick connect')
     case 'snippets.open':
@@ -94,6 +96,8 @@ export function commandTitle(id: string): string {
       return t('Modules: Browse')
     case 'diagnostics.toggle':
       return t('Toggle diagnostics')
+    case 'view.focus':
+      return t('Focus mode: only the terminal')
     default:
       return COMMANDS.find((c) => c.id === id)?.title ?? id
   }

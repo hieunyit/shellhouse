@@ -28,7 +28,8 @@ import {
   Trash2,
   Upload,
   X,
-  Zap
+  Zap,
+  TerminalSquare
 } from 'lucide-react'
 import { Button, cx, Notice } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
@@ -37,9 +38,15 @@ import { Empty, ToolButton } from '../../../renderer/src/components/files/parts'
 import { KeyHints, Pill } from '../../../renderer/src/components/panels'
 import type { SortState } from '../../../renderer/src/components/SortMenu'
 import { cleanError } from '../../../renderer/src/lib/format'
+import { EnvLabel } from '../../../renderer/src/ds'
+import { useEndpointEnvironment } from './DockerSection'
+import { containerCommands, type DockerEndpoint } from '../shared/commands'
 import {
   ConnectionPrompt,
   ExplorerNav,
+  savedHost,
+  showCommands,
+  useReportEnvironment,
   formatBytes,
   formatDateTime,
   formatPercent,
@@ -332,7 +339,12 @@ export function DockerTab({
     [listeners]
   )
   const session = useDockerSession(tabId, hostId, onEvent)
-  const { request, ready, readOnly } = session
+  // Môi trường của endpoint (Settings › Environments): nhãn, vạch trên cùng, chỉ đọc mặc định,
+  // cách xác nhận khi xoá.
+  const env = useEndpointEnvironment(hostId ?? null)
+  useReportEnvironment(tabId, env?.id)
+  const { request, ready } = session
+  const readOnly = session.readOnly || env?.readOnly === true
   useEffect(
     () => () => {
       if (reloadTimer.current !== null) window.clearTimeout(reloadTimer.current)
@@ -454,9 +466,19 @@ export function DockerTab({
     }
   }
 
-  /** Hỏi lại bằng hộp thoại của app (không dùng window.confirm). */
+  /**
+   * Hỏi lại bằng hộp thoại của app (không dùng window.confirm). Môi trường của endpoint quyết định
+   * cách xác nhận thao tác phá huỷ: "Type name" phải gõ tên, còn lại hộp xác nhận thường.
+   */
   const confirm = (request: ConfirmRequest): void => {
-    setDialog({ kind: 'confirm', request })
+    const { typeName, ...rest } = request
+    setDialog({
+      kind: 'confirm',
+      request:
+        request.danger && env?.confirm === 'type' && typeName !== undefined
+          ? { ...rest, typeName }
+          : rest
+    })
   }
 
   /** Mốc cho Shift+bấm ô chọn (chọn một khoảng). */
@@ -531,6 +553,10 @@ export function DockerTab({
       message: ask.message,
       confirmLabel: ask.confirmLabel,
       danger: ask.danger,
+      typeName:
+        items.length === 1
+          ? (items[0]?.name ?? '')
+          : tn(items.length, '{n} container', '{n} containers'),
       ...(ask.volumesOption
         ? { option: { label: t('Also remove anonymous volumes of the container (docker rm -v)') } }
         : {}),
@@ -586,6 +612,7 @@ export function DockerTab({
           : t('Every container of {name} is stopped.', { name: p.name }),
       confirmLabel: action === 'down' ? t('Take down') : t('Stop'),
       danger: action === 'down',
+      typeName: p.name,
       onConfirm: go
     })
   }
@@ -620,6 +647,13 @@ export function DockerTab({
             : t('{names} is removed.', { names: list }),
       confirmLabel: t('Remove'),
       danger: true,
+      typeName: plural
+        ? kind === 'image'
+          ? tn(names.length, '{n} image', '{n} images')
+          : kind === 'volume'
+            ? tn(names.length, '{n} volume', '{n} volumes')
+            : tn(names.length, '{n} network', '{n} networks')
+        : (names[0] ?? ''),
       onConfirm: () => {
         void run(t('Remove failed'), remove)
       }
@@ -708,6 +742,28 @@ export function DockerTab({
         run: () => {
           setSelected(new Set([c.name]))
           setDetailTab('files')
+        }
+      },
+      {
+        id: 'copy-command',
+        label: t('Copy as command…'),
+        icon: <TerminalSquare size={14} />,
+        secondary: true,
+        run: () => {
+          const wsl = wslDistroOf(hostId ?? null)
+          const endpoint: DockerEndpoint = !hostId
+            ? { kind: 'local' }
+            : wsl
+              ? { kind: 'wsl', distro: wsl }
+              : { kind: 'ssh', address: savedHost(hostId)?.address ?? hostId }
+          showCommands(
+            t('{name} as docker commands', { name: c.name }),
+            containerCommands(endpoint, {
+              name: c.name,
+              running,
+              project: c.project ?? undefined
+            }).map((l) => ({ label: dockerCommandLabel(l.id), command: l.command }))
+          )
         }
       },
       {
@@ -1799,6 +1855,7 @@ export function DockerTab({
             >
               {sectionLabel(section)}
             </span>
+            {env && <EnvLabel env={env} size="md" className="ml-1.5" />}
             <div className="min-w-2 flex-1" />
             {toolbar}
           </div>
@@ -2575,4 +2632,30 @@ export function DockerTab({
       {menu}
     </div>
   )
+}
+
+/** Nhãn của từng lệnh docker (dịch lúc vẽ). */
+function dockerCommandLabel(id: string): string {
+  switch (id) {
+    case 'logs':
+      return t('Follow logs')
+    case 'inspect':
+      return t('Inspect')
+    case 'exec':
+      return t('Open a shell')
+    case 'stats':
+      return t('CPU / memory now')
+    case 'restart':
+      return t('Restart')
+    case 'stop':
+      return t('Stop')
+    case 'start':
+      return t('Start')
+    case 'compose-logs':
+      return t('Logs of the Compose project')
+    case 'remove':
+      return t('Remove')
+    default:
+      return id
+  }
 }

@@ -24,6 +24,11 @@ export const COMMANDS: readonly CommandDef[] = [
     title: 'Import hosts (ssh config, MobaXterm, Termius, CSV)',
     keys: [null, null]
   },
+  {
+    id: 'hosts.export',
+    title: 'Export hosts (Shellhouse YAML, OpenSSH config, CSV)',
+    keys: [null, null]
+  },
   // Không dùng Ctrl+O: nano dùng để lưu.
   { id: 'quickconnect.focus', title: 'Quick connect', keys: ['Meta+Shift+O', 'Ctrl+Shift+O'] },
   { id: 'snippets.open', title: 'Open snippets', keys: ['Meta+S', 'Ctrl+Shift+S'] },
@@ -42,7 +47,12 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: 'terminal.zoomReset', title: 'Terminal: default text size', keys: ['Meta+0', 'Ctrl+0'] },
   { id: 'workspaces.open', title: 'Workspaces: save or open a layout', keys: [null, null] },
   { id: 'modules.browse', title: 'Modules: Browse', keys: [null, null] },
-  { id: 'diagnostics.toggle', title: 'Toggle diagnostics', keys: [null, null] }
+  { id: 'diagnostics.toggle', title: 'Toggle diagnostics', keys: [null, null] },
+  {
+    id: 'view.focus',
+    title: 'Focus mode: only the terminal',
+    keys: ['Meta+Shift+Enter', 'Ctrl+Shift+Enter']
+  }
 ]
 
 const MODIFIERS = ['Ctrl', 'Alt', 'Shift', 'Meta'] as const

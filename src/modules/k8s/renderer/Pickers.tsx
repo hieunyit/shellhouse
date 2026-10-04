@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createPortal } from 'react-dom'
 import { ChevronDown, ChevronsUpDown, Hash } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
+import { EnvLabel, type EnvLike } from '../../../renderer/src/ds'
 import { t, tn } from '../../registry/renderer-kit'
 
 /**
@@ -154,16 +155,15 @@ function menuKeyDown(
 export function ContextPicker({
   current,
   label,
-  color,
   version,
   contexts,
   onPick
 }: {
   current: string
   label: string
-  color: string
   version: string | undefined
-  contexts: { key: string; name: string; source: string; color: string }[]
+  /** `env`: môi trường của context (nhãn trong danh sách). */
+  contexts: { key: string; name: string; source: string; env?: EnvLike | undefined }[]
   onPick: (key: string) => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
@@ -212,11 +212,7 @@ export function ContextPicker({
           }
         }}
       >
-        <span
-          className="truncate text-[13px] font-medium"
-          data-testid="k8s-context-label"
-          data-color={color}
-        >
+        <span className="truncate text-[13px] font-medium" data-testid="k8s-context-label">
           {label}
         </span>
         <ChevronsUpDown size={13} strokeWidth={1.5} className="shrink-0 text-faint" aria-hidden />
@@ -249,11 +245,11 @@ export function ContextPicker({
                 if (c.key !== current) onPick(c.key)
               }}
             >
-              <span className={cx('size-2 shrink-0 rounded-full', c.color)} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium text-fg">{c.name}</span>
                 <span className="block truncate text-faint">{c.source}</span>
               </span>
+              {c.env && <EnvLabel env={c.env} />}
             </button>
           ))}
         </DropMenu>

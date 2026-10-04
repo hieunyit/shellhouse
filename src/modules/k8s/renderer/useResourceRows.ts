@@ -2,6 +2,12 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import type { MetricsResult } from '../shared/ops'
 import { toRow, type K8sObject, type ResourceRow } from '../shared/resources'
 import { filterRows, sortRows, type Row, type RowSortKey } from '../shared/rows'
+import {
+  looksLikeSelector,
+  matchesSelector,
+  parseSelector,
+  type SelectorParse
+} from '../shared/selector'
 import { objectKey } from './useResourceList'
 
 /**
@@ -43,8 +49,10 @@ export function useResourceRows({
   active: boolean
 }): {
   rows: Row[]
-  /** Chữ lọc đang áp dụng (chữ thường, '' = không lọc / đang gõ lệnh). */
+  /** Chữ lọc đang áp dụng (chữ thường, '' = không lọc / đang gõ lệnh / đang lọc theo nhãn). */
   q: string
+  /** Ô lọc là label selector (kubectl -l): đã đọc được hay lỗi cú pháp. */
+  selector: SelectorParse | null
   single: Row | undefined
   detail: Row | undefined
 } {
@@ -61,7 +69,14 @@ export function useResourceRows({
   }, [active])
 
   const deferredQuery = useDeferredValue(query)
-  const q = deferredQuery.startsWith(':') ? '' : deferredQuery.trim().toLowerCase()
+  const selector = useMemo(
+    () =>
+      !deferredQuery.startsWith(':') && looksLikeSelector(deferredQuery)
+        ? parseSelector(deferredQuery)
+        : null,
+    [deferredQuery]
+  )
+  const q = deferredQuery.startsWith(':') || selector ? '' : deferredQuery.trim().toLowerCase()
   const allRows = useMemo<Row[]>(
     () =>
       objects ? [...objects.values()].map((obj) => ({ obj, row: cachedRow(kindId, obj) })) : [],
@@ -69,7 +84,13 @@ export function useResourceRows({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [objects, kindId, ageTick]
   )
-  const filteredRows = useMemo(() => filterRows(allRows, q), [allRows, q])
+  const filteredRows = useMemo(
+    () =>
+      selector?.ok
+        ? allRows.filter((r) => matchesSelector(r.obj.metadata.labels, selector.requirements))
+        : filterRows(allRows, q),
+    [allRows, q, selector]
+  )
   // Số liệu chỉ ảnh hưởng thứ tự khi đang xếp theo CPU / RAM.
   const sortMetrics = sort.key === 'cpu' || sort.key === 'mem' ? metrics : null
   const rows = useMemo(
@@ -84,5 +105,5 @@ export function useResourceRows({
   // Chi tiết lấy từ dữ liệu, không từ dòng đang lọc: gõ lọc không đóng mất chi tiết đang xem.
   const detailObj = detailKey ? objects?.get(detailKey) : undefined
   const detail = detailObj ? { obj: detailObj, row: cachedRow(kindId, detailObj) } : undefined
-  return { rows, q, single, detail }
+  return { rows, q, selector, single, detail }
 }

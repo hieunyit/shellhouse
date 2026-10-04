@@ -66,6 +66,24 @@ export function whenHostRunning(timeoutMs = 15_000): Promise<void> {
 export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
 export { usePublishTransfers } from '../../renderer/src/stores/transfers'
 export {
+  setSourceEnvironment,
+  useEnvironments,
+  useSourceEnvironment,
+  useSourceEnvironmentMap
+} from '../../renderer/src/stores/environments'
+export {
+  EnvironmentPicker,
+  environmentMenu,
+  environmentRules
+} from '../../renderer/src/components/EnvironmentPicker'
+export { useReportEnvironment } from '../../renderer/src/shell/report-env'
+export {
+  showCommands,
+  shellQuote,
+  type CommandLine
+} from '../../renderer/src/components/CommandSheet'
+export { environmentFromColor, type EnvironmentDef } from '@shared/environments'
+export {
   ExplorerNav,
   useNavPlacement,
   type NavPlacement
@@ -534,10 +552,13 @@ export function lazyModuleComponent<P extends object>(
 
 // ——— Icon theo tên trong manifest ———
 
+import { KubernetesIcon } from './renderer-icons'
+
 const ICONS: Record<string, LucideIcon> = {
   cloud: Cloud,
   container: Container,
   ship: Ship,
+  kubernetes: KubernetesIcon,
   boxes: Boxes,
   database: Database,
   network: Network,

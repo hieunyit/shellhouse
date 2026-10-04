@@ -76,10 +76,13 @@ function FieldError({
 export function HostForm({
   host,
   defaultGroupId,
+  prefill,
   onClose
 }: {
   host: HostSummary | null
   defaultGroupId: string | null
+  /** Host mới điền sẵn (Quick connect → Ctrl+Enter "lưu thành host"). */
+  prefill?: { hostname: string; port: number; username: string } | undefined
   onClose: () => void
 }): React.JSX.Element {
   const { keys, hosts, accounts } = useHosts((s) => s.tree)
@@ -95,11 +98,19 @@ export function HostForm({
   )
   /** RDP: lưu mật khẩu trong vault (mstsc / FreeRDP dùng luôn) hay hỏi mỗi lần. */
   const [rdpSave, setRdpSave] = useState(host ? host.auth === 'password' : true)
-  const [label, setLabel] = useState(host?.label ?? '')
-  const [hostname, setHostname] = useState(host?.hostname ?? '')
+  const [label, setLabel] = useState(host?.label ?? prefill?.hostname ?? '')
+  const [hostname, setHostname] = useState(host?.hostname ?? prefill?.hostname ?? '')
   // '' = kế thừa từ nhóm (hoặc 22).
-  const [port, setPort] = useState(host ? (host.port === null ? '' : String(host.port)) : '')
-  const [username, setUsername] = useState(host?.username ?? '')
+  const [port, setPort] = useState(
+    host
+      ? host.port === null
+        ? ''
+        : String(host.port)
+      : prefill && prefill.port !== 22
+        ? String(prefill.port)
+        : ''
+  )
+  const [username, setUsername] = useState(host?.username ?? prefill?.username ?? '')
   const [auth, setAuth] = useState<AuthKind>(host?.auth ?? 'auto')
   const [password, setPassword] = useState('')
   const [clearPassword, setClearPassword] = useState(false)

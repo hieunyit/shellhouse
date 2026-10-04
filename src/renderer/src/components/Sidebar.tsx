@@ -25,12 +25,14 @@ import {
   Copy,
   CopyPlus,
   FileInput,
+  FileOutput,
   Folder,
   FolderInput,
   FolderOpen,
   FolderPlus,
   LayoutGrid,
   Maximize2,
+  MoreHorizontal,
   Pencil,
   Play,
   Plus,
@@ -46,7 +48,7 @@ import {
 import { bestScore } from '@shared/fuzzy'
 import { countHostsRecursive, groupMoveProblem } from '@shared/group-tree'
 import type { GroupSummary, HostSummary } from '@shared/hosts'
-import { GroupForm, HostForm, ImportDialog } from '../lazy'
+import { ExportDialog, GroupForm, HostForm, ImportDialog } from '../lazy'
 import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
 import { moduleHostActions } from '../../../modules/registry/renderer-kit'
@@ -73,6 +75,7 @@ import { useUiRequests } from '../stores/ui-requests'
 import { EnvLabel } from '../ds'
 import { findEnvironment } from '@shared/environments'
 import { groupOwnEnvironment, useEnvironments } from '../stores/environments'
+import { environmentMenu } from './EnvironmentPicker'
 import { LocalModuleSuggestion } from './sidebar/LocalModuleSuggestion'
 
 // ---------- Kéo thả ----------
@@ -139,9 +142,15 @@ function openManyMessage(n: number, layout: 'tabs' | 'grid', broadcast: boolean)
 }
 
 type Dialog =
-  | { kind: 'host'; host: HostSummary | null; groupId: string | null }
+  | {
+      kind: 'host'
+      host: HostSummary | null
+      groupId: string | null
+      prefill?: { hostname: string; port: number; username: string }
+    }
   | { kind: 'group'; group: GroupSummary | null; parentId?: string | null; confirmDelete?: boolean }
   | { kind: 'import' }
+  | { kind: 'export'; groupId: string | null }
   | { kind: 'delete'; hosts: HostSummary[] }
   | { kind: 'move'; hosts: HostSummary[] }
   | { kind: 'tags'; hosts: HostSummary[] }
@@ -188,8 +197,15 @@ export const Sidebar = memo(
           }
           setDialog(
             req.kind === 'new-host'
-              ? { kind: 'host', host: null, groupId: null }
-              : { kind: 'import' }
+              ? {
+                  kind: 'host',
+                  host: null,
+                  groupId: null,
+                  ...(req.prefill ? { prefill: req.prefill } : {})
+                }
+              : req.kind === 'export-hosts'
+                ? { kind: 'export', groupId: null }
+                : { kind: 'import' }
           )
         }),
       []
@@ -602,6 +618,27 @@ export const Sidebar = memo(
             setCollapsed((prev) => new Set([...prev, ...descendants]))
           }
         },
+        {
+          id: 'export',
+          label: t('Export hosts…'),
+          icon: <FileOutput size={14} />,
+          onSelect: () => {
+            setDialog({ kind: 'export', groupId: group.id })
+          }
+        },
+        'separator',
+        // Đổi môi trường nhanh (nhóm con / host bên trong kế thừa).
+        ...environmentMenu(environments, groupOwnEnvironment(group.defaults) ?? null, (id) => {
+          const rest = Object.fromEntries(
+            Object.entries(group.defaults).filter(([k]) => k !== 'color' && k !== 'environment')
+          )
+          void window.shellhouse.saveGroup({
+            id: group.id,
+            name: group.name,
+            parentId: group.parentId,
+            defaults: id ? { ...rest, environment: id } : rest
+          })
+        }),
         'separator',
         {
           id: 'delete',
@@ -956,6 +993,24 @@ export const Sidebar = memo(
               >
                 <Pencil size={12} />
               </IconButton>
+              <IconButton
+                label={t('More actions for {name}', { name: group.name })}
+                size="sm"
+                data-testid="group-more"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  groupMenu(
+                    {
+                      clientX: rect.left,
+                      clientY: rect.bottom + 4,
+                      preventDefault: () => undefined
+                    } as unknown as MouseEvent,
+                    group
+                  )
+                }}
+              >
+                <MoreHorizontal size={13} />
+              </IconButton>
             </span>
           </div>
           {open && (
@@ -1178,6 +1233,17 @@ export const Sidebar = memo(
                 <FileInput size={14} />
               </IconButton>
               <IconButton
+                label={t('Export hosts…')}
+                size="sm"
+                data-testid="hosts-export"
+                disabled={hosts.length === 0}
+                onClick={() => {
+                  setDialog({ kind: 'export', groupId: null })
+                }}
+              >
+                <FileOutput size={14} />
+              </IconButton>
+              <IconButton
                 label={allCollapsed ? t('Expand all groups') : t('Collapse all groups')}
                 size="sm"
                 data-testid="toggle-all-groups"
@@ -1386,7 +1452,12 @@ export const Sidebar = memo(
 
         {menu}
         {dialog?.kind === 'host' && (
-          <HostForm host={dialog.host} defaultGroupId={dialog.groupId} onClose={closeDialog} />
+          <HostForm
+            host={dialog.host}
+            defaultGroupId={dialog.groupId}
+            prefill={dialog.prefill}
+            onClose={closeDialog}
+          />
         )}
         {dialog?.kind === 'group' && (
           <GroupForm
@@ -1397,6 +1468,9 @@ export const Sidebar = memo(
           />
         )}
         {dialog?.kind === 'import' && <ImportDialog onClose={closeDialog} />}
+        {dialog?.kind === 'export' && (
+          <ExportDialog initialGroup={dialog.groupId} onClose={closeDialog} />
+        )}
         {dialog?.kind === 'delete' && (
           <DeleteHostsDialog
             hosts={dialog.hosts}

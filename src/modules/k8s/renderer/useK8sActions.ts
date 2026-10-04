@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { cleanError } from '../../../renderer/src/lib/format'
-import { t, toast } from '../../registry/renderer-kit'
+import { showCommands, t, toast } from '../../registry/renderer-kit'
+import { resourceCommands } from '../shared/commands'
 import type { DiscoveredKind, K8sClusterParams, K8sOp } from '../shared/ops'
 import { selectorString, type K8sObject, type ResourceKind } from '../shared/resources'
 import { containersOf, type ActionHandlers } from './actions'
@@ -66,6 +67,21 @@ export function useK8sActions({
   /** Production: hỏi một lần mỗi tab trước khi sửa bằng editor ngoài (mỗi lần lưu là ghi lên cluster). */
   const [externalEditOk] = useState(() => new Set<string>())
   return {
+    copyCommand: (obj) => {
+      const replicas = (obj.spec?.['replicas'] as number | undefined) ?? undefined
+      const lines = resourceCommands({
+        ref: params.ref,
+        kindId,
+        name: obj.metadata.name,
+        namespace: obj.metadata.namespace,
+        containers: containersOf(obj),
+        replicas
+      })
+      showCommands(
+        t('{kind} {name} as kubectl', { kind: obj.kind ?? kindId, name: obj.metadata.name }),
+        lines.map((l) => ({ label: commandLabel(l.id), command: l.command }))
+      )
+    },
     logs: (obj, opts) => {
       const base = {
         ref: params.ref,
@@ -384,5 +400,35 @@ export function useK8sActions({
           })
       )
     }
+  }
+}
+
+/** Nhãn của từng lệnh kubectl (dịch lúc vẽ). */
+export function commandLabel(id: string): string {
+  switch (id) {
+    case 'get':
+      return t('Show as YAML')
+    case 'describe':
+      return t('Describe')
+    case 'logs':
+      return t('Follow logs')
+    case 'logs-previous':
+      return t('Logs of the previous container')
+    case 'exec':
+      return t('Open a shell')
+    case 'rollout-status':
+      return t('Rollout status')
+    case 'restart':
+      return t('Restart')
+    case 'scale':
+      return t('Scale')
+    case 'cordon':
+      return t('Cordon')
+    case 'drain':
+      return t('Drain')
+    case 'delete':
+      return t('Delete')
+    default:
+      return id
   }
 }

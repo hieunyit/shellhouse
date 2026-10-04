@@ -247,11 +247,20 @@ export const K8sOp = z.discriminatedUnion('op', [
     namespace: Namespace,
     pod: Name.optional(),
     selector: Selector.optional(),
+    /** Các pod đã chọn (thanh thao tác hàng loạt). */
+    pods: z.array(Name).min(1).max(20).optional(),
     container: z.string().max(253).optional(),
     allContainers: z.boolean().optional(),
     previous: z.boolean(),
     tail: z.number().int().min(0).max(100_000),
-    timestamps: z.boolean()
+    timestamps: z.boolean(),
+    /** Chỉ log trong khoảng này (giây, như kubectl --since). */
+    sinceSeconds: z
+      .number()
+      .int()
+      .min(1)
+      .max(30 * 86_400)
+      .optional()
   }),
   z.object({
     op: z.literal('portForward'),
@@ -656,9 +665,10 @@ export const K8sLogsParams = z.object({
   ref: ContextRef,
   bastionHostId: z.string().min(1).max(64).optional(),
   namespace: Namespace,
-  /** Một pod; hoặc `selector` = mọi pod của workload. */
+  /** Một pod; hoặc `selector` = mọi pod của workload; hoặc `pods` = các pod đã chọn. */
   pod: Name.optional(),
   selector: Selector.optional(),
+  pods: z.array(Name).min(1).max(20).optional(),
   container: z.string().max(253).optional(),
   allContainers: z.boolean().optional(),
   /** Tiêu đề tab khi xem log workload ("deployment/web"). */

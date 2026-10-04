@@ -3,7 +3,7 @@ import { LookMenu } from './LookMenu'
 import { useTerminalFind } from '../stores/terminal-find'
 import { FindBar } from './FindBar'
 import '@xterm/xterm/css/xterm.css'
-import { ArrowLeftRight, Columns2, FolderOpen, KeyRound, Search } from 'lucide-react'
+import { ArrowLeftRight, Columns2, FolderOpen, KeyRound, Maximize2, Search } from 'lucide-react'
 import { LocalPanel } from './LocalPanel'
 import type { LocalTarget, SftpActions } from './SftpPanel'
 import { connectionLabel, cx, StatusDot } from '../components/ui'
@@ -14,6 +14,7 @@ import { useBroadcast } from './broadcast'
 import { useTerminalMenu } from './TerminalMenu'
 import { setCloseGuard, useTabs, type TerminalTarget } from '../stores/tabs'
 import { usePublishTransfers } from '../stores/transfers'
+import { useShell } from '../shell/store'
 import { useSettings } from '../stores/settings'
 import { TerminalController, type ActivePrompt } from './controller'
 import { DeployKeyDialog, ForwardsPanel, SftpPanel } from '../lazy'
@@ -253,6 +254,7 @@ export function TerminalView({
             '@container flex h-9 shrink-0 items-center gap-1 overflow-hidden border-b border-ds-border-subtle bg-surface px-2 text-xs whitespace-nowrap'
           )}
           data-env-color={env?.color ?? ''}
+          data-session-bar=""
         >
           <span className="flex items-center gap-2 pl-1" data-testid="session-state">
             <StatusDot state={state} />
@@ -340,6 +342,15 @@ export function TerminalView({
           )}
           <div className="flex-1" />
           <LookMenu />
+          <ToolbarButton
+            testId="session-focus"
+            icon={<Maximize2 size={13} />}
+            onClick={() => {
+              useShell.getState().setFocus(true)
+            }}
+          >
+            {t('Focus')}
+          </ToolbarButton>
           <ToolbarButton
             testId="open-find"
             icon={<Search size={13} />}

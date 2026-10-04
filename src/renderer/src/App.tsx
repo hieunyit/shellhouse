@@ -19,9 +19,11 @@ import { parseMacro } from '@shared/macro'
 import { toggleMultiExec, useBroadcast } from './terminal/broadcast'
 import { controllers } from './terminal/registry'
 import { EnableModuleDialog } from './components/EnableModuleDialog'
+import { CommandSheet } from './components/CommandSheet'
 import { useModuleUi } from './stores/module-ui'
 import { t } from '@shared/i18n'
 import { DsProvider } from './ds'
+import { cx } from './ds/utils'
 import { ActivityBar } from './shell/ActivityBar'
 import { Explorer } from './shell/Explorer'
 import { Main } from './shell/Main'
@@ -45,6 +47,7 @@ export function App(): React.JSX.Element {
   const [overlay, setOverlay] = useState<Overlay>(null)
   const activeId = useTabs((s) => s.activeId)
   const multiExec = useBroadcast((s) => s.enabled)
+  const focus = useShell((s) => s.focus)
   // Vào / ra MultiExec: terminal đổi chỗ → đo lại kích thước và focus vào tab đang chọn.
   useEffect(() => {
     const id = useTabs.getState().activeId
@@ -131,6 +134,9 @@ export function App(): React.JSX.Element {
       case 'hosts.import':
         void openSidebarDialog('import-hosts')
         break
+      case 'hosts.export':
+        void openSidebarDialog('export-hosts')
+        break
       case 'quickconnect.focus':
         setOverlay({ kind: 'quickConnect' })
         break
@@ -193,6 +199,11 @@ export function App(): React.JSX.Element {
       case 'designkit.open':
         setOverlay({ kind: 'designKit' })
         break
+      case 'view.focus': {
+        const shell = useShell.getState()
+        shell.setFocus(!shell.focus)
+        break
+      }
       case 'diagnostics.toggle': {
         const shell = useShell.getState()
         if (shell.area === 'settings' && shell.settingsSection === 'diagnostics') shell.back()
@@ -260,15 +271,17 @@ export function App(): React.JSX.Element {
             onWorkspaces={shellActions.onWorkspaces}
           />
         </ErrorBoundary>
-        <div className="flex min-h-0 flex-1">
-          <ActivityBar />
+        <div className={cx('flex min-h-0 flex-1', focus && 'pb-2 pl-2')}>
+          {!focus && <ActivityBar />}
           {/* Mỗi vùng có ErrorBoundary riêng: Explorer lỗi không gỡ vùng terminal (mất phiên). */}
-          <ErrorBoundary label="sidebar" compact>
-            <Explorer searchRef={searchRef} />
-          </ErrorBoundary>
+          {!focus && (
+            <ErrorBoundary label="sidebar" compact>
+              <Explorer searchRef={searchRef} />
+            </ErrorBoundary>
+          )}
           <Main onSnippets={shellActions.onSnippets} />
         </div>
-        <StatusBar />
+        {!focus && <StatusBar />}
         {overlay?.kind === 'snippets' && (
           <SnippetsDialog
             canInsert={activeId !== null && controllers.has(activeId)}
@@ -299,6 +312,7 @@ export function App(): React.JSX.Element {
         {overlay?.kind === 'designKit' && <DesignKit onClose={closeOverlay} />}
         {overlay?.kind === 'quickConnect' && <QuickConnectDialog onClose={closeOverlay} />}
         <EnableModuleDialog />
+        <CommandSheet />
         {/* Sau cùng: hộp thoại xác nhận nằm trên mọi hộp thoại khác. */}
         <ConfirmHost />
       </div>

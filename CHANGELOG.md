@@ -32,7 +32,23 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - **Environments** (Settings → Environments): Production, Staging, Development, Test — or your
   own — with a short label, highlighted or neutral style, an optional line at the top of the
   content, how deleting is confirmed and read-only by default. Set one on a host group (subgroups
-  and hosts inherit it); groups that only had a color keep their environment.
+  and hosts inherit it), a Kubernetes context, a Docker endpoint or an S3 account (right-click →
+  Environment). Production asks you to type the resource name before deleting (Kubernetes, Docker);
+  leaving it asks first and offers Undo. Groups or contexts that only had a color keep their
+  environment.
+- **Focus mode** (Ctrl+Shift+Enter or the ⤢ button): only the terminal and the title bar; a small
+  pill shows where you are and exits. Esc stays with vim / less.
+- **Copy as command**: Pods, Deployments… (kubectl with the right context / namespace /
+  kubeconfig), containers (docker with `-H ssh://…` or WSL) and S3 objects (aws with profile /
+  endpoint) — plus `kubectl get` for the current list.
+- **Label selector** in the Kubernetes filter: `app=web`, `tier!=data`, `app in (web,api)`,
+  `!canary` (or `-l …`), with clear errors; copied commands keep the selector.
+- Kubernetes logs: time range (5 m – 24 h), logs of several selected pods in one tab, and the
+  equivalent `kubectl logs` command at the bottom.
+- **Export hosts** (Shellhouse YAML with groups and environments, OpenSSH config, CSV) for all or one
+  group — never passwords or keys; Import reads Shellhouse YAML back.
+- Quick connect: Ctrl+Enter saves the typed address as a new host.
+- Group rows: a ⋯ menu (new host / subgroup, edit, export, environment, delete).
 
 ## [1.2.0-beta.13] - 2026-10-04
 

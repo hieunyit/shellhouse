@@ -48,7 +48,8 @@ export function S3Dialog({
   run,
   onClose,
   onDone,
-  onJob
+  onJob,
+  typeName
 }: {
   dialog: NonNullable<S3DialogState>
   buckets: S3Bucket[]
@@ -62,6 +63,11 @@ export function S3Dialog({
    * Hộp thoại đóng ngay; lỗi hiện ở thanh lỗi của tab.
    */
   onJob: (job: S3BulkJob, label: string, verb: string) => void
+  /**
+   * Môi trường của tài khoản yêu cầu gõ tên khi xoá (Production): phải gõ đúng chuỗi này (tên
+   * object, hoặc "3 items") thì nút Delete mới bật; không dán được.
+   */
+  typeName?: string | undefined
 }): React.JSX.Element {
   const [value, setValue] = useState(dialog.kind === 'rename' ? dialog.entry.name : '')
   const [destBucket, setDestBucket] = useState(bucket ?? '')
@@ -117,7 +123,9 @@ export function S3Dialog({
                 dialog.versions.some((v) => !v.deleteMarker) &&
                 value.trim().toLowerCase() !== CONFIRM_WORD
               ? t('Type “{word}” to confirm', { word: CONFIRM_WORD })
-              : null
+              : dialog.kind === 'delete' && typeName !== undefined && value !== typeName
+                ? t('Type {name} to confirm', { name: typeName })
+                : null
 
   const submit = async (): Promise<void> => {
     // Link chia sẻ có nút riêng (ShareLink) — Enter trong ô thời hạn không đóng hộp thoại.
@@ -386,6 +394,25 @@ export function S3Dialog({
                     ? t('This deletes more than {n} objects.', { n: formatNumber(count.count) })
                     : tn(count.count, 'This deletes {n} object.', 'This deletes {n} objects.')}
               </p>
+            )}
+            {typeName !== undefined && (
+              <label className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-muted">
+                  {t('Type {name} to confirm', { name: typeName })}
+                </span>
+                <Input
+                  autoFocus
+                  mono
+                  value={value}
+                  data-testid="s3-delete-typed"
+                  onPaste={(e) => {
+                    e.preventDefault()
+                  }}
+                  onChange={(e) => {
+                    setValue(e.target.value)
+                  }}
+                />
+              </label>
             )}
             {versioning === 'Enabled' || versioning === 'Suspended' ? (
               <p className="text-xs text-warning">

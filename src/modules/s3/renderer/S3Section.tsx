@@ -14,7 +14,17 @@ import {
 import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
 import { useS3 } from './store'
 import { openS3, s3Api } from './api'
-import { confirmAction, t } from '../../registry/renderer-kit'
+import {
+  confirmAction,
+  environmentMenu,
+  EnvironmentPicker,
+  setSourceEnvironment,
+  t,
+  useEnvironments,
+  useSourceEnvironment,
+  useSourceEnvironmentMap
+} from '../../registry/renderer-kit'
+import { EnvLabel } from '../../../renderer/src/ds'
 
 /** Mục "S3" ở thanh bên: tài khoản S3, bấm đúp để mở trình quản lý. */
 export function S3Section(): React.JSX.Element {
@@ -22,6 +32,8 @@ export function S3Section(): React.JSX.Element {
   const [open, setOpen] = useState(true)
   const [editing, setEditing] = useState<S3AccountSummary | 'new' | null>(null)
   const { menu, open: openMenu } = useContextMenu()
+  const environments = useEnvironments()
+  const sourceEnvs = useSourceEnvironmentMap()
 
   useEffect(() => {
     void useS3.getState().reload()
@@ -68,7 +80,7 @@ export function S3Section(): React.JSX.Element {
               tabIndex={0}
               data-testid="s3-account"
               data-name={a.name}
-              className="group flex h-10 cursor-default items-center gap-2.5 rounded-md px-2 hover:bg-hover"
+              className="group flex h-10 cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus"
               title={t('Double-click to open')}
               onDoubleClick={() => openS3(a)}
               onKeyDown={(e) => {
@@ -92,6 +104,12 @@ export function S3Section(): React.JSX.Element {
                     }
                   },
                   'separator',
+                  ...environmentMenu(
+                    environments,
+                    sourceEnvs[`s3:${a.id}`] ?? null,
+                    (id) => void setSourceEnvironment('s3', a.id, id)
+                  ),
+                  'separator',
                   {
                     id: 's3-delete',
                     label: t('Delete account'),
@@ -111,15 +129,14 @@ export function S3Section(): React.JSX.Element {
                 ])
               }}
             >
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-subtle text-muted">
-                <Cloud size={14} />
-              </span>
+              <Cloud size={15} strokeWidth={1.6} className="shrink-0 text-faint" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] text-fg">{a.name}</span>
                 <span className="block truncate font-mono text-xs text-faint">
                   {a.endpoint ? new URL(a.endpoint).host : `AWS ${a.region || 'us-east-1'}`}
                 </span>
               </span>
+              <AccountEnv id={a.id} />
             </div>
             {/* Mục ghim: lối tắt đã lưu (không giữ kết nối) — bấm là mở tab ngay tại đó. */}
             {a.pins.map((pin) => (
@@ -129,7 +146,7 @@ export function S3Section(): React.JSX.Element {
                 data-testid="s3-pin"
                 data-name={pinLabel(pin)}
                 title={`s3://${pin.bucket}/${pin.prefix}`}
-                className="flex h-7 w-full items-center gap-2 rounded-md pr-2 pl-9 text-left text-[12.5px] text-muted hover:bg-hover hover:text-fg"
+                className="flex h-7 w-full items-center gap-2 rounded-ds-md pr-2 pl-8 text-left text-[13px] text-muted hover:bg-ds-hover hover:text-fg"
                 onClick={() => openS3(a, pin)}
                 onContextMenu={(e) => {
                   e.preventDefault()
@@ -189,6 +206,9 @@ function S3AccountForm({
   const [error, setError] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [tested, setTested] = useState<{ ok: boolean; message: string } | null>(null)
+  // Môi trường chọn ngay khi thêm / sửa tài khoản (Settings › Environments).
+  const current = useAccountEnvironment(account?.id ?? '')
+  const [environment, setEnvironment] = useState<string | null>(current?.id ?? null)
   const warning = endpointWarning(endpoint)
 
   const parse = () =>
@@ -209,8 +229,11 @@ function S3AccountForm({
       return
     }
     const result = await s3Api.save(parsed.data)
-    if (result.ok) onClose()
-    else setError(t(result.message))
+    if (result.ok) {
+      if (environment !== (current?.id ?? null))
+        await setSourceEnvironment('s3', result.id, environment)
+      onClose()
+    } else setError(t(result.message))
   }
 
   /** Thử kết nối bằng thông tin đang nhập (không lưu). */
@@ -347,8 +370,26 @@ function S3AccountForm({
             {tested.message}
           </Notice>
         )}
+        <div className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted">{t('Environment')}</span>
+          <EnvironmentPicker
+            value={environment}
+            onChange={setEnvironment}
+            testIdPrefix="s3-account-env"
+          />
+        </div>
         <button type="submit" hidden />
       </form>
     </Modal>
   )
+}
+
+/** Môi trường của tài khoản S3 (Settings › Environments). */
+export function useAccountEnvironment(id: string): ReturnType<typeof useSourceEnvironment> {
+  return useSourceEnvironment('s3', id)
+}
+
+function AccountEnv({ id }: { id: string }): React.JSX.Element | null {
+  const env = useAccountEnvironment(id)
+  return env ? <EnvLabel env={env} /> : null
 }
