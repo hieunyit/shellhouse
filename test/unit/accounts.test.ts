@@ -84,6 +84,8 @@ describe('Tài khoản dùng chung', () => {
     const raw = readFileSync(path)
     expect(raw.includes('ACCOUNT-PW-111')).toBe(false)
     expect(raw.includes('key-pass')).toBe(false)
+    // Windows không xoá được file DB còn mở (thư mục tạm bị dọn sau test).
+    db.close()
   })
 
   it('tên tài khoản không trùng; key phải còn trong vault', async () => {
