@@ -108,6 +108,13 @@ export const rdp: Readonly<Record<string, string>> = {
   Direct: 'Trực tiếp',
   'Through SSH host': 'Qua SSH host',
   'RD Gateway': 'RD Gateway',
+  // Cảnh báo file .rdp chưa ký (mstsc)
+  'Clipboard off': 'Tắt clipboard',
+  'Audio off': 'Tắt âm thanh',
+  'Custom scale': 'Scale tuỳ chỉnh',
+  'Fixed resolution': 'Độ phân giải cố định',
+  "Windows will show an “Unknown publisher” warning for these options because the connection file isn't signed: {options}":
+    'Windows sẽ hiện cảnh báo “Unknown publisher” cho các tuỳ chọn này vì file kết nối không được ký: {options}',
   'The Remote Desktop client connects to the host directly.':
     'Client Remote Desktop kết nối thẳng tới host.',
   'SSH host': 'SSH host',

@@ -121,7 +121,8 @@ beforeEach(() => {
       selfSigned: true
     },
     status: 'unknown',
-    known: null
+    known: null,
+    tls: { protocol: 'TLSv1.2', cipher: 'TLS_RSA_WITH_AES_128_GCM_SHA256', legacyRsa: true }
   }
   connectResult = () => Promise.resolve(fakeSession)
   vi.stubGlobal(
@@ -193,6 +194,7 @@ describe('RdpController', () => {
     expect(calls).toContain('connect bob/pw')
     expect(c.getState().phase).toBe('connected')
     expect(c.getState().desktop).toEqual({ width: 1280, height: 720 })
+    expect(c.getState().tls?.legacyRsa).toBe(true)
     expect(saved).toEqual([['h1', 'pw']])
     // Gửi clipboard thủ công.
     expect(await c.pushClipboard(true)).toBe(true)
@@ -259,6 +261,18 @@ describe('tiện ích', () => {
     expect(desktopSizeFor(1001.7, 701)).toEqual({ width: 1000, height: 700 })
     expect(desktopSizeFor(100, 100)).toEqual({ width: 640, height: 480 })
     expect(desktopSizeFor(99999, 99999)).toEqual({ width: 8192, height: 8192 })
+  })
+
+  it('nhãn TLS trên thanh trạng thái', async () => {
+    const { tlsLabel } = await import('../../src/renderer/src/rdp/controller')
+    expect(tlsLabel(null)).toBe('TLS')
+    expect(
+      tlsLabel({ protocol: 'TLSv1.3', cipher: 'TLS_AES_256_GCM_SHA384', legacyRsa: false })
+    ).toBe('TLS 1.3')
+    expect(
+      tlsLabel({ protocol: 'TLSv1.2', cipher: 'TLS_RSA_WITH_AES_128_GCM_SHA256', legacyRsa: true })
+    ).toBe('TLS 1.2 (RSA)')
+    expect(tlsLabel({ protocol: 'unknown', cipher: '', legacyRsa: false })).toBe('TLS')
   })
 
   it('bảng scancode', async () => {

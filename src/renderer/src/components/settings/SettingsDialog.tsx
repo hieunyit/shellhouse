@@ -9,11 +9,13 @@ import {
   Palette,
   Puzzle,
   Shield,
-  SquareTerminal
+  SquareTerminal,
+  UsersRound
 } from 'lucide-react'
 import { t } from '@shared/i18n'
 import { Diagnostics } from '../Diagnostics'
 import { cx, Modal } from '../ui'
+import { AccountsSection } from './AccountsSection'
 import { AppearanceSection } from './AppearanceSection'
 import { FilesSection } from './FilesSection'
 import { KeysSection } from './KeysSection'
@@ -31,6 +33,7 @@ const SECTIONS = [
   { id: 'files', title: () => t('Files'), icon: FolderOpen },
   { id: 'modules', title: () => t('Modules'), icon: Puzzle },
   { id: 'security', title: () => t('Security'), icon: Shield },
+  { id: 'accounts', title: () => t('Accounts'), icon: UsersRound },
   { id: 'keys', title: () => t('SSH keys'), icon: KeyRound },
   { id: 'shortcuts', title: () => t('Shortcuts'), icon: Keyboard },
   { id: 'updates', title: () => t('Updates'), icon: Download },
@@ -84,6 +87,7 @@ export function SettingsDialog({
           {section === 'files' && <FilesSection />}
           {section === 'modules' && <ModulesSection />}
           {section === 'security' && <SecuritySection />}
+          {section === 'accounts' && <AccountsSection />}
           {section === 'keys' && <KeysSection />}
           {section === 'shortcuts' && <ShortcutsSection />}
           {section === 'updates' && <UpdatesSection />}

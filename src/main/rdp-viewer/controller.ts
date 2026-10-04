@@ -2,6 +2,7 @@ import { t } from '@shared/i18n'
 import { hostPort, splitDomainUser } from '@shared/rdp'
 import type {
   RdpCertInfo,
+  RdpProbe,
   RdpViewOpenRequest,
   RdpViewOpenResult,
   RdpViewPrepare,
@@ -15,8 +16,8 @@ import type { RdpCertStore } from './cert-store'
 export interface RdpViewDeps {
   resolve(hostId: string, touch: boolean): ResolvedRdp
   certs: Pick<RdpCertStore, 'check' | 'pinned' | 'trust'>
-  /** Session Host: dò chứng chỉ server. */
-  probe(target: RdpViewTarget): Promise<RdpCertInfo>
+  /** Session Host: dò chứng chỉ server (+ kiểu TLS bắt tay được). */
+  probe(target: RdpViewTarget): Promise<RdpProbe>
   /** Session Host: cấp token proxy cho đích + dấu chứng chỉ đã tin. */
   open(target: RdpViewTarget, pin: string): Promise<{ proxyAddress: string; token: string }>
   now?: () => number
@@ -106,13 +107,14 @@ export class RdpViewController {
   async probe(request: RdpViewProbeRequest): Promise<RdpViewProbeResult> {
     const host = this.deps.resolve(request.hostId, false)
     const target = withSecret(host, (h) => this.target(h, request.viaSessionId))
-    const cert = await this.deps.probe(target)
+    const { cert, tls } = await this.deps.probe(target)
     this.probed.set(request.hostId, { host: target.host, port: target.port, cert, at: this.now() })
     const check = this.deps.certs.check(target.host, target.port, cert.fingerprint)
     return {
       cert,
       status: check.status,
-      known: check.status === 'changed' ? check.known : null
+      known: check.status === 'changed' ? check.known : null,
+      tls
     }
   }
 

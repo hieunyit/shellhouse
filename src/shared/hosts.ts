@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { SerialSettings } from './serial'
-import { RdpSettings, RdpUsername } from './rdp'
+import { RdpDomain, RdpSettings, RdpUsername } from './rdp'
 import { HostOs } from './host-os'
 
 // Không import từ file khác ngoài zod: dùng chung cho main, renderer và test.
@@ -110,7 +110,12 @@ export const HostSummary = z.object({
   /** Thứ tự thủ công trong nhóm; 0 = chưa sắp (theo tên). */
   sort: z.number().int(),
   /** Hệ điều hành server nhận ra ở lần kết nối SSH gần nhất (icon distro); chưa biết = không có. */
-  os: HostOs.nullable().optional()
+  os: HostOs.nullable().optional(),
+  /**
+   * Tài khoản dùng chung (Settings → Accounts) host đang dùng; null / không có = thông tin đăng nhập
+   * riêng của host. Khi có: username / auth / keyId / hasPassword ở trên là của tài khoản.
+   */
+  accountId: z.string().nullable().optional()
 })
 export type HostSummary = z.infer<typeof HostSummary>
 
@@ -185,7 +190,17 @@ export const HostInput = z.object({
   tags: z
     .array(z.string().trim().min(1).max(40, 'Each tag can be at most 40 characters'))
     .max(20, 'At most 20 tags'),
-  color: z.enum(HOST_COLORS).nullable()
+  color: z.enum(HOST_COLORS).nullable(),
+  /**
+   * Dùng tài khoản dùng chung: host liên kết tới tài khoản (không sao chép) — username / auth /
+   * password / keyId / passphrase ở trên bị bỏ qua. null / không có = thông tin riêng của host.
+   */
+  accountId: z.string().max(64).nullable().optional(),
+  /**
+   * Chuyển từ tài khoản sang thông tin riêng: password / passphrase để trống (undefined) thì lấy từ
+   * tài khoản này (renderer không bao giờ thấy secret, nên không tự chép được).
+   */
+  secretsFrom: z.string().max(64).optional()
 })
 export type HostInput = z.infer<typeof HostInput>
 
@@ -220,10 +235,62 @@ export const KeySummary = z.object({
 })
 export type KeySummary = z.infer<typeof KeySummary>
 
+/**
+ * Tài khoản dùng chung (Keychain kiểu Termius): username + mật khẩu + SSH key (+ passphrase) +
+ * domain, chọn một lần cho nhiều host. Gửi cho renderer — KHÔNG có secret, chỉ cờ has*.
+ */
+export const AccountSummary = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** '' = không đặt (host dùng username kế thừa từ nhóm). */
+  username: z.string(),
+  hasPassword: z.boolean(),
+  keyId: z.string().nullable(),
+  hasPassphrase: z.boolean(),
+  /** Domain Windows cho Remote Desktop; '' = không có. */
+  domain: z.string(),
+  notes: z.string(),
+  /** Host đang dùng tài khoản này. */
+  hostIds: z.array(z.string()),
+  updatedAt: z.number()
+})
+export type AccountSummary = z.infer<typeof AccountSummary>
+
+export const AccountInput = z.object({
+  /** Không có = tạo mới. */
+  id: z.string().max(64).optional(),
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Enter a name for the account')
+    .max(100, 'The name is too long (max 100)'),
+  /** SSH (user) hoặc Windows (UPN, có khoảng trắng) — service kiểm lại theo host đang dùng. */
+  username: z.literal('').or(Username).or(RdpUsername),
+  /** undefined = giữ mật khẩu đã lưu; '' = xoá. */
+  password: z.string().max(1024).optional(),
+  keyId: z.string().max(64).nullable(),
+  /** undefined = giữ passphrase đã lưu (nếu key không đổi); '' = xoá. */
+  passphrase: z.string().max(1024).optional(),
+  domain: RdpDomain.or(z.literal('')),
+  notes: z.string().max(2000, 'The notes are too long (max 2000 characters)')
+})
+export type AccountInput = z.infer<typeof AccountInput>
+
+/**
+ * Xoá tài khoản đang được host dùng: chuyển các host sang tài khoản khác, hoặc chép thông tin của
+ * tài khoản vào từng host (thành thông tin riêng). Không có = chỉ xoá khi không host nào dùng.
+ */
+export const AccountDeleteResolution = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('reassign'), accountId: z.string().max(64) }),
+  z.object({ mode: z.literal('convert') })
+])
+export type AccountDeleteResolution = z.infer<typeof AccountDeleteResolution>
+
 export const HostTree = z.object({
   groups: z.array(GroupSummary),
   hosts: z.array(HostSummary),
-  keys: z.array(KeySummary)
+  keys: z.array(KeySummary),
+  accounts: z.array(AccountSummary)
 })
 export type HostTree = z.infer<typeof HostTree>
 

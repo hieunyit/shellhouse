@@ -210,7 +210,8 @@ export async function connectRdp(
     patch(id, {
       launchId: result.launchId,
       client: result.client.name,
-      phase: result.tracked ? 'running' : 'detached'
+      phase: result.tracked ? 'running' : 'detached',
+      hint: result.notice
     })
   } catch (error) {
     if (find(id)?.phase === 'failed') return

@@ -43,7 +43,11 @@ async function setup(host: Partial<ResolvedRdp> = {}) {
   const controller = new RdpViewController({
     resolve,
     certs,
-    probe: () => Promise.resolve(cert(serverCert)),
+    probe: () =>
+      Promise.resolve({
+        cert: cert(serverCert),
+        tls: { protocol: 'TLSv1.3', cipher: 'TLS_AES_256_GCM_SHA384', legacyRsa: false }
+      }),
     open: (target, pin) => {
       opened.push({ target, pin })
       return Promise.resolve({ proxyAddress: 'ws://127.0.0.1:9/rdcleanpath', token: 'tok' })

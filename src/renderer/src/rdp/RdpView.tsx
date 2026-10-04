@@ -41,7 +41,7 @@ import { useTabStatus } from '../stores/tab-status'
 import { useTabs } from '../stores/tabs'
 import { openRdpHost } from '../stores/rdp'
 import { toast } from '../stores/toasts'
-import { RdpController, type RdpScale, type RdpViewState } from './controller'
+import { RdpController, tlsLabel, type RdpScale, type RdpViewState } from './controller'
 import { rdpControllers } from './registry'
 
 const dotOf: Record<RdpViewState['phase'], ConnectionState> = {
@@ -702,10 +702,18 @@ function StatusBar({ state, active }: { state: RdpViewState; active: boolean }):
       {connected && (
         <span
           className="flex items-center gap-1"
-          title={t('Encrypted with TLS; server certificate verified')}
+          data-testid="rdp-view-tls"
+          title={
+            state.tls?.legacyRsa
+              ? t(
+                  'Encrypted with TLS 1.2 using RSA key exchange ({cipher}): the server certificate does not allow modern key exchange, as is usual for Windows. Server certificate verified',
+                  { cipher: state.tls.cipher }
+                )
+              : t('Encrypted with TLS; server certificate verified')
+          }
         >
           <Lock size={10} aria-hidden />
-          TLS
+          {tlsLabel(state.tls)}
         </span>
       )}
       {state.via && <span>{t('via {via}', { via: state.via })}</span>}

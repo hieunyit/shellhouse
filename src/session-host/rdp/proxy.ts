@@ -5,7 +5,7 @@ import type { Duplex } from 'node:stream'
 import type { TLSSocket } from 'node:tls'
 import { WebSocketServer, type RawData, type WebSocket } from 'ws'
 import { t } from '@shared/i18n'
-import type { RdpCertInfo, RdpViewTarget } from '@shared/rdp-viewer'
+import type { RdpProbe, RdpViewTarget } from '@shared/rdp-viewer'
 import {
   detectPdu,
   errorPdu,
@@ -14,7 +14,16 @@ import {
   responsePdu,
   type RDCleanPathError
 } from './rdcleanpath'
-import { certInfo, peerChain, startTls, tlsAlertOf } from './tls'
+import {
+  certInfo,
+  isKeyUsageError,
+  needsLegacyRsa,
+  peerChain,
+  startTls,
+  tlsAlertOf,
+  tlsInfo,
+  type TlsMode
+} from './tls'
 import {
   PROTOCOL_RDP,
   connectionRequest,
@@ -24,7 +33,8 @@ import {
 } from './x224'
 
 /** Mở luồng byte tới server RDP (TCP thẳng hoặc kênh direct-tcpip của phiên SSH). */
-export type Dialer = (target: RdpViewTarget) => Promise<Duplex & { remoteAddress?: string }>
+export type Dialer = (target: RdpViewTarget) => Promise<Socket>
+type Socket = Duplex & { remoteAddress?: string; remotePort?: number }
 
 export interface RdpProxyOptions {
   dial: Dialer
@@ -35,6 +45,32 @@ export interface RdpProxyOptions {
   /** Không còn token / kết nối nào trong khoảng này → đóng cổng nghe. */
   idleCloseMs?: number
   now?: () => number
+  /** Thay bắt tay TLS (test giả lỗi chỉ BoringSSL mới có). */
+  startTls?: typeof startTls
+}
+
+/** Kết nối tới server đã xong X.224 + TLS. */
+interface Link {
+  socket: Socket
+  tls: TLSSocket
+  /** X.224 Connection Confirm của lượt kết nối thành công (gửi lại cho client). */
+  confirmRaw: Buffer
+  mode: TlsMode
+}
+
+/** Lỗi ở một bước bắt tay với server — probe và proxy dịch ra thông báo / PDU khác nhau. */
+class StageError extends Error {
+  readonly confirmRaw: Buffer | undefined
+  readonly code: number | undefined
+  constructor(
+    readonly stage: 'dial' | 'x224' | 'negotiation' | 'legacy' | 'tls' | 'downgrade',
+    readonly error: unknown,
+    extra: { confirmRaw?: Buffer; code?: number } = {}
+  ) {
+    super(errorText(error))
+    this.confirmRaw = extra.confirmRaw
+    this.code = extra.code
+  }
 }
 
 interface Grant {
@@ -48,6 +84,8 @@ interface Grant {
 export const PROXY_PATH = '/rdcleanpath'
 const MAX_GRANTS = 64
 const MAX_CONNECTIONS = 32
+/** Số đích nhớ là cần TLS 1.2 + trao đổi khoá RSA. */
+const MAX_LEGACY_TARGETS = 256
 /** Ngưỡng dừng đọc từ server khi renderer chưa nhận kịp (backpressure). */
 const HIGH_WATER = 4 * 1024 * 1024
 const LOW_WATER = 1024 * 1024
@@ -101,6 +139,12 @@ export function dialErrorMessage(target: RdpViewTarget, error: unknown): string 
   }
 }
 
+export function downgradeMessage(): string {
+  return t(
+    'The TLS handshake with the server was inconsistent (possible interception) — connection stopped'
+  )
+}
+
 /** [MS-RDPBCGR] 2.2.1.2.2 — lý do server từ chối thương lượng. */
 export function negotiationFailureMessage(code: number): string {
   switch (code) {
@@ -141,6 +185,8 @@ export class RdpProxy {
   private readonly grants = new Map<string, Grant>()
   private readonly connections = new Set<WebSocket>()
   private idleTimer: NodeJS.Timeout | null = null
+  /** Đích (host:port) có chứng chỉ chỉ dùng được với trao đổi khoá RSA — bỏ lượt bắt tay hỏng. */
+  private readonly legacyTargets = new Set<string>()
   private readonly ttl: number
   private readonly handshakeTimeout: number
   private readonly idleClose: number
@@ -158,33 +204,143 @@ export class RdpProxy {
   }
 
   /** Dò chứng chỉ server (TCP → X.224 → TLS), không giữ kết nối. */
-  async probe(target: RdpViewTarget): Promise<RdpCertInfo> {
-    let socket: Duplex
+  async probe(target: RdpViewTarget): Promise<RdpProbe> {
+    let link: Link | null = null
+    try {
+      link = await this.establish(target, connectionRequest(), () => true)
+      const leaf = peerChain(link.tls)[0]
+      if (!leaf) throw new Error(t('The server did not send a TLS certificate'))
+      return { cert: certInfo(leaf), tls: tlsInfo(link.tls, link.mode) }
+    } catch (error) {
+      if (!(error instanceof StageError)) throw error
+      const cause = error.error
+      switch (error.stage) {
+        case 'dial':
+          throw new Error(dialErrorMessage(target, cause), { cause: error })
+        case 'negotiation':
+          throw new Error(negotiationFailureMessage(error.code ?? 0), { cause: error })
+        case 'legacy':
+          throw new Error(negotiationFailureMessage(2), { cause: error })
+        case 'downgrade':
+          throw new Error(downgradeMessage(), { cause: error })
+        default:
+          if (cause instanceof Error && cause.message.startsWith('timed out'))
+            throw new Error(t('The server did not answer the Remote Desktop handshake'), {
+              cause: error
+            })
+          throw cause
+      }
+    } finally {
+      link?.tls.destroy()
+      link?.socket.destroy()
+    }
+  }
+
+  /**
+   * TCP → X.224 → TLS tới đích. Chứng chỉ thiếu digitalSignature (mặc định của Windows) làm
+   * BoringSSL từ chối bắt tay ECDHE/TLS 1.3 → làm lại từ đầu (socket cũ đã chết, phải thương lượng
+   * X.224 lại) với TLS 1.2 + trao đổi khoá RSA, như mstsc. Chỉ lùi khi gặp đúng lỗi key usage và
+   * chứng chỉ nhận được sau đó đúng là cần vậy; nhớ theo đích để lần sau bắt tay một lần.
+   */
+  private async establish(
+    target: RdpViewTarget,
+    x224: Buffer,
+    alive: () => boolean
+  ): Promise<Link> {
+    const key = `${target.host}:${target.port}`
+    let mode: TlsMode = this.legacyTargets.has(key) ? 'legacy-rsa' : 'modern'
+    let fellBack = false
+    // Tối đa: legacy (nhớ, nay hỏng) → modern (lỗi key usage) → legacy.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!alive()) throw new Error('client went away')
+      const link = await this.connectOnce(target, x224, mode, alive)
+      if ('error' in link) {
+        if (mode === 'modern' && isKeyUsageError(link.error)) {
+          this.opts.log(
+            'info',
+            `RDP proxy: ${key} certificate does not allow ECDHE key exchange (keyUsage) — retrying with TLS 1.2 RSA key exchange`
+          )
+          mode = 'legacy-rsa'
+          fellBack = true
+          continue
+        }
+        if (mode === 'legacy-rsa' && !fellBack) {
+          // Server đã đổi (chứng chỉ / cấu hình) kể từ lần nhớ → thử lại kiểu mặc định.
+          this.legacyTargets.delete(key)
+          mode = 'modern'
+          continue
+        }
+        throw new StageError('tls', link.error)
+      }
+      if (mode === 'modern') return link
+      const leaf = peerChain(link.tls)[0]
+      if (leaf && needsLegacyRsa(leaf)) {
+        this.legacyTargets.add(key)
+        if (this.legacyTargets.size > MAX_LEGACY_TARGETS) {
+          const oldest = this.legacyTargets.values().next().value
+          if (oldest !== undefined) this.legacyTargets.delete(oldest)
+        }
+        return link
+      }
+      link.tls.destroy()
+      link.socket.destroy()
+      if (fellBack)
+        // Lỗi key usage không khớp chứng chỉ server thật dùng → có thể bị chèn giữa để ép hạ cấp.
+        throw new StageError(
+          'downgrade',
+          new Error('key usage fallback did not match the certificate')
+        )
+      this.legacyTargets.delete(key)
+      mode = 'modern'
+    }
+    throw new StageError('tls', new Error('TLS handshake failed'))
+  }
+
+  /** Một lượt TCP → X.224 → TLS. Lỗi TLS trả về (để quyết định lùi), các lỗi khác ném StageError. */
+  private async connectOnce(
+    target: RdpViewTarget,
+    x224: Buffer,
+    mode: TlsMode,
+    alive: () => boolean
+  ): Promise<Link | { error: unknown }> {
+    let socket: Socket
     try {
       socket = await this.opts.dial(target)
     } catch (error) {
-      throw new Error(dialErrorMessage(target, error), { cause: error })
+      throw new StageError('dial', error)
     }
-    let tls: TLSSocket | null = null
     try {
-      socket.write(connectionRequest())
-      const confirm = parseConnectionConfirm(await readTpkt(socket, this.handshakeTimeout))
-      if (confirm.kind === 'failure') throw new Error(negotiationFailureMessage(confirm.code))
-      if (confirm.kind === 'legacy' || confirm.protocol === PROTOCOL_RDP)
-        throw new Error(negotiationFailureMessage(2))
-      tls = await startTls(socket, target.host, this.handshakeTimeout)
-      const leaf = peerChain(tls)[0]
-      if (!leaf) throw new Error(t('The server did not send a TLS certificate'))
-      return certInfo(leaf)
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith('timed out'))
-        throw new Error(t('The server did not answer the Remote Desktop handshake'), {
-          cause: error
+      if (!alive()) throw new Error('client went away')
+      socket.write(x224)
+      let confirmRaw: Buffer
+      try {
+        confirmRaw = await readTpkt(socket, this.handshakeTimeout)
+      } catch (error) {
+        throw new StageError('x224', error)
+      }
+      const confirm = parseConnectionConfirm(confirmRaw)
+      if (confirm.kind === 'failure')
+        throw new StageError('negotiation', new Error(`negotiation failure ${confirm.code}`), {
+          confirmRaw,
+          code: confirm.code
         })
-      throw error
-    } finally {
-      tls?.destroy()
+      if (confirm.kind === 'legacy' || confirm.protocol === PROTOCOL_RDP)
+        throw new StageError('legacy', new Error('server selected legacy RDP security'))
+      try {
+        const tls = await (this.opts.startTls ?? startTls)(
+          socket,
+          target.host,
+          this.handshakeTimeout,
+          mode
+        )
+        return { socket, tls, confirmRaw, mode }
+      } catch (error) {
+        socket.destroy()
+        return { error }
+      }
+    } catch (error) {
       socket.destroy()
+      throw error
     }
   }
 
@@ -273,7 +429,7 @@ export class RdpProxy {
   }
 
   private async handle(ws: WebSocket): Promise<void> {
-    let socket: (Duplex & { remoteAddress?: string; remotePort?: number }) | null = null
+    let socket: Socket | null = null
     let tls: TLSSocket | null = null
     // Một listener suốt vòng đời: gom PDU yêu cầu → giữ byte tới sớm trong lúc bắt tay với server
     // → chuyển thẳng sang TLS. Không có khoảng nào frame bị rơi vì chưa ai nghe.
@@ -298,42 +454,38 @@ export class RdpProxy {
       if (!isConnectionRequest(request.x224))
         throw new ProxyFailure('not an X.224 Connection Request', errorPdu({ httpStatusCode: 400 }))
       const { target } = grant
+      let link: Link
       try {
-        socket = await this.opts.dial(target)
+        link = await this.establish(target, request.x224, () => !inbound.isClosed())
       } catch (error) {
-        const wsa = wsaOf(error)
-        throw new ProxyFailure(
-          `connect failed: ${errorText(error)}`,
-          errorPdu(wsa !== undefined ? { wsaLastError: wsa } : { httpStatusCode: 502 })
-        )
+        if (!(error instanceof StageError)) throw error
+        const reason = errorText(error.error)
+        switch (error.stage) {
+          case 'dial': {
+            const wsa = wsaOf(error.error)
+            throw new ProxyFailure(
+              `connect failed: ${reason}`,
+              errorPdu(wsa !== undefined ? { wsaLastError: wsa } : { httpStatusCode: 502 })
+            )
+          }
+          case 'x224':
+            throw new ProxyFailure(`X.224: ${reason}`, errorPdu({ httpStatusCode: 502 }))
+          case 'negotiation':
+            throw new ProxyFailure(reason, negotiationErrorPdu(error.confirmRaw ?? Buffer.alloc(0)))
+          case 'legacy':
+            throw new ProxyFailure(reason, errorPdu({ httpStatusCode: 502 }))
+          case 'downgrade':
+            throw new ProxyFailure(`TLS: ${reason}`, errorPdu({ tlsAlertCode: 40 }))
+          default:
+            throw new ProxyFailure(
+              `TLS: ${reason}`,
+              errorPdu({ tlsAlertCode: tlsAlertOf(error.error) })
+            )
+        }
       }
-      if (inbound.isClosed()) throw new Error('client went away')
-      socket.write(request.x224)
-      let confirmRaw: Buffer
-      try {
-        confirmRaw = await readTpkt(socket, this.handshakeTimeout)
-      } catch (error) {
-        throw new ProxyFailure(`X.224: ${errorText(error)}`, errorPdu({ httpStatusCode: 502 }))
-      }
-      const confirm = parseConnectionConfirm(confirmRaw)
-      if (confirm.kind === 'failure')
-        throw new ProxyFailure(
-          `negotiation failure ${confirm.code}`,
-          negotiationErrorPdu(confirmRaw)
-        )
-      if (confirm.kind === 'legacy' || confirm.protocol === PROTOCOL_RDP)
-        throw new ProxyFailure(
-          'server selected legacy RDP security',
-          errorPdu({ httpStatusCode: 502 })
-        )
-      try {
-        tls = await startTls(socket, target.host, this.handshakeTimeout)
-      } catch (error) {
-        throw new ProxyFailure(
-          `TLS: ${errorText(error)}`,
-          errorPdu({ tlsAlertCode: tlsAlertOf(error) })
-        )
-      }
+      socket = link.socket
+      tls = link.tls
+      const confirmRaw = link.confirmRaw
       const chain = peerChain(tls)
       const leaf = chain[0]
       const fingerprint = leaf ? certInfo(leaf).fingerprint : null

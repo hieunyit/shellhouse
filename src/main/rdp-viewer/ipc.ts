@@ -1,5 +1,5 @@
 import type { IpcMainInvokeEvent } from 'electron'
-import { RdpCertInfo } from '@shared/rdp-viewer'
+import { RdpProbe } from '@shared/rdp-viewer'
 import type { HostService } from '../hosts/service'
 import { handle } from '../ipc/router'
 import type { SessionHostSupervisor } from '../session-host/supervisor'
@@ -22,7 +22,7 @@ export function registerRdpViewIpc(options: RdpViewIpcOptions): RdpViewControlle
     resolve: (hostId, touch) => options.hosts().resolveRdp(hostId, touch),
     certs: new RdpCertStore(options.db),
     probe: async (target) =>
-      RdpCertInfo.parse(await options.supervisor.rdpRequest({ type: 'rdp:probe', target })),
+      RdpProbe.parse(await options.supervisor.rdpRequest({ type: 'rdp:probe', target })),
     open: async (target, pin) => {
       const result = (await options.supervisor.rdpRequest({ type: 'rdp:open', target, pin })) as {
         proxyAddress: string

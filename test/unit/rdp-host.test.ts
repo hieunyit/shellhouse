@@ -138,7 +138,7 @@ describe('RdpController', () => {
       launcher: {
         launch: (plan) => {
           plans.push(plan)
-          return Promise.resolve({ launchId: 'L1', tracked: true })
+          return Promise.resolve({ launchId: 'L1', tracked: true, unsignedFile: [] })
         },
         stop: () => Promise.resolve()
       }

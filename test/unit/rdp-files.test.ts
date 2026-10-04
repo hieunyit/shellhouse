@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_RDP, RdpSettings, RdpUsername, rdpAddress, splitDomainUser } from '@shared/rdp'
+import {
+  DEFAULT_RDP,
+  RdpSettings,
+  RdpUsername,
+  mstscFileOnlyOptions,
+  rdpAddress,
+  splitDomainUser
+} from '@shared/rdp'
+import { setLanguage } from '@shared/i18n'
+import { unsignedRdpNotice } from '@shared/rdp-notice'
 import { HostInput } from '@shared/hosts'
 import {
   buildRdpFile,
@@ -15,6 +24,7 @@ import {
   cmdkeyDeleteArgs,
   freerdpArgs,
   macOpenArgs,
+  mstscArgs,
   remminaArgs
 } from '../../src/main/rdp/argv'
 import { detectRdpClient, findInPath, parseFreeRdpMajor } from '../../src/main/rdp/detect'
@@ -236,6 +246,56 @@ describe('RDP: tham số dòng lệnh', () => {
     const noPw = freerdpArgs(target({ domain: '' }), { major: 3, passwordOnStdin: false })
     expect(noPw).not.toContain('/from-stdin')
     expect(noPw).not.toContain('/d:')
+  })
+
+  it('mstsc: tham số dòng lệnh thay file .rdp (không cảnh báo "Unknown publisher")', () => {
+    expect(mstscArgs(target(), { prompt: false })).toEqual([
+      '/v:win.example.com:3389',
+      '/w:1920',
+      '/h:1080'
+    ])
+    expect(
+      mstscArgs(
+        target({ host: '127.0.0.1', port: 50123 }, { fullScreen: true, multiMonitor: true }),
+        {
+          prompt: true
+        }
+      )
+    ).toEqual(['/v:127.0.0.1:50123', '/f', '/multimon', '/prompt'])
+    // Nhiều màn hình chỉ có nghĩa khi toàn màn hình; IPv6 trong [].
+    expect(
+      mstscArgs(target({ host: 'fe80::1' }, { multiMonitor: true }), { prompt: false })
+    ).toEqual(['/v:[fe80::1]:3389', '/w:1920', '/h:1080'])
+  })
+
+  it('mstsc: tuỳ chọn chỉ có trong file .rdp', () => {
+    expect(mstscFileOnlyOptions(DEFAULT_RDP)).toEqual([])
+    expect(
+      mstscFileOnlyOptions({
+        ...DEFAULT_RDP,
+        clipboard: false,
+        drives: true,
+        audio: false,
+        printers: true,
+        gateway: 'gw.example.com',
+        scale: 150,
+        dynamicResolution: false
+      })
+    ).toEqual(['clipboard', 'drives', 'audio', 'printers', 'gateway', 'scale', 'smartSizing'])
+    // Toàn màn hình: không cần smart sizing.
+    expect(
+      mstscFileOnlyOptions({ ...DEFAULT_RDP, dynamicResolution: false, fullScreen: true })
+    ).toEqual([])
+    expect(unsignedRdpNotice([])).toBeNull()
+    expect(unsignedRdpNotice(['drives', 'printers'])).toBe(
+      "Windows will show an “Unknown publisher” warning for these options because the connection file isn't signed: Local drives, Printers"
+    )
+    setLanguage('vi')
+    try {
+      expect(unsignedRdpNotice(['clipboard'])).toContain('Tắt clipboard')
+    } finally {
+      setLanguage('en')
+    }
   })
 
   it('cmdkey / open / remmina', () => {

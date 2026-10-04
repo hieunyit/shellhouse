@@ -107,32 +107,66 @@ const xfreerdp: DetectedClient = {
 const flush = () => new Promise((r) => setTimeout(r, 0))
 
 describe('RdpLauncher', () => {
-  it('mstsc: cmdkey trước khi chạy, file .rdp 0600 không có mật khẩu; thoát → xoá cmdkey + file', async () => {
+  it('mstsc: cmdkey trước khi chạy, tham số dòng lệnh (không file .rdp); thoát → xoá cmdkey', async () => {
     const s = setup({ platform: 'win32' })
-    const { launchId, tracked } = await s.launcher.launch({
+    const { launchId, tracked, unsignedFile } = await s.launcher.launch({
       client: mstsc,
       target,
       password: 's3cret'
     })
     expect(tracked).toBe(true)
+    expect(unsignedFile).toEqual([])
     expect(s.runs[0]?.args).toEqual([
       '/generic:TERMSRV/srv.example.com',
       '/user:CORP\\john',
       '/pass:s3cret'
     ])
+    expect(s.files.size).toBe(0)
+    expect(s.calls[0]).toMatchObject({
+      file: mstsc.path,
+      args: ['/v:srv.example.com:3389', '/w:1920', '/h:1080'],
+      stdin: false
+    })
+    // Mật khẩu không bao giờ vào log / argv của mstsc.
+    expect(s.logs.join('\n')).not.toContain('s3cret')
+    expect(s.calls[0]?.args.join(' ')).not.toContain('s3cret')
+    s.children[0]?.emit('exit', 0, null)
+    await flush()
+    expect(s.runs[1]?.args).toEqual(['/delete:TERMSRV/srv.example.com'])
+    expect(s.events).toEqual([{ launchId, state: 'exited', code: 0, message: null }])
+    expect(s.launcher.size).toBe(0)
+  })
+
+  it('mstsc: không có mật khẩu → /prompt, không cmdkey', async () => {
+    const s = setup({ platform: 'win32' })
+    await s.launcher.launch({
+      client: mstsc,
+      target: { ...target, settings: { ...DEFAULT_RDP, fullScreen: true, multiMonitor: true } },
+      password: null
+    })
+    expect(s.runs).toHaveLength(0)
+    expect(s.calls[0]?.args).toEqual(['/v:srv.example.com:3389', '/f', '/multimon', '/prompt'])
+  })
+
+  it('mstsc: tuỳ chọn chỉ có trong file → file .rdp 0600 không có mật khẩu, báo file chưa ký', async () => {
+    const s = setup({ platform: 'win32' })
+    const { unsignedFile } = await s.launcher.launch({
+      client: mstsc,
+      target: { ...target, settings: { ...DEFAULT_RDP, drives: true, clipboard: false } },
+      password: 's3cret'
+    })
+    expect(unsignedFile).toEqual(['clipboard', 'drives'])
     const [file, data] = [...s.files.entries()][0] ?? []
     // Thư mục tạm thật dùng dấu phân cách của máy chạy (Windows: \\).
     expect(file).toMatch(/^[\\/]tmp[\\/]rdp[\\/].+\.rdp$/)
-    expect(Buffer.from(data as Buffer).toString('utf16le')).not.toContain('s3cret')
+    const text = Buffer.from(data as Buffer).toString('utf16le')
+    expect(text).not.toContain('s3cret')
+    expect(text).toContain('drivestoredirect:s:*')
     expect(s.calls[0]).toMatchObject({ file: mstsc.path, args: [file], stdin: false })
-    // Mật khẩu không bao giờ vào log.
-    expect(s.logs.join('\n')).not.toContain('s3cret')
     s.children[0]?.emit('exit', 0, null)
     await flush()
     expect(s.runs[1]?.args).toEqual(['/delete:TERMSRV/srv.example.com'])
     expect(s.removed).toContain(file)
-    expect(s.events).toEqual([{ launchId, state: 'exited', code: 0, message: null }])
-    expect(s.launcher.size).toBe(0)
   })
 
   it('mstsc: hai phiên cùng TERMSRV → chỉ xoá khi phiên cuối thoát; không có mật khẩu → không cmdkey', async () => {
@@ -152,9 +186,10 @@ describe('RdpLauncher', () => {
 
   it('cmdkey lỗi → không chạy mstsc, dọn file', async () => {
     const s = setup({ platform: 'win32', cmdkeyCode: 1 })
-    await expect(s.launcher.launch({ client: mstsc, target, password: 'a' })).rejects.toThrow(
-      /cmdkey/
-    )
+    const withFile = { ...target, settings: { ...DEFAULT_RDP, printers: true } }
+    await expect(
+      s.launcher.launch({ client: mstsc, target: withFile, password: 'a' })
+    ).rejects.toThrow(/cmdkey/)
     expect(s.calls).toHaveLength(0)
     expect(s.files.size).toBe(0)
   })

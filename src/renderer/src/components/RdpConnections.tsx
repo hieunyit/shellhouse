@@ -144,7 +144,11 @@ function Card({ c }: { c: RdpConnection }): React.JSX.Element {
           >
             {statusText(c)}
           </p>
-          {failed && c.hint && <p className="mt-1 text-xs text-muted">{c.hint}</p>}
+          {c.hint && (failed || c.phase === 'running' || c.phase === 'detached') && (
+            <p className="mt-1 text-xs text-muted" data-testid="rdp-hint">
+              {c.hint}
+            </p>
+          )}
           {c.phase === 'detached' && (
             <p className="mt-1 text-xs text-faint">
               {c.tunnelPort

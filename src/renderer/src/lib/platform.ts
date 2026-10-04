@@ -24,3 +24,8 @@ export function windowsPty(): { backend: 'conpty'; buildNumber?: number } | unde
 export function appRelease(): string {
   return (info?.version ?? '0.0.0').replace(/-.*$/, '')
 }
+
+/** App đang chạy trên Windows (client RDP ngoài là mstsc). */
+export function isWindows(): boolean {
+  return info?.platform === 'win32'
+}

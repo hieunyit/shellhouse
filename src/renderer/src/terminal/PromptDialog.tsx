@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react'
+import { useHosts } from '../stores/hosts'
 import { ShieldAlert, ShieldQuestion } from 'lucide-react'
 import { t } from '@shared/i18n'
 import type { PromptRequest } from '@shared/stream-protocol'
@@ -279,20 +280,29 @@ function PasswordPrompt({
     const host = tabId ? savedHostForPassword(request, tabId) : null
     return tabId && host ? { tabId, key, host } : null
   })
+  // Host dùng tài khoản chung: mật khẩu lưu vào TÀI KHOẢN (mọi host dùng nó đều nhận) — nói rõ.
+  const account = useHosts((s) =>
+    target?.host.accountId ? s.tree.accounts.find((a) => a.id === target.host.accountId) : undefined
+  )
   const remember: RememberOption | null =
     target && unlocked
       ? {
           label: t('Save password in vault'),
-          description: target.host.hasPassword
-            ? t('Replaces the saved password of {name} once you are signed in.', {
-                name: target.host.label
-              })
-            : t(
-                'Saved for {name} once you are signed in. Next time you connect without a prompt.',
-                {
+          description: account
+            ? t(
+                'Saved to the account {account} once you are signed in — every host using this account gets it.',
+                { account: account.name }
+              )
+            : target.host.hasPassword
+              ? t('Replaces the saved password of {name} once you are signed in.', {
                   name: target.host.label
-                }
-              ),
+                })
+              : t(
+                  'Saved for {name} once you are signed in. Next time you connect without a prompt.',
+                  {
+                    name: target.host.label
+                  }
+                ),
           testId: 'prompt-save-password',
           onSubmit: ([password]) => {
             if (!password) return

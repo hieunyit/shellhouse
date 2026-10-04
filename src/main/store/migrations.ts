@@ -9,6 +9,7 @@ import m0007 from '../../../migrations/0007_s3_pins.sql?raw'
 import m0008 from '../../../migrations/0008_modules.sql?raw'
 import m0009 from '../../../migrations/0009_host_os.sql?raw'
 import m0010 from '../../../migrations/0010_rdp_certificates.sql?raw'
+import m0011 from '../../../migrations/0011_accounts.sql?raw'
 
 /** Thứ tự phát hành. Chỉ thêm vào cuối. */
 export const MIGRATIONS: readonly Migration[] = [
@@ -21,5 +22,6 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 7, name: 's3_pins', sql: m0007 },
   { version: 8, name: 'modules', sql: m0008 },
   { version: 9, name: 'host_os', sql: m0009 },
-  { version: 10, name: 'rdp_certificates', sql: m0010 }
+  { version: 10, name: 'rdp_certificates', sql: m0010 },
+  { version: 11, name: 'accounts', sql: m0011 }
 ]

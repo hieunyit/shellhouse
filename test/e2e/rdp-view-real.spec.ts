@@ -8,6 +8,11 @@ import { launchApp, type LaunchedApp } from './fixtures'
  *   SHELLHOUSE_TEST_RDP_SERVER=127.0.0.1:33890 SHELLHOUSE_TEST_RDP_USER=ubuntu \
  *     SHELLHOUSE_TEST_RDP_PASSWORD=ubuntu pnpm test:e2e test/e2e/rdp-view-real.spec.ts
  *
+ * Chứng chỉ kiểu Windows (keyUsage thiếu digitalSignature → TLS 1.2 trao đổi khoá RSA): trỏ
+ * certificate= / key_file= trong /etc/xrdp/xrdp.ini tới chứng chỉ tạo bằng
+ * `openssl req -x509 … -addext keyUsage=critical,keyEncipherment,dataEncipherment`, khởi động lại
+ * container, chạy kèm SHELLHOUSE_TEST_RDP_TLS="TLS 1.2 (RSA)".
+ *
  * Với Windows: bật Remote Desktop (NLA bật / tắt đều được), dùng địa chỉ + tài khoản của máy đó.
  * xrdp: IronRDP không gửi cờ autologon nên xrdp hiện hộp đăng nhập riêng (vẽ bằng drawing order —
  * IronRDP chưa hỗ trợ nên hộp này hiển thị lỗi hình); sau khi đăng nhập, desktop Xfce vẽ bình thường.
@@ -17,6 +22,11 @@ const [host = '', port = '3389'] = server.split(/:(?=\d+$)/)
 const user = process.env['SHELLHOUSE_TEST_RDP_USER'] ?? ''
 const password = process.env['SHELLHOUSE_TEST_RDP_PASSWORD'] ?? ''
 const shot = process.env['SHELLHOUSE_TEST_RDP_SCREENSHOT']
+/**
+ * Kiểu TLS mong đợi trên thanh trạng thái, vd. "TLS 1.2 (RSA)" cho server dùng chứng chỉ mặc định
+ * của Windows (keyUsage thiếu digitalSignature). Không đặt = chỉ kiểm có hiện TLS.
+ */
+const expectTls = process.env['SHELLHOUSE_TEST_RDP_TLS']
 
 const test = base.extend<{ launched: LaunchedApp }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright bắt buộc destructuring fixture
@@ -47,6 +57,7 @@ test('kết nối server RDP thật, vẽ màn hình, nhận chuột / phím', a
   await view.getByTestId('rdp-view-cert-trust').click()
   await expect(view).toHaveAttribute('data-phase', 'connected', { timeout: 60_000 })
   await expect(view.getByTestId('rdp-view-resolution')).toHaveText(/^\d+×\d+$/)
+  await expect(view.getByTestId('rdp-view-tls')).toHaveText(expectTls ?? /^TLS 1\.[23]( \(RSA\))?$/)
   // Chờ server vẽ khung hình đầu.
   await page.waitForTimeout(4_000)
   const canvas = view.getByTestId('rdp-view-canvas')

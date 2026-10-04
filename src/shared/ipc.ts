@@ -4,6 +4,8 @@ import { SessionSpec } from './stream-protocol'
 import { LocalListing } from './local-files'
 import { SerialPortInfo } from './serial'
 import {
+  AccountDeleteResolution,
+  AccountInput,
   GroupInput,
   HostInput,
   HostTree,
@@ -171,6 +173,14 @@ export const invokeContract = {
   /** Main mở hộp thoại chọn file (renderer không đọc được file). */
   'keys:importFromFile': { args: z.tuple([]), result: MutationResult.nullable() },
   'keys:delete': { args: z.tuple([z.string().max(64)]), result: MutationResult },
+  /** Tài khoản dùng chung (Settings → Accounts); danh sách nằm trong `hosts:tree`. */
+  'accounts:save': { args: z.tuple([AccountInput]), result: MutationResult },
+  'accounts:duplicate': { args: z.tuple([z.string().max(64)]), result: MutationResult },
+  /** Tài khoản đang có host dùng: phải kèm cách xử lý (chuyển sang tài khoản khác / chép vào host). */
+  'accounts:delete': {
+    args: z.tuple([z.string().max(64), AccountDeleteResolution.nullable()]),
+    result: MutationResult
+  },
   'sshConfig:scan': { args: z.tuple([]), result: z.array(ImportCandidate) },
   'sshConfig:import': {
     args: z.tuple([z.array(z.string().max(255)).max(1000)]),
@@ -376,6 +386,9 @@ export interface ShellhouseApi {
   reorderGroups(parentId: string | null, orderedIds: string[]): Promise<MutationResult>
   importKeyFromFile(): Promise<MutationResult | null>
   deleteKey(id: string): Promise<MutationResult>
+  saveAccount(input: AccountInput): Promise<MutationResult>
+  duplicateAccount(id: string): Promise<MutationResult>
+  deleteAccount(id: string, resolution: AccountDeleteResolution | null): Promise<MutationResult>
   scanSshConfig(): Promise<ImportCandidate[]>
   importSshConfig(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
   scanMobaXterm(pick: boolean): Promise<FileImportScan>

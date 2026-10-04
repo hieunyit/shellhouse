@@ -22,7 +22,7 @@ describe.skipIf(!server)('RdpProxy với server RDP thật', () => {
     })
     try {
       const target = { host, port }
-      const cert = await proxy.probe(target)
+      const { cert } = await proxy.probe(target)
       expect(cert.fingerprint).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/)
       const { port: wsPort, token } = await proxy.open(target, cert.fingerprint)
       const ws = new WebSocket(`ws://127.0.0.1:${wsPort}${PROXY_PATH}`)

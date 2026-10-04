@@ -1,5 +1,5 @@
 import { t } from '@shared/i18n'
-import type { RdpViewPrepare, RdpViewProbeResult } from '@shared/rdp-viewer'
+import type { RdpTlsInfo, RdpViewPrepare, RdpViewProbeResult } from '@shared/rdp-viewer'
 import type { ActivePrompt } from '../terminal/controller'
 import type { IronRdpModule } from './ironrdp'
 import { SCANCODE, scancodeOf } from './keymap'
@@ -41,6 +41,8 @@ export interface RdpViewState {
   /** Prompt SSH của tunnel (host key, mật khẩu…). */
   prompt: ActivePrompt | null
   probe: RdpViewProbeResult | null
+  /** Phiên TLS với server (từ lần dò gần nhất). */
+  tls: RdpTlsInfo | null
   credentials: RdpCredentialsRequest | null
   /** Lý do ngắt (phase disconnected); `external` = nên mở bằng client RDP của hệ điều hành. */
   error: { message: string; external: boolean } | null
@@ -51,6 +53,14 @@ export interface RdpViewState {
   dynamic: boolean
   scale: RdpScale
   connectedAt: number | null
+}
+
+/** "TLS 1.3", "TLS 1.2", "TLS 1.2 (RSA)" — chưa rõ thì chỉ "TLS". */
+export function tlsLabel(tls: RdpTlsInfo | null): string {
+  if (!tls) return 'TLS'
+  const version = /^TLSv(\d(?:\.\d)?)$/.exec(tls.protocol)?.[1]
+  const base = version ? `TLS ${version}` : 'TLS'
+  return tls.legacyRsa ? `${base} (RSA)` : base
 }
 
 export interface TypedCredentials {
@@ -202,6 +212,7 @@ export class RdpController {
       detail: null,
       prompt: null,
       probe: null,
+      tls: null,
       credentials: null,
       error: null,
       userClosed: false,
@@ -330,6 +341,7 @@ export class RdpController {
       error: null,
       userClosed: false,
       probe: null,
+      tls: null,
       credentials: null,
       desktop: null,
       connectedAt: null
@@ -388,6 +400,7 @@ export class RdpController {
       const probeRequest = { hostId: this.hostId, ...(viaSessionId ? { viaSessionId } : {}) }
       const probe = await window.shellhouse.rdpViewProbe(probeRequest)
       if (this.stale(gen)) return
+      this.set({ tls: probe.tls })
       if (probe.status !== 'trusted') {
         this.set({ phase: 'certificate', probe })
         const ok = await new Promise<boolean>((resolve) => {

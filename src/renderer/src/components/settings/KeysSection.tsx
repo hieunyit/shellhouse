@@ -9,6 +9,7 @@ const BITS = { ed25519: [], rsa: [3072, 4096], ecdsa: [256, 384, 521] } as const
 
 export function KeysSection(): React.JSX.Element {
   const keys = useHosts((s) => s.tree.keys)
+  const accounts = useHosts((s) => s.tree.accounts)
   const [name, setName] = useState('')
   const [type, setType] = useState<'ed25519' | 'rsa' | 'ecdsa'>('ed25519')
   const [bits, setBits] = useState<number | undefined>(undefined)
@@ -66,6 +67,16 @@ export function KeysSection(): React.JSX.Element {
                 </span>
               </div>
               <p className="mt-1 font-mono text-xs break-all text-faint">{k.fingerprint}</p>
+              {accounts.some((a) => a.keyId === k.id) && (
+                <p className="mt-1 text-xs text-muted" data-testid="key-accounts">
+                  {t('Used by accounts: {names}', {
+                    names: accounts
+                      .filter((a) => a.keyId === k.id)
+                      .map((a) => a.name)
+                      .join(', ')
+                  })}
+                </p>
+              )}
               <div className="mt-2 flex gap-1">
                 <Button
                   size="sm"

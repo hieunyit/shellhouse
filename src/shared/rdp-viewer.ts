@@ -28,6 +28,23 @@ export const RdpCertInfo = z.object({
 })
 export type RdpCertInfo = z.infer<typeof RdpCertInfo>
 
+/** Phiên TLS với server (hiện trên thanh trạng thái). */
+export const RdpTlsInfo = z.object({
+  /** TLSv1.2 / TLSv1.3 */
+  protocol: z.string().max(32),
+  cipher: z.string().max(128),
+  /**
+   * Chứng chỉ server không cho trao đổi khoá hiện đại (thiếu digitalSignature trong keyUsage — mặc
+   * định của Windows) → TLS 1.2 với trao đổi khoá RSA, như mstsc.
+   */
+  legacyRsa: z.boolean()
+})
+export type RdpTlsInfo = z.infer<typeof RdpTlsInfo>
+
+/** Kết quả dò server của Session Host. */
+export const RdpProbe = z.object({ cert: RdpCertInfo, tls: RdpTlsInfo })
+export type RdpProbe = z.infer<typeof RdpProbe>
+
 export const RdpViewPrepare = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true),
@@ -64,7 +81,8 @@ export const RdpViewProbeResult = z.object({
   cert: RdpCertInfo,
   /** trusted = khớp chứng chỉ đã tin; unknown = lần đầu; changed = khác chứng chỉ đã tin. */
   status: z.enum(['trusted', 'unknown', 'changed']),
-  known: z.string().nullable()
+  known: z.string().nullable(),
+  tls: RdpTlsInfo
 })
 export type RdpViewProbeResult = z.infer<typeof RdpViewProbeResult>
 

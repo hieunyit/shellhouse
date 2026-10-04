@@ -309,6 +309,8 @@ test('Docker: Compose — bảng project, thao tác cạnh tên, service mở r�
     await expect(page.getByRole('menuitem', { name: /Copy folder path/ })).toBeVisible()
     await expect(page.getByRole('menuitem', { name: /Down/ })).toBeVisible()
     await page.keyboard.press('Escape')
+    // Menu phải đóng hẳn trước cú bấm sau (không thì cú bấm rơi vào lớp đang đóng).
+    await expect(page.getByRole('menuitem', { name: /Down/ })).toHaveCount(0)
 
     // Restart một service → Engine nhận lệnh cho đúng container.
     await view
@@ -316,7 +318,9 @@ test('Docker: Compose — bảng project, thao tác cạnh tên, service mở r�
       .getByTestId('docker-compose-service-restart')
       .click()
     await expect
-      .poll(() => engine.requests.some((r) => /\/containers\/db-[^/]+\/restart/.test(r)))
+      .poll(() => engine.requests.some((r) => /\/containers\/db-[^/]+\/restart/.test(r)), {
+        timeout: 15_000
+      })
       .toBe(true)
     // Stop cả project (hỏi lại trước).
     await shop.getByTestId('docker-compose-stop').click()

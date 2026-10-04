@@ -1,7 +1,9 @@
 import { t } from '@shared/i18n'
 import type { HostSummary } from '@shared/hosts'
-import { RDP_SCALES, RDP_SIZES, type RdpSettings } from '@shared/rdp'
-import { Checkbox, Field, Input, Segmented, Select } from './ui'
+import { RDP_SCALES, RDP_SIZES, mstscFileOnlyOptions, type RdpSettings } from '@shared/rdp'
+import { unsignedRdpNotice } from '@shared/rdp-notice'
+import { isWindows } from '../lib/platform'
+import { Checkbox, Field, Input, Notice, Segmented, Select } from './ui'
 
 type Path = 'direct' | 'ssh' | 'gateway'
 
@@ -36,6 +38,13 @@ export function RdpFields({
     : 'custom'
   const sshHosts = hosts.filter((h) => h.protocol === 'ssh' && h.id !== selfId)
   const viaMissing = value.viaHostId !== null && !sshHosts.some((h) => h.id === value.viaHostId)
+  // mstsc: các tuỳ chọn này cần file .rdp tạm (không ký) → Windows cảnh báo "Unknown publisher".
+  const unsigned =
+    value.openWith === 'native' && isWindows()
+      ? unsignedRdpNotice(
+          mstscFileOnlyOptions({ ...value, gateway: path === 'gateway' ? value.gateway : null })
+        )
+      : null
 
   return (
     <div className="flex flex-col gap-3" data-testid="rdp-fields">
@@ -61,6 +70,7 @@ export function RdpFields({
                 'Opens the Remote Desktop client of your system (mstsc, Windows App, FreeRDP or Remmina).'
               )}
         </p>
+        {unsigned && <Notice testId="rdp-unsigned-notice">{unsigned}</Notice>}
       </div>
       <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
         <span className="text-xs font-medium text-muted">{t('Display')}</span>

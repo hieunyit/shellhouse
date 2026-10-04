@@ -23,7 +23,7 @@ function derive(tree: HostTree): Pick<HostsStore, 'groupTree' | 'effective'> {
   return { groupTree, effective }
 }
 
-const empty: HostTree = { groups: [], hosts: [], keys: [] }
+const empty: HostTree = { groups: [], hosts: [], keys: [], accounts: [] }
 
 export const useHosts = create<HostsStore>((set) => ({
   tree: empty,

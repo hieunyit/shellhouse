@@ -65,6 +65,7 @@ describe('stores/credentials', { timeout: 60_000 }, () => {
       tree: {
         groups: [],
         keys: [],
+        accounts: [],
         hosts: [
           host({ id: 'a', lastUsedAt: 5 }),
           host({ id: 'b', lastUsedAt: 1 }),

@@ -11,19 +11,26 @@ import {
   encodePdu,
   type RDCleanPathPdu
 } from '../../src/session-host/rdp/rdcleanpath'
+import {
+  isKeyUsageError,
+  keyUsageOf,
+  needsLegacyRsa,
+  startTls
+} from '../../src/session-host/rdp/tls'
 import { connectionRequest } from '../../src/session-host/rdp/x224'
-import { startFakeRdp, type FakeRdp } from './rdp-fake-server'
+import { fakeCertPem, startFakeRdp, type FakeRdp } from './rdp-fake-server'
 
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c()
 })
 
-function proxy(): RdpProxy {
+function proxy(tls?: typeof startTls, logs?: string[]): RdpProxy {
   const p = new RdpProxy({
     dial: createDialer({ sshClient: () => Promise.resolve(null), connectTimeoutMs: 3_000 }),
-    log: () => undefined,
-    handshakeTimeoutMs: 3_000
+    log: (_level, message) => logs?.push(message),
+    handshakeTimeoutMs: 3_000,
+    ...(tls ? { startTls: tls } : {})
   })
   cleanups.push(() => {
     p.close()
@@ -106,9 +113,9 @@ describe('RdpProxy (server RDP giả: X.224 + TLS)', () => {
   it('probe trả chứng chỉ server', async () => {
     const server = await fake()
     const info = await proxy().probe({ host: '127.0.0.1', port: server.port })
-    expect(info.subject).toContain('fake-rdp-a.test')
-    expect(info.selfSigned).toBe(true)
-    expect(info.fingerprint).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/)
+    expect(info.cert.subject).toContain('fake-rdp-a.test')
+    expect(info.cert.selfSigned).toBe(true)
+    expect(info.cert.fingerprint).toMatch(/^([0-9A-F]{2}:){31}[0-9A-F]{2}$/)
     expect(server.requests[0]?.[5]).toBe(0xe0)
   })
 
@@ -116,7 +123,7 @@ describe('RdpProxy (server RDP giả: X.224 + TLS)', () => {
     const server = await fake()
     const p = proxy()
     const target = { host: '127.0.0.1', port: server.port }
-    const { fingerprint } = await p.probe(target)
+    const { fingerprint } = (await p.probe(target)).cert
     const { port, token } = await p.open(target, fingerprint)
     const client = await Client.open(port)
     // Gửi yêu cầu chia hai frame + byte RDP tới sớm ngay sau (proxy phải giữ lại, không làm rơi).
@@ -144,7 +151,7 @@ describe('RdpProxy (server RDP giả: X.224 + TLS)', () => {
     const server = await fake()
     const p = proxy()
     const target = { host: '127.0.0.1', port: server.port }
-    const { fingerprint } = await p.probe(target)
+    const { fingerprint } = (await p.probe(target)).cert
     const { port, token } = await p.open(target, fingerprint)
 
     const bad = await Client.open(port)
@@ -184,7 +191,7 @@ describe('RdpProxy (server RDP giả: X.224 + TLS)', () => {
     const server = await fake()
     const p = proxy()
     const target = { host: '127.0.0.1', port: server.port }
-    const { fingerprint } = await p.probe(target)
+    const { fingerprint } = (await p.probe(target)).cert
     server.setCert('b')
     const { port, token } = await p.open(target, fingerprint)
     const c = await Client.open(port)
@@ -275,5 +282,132 @@ describe('RdpProxy (server RDP giả: X.224 + TLS)', () => {
       })
     })
     expect(v6).toBe(false)
+  })
+})
+
+const der = (pem: string): Buffer => new X509Certificate(pem).raw
+
+/**
+ * Giả BoringSSL (Node của Electron): bắt tay kiểu mặc định với chứng chỉ thiếu digitalSignature →
+ * KEY_USAGE_BIT_INCORRECT. OpenSSL của Node trong Vitest không kiểm keyUsage nên phải giả lập; e2e
+ * (rdp-view.spec.ts) kiểm với BoringSSL thật.
+ */
+const boringTls: typeof startTls = async (socket, host, timeoutMs, mode) => {
+  const tls = await startTls(socket, host, timeoutMs, mode)
+  const leaf = tls.getPeerCertificate().raw
+  if (mode !== 'legacy-rsa' && needsLegacyRsa(leaf)) {
+    tls.destroy()
+    throw Object.assign(
+      new Error('error:1000012e:SSL routines:OPENSSL_internal:KEY_USAGE_BIT_INCORRECT'),
+      { code: 'ERR_SSL_KEY_USAGE_BIT_INCORRECT' }
+    )
+  }
+  return tls
+}
+
+describe('RdpProxy: chứng chỉ RDP mặc định của Windows (thiếu digitalSignature)', () => {
+  it('đọc keyUsage của chứng chỉ', () => {
+    expect(keyUsageOf(der(fakeCertPem('legacy')))).toEqual({
+      digitalSignature: false,
+      keyEncipherment: true
+    })
+    expect(needsLegacyRsa(der(fakeCertPem('legacy')))).toBe(true)
+    // Không có extension keyUsage → dùng được cho mọi việc.
+    expect(keyUsageOf(der(fakeCertPem('a')))).toBeNull()
+    expect(needsLegacyRsa(der(fakeCertPem('a')))).toBe(false)
+    expect(keyUsageOf(Buffer.from('not a certificate'))).toBeNull()
+    expect(isKeyUsageError({ code: 'ERR_SSL_KEY_USAGE_BIT_INCORRECT' })).toBe(true)
+    expect(
+      isKeyUsageError(
+        new Error('1:error:1000012e:SSL routines:OPENSSL_internal:KEY_USAGE_BIT_INCORRECT')
+      )
+    ).toBe(true)
+    expect(isKeyUsageError({ code: 'ERR_SSL_WRONG_VERSION_NUMBER' })).toBe(false)
+  })
+
+  it('lỗi key usage → làm lại X.224 + TLS 1.2 trao đổi khoá RSA; nhớ cho lần sau; cùng chứng chỉ', async () => {
+    const server = await fake({ cert: 'legacy' })
+    const logs: string[] = []
+    const p = proxy(boringTls, logs)
+    const target = { host: '127.0.0.1', port: server.port }
+    const probe = await p.probe(target)
+    expect(probe.tls).toMatchObject({ protocol: 'TLSv1.2', legacyRsa: true })
+    expect(probe.tls.cipher).toMatch(/^TLS_RSA_WITH_AES/)
+    expect(probe.cert.subject).toContain('fake-rdp-legacy.test')
+    // Hai lượt X.224: lượt đầu chết ở TLS, lượt hai thương lượng lại từ đầu.
+    expect(server.requests).toHaveLength(2)
+    expect(server.handshakes.at(-1)).toMatchObject({ protocol: 'TLSv1.2' })
+    expect(server.handshakes.at(-1)?.cipher).not.toMatch(/ECDHE|DHE/)
+    expect(logs.join('\n')).toMatch(/RSA key exchange/)
+
+    // Kết nối thật: đã nhớ đích → một lượt X.224 + TLS; chứng chỉ khớp dấu đã tin.
+    const { port, token } = await p.open(target, probe.cert.fingerprint)
+    const client = await Client.open(port)
+    client.ws.send(requestPdu(token))
+    const res = await client.pdu()
+    expect(res.error).toBeUndefined()
+    expect(res.serverCertChain?.[0]).toEqual(der(fakeCertPem('legacy')))
+    expect(server.requests).toHaveLength(3)
+    client.ws.send(Buffer.from('ping'))
+    expect((await client.bytes(4)).toString()).toBe('ping')
+    client.ws.close()
+  })
+
+  it('kết nối thẳng (chưa probe) cũng tự lùi; chứng chỉ khác dấu đã tin vẫn bị từ chối', async () => {
+    const server = await fake({ cert: 'legacy' })
+    const pin = (await proxy(boringTls).probe({ host: '127.0.0.1', port: server.port })).cert
+      .fingerprint
+    const p = proxy(boringTls)
+    const target = { host: '127.0.0.1', port: server.port }
+    const ok = await p.open(target, pin)
+    const c1 = await Client.open(ok.port)
+    c1.ws.send(requestPdu(ok.token))
+    expect((await c1.pdu()).error).toBeUndefined()
+    c1.ws.close()
+    const bad = await p.open(target, 'AA')
+    const c2 = await Client.open(bad.port)
+    c2.ws.send(requestPdu(bad.token))
+    expect((await c2.pdu()).error).toEqual({ errorCode: 1, tlsAlertCode: 42 })
+  })
+
+  it('không lùi khi lỗi TLS khác; lỗi key usage không khớp chứng chỉ thật → dừng (chống ép hạ cấp)', async () => {
+    const server = await fake({ cert: 'a' })
+    const target = { host: '127.0.0.1', port: server.port }
+    let calls = 0
+    const otherError: typeof startTls = () => {
+      calls++
+      return Promise.reject(
+        Object.assign(new Error('wrong version'), { code: 'ERR_SSL_WRONG_VERSION_NUMBER' })
+      )
+    }
+    await expect(proxy(otherError).probe(target)).rejects.toThrow(/wrong version/)
+    expect(calls).toBe(1)
+
+    // Kẻ đứng giữa gây lỗi key usage, nhưng chứng chỉ server thật không cần trao đổi khoá RSA.
+    const forged: typeof startTls = async (socket, host, timeoutMs, mode) => {
+      if (mode !== 'legacy-rsa')
+        throw Object.assign(new Error('KEY_USAGE_BIT_INCORRECT'), {
+          code: 'ERR_SSL_KEY_USAGE_BIT_INCORRECT'
+        })
+      return startTls(socket, host, timeoutMs, 'modern')
+    }
+    const p = proxy(forged)
+    await expect(p.probe(target)).rejects.toThrow(/possible interception/)
+    const pin = (await proxy().probe(target)).cert.fingerprint
+    const { port, token } = await p.open(target, pin)
+    const c = await Client.open(port)
+    c.ws.send(requestPdu(token))
+    expect((await c.pdu()).error).toEqual({ errorCode: 1, tlsAlertCode: 40 })
+  })
+
+  it('đã nhớ cần RSA nhưng server đổi sang chứng chỉ thường → quay lại bắt tay mặc định', async () => {
+    const server = await fake({ cert: 'legacy' })
+    const p = proxy(boringTls)
+    const target = { host: '127.0.0.1', port: server.port }
+    expect((await p.probe(target)).tls.legacyRsa).toBe(true)
+    server.setCert('a')
+    const again = await p.probe(target)
+    expect(again.tls.legacyRsa).toBe(false)
+    expect(again.cert.subject).toContain('fake-rdp-a.test')
   })
 })

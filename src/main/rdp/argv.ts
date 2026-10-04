@@ -43,6 +43,24 @@ export function freerdpArgs(
   return args
 }
 
+/**
+ * mstsc chạy bằng tham số thay cho file .rdp (file tạm không ký → Windows cảnh báo "Unknown
+ * publisher"). Chỉ dùng khi `mstscFileOnlyOptions` rỗng — phần còn lại mstsc lấy từ Default.rdp.
+ * Tên đăng nhập + mật khẩu đi qua Credential Manager (cmdkey); không có thì /prompt để mstsc hỏi.
+ */
+export function mstscArgs(target: RdpTarget, options: { prompt: boolean }): string[] {
+  const s = target.settings
+  const args = [`/v:${hostPort(target.host, target.port)}`]
+  if (s.fullScreen) {
+    args.push('/f')
+    if (s.multiMonitor) args.push('/multimon')
+  } else {
+    args.push(`/w:${s.width}`, `/h:${s.height}`)
+  }
+  if (options.prompt) args.push('/prompt')
+  return args
+}
+
 /** Đích trong Credential Manager mà mstsc tra khi kết nối tới `host`. */
 export function termsrvTarget(host: string): string {
   return `TERMSRV/${host}`

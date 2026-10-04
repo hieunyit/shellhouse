@@ -2,11 +2,12 @@ import { toast } from '../stores/toasts'
 import { useMemo, useState, type SyntheticEvent } from 'react'
 import { t } from '@shared/i18n'
 import { inheritedDefaults } from '@shared/inherit'
-import { ArrowRight, KeyRound, X, ChevronRight } from 'lucide-react'
+import { ArrowRight, KeyRound, X, ChevronRight, Pencil } from 'lucide-react'
 import {
   ENCODINGS,
   HostInput,
   MAX_JUMPS,
+  type AccountSummary,
   type AuthKind,
   type HostMode,
   type HostProtocol,
@@ -31,6 +32,10 @@ import { PasswordInput } from './PasswordInput'
 import { TagInput } from './TagInput'
 import { GroupSelect } from './GroupSelect'
 import { DeleteHostsDialog } from './sidebar/dialogs'
+import { AccountPicker } from './accounts/AccountPicker'
+import { AccountEditor } from './accounts/AccountEditor'
+import { AccountBadges, AccountsDialog } from './accounts/AccountsManager'
+import { customFromAccount, suggestAccountName } from './accounts/account-logic'
 import {
   Button,
   Checkbox,
@@ -77,7 +82,7 @@ export function HostForm({
   defaultGroupId: string | null
   onClose: () => void
 }): React.JSX.Element {
-  const { keys, hosts } = useHosts((s) => s.tree)
+  const { keys, hosts, accounts } = useHosts((s) => s.tree)
   const [protocol, setProtocol] = useState<HostProtocol>(host?.protocol ?? 'ssh')
   const [serial, setSerial] = useState<SerialSettings>(
     host?.serial ?? { path: '', ...DEFAULT_SERIAL }
@@ -100,6 +105,11 @@ export function HostForm({
   const [clearPassword, setClearPassword] = useState(false)
   const [keyId, setKeyId] = useState<string | null>(host?.keyId ?? keys[0]?.id ?? null)
   const [passphrase, setPassphrase] = useState('')
+  /** Tài khoản dùng chung (Settings → Accounts); null = thông tin riêng của host ("Custom"). */
+  const [accountId, setAccountId] = useState<string | null>(host?.accountId ?? null)
+  /** Vừa chuyển từ tài khoản sang Custom: mật khẩu / passphrase để trống thì main chép từ đây. */
+  const [secretsFrom, setSecretsFrom] = useState<AccountSummary | null>(null)
+  const [accountDialog, setAccountDialog] = useState<'manage' | 'new' | AccountSummary | null>(null)
   const [groupId, setGroupId] = useState<string | null>(host?.groupId ?? defaultGroupId)
   const [tags, setTags] = useState<string[]>(host?.tags ?? [])
   const [color, setColor] = useState<HostSummary['color']>(host?.color ?? null)
@@ -136,6 +146,51 @@ export function HostForm({
   )
   const [saving, setSaving] = useState(false)
 
+  const account = accounts.find((a) => a.id === accountId) ?? null
+  /** Host dùng tài khoản (chỉ SSH và RDP có phần đăng nhập). */
+  const usesAccount = accountId !== null && (isSsh || isRdp)
+  /** Có mật khẩu đã lưu để "để trống = giữ" (của host, hoặc của tài khoản vừa bỏ chọn). */
+  const storedPassword = secretsFrom ? secretsFrom.hasPassword : Boolean(host?.hasPassword)
+  const savedPlaceholder = secretsFrom
+    ? t('From the account — leave empty to keep it')
+    : t('Saved — leave empty to keep it')
+
+  const chooseAccount = (id: string | null): void => {
+    if (id === accountId) return
+    if (id === null && account) {
+      // Custom: chép giá trị của tài khoản để sửa tiếp; secret do main chép (renderer không có).
+      const c = customFromAccount(account)
+      setUsername(c.username)
+      setAuth(c.auth)
+      setKeyId(c.keyId ?? keys[0]?.id ?? null)
+      if (c.domain) setRdp({ ...rdp, domain: c.domain })
+      setRdpSave(c.savePassword)
+      setSecretsFrom(account)
+    }
+    setPassword('')
+    setPassphrase('')
+    setClearPassword(false)
+    setFieldError(null)
+    setError(null)
+    setAccountId(id)
+  }
+
+  /** Lỗi của tài khoản đang chọn khi Save (đã bị xoá, không có username nào dùng được). */
+  const accountError = (): string | null => {
+    if (!account) return t('The selected account no longer exists')
+    if (isSsh && !account.username && !inherited.username)
+      return t('The account “{name}” has no username and the group sets none', {
+        name: account.name
+      })
+    return null
+  }
+  const accountFields = (): Partial<HostInput> =>
+    usesAccount
+      ? { accountId }
+      : secretsFrom
+        ? { accountId: null, secretsFrom: secretsFrom.id }
+        : { accountId: null }
+
   const hostLabel = (id: string): string => hosts.find((h) => h.id === id)?.label ?? t('(deleted)')
   const jumpChoices = hosts.filter((h) => h.id !== host?.id && !jumpHostIds.includes(h.id))
 
@@ -159,9 +214,16 @@ export function HostForm({
       return
     }
     // password/passphrase: undefined = keep the stored value (when editing without retyping).
-    const keepPassword = host?.hasPassword && password === '' && !clearPassword
+    const keepPassword = storedPassword && password === '' && !clearPassword
+    if (usesAccount) {
+      const problem = accountError()
+      if (problem) {
+        setError(problem)
+        return
+      }
+    }
     if (isRdp) {
-      await submitRdp(Boolean(keepPassword))
+      await submitRdp(keepPassword)
       return
     }
     if (!isSsh) {
@@ -209,11 +271,16 @@ export function HostForm({
       label: label || hostname,
       hostname: hostname.trim(),
       port: port.trim() === '' ? null : Number(port),
-      username: username.trim(),
-      auth,
-      ...(auth === 'password' && !keepPassword ? { password } : {}),
-      keyId: auth === 'key' ? keyId : null,
-      ...(auth === 'key' && passphrase ? { passphrase } : {}),
+      ...(usesAccount
+        ? { username: '', auth: 'auto' as const, keyId: null }
+        : {
+            username: username.trim(),
+            auth,
+            ...(auth === 'password' && !keepPassword ? { password } : {}),
+            keyId: auth === 'key' ? keyId : null,
+            ...(auth === 'key' && passphrase ? { passphrase } : {})
+          }),
+      ...accountFields(),
       keyFile: host?.keyFile ?? null,
       proxyJump: host?.proxyJump ?? null,
       jumpHostIds,
@@ -225,7 +292,7 @@ export function HostForm({
       tags,
       color
     }
-    if (!draft.username && !inherited.username) {
+    if (!usesAccount && !draft.username && !inherited.username) {
       setFieldError({ field: 'username', message: t('Enter a username') })
       return
     }
@@ -249,7 +316,8 @@ export function HostForm({
 
   /** Host Remote Desktop: tên đăng nhập kiểu Windows (CORP\\john tự tách domain), mật khẩu lưu / hỏi. */
   const submitRdp = async (keepPassword: boolean): Promise<void> => {
-    const split = splitDomainUser(username)
+    // Dùng tài khoản: username / domain / mật khẩu lấy từ tài khoản lúc kết nối.
+    const split = usesAccount ? { username: '', domain: null } : splitDomainUser(username)
     if (split.username) {
       const checked = RdpUsername.safeParse(split.username)
       if (!checked.success) {
@@ -279,7 +347,7 @@ export function HostForm({
       return
     }
     // Chọn lưu mà chưa từng nhập mật khẩu → coi như hỏi mỗi lần (không lưu mật khẩu rỗng).
-    const store = rdpSave && (password !== '' || keepPassword)
+    const store = !usesAccount && rdpSave && (password !== '' || keepPassword)
     const draft = {
       ...(host ? { id: host.id } : {}),
       protocol: 'rdp' as const,
@@ -290,6 +358,7 @@ export function HostForm({
       username: split.username,
       auth: store ? ('password' as const) : ('auto' as const),
       ...(store && !keepPassword ? { password } : {}),
+      ...accountFields(),
       keyId: null,
       keyFile: null,
       proxyJump: null,
@@ -331,6 +400,65 @@ export function HostForm({
     }
   }
   const [confirmDelete, setConfirmDelete] = useState(false)
+
+  /** Ô chọn tài khoản ở đầu phần đăng nhập (SSH / RDP). */
+  const accountRow = (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs text-muted">{t('Account')}</span>
+      <AccountPicker
+        value={accountId}
+        accounts={accounts}
+        keys={keys}
+        protocol={protocol}
+        onChange={chooseAccount}
+        onCreate={() => {
+          setAccountDialog('new')
+        }}
+        onManage={() => {
+          setAccountDialog('manage')
+        }}
+      />
+    </div>
+  )
+  /** Tóm tắt (chỉ đọc) tài khoản đang chọn + nút sửa tài khoản. */
+  const accountCard = account ? (
+    <div
+      className="flex items-start gap-2 rounded-md border border-line bg-subtle px-2.5 py-2"
+      data-testid="host-account-summary"
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <AccountBadges account={account} keys={keys} />
+        <p className="text-xs text-faint">
+          {isRdp
+            ? account.hasPassword
+              ? t('Signs in with the account’s username and password.')
+              : t('The Remote Desktop client asks for the password when you connect.')
+            : account.keyId && account.hasPassword
+              ? t('Tries the account’s SSH key first, then its password.')
+              : account.keyId
+                ? t('Signs in with the account’s SSH key.')
+                : account.hasPassword
+                  ? t('Signs in with the account’s password.')
+                  : t(
+                      'Tries your SSH agent and default keys (~/.ssh/id_*), then asks for a password.'
+                    )}
+        </p>
+      </div>
+      <Button
+        size="sm"
+        variant="ghost"
+        icon={<Pencil size={13} />}
+        data-testid="host-account-edit"
+        onClick={() => {
+          setAccountDialog(account)
+        }}
+      >
+        {t('Edit account')}
+      </Button>
+    </div>
+  ) : (
+    <Notice tone="warning">{t('The selected account no longer exists')}</Notice>
+  )
 
   return (
     <Modal
@@ -450,7 +578,9 @@ export function HostForm({
                 placeholder={t('e.g. {example}', { example: 'Administrator' })}
                 data-testid="host-username"
                 aria-invalid={fieldError?.field === 'username' || undefined}
-                value={username}
+                disabled={usesAccount}
+                title={usesAccount ? t('From the account') : undefined}
+                value={usesAccount ? (account?.username ?? '') : username}
                 onChange={(e) => {
                   setUsername(e.target.value)
                   if (fieldError?.field === 'username') setFieldError(null)
@@ -465,7 +595,9 @@ export function HostForm({
                 className="placeholder:font-sans"
                 placeholder={t('e.g. {example}', { example: 'CORP' })}
                 data-testid="rdp-domain"
-                value={rdp.domain}
+                disabled={usesAccount && Boolean(account?.domain)}
+                title={usesAccount && account?.domain ? t('From the account') : undefined}
+                value={usesAccount && account?.domain ? account.domain : rdp.domain}
                 onChange={(e) => {
                   setRdp({ ...rdp, domain: e.target.value })
                 }}
@@ -478,10 +610,15 @@ export function HostForm({
             <Field
               label={t('Username')}
               hint={
-                inherited.username && !username
-                  ? t('Using “{value}”', { value: inherited.username.value }) +
-                    from(inherited.username)
-                  : undefined
+                usesAccount
+                  ? account && !account.username && inherited.username
+                    ? t('Using “{value}”', { value: inherited.username.value }) +
+                      from(inherited.username)
+                    : t('From the account')
+                  : inherited.username && !username
+                    ? t('Using “{value}”', { value: inherited.username.value }) +
+                      from(inherited.username)
+                    : undefined
               }
             >
               <Input
@@ -495,7 +632,8 @@ export function HostForm({
                 }
                 data-testid="host-username"
                 aria-invalid={fieldError?.field === 'username' || undefined}
-                value={username}
+                disabled={usesAccount}
+                value={usesAccount ? (account?.username ?? '') : username}
                 onChange={(e) => {
                   setUsername(e.target.value)
                   if (fieldError?.field === 'username') setFieldError(null)
@@ -523,36 +661,41 @@ export function HostForm({
         {isRdp && (
           <>
             <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
-              <span className="text-xs font-medium text-muted">{t('Password')}</span>
-              <Segmented
-                value={rdpSave ? 'save' : 'ask'}
-                onChange={(v) => {
-                  setRdpSave(v === 'save')
-                }}
-                testIdPrefix="rdp-auth"
-                options={[
-                  { value: 'save', label: t('Save in vault') },
-                  { value: 'ask', label: t('Ask each time') }
-                ]}
-              />
-              {rdpSave ? (
-                <PasswordInput
-                  data-testid="host-password"
-                  aria-label={t('Password')}
-                  placeholder={
-                    host?.hasPassword
-                      ? t('Saved — leave empty to keep it')
-                      : t('Password (stored encrypted)')
-                  }
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value)
-                  }}
-                />
+              {accountRow}
+              {usesAccount ? (
+                accountCard
               ) : (
-                <p className="text-xs text-faint">
-                  {t('The Remote Desktop client asks for the password when you connect.')}
-                </p>
+                <>
+                  <span className="text-xs font-medium text-muted">{t('Password')}</span>
+                  <Segmented
+                    value={rdpSave ? 'save' : 'ask'}
+                    onChange={(v) => {
+                      setRdpSave(v === 'save')
+                    }}
+                    testIdPrefix="rdp-auth"
+                    options={[
+                      { value: 'save', label: t('Save in vault') },
+                      { value: 'ask', label: t('Ask each time') }
+                    ]}
+                  />
+                  {rdpSave ? (
+                    <PasswordInput
+                      data-testid="host-password"
+                      aria-label={t('Password')}
+                      placeholder={
+                        storedPassword ? savedPlaceholder : t('Password (stored encrypted)')
+                      }
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value)
+                      }}
+                    />
+                  ) : (
+                    <p className="text-xs text-faint">
+                      {t('The Remote Desktop client asks for the password when you connect.')}
+                    </p>
+                  )}
+                </>
               )}
             </div>
             <RdpFields
@@ -570,93 +713,103 @@ export function HostForm({
           <>
             <div className="flex flex-col gap-2.5 rounded-lg border border-line p-3">
               <span className="text-xs font-medium text-muted">{t('Authentication')}</span>
-              <Segmented
-                value={auth}
-                onChange={setAuth}
-                testIdPrefix="host-auth"
-                options={[
-                  { value: 'auto', label: t('Automatic') },
-                  { value: 'password', label: t('Password') },
-                  { value: 'key', label: t('SSH key') }
-                ]}
-              />
-              {auth === 'auto' && (
-                <p className="text-xs text-faint">
-                  {inherited.keyId
-                    ? t(
-                        'Tries the group key “{key}”{from}, your SSH agent and default keys, then asks for a password.',
-                        {
-                          key: keys.find((k) => k.id === inherited.keyId?.value)?.name ?? '?',
-                          from: from(inherited.keyId)
-                        }
-                      )
-                    : t(
-                        'Tries your SSH agent and default keys (~/.ssh/id_*), then asks for a password.'
-                      )}
-                </p>
-              )}
-              {auth === 'password' && (
-                <div className="flex flex-col gap-2">
-                  <PasswordInput
-                    data-testid="host-password"
-                    aria-label={t('Password')}
-                    disabled={clearPassword}
-                    placeholder={
-                      host?.hasPassword
-                        ? t('Saved — leave empty to keep it')
-                        : t('Password (stored encrypted)')
-                    }
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value)
-                    }}
+              {accountRow}
+              {usesAccount ? (
+                accountCard
+              ) : (
+                <>
+                  <Segmented
+                    value={auth}
+                    onChange={setAuth}
+                    testIdPrefix="host-auth"
+                    options={[
+                      { value: 'auto', label: t('Automatic') },
+                      { value: 'password', label: t('Password') },
+                      { value: 'key', label: t('SSH key') }
+                    ]}
                   />
-                  {host?.hasPassword && (
-                    <Checkbox
-                      label={t('Forget the saved password (ask every time)')}
-                      checked={clearPassword}
-                      onChange={(e) => {
-                        setClearPassword(e.target.checked)
-                      }}
-                    />
+                  {auth === 'auto' && (
+                    <p className="text-xs text-faint">
+                      {inherited.keyId
+                        ? t(
+                            'Tries the group key “{key}”{from}, your SSH agent and default keys, then asks for a password.',
+                            {
+                              key: keys.find((k) => k.id === inherited.keyId?.value)?.name ?? '?',
+                              from: from(inherited.keyId)
+                            }
+                          )
+                        : t(
+                            'Tries your SSH agent and default keys (~/.ssh/id_*), then asks for a password.'
+                          )}
+                    </p>
                   )}
-                </div>
-              )}
-              {auth === 'key' && (
-                <div className="flex flex-col gap-2">
-                  <div className="flex gap-2">
-                    <Select
-                      data-testid="host-key"
-                      value={keyId ?? ''}
-                      onChange={(e) => {
-                        setKeyId(e.target.value || null)
-                      }}
-                    >
-                      {keys.length === 0 && (
-                        <option value="">{t('No keys in the vault yet')}</option>
+                  {auth === 'password' && (
+                    <div className="flex flex-col gap-2">
+                      <PasswordInput
+                        data-testid="host-password"
+                        aria-label={t('Password')}
+                        disabled={clearPassword}
+                        placeholder={
+                          storedPassword ? savedPlaceholder : t('Password (stored encrypted)')
+                        }
+                        value={password}
+                        onChange={(e) => {
+                          setPassword(e.target.value)
+                        }}
+                      />
+                      {storedPassword && (
+                        <Checkbox
+                          label={t('Forget the saved password (ask every time)')}
+                          checked={clearPassword}
+                          onChange={(e) => {
+                            setClearPassword(e.target.checked)
+                          }}
+                        />
                       )}
-                      {keys.map((k) => (
-                        <option key={k.id} value={k.id}>
-                          {k.name} ({k.type}
-                          {k.encrypted ? `, ${t('passphrase')}` : ''})
-                        </option>
-                      ))}
-                    </Select>
-                    <Button icon={<KeyRound size={14} />} onClick={() => void importKey()}>
-                      {t('Import…')}
-                    </Button>
-                  </div>
-                  {keys.find((k) => k.id === keyId)?.encrypted && (
-                    <PasswordInput
-                      aria-label={t('Passphrase')}
-                      placeholder={t('Passphrase (leave empty to be asked when connecting)')}
-                      value={passphrase}
-                      onChange={(e) => {
-                        setPassphrase(e.target.value)
-                      }}
-                    />
+                    </div>
                   )}
-                </div>
+                  {auth === 'key' && (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex gap-2">
+                        <Select
+                          data-testid="host-key"
+                          value={keyId ?? ''}
+                          onChange={(e) => {
+                            setKeyId(e.target.value || null)
+                          }}
+                        >
+                          {keys.length === 0 && (
+                            <option value="">{t('No keys in the vault yet')}</option>
+                          )}
+                          {keys.map((k) => (
+                            <option key={k.id} value={k.id}>
+                              {k.name} ({k.type}
+                              {k.encrypted ? `, ${t('passphrase')}` : ''})
+                            </option>
+                          ))}
+                        </Select>
+                        <Button icon={<KeyRound size={14} />} onClick={() => void importKey()}>
+                          {t('Import…')}
+                        </Button>
+                      </div>
+                      {keys.find((k) => k.id === keyId)?.encrypted && (
+                        <PasswordInput
+                          aria-label={t('Passphrase')}
+                          data-testid="host-passphrase"
+                          placeholder={
+                            secretsFrom?.hasPassphrase && secretsFrom.keyId === keyId
+                              ? savedPlaceholder
+                              : t('Passphrase (leave empty to be asked when connecting)')
+                          }
+                          value={passphrase}
+                          onChange={(e) => {
+                            setPassphrase(e.target.value)
+                          }}
+                        />
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
@@ -888,6 +1041,28 @@ export function HostForm({
         )}
         <button type="submit" hidden />
       </form>
+      {accountDialog === 'manage' && (
+        <AccountsDialog
+          onClose={() => {
+            setAccountDialog(null)
+          }}
+        />
+      )}
+      {accountDialog !== null && accountDialog !== 'manage' && (
+        <AccountEditor
+          account={accountDialog === 'new' ? null : accountDialog}
+          initial={{
+            name: suggestAccountName(accounts, username.trim(), ''),
+            username: usesAccount ? '' : username.trim()
+          }}
+          onClose={() => {
+            setAccountDialog(null)
+          }}
+          onSaved={(id) => {
+            if (accountDialog === 'new') chooseAccount(id)
+          }}
+        />
+      )}
       {confirmDelete && host && (
         <DeleteHostsDialog
           hosts={[host]}

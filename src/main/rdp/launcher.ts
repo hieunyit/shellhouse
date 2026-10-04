@@ -1,8 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { t } from '@shared/i18n'
-import type { RdpStatusEvent } from '@shared/rdp'
-import { cmdkeyAddArgs, cmdkeyDeleteArgs, freerdpArgs, macOpenArgs, remminaArgs } from './argv'
+import { mstscFileOnlyOptions, type RdpFileOnlyOption, type RdpStatusEvent } from '@shared/rdp'
+import {
+  cmdkeyAddArgs,
+  cmdkeyDeleteArgs,
+  freerdpArgs,
+  macOpenArgs,
+  mstscArgs,
+  remminaArgs
+} from './argv'
 import type { DetectedClient } from './detect'
 import { buildRdpFile, buildRemminaFile, encodeRdpFile, type RdpTarget } from './rdp-file'
 
@@ -134,7 +141,13 @@ export class RdpLauncher {
     return client.kind !== 'windows-app'
   }
 
-  async launch(plan: LaunchPlan): Promise<{ launchId: string; tracked: boolean }> {
+  /**
+   * `unsignedFile` = tuỳ chọn buộc mstsc mở bằng file .rdp tạm (Windows sẽ cảnh báo "Unknown
+   * publisher"); rỗng = không dùng file chưa ký.
+   */
+  async launch(
+    plan: LaunchPlan
+  ): Promise<{ launchId: string; tracked: boolean; unsignedFile: RdpFileOnlyOption[] }> {
     const id = randomUUID()
     const entry: Running = {
       id,
@@ -149,8 +162,9 @@ export class RdpLauncher {
       done: false
     }
     this.running.set(id, entry)
+    let unsignedFile: RdpFileOnlyOption[]
     try {
-      await this.start(entry, plan)
+      unsignedFile = await this.start(entry, plan)
     } catch (error) {
       this.running.delete(id)
       await this.cleanup(entry)
@@ -160,7 +174,7 @@ export class RdpLauncher {
       `RDP ${id}: ${plan.client.name} → ${plan.target.host}:${plan.target.port}` +
         (plan.password ? ' (password provided)' : '')
     )
-    return { launchId: id, tracked: RdpLauncher.tracked(plan.client) }
+    return { launchId: id, tracked: RdpLauncher.tracked(plan.client), unsignedFile }
   }
 
   private file(entry: Running, extension: string, data: Buffer | string): string {
@@ -176,8 +190,11 @@ export class RdpLauncher {
     return path
   }
 
-  private async start(entry: Running, plan: LaunchPlan): Promise<void> {
+  /** Chạy client; trả các tuỳ chọn buộc mstsc dùng file .rdp chưa ký (khác mstsc: rỗng). */
+  private async start(entry: Running, plan: LaunchPlan): Promise<RdpFileOnlyOption[]> {
     const { client, target, password } = plan
+    const fileOnly = mstscFileOnlyOptions(target.settings)
+    const credential = password !== null && target.username !== ''
     switch (client.kind) {
       case 'stub': {
         this.deps.recordStub?.({
@@ -188,12 +205,19 @@ export class RdpLauncher {
           domain: target.domain,
           fullScreen: target.settings.fullScreen,
           passwordProvided: password !== null,
-          rdpFile: buildRdpFile(target)
+          rdpFile: buildRdpFile(target),
+          // Như mstsc: tham số dòng lệnh nếu được, không thì file .rdp.
+          mstscArgs: fileOnly.length === 0 ? mstscArgs(target, { prompt: !credential }) : null
         })
-        return
+        return fileOnly
       }
       case 'mstsc': {
-        const file = this.file(entry, '.rdp', encodeRdpFile(buildRdpFile(target)))
+        // Tham số dòng lệnh khi đủ diễn đạt cài đặt của host: file .rdp tạm không ký được, Windows
+        // cảnh báo "Unknown publisher" mỗi lần mở.
+        const args =
+          fileOnly.length > 0
+            ? [this.file(entry, '.rdp', encodeRdpFile(buildRdpFile(target)))]
+            : mstscArgs(target, { prompt: !credential })
         if (password && target.username) {
           if (!client.cmdkey)
             throw new Error(t('cmdkey.exe was not found — cannot pass the saved password to mstsc'))
@@ -206,8 +230,8 @@ export class RdpLauncher {
           entry.credential = target.host
           this.credentialUsers.set(target.host, (this.credentialUsers.get(target.host) ?? 0) + 1)
         }
-        await this.spawnTracked(entry, client.path, [file], null)
-        return
+        await this.spawnTracked(entry, client.path, args, null)
+        return fileOnly
       }
       case 'windows-app': {
         const file = this.file(entry, '.rdp', encodeRdpFile(buildRdpFile(target)))
@@ -224,7 +248,7 @@ export class RdpLauncher {
         })
         entry.child = null
         if (code !== 0) throw new Error(t('Could not open {app}', { app: client.name }))
-        return
+        return []
       }
       case 'xfreerdp': {
         const args = freerdpArgs(target, {
@@ -232,12 +256,12 @@ export class RdpLauncher {
           passwordOnStdin: password !== null
         })
         await this.spawnTracked(entry, client.path, args, password)
-        return
+        return []
       }
       case 'remmina': {
         const file = this.file(entry, '.remmina', buildRemminaFile(target, this.deps.home))
         await this.spawnTracked(entry, client.path, remminaArgs(file), null)
-        return
+        return []
       }
     }
   }

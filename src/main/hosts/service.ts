@@ -1,9 +1,13 @@
 import type { ParsedKey } from 'ssh2'
 import { utils } from 'ssh2'
 import type {
+  AccountDeleteResolution,
+  AccountInput,
+  AccountSummary,
   GroupInput,
   GroupSummary,
   HostInput,
+  HostProtocol,
   HostSummary,
   HostTree,
   KeySummary
@@ -69,6 +73,55 @@ interface HostRow {
   auth_type: 'password' | 'key' | 'agent' | null
   has_secret: number | null
   key_id: string | null
+  shared: number | null
+  split_secrets: number | null
+}
+
+/** Một dòng bảng identities (thông tin đăng nhập riêng của host, hoặc tài khoản dùng chung). */
+interface IdentityRow {
+  id: string
+  name: string
+  username: string | null
+  auth_type: 'password' | 'key' | 'agent'
+  secret_enc: Buffer | null
+  key_id: string | null
+  shared: number
+  split_secrets: number
+  passphrase_enc: Buffer | null
+  domain: string | null
+  notes: string | null
+}
+
+/** Trường cần để giải mã secret của một identity (theo đúng cách lưu của nó). */
+interface IdentitySecretsRow {
+  identity_id: string | null
+  auth_type: string | null
+  secret_enc: Buffer | null
+  split_secrets: number | null
+  passphrase_enc: Buffer | null
+}
+
+/** Mật khẩu / passphrase đã giải mã — người gọi dispose(). */
+interface IdentitySecrets {
+  password: Secret | null
+  passphrase: Secret | null
+}
+
+/** Cách xác thực suy ra từ dữ liệu của identity dạng split (tài khoản): key → mật khẩu → tự động. */
+function splitAuthType(keyId: string | null, hasPassword: boolean): 'key' | 'password' | 'agent' {
+  return keyId ? 'key' : hasPassword ? 'password' : 'agent'
+}
+
+/** Username của tài khoản có dùng được cho host giao thức này không ('' = kế thừa, luôn được). */
+function usernameProblem(protocol: HostProtocol, username: string): string | null {
+  if (username === '') return null
+  if (protocol === 'rdp')
+    return RdpUsername.safeParse(username).success
+      ? null
+      : t('“{value}” is not a valid Windows username', { value: username })
+  return Username.safeParse(username).success
+    ? null
+    : t('“{value}” is not a valid SSH username', { value: username })
 }
 
 interface HostOptions {
@@ -162,7 +215,7 @@ export class HostService {
         `SELECT h.id, h.group_id, h.label, h.hostname, h.port, h.identity_id, h.jump_host_ids,
                 h.mode, h.options, h.tags,
                 h.color, h.last_used_at, h.favorite, h.sort, h.os, i.username, i.auth_type,
-                (i.secret_enc IS NOT NULL) AS has_secret, i.key_id
+                (i.secret_enc IS NOT NULL) AS has_secret, i.key_id, i.shared, i.split_secrets
          FROM hosts h LEFT JOIN identities i ON i.id = h.identity_id
          WHERE h.deleted_at IS NULL
          ORDER BY h.sort, h.label COLLATE NOCASE`
@@ -179,8 +232,10 @@ export class HostService {
       groups,
       hosts: rows.map((r): HostSummary => {
         const options = parseJson<HostOptions>(r.options, {})
-        const auth =
-          r.auth_type === 'password' ? 'password' : r.auth_type === 'key' ? 'key' : 'auto'
+        // Dạng split (tài khoản): secret_enc luôn là mật khẩu, có thể có cả key lẫn mật khẩu.
+        const split = r.split_secrets === 1
+        const kind = split ? splitAuthType(r.key_id, r.has_secret === 1) : (r.auth_type ?? 'agent')
+        const auth = kind === 'password' ? 'password' : kind === 'key' ? 'key' : 'auto'
         return {
           id: r.id,
           groupId: r.group_id,
@@ -189,7 +244,7 @@ export class HostService {
           port: options.inheritPort ? null : r.port,
           username: r.username ?? '',
           auth,
-          hasPassword: auth === 'password' && r.has_secret === 1,
+          hasPassword: r.has_secret === 1 && (split || auth === 'password'),
           keyId: r.key_id,
           keyFile: options.keyFile ?? null,
           proxyJump: options.proxyJump ?? null,
@@ -207,7 +262,8 @@ export class HostService {
           lastUsedAt: r.last_used_at,
           favorite: r.favorite === 1,
           sort: r.sort,
-          ...osOf(r.os)
+          ...osOf(r.os),
+          ...(r.shared === 1 && r.identity_id ? { accountId: r.identity_id } : {})
         }
       }),
       keys: keys.map((k): KeySummary => ({
@@ -216,7 +272,8 @@ export class HostService {
         type: k.type,
         fingerprint: fingerprintSha256(Buffer.from(k.public_key.split(' ')[1] ?? '', 'base64')),
         encrypted: k.encrypted === 1
-      }))
+      })),
+      accounts: this.accounts()
     }
   }
 
@@ -225,59 +282,45 @@ export class HostService {
     return this.db.transaction(() => {
       const existing = input.id
         ? (this.db
-            .prepare('SELECT identity_id FROM hosts WHERE id = ? AND deleted_at IS NULL')
-            .get(input.id) as { identity_id: string | null } | undefined)
+            .prepare(
+              `SELECT h.identity_id, i.shared, i.split_secrets
+               FROM hosts h LEFT JOIN identities i ON i.id = h.identity_id
+               WHERE h.id = ? AND h.deleted_at IS NULL`
+            )
+            .get(input.id) as
+            | { identity_id: string | null; shared: number | null; split_secrets: number | null }
+            | undefined)
         : undefined
       if (input.id && !existing) throw new Error(t('Host not found'))
-      if (input.auth === 'key' && !input.keyId) throw new Error(t('No key selected'))
+      const accountId = input.accountId ?? null
+      if (!accountId && input.auth === 'key' && !input.keyId) throw new Error(t('No key selected'))
       this.checkProtocolFields(input)
       this.checkJumps(input.id ?? null, input.jumpHostIds)
 
       const hostId = input.id ?? uuidv7(now)
-      const identityId = existing?.identity_id ?? uuidv7(now)
-      const authType = input.auth === 'auto' ? 'agent' : input.auth
-
-      // Secret: password (auth=password) hoặc passphrase (auth=key). undefined = giữ nguyên.
-      const newSecret =
-        input.auth === 'password' ? input.password : input.auth === 'key' ? input.passphrase : ''
-      const ref = { table: 'identities', id: identityId, field: 'secret_enc' }
-      let secretSql = 'secret_enc'
-      const params: unknown[] = []
-      if (newSecret !== undefined) {
-        secretSql = '?'
-        params.push(newSecret === '' ? null : this.vault.encryptString(ref, newSecret))
-      }
-
-      if (existing?.identity_id) {
-        this.db
-          .prepare(
-            `UPDATE identities SET name = ?, username = ?, auth_type = ?, secret_enc = ${secretSql},
-                    key_id = ?, updated_at = ? WHERE id = ?`
-          )
-          .run(
-            input.label,
-            input.username,
-            authType,
-            ...params,
-            input.auth === 'key' ? input.keyId : null,
-            now,
-            identityId
-          )
+      // Identity riêng của host (không phải tài khoản dùng chung) — sửa tại chỗ hoặc bỏ đi.
+      const ownIdentity =
+        existing?.identity_id && existing.shared !== 1 ? existing.identity_id : null
+      let identityId: string
+      if (accountId) {
+        identityId = this.linkAccount(input, accountId)
+        if (ownIdentity) this.retireIdentity(ownIdentity, now)
+      } else if (ownIdentity && existing?.split_secrets !== 1 && !input.secretsFrom) {
+        identityId = ownIdentity
+        this.writeOwnIdentity(input, ownIdentity, null, true)
       } else {
-        this.db
-          .prepare(
-            `INSERT INTO identities (id, name, username, auth_type, secret_enc, key_id, updated_at)
-             VALUES (?, ?, ?, ?, ${newSecret === undefined ? 'NULL' : '?'}, ?, ?)`
-          )
-          .run(
-            identityId,
-            input.label,
-            input.username,
-            authType,
-            ...params,
-            input.auth === 'key' ? input.keyId : null,
-            now
-          )
+        // Host vừa thôi dùng tài khoản (hoặc identity tách từ tài khoản): tạo identity riêng mới,
+        // mật khẩu / passphrase không nhập lại thì chép từ tài khoản / identity cũ.
+        const sourceId =
+          input.secretsFrom ??
+          (existing?.shared === 1 ? existing.identity_id : null) ??
+          (existing?.split_secrets === 1 ? ownIdentity : null)
+        const source = sourceId ? this.identityRow(sourceId) : undefined
+        if (input.secretsFrom && source?.shared !== 1)
+          throw new Error(t('The selected account no longer exists'))
+        identityId = uuidv7(now)
+        this.writeOwnIdentity(input, identityId, source ?? null, false)
+        if (ownIdentity) this.retireIdentity(ownIdentity, now)
       }
 
       const options: HostOptions = {}
@@ -332,7 +375,90 @@ export class HostService {
     })()
   }
 
-  /** Xoá mềm (giữ tombstone cho sync) và xoá secret ngay. */
+  /** Kiểm tài khoản host sắp liên kết tới; trả id của nó. */
+  private linkAccount(input: HostInput, accountId: string): string {
+    const protocol = input.protocol ?? 'ssh'
+    if (protocol !== 'ssh' && protocol !== 'rdp')
+      throw new Error(t('Accounts can only be used by SSH and Remote Desktop hosts'))
+    const account = this.accountRow(accountId)
+    if (!account) throw new Error(t('The selected account no longer exists'))
+    const problem = usernameProblem(protocol, account.username ?? '')
+    if (problem) throw new Error(problem)
+    return account.id
+  }
+
+  /**
+   * Ghi identity riêng của host theo cách lưu cũ (một secret: mật khẩu khi auth = password,
+   * passphrase khi auth = key). `update` = sửa dòng có sẵn; không thì thêm mới. Secret không nhập
+   * (undefined): dòng có sẵn giữ nguyên; dòng mới lấy từ `source` (tài khoản vừa bỏ chọn) nếu có.
+   */
+  private writeOwnIdentity(
+    input: HostInput,
+    identityId: string,
+    source: IdentityRow | null,
+    update: boolean
+  ): void {
+    const now = this.now()
+    const authType = input.auth === 'auto' ? 'agent' : input.auth
+    const keyId = input.auth === 'key' ? input.keyId : null
+    let newSecret =
+      input.auth === 'password' ? input.password : input.auth === 'key' ? input.passphrase : ''
+    if (newSecret === undefined && !update && source) {
+      const secrets = this.identitySecrets({ ...source, identity_id: source.id })
+      try {
+        if (input.auth === 'password') newSecret = secrets.password?.revealString()
+        // Passphrase chỉ có nghĩa với đúng key của tài khoản.
+        if (input.auth === 'key' && source.key_id === keyId)
+          newSecret = secrets.passphrase?.revealString()
+      } finally {
+        secrets.password?.dispose()
+        secrets.passphrase?.dispose()
+      }
+    }
+    const sealed =
+      newSecret === undefined || newSecret === ''
+        ? null
+        : this.vault.encryptString(
+            { table: 'identities', id: identityId, field: 'secret_enc' },
+            newSecret
+          )
+    if (update) {
+      this.db
+        .prepare(
+          `UPDATE identities SET name = ?, username = ?, auth_type = ?,
+                  secret_enc = ${newSecret === undefined ? 'secret_enc' : '?'},
+                  key_id = ?, updated_at = ? WHERE id = ?`
+        )
+        .run(
+          input.label,
+          input.username,
+          authType,
+          ...(newSecret === undefined ? [] : [sealed]),
+          keyId,
+          now,
+          identityId
+        )
+      return
+    }
+    this.db
+      .prepare(
+        `INSERT INTO identities (id, name, username, auth_type, secret_enc, key_id, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(identityId, input.label, input.username, authType, sealed, keyId, now)
+  }
+
+  /** Bỏ identity riêng của host (xoá mềm, xoá secret ngay). Không bao giờ đụng tài khoản dùng chung. */
+  private retireIdentity(identityId: string, now: number): void {
+    this.db
+      .prepare(
+        `UPDATE identities SET secret_enc = NULL, passphrase_enc = NULL, deleted_at = ?,
+                updated_at = ? WHERE id = ? AND shared = 0`
+      )
+      .run(now, now, identityId)
+  }
+
+  /** Xoá mềm (giữ tombstone cho sync) và xoá secret ngay. Tài khoản dùng chung thì giữ nguyên. */
   deleteHost(id: string): void {
     const now = this.now()
     this.db.transaction(() => {
@@ -342,13 +468,7 @@ export class HostService {
       this.db
         .prepare('UPDATE hosts SET deleted_at = ?, updated_at = ? WHERE id = ?')
         .run(now, now, id)
-      if (row.identity_id) {
-        this.db
-          .prepare(
-            'UPDATE identities SET secret_enc = NULL, deleted_at = ?, updated_at = ? WHERE id = ?'
-          )
-          .run(now, now, row.identity_id)
-      }
+      if (row.identity_id) this.retireIdentity(row.identity_id, now)
     })()
   }
 
@@ -557,7 +677,7 @@ export class HostService {
     this.db.transaction(() => {
       const row = this.db
         .prepare(
-          `SELECT h.label, h.identity_id, i.auth_type, i.id AS existing
+          `SELECT h.label, h.identity_id, i.auth_type, i.id AS existing, i.split_secrets
            FROM hosts h LEFT JOIN identities i ON i.id = h.identity_id
            WHERE h.id = ? AND h.deleted_at IS NULL`
         )
@@ -567,9 +687,23 @@ export class HostService {
             identity_id: string | null
             auth_type: string | null
             existing: string | null
+            split_secrets: number | null
           }
         | undefined
       if (!row) throw new Error(t('Host not found'))
+      if (row.existing && row.split_secrets === 1) {
+        // Tài khoản (hoặc identity tách từ tài khoản): mật khẩu có cột riêng, key giữ nguyên —
+        // lưu vào tài khoản thì mọi host dùng tài khoản đó đều có mật khẩu mới.
+        const ref = { table: 'identities', id: row.existing, field: 'secret_enc' }
+        this.db
+          .prepare(
+            `UPDATE identities SET secret_enc = ?,
+                    auth_type = CASE WHEN key_id IS NULL THEN 'password' ELSE 'key' END,
+                    updated_at = ? WHERE id = ?`
+          )
+          .run(this.vault.encryptString(ref, password), now, row.existing)
+        return
+      }
       if (row.auth_type === 'key') throw new Error(t('This host signs in with an SSH key'))
       if (row.existing) {
         const ref = { table: 'identities', id: row.existing, field: 'secret_enc' }
@@ -670,42 +804,13 @@ export class HostService {
       const newId = uuidv7(now)
       let identityId: string | null = null
       if (typeof host['identity_id'] === 'string') {
-        const identity = this.db
-          .prepare('SELECT * FROM identities WHERE id = ?')
-          .get(host['identity_id']) as Record<string, unknown> | undefined
-        if (identity) {
-          identityId = uuidv7(now)
-          // Secret được mã hoá gắn với id identity (AD) → giải mã rồi mã hoá lại cho id mới.
-          let secretEnc: Buffer | null = null
-          if (identity['secret_enc'] instanceof Buffer) {
-            const secret = this.vault.decrypt(
-              { table: 'identities', id: String(identity['id']), field: 'secret_enc' },
-              identity['secret_enc']
-            )
-            try {
-              secretEnc = this.vault.encryptString(
-                { table: 'identities', id: identityId, field: 'secret_enc' },
-                secret.revealString()
-              )
-            } finally {
-              secret.dispose()
-            }
-          }
-          this.db
-            .prepare(
-              `INSERT INTO identities (id, name, username, auth_type, secret_enc, key_id, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`
-            )
-            .run(
-              identityId,
-              identity['name'],
-              identity['username'],
-              identity['auth_type'],
-              secretEnc,
-              identity['key_id'],
-              now
-            )
-        }
+        const identity = this.identityRow(host['identity_id'])
+        // Tài khoản dùng chung: bản sao cũng liên kết tới nó. Identity riêng: chép (kể cả secret).
+        if (identity)
+          identityId =
+            identity.shared === 1
+              ? identity.id
+              : this.copyIdentity(identity, { name: identity.name, shared: false }, now)
       }
       const label = this.uniqueLabel(String(host['label']))
       this.db
@@ -835,6 +940,19 @@ export class HostService {
   }
 
   deleteKey(id: string): void {
+    const accounts = this.db
+      .prepare(
+        `SELECT name FROM identities WHERE key_id = ? AND shared = 1 AND deleted_at IS NULL
+         ORDER BY name COLLATE NOCASE`
+      )
+      .all(id) as { name: string }[]
+    const [first] = accounts
+    if (first && accounts.length === 1)
+      throw new Error(t('The key is used by the account “{name}”', { name: first.name }))
+    if (accounts.length > 1)
+      throw new Error(
+        tn(accounts.length, 'The key is used by {n} account', 'The key is used by {n} accounts')
+      )
     const inUse = this.db
       .prepare('SELECT COUNT(*) AS n FROM identities WHERE key_id = ? AND deleted_at IS NULL')
       .get(id) as { n: number }
@@ -1039,35 +1157,30 @@ export class HostService {
     const row = this.db
       .prepare(
         `SELECT h.label, h.hostname, h.port, h.options, i.id AS identity_id, i.username,
-                i.auth_type, i.secret_enc
+                i.auth_type, i.secret_enc, i.split_secrets, i.passphrase_enc, i.domain
          FROM hosts h LEFT JOIN identities i ON i.id = h.identity_id
          WHERE h.id = ? AND h.deleted_at IS NULL`
       )
       .get(hostId) as
-      | {
+      | (IdentitySecretsRow & {
           label: string
           hostname: string
           port: number
           options: string
-          identity_id: string | null
           username: string | null
-          auth_type: string | null
-          secret_enc: Buffer | null
-        }
+          domain: string | null
+        })
       | undefined
     if (!row) throw new Error(t('Host not found'))
     const options = parseJson<HostOptions>(row.options, {})
     if (options.protocol !== 'rdp')
       throw new Error(t('"{name}" is not a Remote Desktop host', { name: row.label }))
-    const settings = rdpSettingsOf(options)
+    const own = rdpSettingsOf(options)
+    // Domain của tài khoản (nếu có) thay domain đặt ở host.
+    const settings = row.domain ? { ...own, domain: row.domain } : own
     const via = settings.viaHostId ? this.tunnelHost(settings.viaHostId) : null
-    const password =
-      row.auth_type === 'password' && row.secret_enc && row.identity_id
-        ? this.vault.decrypt(
-            { table: 'identities', id: row.identity_id, field: 'secret_enc' },
-            row.secret_enc
-          )
-        : null
+    // RDP không dùng key: chỉ lấy mật khẩu (passphrase không giải mã).
+    const { password } = this.identitySecrets({ ...row, passphrase_enc: null })
     if (touch)
       this.db.prepare('UPDATE hosts SET last_used_at = ? WHERE id = ?').run(this.now(), hostId)
     return {
@@ -1078,6 +1191,296 @@ export class HostService {
       settings,
       password,
       via
+    }
+  }
+
+  // ---------- Tài khoản dùng chung (Settings → Accounts) ----------
+
+  /** Danh sách tài khoản (không secret) kèm host đang dùng từng tài khoản. */
+  accounts(): AccountSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, name, username, (secret_enc IS NOT NULL) AS has_password, key_id,
+                (passphrase_enc IS NOT NULL) AS has_passphrase, domain, notes, updated_at
+         FROM identities WHERE shared = 1 AND deleted_at IS NULL
+         ORDER BY name COLLATE NOCASE`
+      )
+      .all() as {
+      id: string
+      name: string
+      username: string | null
+      has_password: number
+      key_id: string | null
+      has_passphrase: number
+      domain: string | null
+      notes: string | null
+      updated_at: number
+    }[]
+    const users = new Map<string, string[]>()
+    const linked = this.db
+      .prepare(
+        `SELECT h.id, h.identity_id FROM hosts h JOIN identities i ON i.id = h.identity_id
+         WHERE h.deleted_at IS NULL AND i.shared = 1 ORDER BY h.label COLLATE NOCASE`
+      )
+      .all() as { id: string; identity_id: string }[]
+    for (const l of linked) users.set(l.identity_id, [...(users.get(l.identity_id) ?? []), l.id])
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      username: r.username ?? '',
+      hasPassword: r.has_password === 1,
+      keyId: r.key_id,
+      hasPassphrase: r.has_passphrase === 1,
+      domain: r.domain ?? '',
+      notes: r.notes ?? '',
+      hostIds: users.get(r.id) ?? [],
+      updatedAt: r.updated_at
+    }))
+  }
+
+  /**
+   * Tạo / sửa tài khoản. Mật khẩu / passphrase: undefined = giữ, '' = xoá. Đổi hoặc bỏ key thì
+   * passphrase cũ bị xoá (nó thuộc về key cũ) trừ khi nhập passphrase mới.
+   */
+  saveAccount(input: AccountInput): string {
+    const now = this.now()
+    const name = input.name.trim()
+    return this.db.transaction(() => {
+      const existing = input.id ? this.accountRow(input.id) : undefined
+      if (input.id && !existing) throw new Error(t('The account no longer exists'))
+      const clash = this.db
+        .prepare(
+          `SELECT 1 FROM identities WHERE shared = 1 AND deleted_at IS NULL AND id IS NOT ?
+             AND name = ? COLLATE NOCASE`
+        )
+        .get(input.id ?? null, name)
+      if (clash) throw new Error(t('There is already an account named “{name}”', { name }))
+      if (input.keyId) {
+        const key = this.db
+          .prepare('SELECT 1 FROM keys WHERE id = ? AND deleted_at IS NULL')
+          .get(input.keyId)
+        if (!key) throw new Error(t('The selected key no longer exists'))
+      }
+      if (existing) this.checkAccountUsers(existing.id, input.username)
+
+      const id = existing?.id ?? uuidv7(now)
+      const seal = (field: 'secret_enc' | 'passphrase_enc', value: string): Buffer =>
+        this.vault.encryptString({ table: 'identities', id, field }, value)
+      const password =
+        input.password === undefined
+          ? (existing?.secret_enc ?? null)
+          : input.password === ''
+            ? null
+            : seal('secret_enc', input.password)
+      const passphrase = !input.keyId
+        ? null
+        : input.passphrase !== undefined
+          ? input.passphrase === ''
+            ? null
+            : seal('passphrase_enc', input.passphrase)
+          : existing?.key_id === input.keyId
+            ? existing.passphrase_enc
+            : null
+      const values = [
+        name,
+        input.username,
+        splitAuthType(input.keyId, password !== null),
+        password,
+        input.keyId,
+        passphrase,
+        input.domain || null,
+        input.notes.trim() || null,
+        now
+      ]
+      if (existing) {
+        this.db
+          .prepare(
+            `UPDATE identities SET name = ?, username = ?, auth_type = ?, secret_enc = ?, key_id = ?,
+                    passphrase_enc = ?, domain = ?, notes = ?, updated_at = ? WHERE id = ?`
+          )
+          .run(...values, id)
+      } else {
+        this.db
+          .prepare(
+            `INSERT INTO identities (name, username, auth_type, secret_enc, key_id, passphrase_enc,
+                                     domain, notes, updated_at, id, shared, split_secrets)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)`
+          )
+          .run(...values, id)
+      }
+      return id
+    })()
+  }
+
+  /** Nhân bản tài khoản (kể cả mật khẩu / passphrase trong vault). Trả về id mới. */
+  duplicateAccount(id: string): string {
+    const now = this.now()
+    return this.db.transaction(() => {
+      const account = this.accountRow(id)
+      if (!account) throw new Error(t('The account no longer exists'))
+      const root = account.name.replace(/ \(copy(?: \d+)?\)$/, '')
+      const taken = this.db.prepare(
+        `SELECT 1 FROM identities WHERE shared = 1 AND deleted_at IS NULL
+           AND name = ? COLLATE NOCASE`
+      )
+      for (let n = 1; ; n++) {
+        const name = n === 1 ? `${root} (copy)` : `${root} (copy ${n})`
+        if (!taken.get(name)) return this.copyIdentity(account, { name, shared: true }, now)
+      }
+    })()
+  }
+
+  /**
+   * Xoá tài khoản. Đang có host dùng thì phải chọn cách xử lý: chuyển các host sang tài khoản khác
+   * (`reassign`) hoặc chép thông tin tài khoản vào từng host (`convert` — host vẫn kết nối được như
+   * cũ). Không chọn → lỗi, không xoá gì.
+   */
+  deleteAccount(id: string, resolution: AccountDeleteResolution | null = null): void {
+    const now = this.now()
+    this.db.transaction(() => {
+      const account = this.accountRow(id)
+      if (!account) return
+      const users = this.db
+        .prepare('SELECT id FROM hosts WHERE identity_id = ? AND deleted_at IS NULL')
+        .all(id) as { id: string }[]
+      if (users.length > 0) {
+        if (!resolution)
+          throw new Error(
+            tn(users.length, 'The account is used by {n} host', 'The account is used by {n} hosts')
+          )
+        if (resolution.mode === 'reassign') {
+          if (resolution.accountId === id)
+            throw new Error(t('Choose a different account for the hosts'))
+          const target = this.accountRow(resolution.accountId)
+          if (!target) throw new Error(t('The selected account no longer exists'))
+          this.checkAccountUsers(id, target.username ?? '')
+          this.db
+            .prepare('UPDATE hosts SET identity_id = ?, updated_at = ? WHERE identity_id = ?')
+            .run(target.id, now, id)
+        } else {
+          const relink = this.db.prepare(
+            'UPDATE hosts SET identity_id = ?, updated_at = ? WHERE id = ?'
+          )
+          for (const host of users) {
+            const copy = this.copyIdentity(account, { name: account.name, shared: false }, now)
+            relink.run(copy, now, host.id)
+          }
+        }
+      }
+      // Host đã xoá (tombstone) có thể vẫn trỏ tới; khoá ngoại SET NULL không áp vì chỉ xoá mềm.
+      this.db
+        .prepare(
+          `UPDATE identities SET secret_enc = NULL, passphrase_enc = NULL, deleted_at = ?,
+                  updated_at = ? WHERE id = ?`
+        )
+        .run(now, now, id)
+    })()
+  }
+
+  /** Username mới của tài khoản phải dùng được cho mọi host đang dùng nó (SSH / Windows). */
+  private checkAccountUsers(accountId: string, username: string): void {
+    const hosts = this.db
+      .prepare('SELECT label, options FROM hosts WHERE identity_id = ? AND deleted_at IS NULL')
+      .all(accountId) as { label: string; options: string }[]
+    for (const h of hosts) {
+      const protocol = parseJson<HostOptions>(h.options, {}).protocol ?? 'ssh'
+      const problem = usernameProblem(protocol, username)
+      if (problem) throw new Error(`${problem} (${h.label})`)
+    }
+  }
+
+  private identityRow(id: string): IdentityRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT id, name, username, auth_type, secret_enc, key_id, shared, split_secrets,
+                passphrase_enc, domain, notes
+         FROM identities WHERE id = ? AND deleted_at IS NULL`
+      )
+      .get(id) as IdentityRow | undefined
+  }
+
+  private accountRow(id: string): IdentityRow | undefined {
+    const row = this.identityRow(id)
+    return row?.shared === 1 ? row : undefined
+  }
+
+  /** Chép một identity sang id mới (secret được mã hoá gắn với id → giải mã rồi mã hoá lại). */
+  private copyIdentity(
+    row: IdentityRow,
+    target: { name: string; shared: boolean },
+    now: number
+  ): string {
+    const id = uuidv7(now)
+    const reseal = (field: 'secret_enc' | 'passphrase_enc', blob: Buffer | null): Buffer | null => {
+      if (!blob) return null
+      const secret = this.vault.decrypt({ table: 'identities', id: row.id, field }, blob)
+      try {
+        return this.vault.encryptString({ table: 'identities', id, field }, secret.revealString())
+      } finally {
+        secret.dispose()
+      }
+    }
+    this.db
+      .prepare(
+        `INSERT INTO identities (id, name, username, auth_type, secret_enc, key_id, updated_at,
+                                 shared, split_secrets, passphrase_enc, domain, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        id,
+        target.name,
+        row.username,
+        row.auth_type,
+        reseal('secret_enc', row.secret_enc),
+        row.key_id,
+        now,
+        target.shared ? 1 : 0,
+        row.split_secrets,
+        reseal('passphrase_enc', row.passphrase_enc),
+        row.domain,
+        row.notes
+      )
+    return id
+  }
+
+  /**
+   * Giải mã mật khẩu / passphrase của identity theo cách lưu của nó — dạng split: hai cột riêng;
+   * dạng cũ: secret_enc là mật khẩu (auth = password) hoặc passphrase (auth = key).
+   */
+  private identitySecrets(row: IdentitySecretsRow): IdentitySecrets {
+    const id = row.identity_id
+    if (!id) return { password: null, passphrase: null }
+    const open = (field: 'secret_enc' | 'passphrase_enc', blob: Buffer | null): Secret | null =>
+      blob ? this.vault.decrypt({ table: 'identities', id, field }, blob) : null
+    if (row.split_secrets === 1) {
+      const password = open('secret_enc', row.secret_enc)
+      try {
+        return { password, passphrase: open('passphrase_enc', row.passphrase_enc) }
+      } catch (error) {
+        password?.dispose()
+        throw error
+      }
+    }
+    return {
+      password: row.auth_type === 'password' ? open('secret_enc', row.secret_enc) : null,
+      passphrase: row.auth_type === 'key' ? open('secret_enc', row.secret_enc) : null
+    }
+  }
+
+  /** Private key trong vault (dạng gửi cho Session Host); null = key đã bị xoá. */
+  private loadKey(id: string): { data: string; label: string } | null {
+    const key = this.db
+      .prepare('SELECT name, private_key_enc FROM keys WHERE id = ? AND deleted_at IS NULL')
+      .get(id) as { name: string; private_key_enc: Buffer } | undefined
+    if (!key) return null
+    const pem = this.vault.decrypt(
+      { table: 'keys', id, field: 'private_key_enc' },
+      key.private_key_enc
+    )
+    try {
+      return { data: pem.revealString(), label: key.name }
+    } finally {
+      pem.dispose()
     }
   }
 
@@ -1169,22 +1572,19 @@ export class HostService {
     const row = this.db
       .prepare(
         `SELECT h.label, h.hostname, h.port, h.options, i.id AS identity_id, i.username,
-                i.auth_type, i.secret_enc, i.key_id
+                i.auth_type, i.secret_enc, i.key_id, i.split_secrets, i.passphrase_enc
          FROM hosts h LEFT JOIN identities i ON i.id = h.identity_id
          WHERE h.id = ? AND h.deleted_at IS NULL`
       )
       .get(hostId) as
-      | {
+      | (IdentitySecretsRow & {
           label: string
           hostname: string
           port: number
           options: string
-          identity_id: string | null
           username: string | null
-          auth_type: string | null
-          secret_enc: Buffer | null
           key_id: string | null
-        }
+        })
       | undefined
     if (!row) throw new Error(t('Host not found'))
     const options = parseJson<HostOptions>(row.options, {})
@@ -1197,53 +1597,30 @@ export class HostService {
     const port = options.inheritPort ? (inherited.port?.value ?? 22) : row.port
 
     const credentials: ResolvedHost['credentials'] = {}
-    const secret =
-      row.secret_enc && row.identity_id
-        ? this.vault.decrypt(
-            { table: 'identities', id: row.identity_id, field: 'secret_enc' },
-            row.secret_enc
-          )
-        : null
+    // Dạng split (tài khoản): có thể có cả key lẫn mật khẩu — thử key trước rồi tới mật khẩu
+    // (thứ tự của bộ xác thực trong Session Host). Dạng cũ: một trong hai theo auth_type.
+    const split = row.split_secrets === 1
+    const keyId = split || row.auth_type === 'key' ? row.key_id : null
+    const secrets = this.identitySecrets(row)
+    const automatic = split ? !keyId && !secrets.password : row.auth_type === 'agent'
     try {
-      if (row.auth_type === 'password' && secret) credentials.password = secret.revealString()
+      if (secrets.password) credentials.password = secrets.password.revealString()
       // Automatic: thử thêm key mặc định của nhóm (nếu key vẫn còn trong vault).
-      if (row.auth_type === 'agent' && inherited.keyId) {
-        const groupKey = this.db
-          .prepare('SELECT name, private_key_enc FROM keys WHERE id = ? AND deleted_at IS NULL')
-          .get(inherited.keyId.value) as { name: string; private_key_enc: Buffer } | undefined
-        if (groupKey) {
-          const pem = this.vault.decrypt(
-            { table: 'keys', id: inherited.keyId.value, field: 'private_key_enc' },
-            groupKey.private_key_enc
-          )
-          try {
-            credentials.privateKey = { data: pem.revealString(), label: groupKey.name }
-          } finally {
-            pem.dispose()
-          }
-        }
+      if (automatic && inherited.keyId) {
+        const groupKey = this.loadKey(inherited.keyId.value)
+        if (groupKey) credentials.privateKey = groupKey
       }
-      if (row.auth_type === 'key' && row.key_id) {
-        const key = this.db
-          .prepare('SELECT name, private_key_enc FROM keys WHERE id = ?')
-          .get(row.key_id) as { name: string; private_key_enc: Buffer } | undefined
+      if (keyId) {
+        const key = this.loadKey(keyId)
         if (!key) throw new Error(t('The key of this host has been deleted'))
-        const pem = this.vault.decrypt(
-          { table: 'keys', id: row.key_id, field: 'private_key_enc' },
-          key.private_key_enc
-        )
-        try {
-          credentials.privateKey = {
-            data: pem.revealString(),
-            label: key.name,
-            ...(secret ? { passphrase: secret.revealString() } : {})
-          }
-        } finally {
-          pem.dispose()
+        credentials.privateKey = {
+          ...key,
+          ...(secrets.passphrase ? { passphrase: secrets.passphrase.revealString() } : {})
         }
       }
     } finally {
-      secret?.dispose()
+      secrets.password?.dispose()
+      secrets.passphrase?.dispose()
     }
 
     return {
@@ -1252,7 +1629,9 @@ export class HostService {
       credentials,
       ...(options.keyFile ? { keyFiles: [options.keyFile] } : {}),
       ...(options.legacy ? { legacyAlgorithms: true } : {}),
-      ...(row.auth_type === 'password' || row.auth_type === 'key' ? { storedOnly: true } : {}),
+      ...((split ? !automatic : row.auth_type === 'password' || row.auth_type === 'key')
+        ? { storedOnly: true }
+        : {}),
       ...(options.tmux ? { tmux: true } : {})
     }
   }

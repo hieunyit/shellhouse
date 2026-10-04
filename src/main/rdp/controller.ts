@@ -8,6 +8,7 @@ import {
   type RdpLaunchRequest,
   type RdpLaunchResult
 } from '@shared/rdp'
+import { unsignedRdpNotice } from '@shared/rdp-notice'
 import type { ResolvedRdp } from '../hosts/service'
 import { installHint, type DetectedClient } from './detect'
 import type { RdpLauncher } from './launcher'
@@ -116,8 +117,18 @@ export class RdpController {
         (needsStdinPassword(client) ? (request.password ?? null) : null)
       if (needsStdinPassword(client) && password === null)
         return { ok: false, message: t('Enter the password to connect'), hint: null }
-      const { launchId, tracked } = await this.deps.launcher.launch({ client, target, password })
-      return { ok: true, launchId, client: { kind: client.kind, name: client.name }, tracked }
+      const { launchId, tracked, unsignedFile } = await this.deps.launcher.launch({
+        client,
+        target,
+        password
+      })
+      return {
+        ok: true,
+        launchId,
+        client: { kind: client.kind, name: client.name },
+        tracked,
+        notice: unsignedRdpNotice(unsignedFile)
+      }
     } catch (error) {
       return { ok: false, message: message(error), hint: null }
     } finally {

@@ -6,6 +6,28 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.12] - 2026-10-04
+
+### Added
+
+- **Accounts** — Settings → Accounts: reusable credentials with username, password, SSH key
+  (pick, import or generate), key passphrase, domain (RDP) and notes; secrets stay encrypted in
+  the vault. In the host form pick an account instead of typing credentials (SSH and RDP); editing
+  the account updates every host that uses it, and SSH logins with the account's key + passphrase
+  need no prompt. Deleting an account in use offers to keep the credentials on each host or move
+  the hosts to another account.
+
+### Fixed
+
+- **RDP in a tab failed on Windows servers** with `KEY_USAGE_BIT_INCORRECT`: Windows' self-signed
+  RDP certificates lack the digital-signature key usage, which Electron's TLS library enforces.
+  Shellhouse now retries with TLS 1.2 RSA key exchange only for such certificates (certificate
+  pinning unchanged; the status bar shows "TLS 1.2 (RSA)").
+- **mstsc showed "Unknown publisher"**: Shellhouse now starts mstsc with command-line options
+  instead of an unsigned `.rdp` file; a file is used only for options the command line cannot set
+  (drive / printer redirection, RD Gateway…), and the host form says so.
+- The "Save password in vault" option says when the password is saved to a shared account.
+
 ## [1.2.0-beta.11] - 2026-10-04
 
 ### Added

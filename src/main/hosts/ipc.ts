@@ -298,6 +298,21 @@ export function registerHostIpc(
     )
   )
 
+  handle('accounts:save', isTrustedSender, (input) =>
+    changing(() => mutation(() => service.saveAccount(input)))
+  )
+  handle('accounts:duplicate', isTrustedSender, (id) =>
+    changing(() => mutation(() => service.duplicateAccount(id)))
+  )
+  handle('accounts:delete', isTrustedSender, (id, resolution) =>
+    changing(() =>
+      mutation(() => {
+        service.deleteAccount(id, resolution)
+        return id
+      })
+    )
+  )
+
   handle('sshConfig:scan', isTrustedSender, () =>
     scanSshConfig(readSshConfig(), {
       home: app.getPath('home'),

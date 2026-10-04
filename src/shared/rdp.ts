@@ -109,6 +109,40 @@ export const DEFAULT_RDP: RdpSettings = {
   viaHostId: null
 }
 
+/**
+ * Tuỳ chọn mstsc chỉ nhận qua file .rdp — không có tham số dòng lệnh tương ứng. Chạy bằng tham số
+ * (/v: /f /w: /h: /multimon) thì mstsc lấy phần còn lại từ Default.rdp của người dùng; file .rdp
+ * tạm thì chưa ký nên từ 2025 Windows luôn hiện cảnh báo "Unknown publisher" → chỉ dùng file khi
+ * host bật tuỳ chọn cần đến nó.
+ */
+export type RdpFileOnlyOption =
+  'clipboard' | 'drives' | 'audio' | 'printers' | 'gateway' | 'scale' | 'smartSizing'
+
+export function mstscFileOnlyOptions(
+  s: Pick<
+    RdpSettings,
+    | 'clipboard'
+    | 'drives'
+    | 'audio'
+    | 'printers'
+    | 'gateway'
+    | 'scale'
+    | 'dynamicResolution'
+    | 'fullScreen'
+  >
+): RdpFileOnlyOption[] {
+  const out: RdpFileOnlyOption[] = []
+  if (!s.clipboard) out.push('clipboard')
+  if (s.drives) out.push('drives')
+  if (!s.audio) out.push('audio')
+  if (s.printers) out.push('printers')
+  if (s.gateway) out.push('gateway')
+  if (s.scale !== null) out.push('scale')
+  // Cửa sổ không đổi độ phân giải theo kích thước → co giãn hình (smart sizing, chỉ có trong file).
+  if (!s.dynamicResolution && !s.fullScreen) out.push('smartSizing')
+  return out
+}
+
 /** Client RDP Shellhouse biết mở. `stub` chỉ có khi chạy E2E. */
 export const RdpClientKind = z.enum(['mstsc', 'windows-app', 'xfreerdp', 'remmina', 'stub'])
 export type RdpClientKind = z.infer<typeof RdpClientKind>
@@ -160,7 +194,9 @@ export const RdpLaunchResult = z.discriminatedUnion('ok', [
      * true = Shellhouse giữ tiến trình client (biết khi nào nó thoát, Disconnect đóng được nó);
      * false = đã giao cho ứng dụng khác (macOS `open`, Remmina đang chạy sẵn).
      */
-    tracked: z.boolean()
+    tracked: z.boolean(),
+    /** Lưu ý cho người dùng (vd. Windows sẽ cảnh báo file .rdp chưa ký). */
+    notice: z.string().nullable()
   }),
   z.object({ ok: z.literal(false), message: z.string(), hint: z.string().nullable() })
 ])

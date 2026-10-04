@@ -10,6 +10,8 @@ export const rdpViewer: Readonly<Record<string, string>> = {
   'The server certificate has not been trusted yet': 'Chưa tin chứng chỉ của server',
   // Session Host (proxy)
   'The SSH connection for the tunnel is not open': 'Kết nối SSH cho tunnel chưa mở',
+  'The TLS handshake with the server was inconsistent (possible interception) — connection stopped':
+    'Bắt tay TLS với server không nhất quán (có thể bị chặn giữa đường) — đã dừng kết nối',
   '{address} refused the connection — is Remote Desktop enabled?':
     '{address} từ chối kết nối — Remote Desktop đã bật chưa?',
   'Timed out connecting to {address}': 'Hết thời gian chờ kết nối tới {address}',
@@ -68,6 +70,8 @@ export const rdpViewer: Readonly<Record<string, string>> = {
   'Waiting for you to check the certificate': 'Chờ bạn kiểm tra chứng chỉ',
   'Waiting for credentials': 'Chờ thông tin đăng nhập',
   'Encrypted with TLS; server certificate verified': 'Mã hoá TLS; đã xác minh chứng chỉ server',
+  'Encrypted with TLS 1.2 using RSA key exchange ({cipher}): the server certificate does not allow modern key exchange, as is usual for Windows. Server certificate verified':
+    'Mã hoá TLS 1.2, trao đổi khoá RSA ({cipher}): chứng chỉ server không cho phép trao đổi khoá hiện đại (thường gặp với Windows). Đã xác minh chứng chỉ server',
   'via {via}': 'qua {via}',
   // Renderer — luồng kết nối
   'The username or password is incorrect': 'Sai tên đăng nhập hoặc mật khẩu',
