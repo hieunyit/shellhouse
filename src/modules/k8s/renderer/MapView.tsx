@@ -78,7 +78,7 @@ import {
   ViewSwitch,
   useElementWidth
 } from './MapControls'
-import { panelOverlay, toolbarFit } from '../shared/toolbarFit'
+import { panelOverlayStable, toolbarFitStable, type ToolbarFit } from '../shared/toolbarFit'
 import { TopologyMap } from './topology/TopologyMap'
 import { MapPanel, HoverCard } from './MapPanel'
 import { buildMapEdges } from './mapEdges'
@@ -226,7 +226,14 @@ function MapInner({
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null)
   // Độ rộng thật của thanh công cụ → mức gọn (cửa sổ hẹp / sidebar host rộng / bảng tài nguyên).
   const [toolbarRef, toolbarWidth] = useElementWidth()
-  const barFit = toolbarFit(toolbarWidth)
+  // Khoảng đệm chống dao động ở sát ngưỡng (đổi mức → xuống dòng / thanh cuộn → độ rộng đổi → …).
+  // Giữ mức trước trong state, cập nhật ngay trong lúc render (pattern "state suy ra" của React).
+  const [prevFit, setPrevFit] = useState<ToolbarFit | null>(null)
+  const barFit = toolbarFitStable(toolbarWidth, prevFit)
+  if (barFit !== prevFit) setPrevFit(barFit)
+  const [prevOverlay, setPrevOverlay] = useState<boolean | null>(null)
+  const overlay = panelOverlayStable(toolbarWidth, prevOverlay)
+  if (overlay !== prevOverlay) setPrevOverlay(overlay)
 
   // ——— Dữ liệu ———
   useEffect(() => {
@@ -1148,7 +1155,7 @@ function MapInner({
               }}
               toolbar={toolbarSlot}
               barFit={barFit}
-              overlayPanel={panelOverlay(toolbarWidth)}
+              overlayPanel={overlay}
               onOpen={onOpen}
               onLogs={onLogs}
               onShell={onShell}
@@ -1343,7 +1350,7 @@ function MapInner({
             storageKey="k8s-map"
             defaultWidth={340}
             maxRatio={0.4}
-            overlay={panelOverlay(toolbarWidth)}
+            overlay={overlay}
             testId="k8s-map-panel"
           >
             <MapPanel

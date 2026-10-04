@@ -23,3 +23,27 @@ export function toolbarFit(width: number): ToolbarFit {
 export function panelOverlay(width: number): boolean {
   return width > 0 && width * 0.4 < 300
 }
+
+/**
+ * Khoảng đệm (px) chống dao động: đổi mức gọn làm thanh công cụ xuống dòng / hiện thanh cuộn →
+ * độ rộng đo lại đổi vài px → mức gọn đổi ngược lại… (vòng lặp vẽ lại liên tục ở sát ngưỡng).
+ * Chỉ lên mức rộng hơn khi vượt ngưỡng + HYSTERESIS; xuống mức hẹp hơn ngay khi dưới ngưỡng.
+ */
+export const HYSTERESIS = 32
+
+const ORDER: readonly ToolbarFit[] = ['narrow', 'compact', 'full']
+
+export function toolbarFitStable(width: number, prev: ToolbarFit | null): ToolbarFit {
+  const next = toolbarFit(width)
+  if (!prev || width <= 0) return next
+  // Hẹp lại: theo ngay. Rộng ra: chỉ khi đủ chỗ cả khoảng đệm.
+  if (ORDER.indexOf(next) <= ORDER.indexOf(prev)) return next
+  return toolbarFit(width - HYSTERESIS) === next ? next : prev
+}
+
+/** panelOverlay có khoảng đệm: đã nổi thì chỉ thôi nổi khi rộng hơn ngưỡng + HYSTERESIS. */
+export function panelOverlayStable(width: number, prev: boolean | null): boolean {
+  const next = panelOverlay(width)
+  if (prev === null || width <= 0 || next === prev) return next
+  return prev ? panelOverlay(width - HYSTERESIS) : next
+}

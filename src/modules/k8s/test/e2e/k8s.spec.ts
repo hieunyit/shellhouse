@@ -602,7 +602,9 @@ test('Kubernetes: Topology tĩnh — vấn đề giải thích bằng lời, tì
 
     // Tìm theo nhãn (key=value) → workload api; HPA ở mức tối đa được nói rõ.
     await map.getByTestId('k8s-topo-search').fill('tier=backend')
-    await map.getByTestId('k8s-topo-result').first().click()
+    // Enter = chọn kết quả đầu (dùng bàn phím — không phụ thuộc cú bấm chuột vào danh sách).
+    await expect(map.getByTestId('k8s-topo-result').first()).toBeVisible()
+    await map.getByTestId('k8s-topo-search').press('Enter')
     await expect(panel).toContainText('Deployment · shop')
     await expect(panel.getByTestId('k8s-topo-problems')).toContainText('at its maximum')
 
