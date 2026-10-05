@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { t, toast } from '../../registry/renderer-kit'
-import type { DiscoveredKind, K8sOp, MetricsResult } from '../shared/ops'
+import type { DiscoveredKind, HealthResult, K8sOp, MetricsResult } from '../shared/ops'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 
@@ -38,6 +38,8 @@ export function useClusterCatalog({
   namespaces: string[] | null
   setNamespaces: (v: string[] | null) => void
   counts: Record<string, number | null>
+  /** Pod / deployment lỗi theo namespace (cả cluster); null = chưa biết / không đọc được. */
+  health: HealthResult | null
 } {
   const [kinds, setKinds] = useState<DiscoveredKind[] | null>(null)
   const [allNamespaces, setAllNamespaces] = useState<string[]>([])
@@ -45,6 +47,7 @@ export function useClusterCatalog({
     initialNamespace ? [initialNamespace] : null
   )
   const [counts, setCounts] = useState<Record<string, number | null>>({})
+  const [health, setHealth] = useState<HealthResult | null>(null)
   /** reloadKey của lần discover gần nhất (khác → người dùng vừa bấm Reload). */
   const discoveredAt = useRef(0)
 
@@ -115,6 +118,12 @@ export function useClusterCatalog({
         },
         () => undefined
       )
+      request<HealthResult>({ op: 'health' }).then(
+        (h) => {
+          if (!cancelled) setHealth(h)
+        },
+        () => undefined
+      )
     }
     poll()
     const timer = setInterval(poll, COUNT_EVERY_MS)
@@ -124,7 +133,7 @@ export function useClusterCatalog({
     }
   }, [ready, active, request, countKey, countNs, nsKnown, reloadKey])
 
-  return { kinds, allNamespaces, namespaces, setNamespaces, counts }
+  return { kinds, allNamespaces, namespaces, setNamespaces, counts, health }
 }
 
 /** CPU / RAM (metrics-server) cho pod và node, 15 giây một lần khi tab đang hiện. */

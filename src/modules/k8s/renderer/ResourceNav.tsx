@@ -21,7 +21,7 @@ import {
   type LucideIcon
 } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
-import { COUNT_CAPPED, type DiscoveredKind } from '../shared/ops'
+import { COUNT_CAPPED, type DiscoveredKind, type HealthResult } from '../shared/ops'
 import { BUILTIN_KINDS, CRD_SECTIONS, type ResourceSection } from '../shared/resources'
 import { formatNumber, t, type NavPlacement } from '../../registry/renderer-kit'
 import { HELM, MAP, OVERVIEW } from './nav'
@@ -116,6 +116,7 @@ export const ResourceNav = memo(function ResourceNav({
   counts,
   allNamespaces,
   namespaces,
+  health = null,
   onNamespaces,
   onGo,
   placement = 'inline'
@@ -130,6 +131,8 @@ export const ResourceNav = memo(function ResourceNav({
   allNamespaces: readonly string[]
   /** Namespace đang xem: [] = mọi namespace; null = chưa biết. */
   namespaces: readonly string[] | null
+  /** Pod / deployment lỗi theo namespace — "N failing" cạnh namespace, Pods, Deployments. */
+  health?: HealthResult | null
   onNamespaces: (v: string[]) => void
   onGo: (id: string) => void
   /** Trong Explorer của khung app (không khung riêng) hay cột bên trái của view. */
@@ -239,6 +242,29 @@ export const ResourceNav = memo(function ResourceNav({
     )
   }
 
+  // Số lỗi trong một phạm vi namespace (null = mọi namespace).
+  const failingIn = (kind: 'pods' | 'deployments', scope: readonly string[] | null): number => {
+    if (!health) return 0
+    const map = health[kind]
+    return scope === null
+      ? Object.values(map).reduce((a, b) => a + b, 0)
+      : scope.reduce((a, n) => a + (map[n] ?? 0), 0)
+  }
+  const failingBadge = (n: number, testId: string): React.ReactNode =>
+    n > 0 ? (
+      <span className="shrink-0 text-ds-xs text-ds-danger tabular-nums" data-testid={testId}>
+        {t('{n} failing', { n: formatNumber(n) })}
+      </span>
+    ) : null
+  // Phạm vi đang xem: [] = mọi namespace.
+  const scope = namespaces && namespaces.length > 0 ? namespaces : null
+  const kindFailing = (id: string): React.ReactNode =>
+    id === 'pods'
+      ? failingBadge(failingIn('pods', scope), 'k8s-nav-failing')
+      : id === 'deployments.apps'
+        ? failingBadge(failingIn('deployments', scope), 'k8s-nav-failing')
+        : null
+
   const item = (x: Item, level: number): React.JSX.Element => {
     const Icon = QUICK_ICON[x.id]
     return row(
@@ -250,7 +276,10 @@ export const ResourceNav = memo(function ResourceNav({
       () => {
         onGo(x.id)
       },
-      count(x.id)
+      <>
+        {kindFailing(x.id)}
+        {count(x.id)}
+      </>
     )
   }
 
@@ -304,11 +333,17 @@ export const ResourceNav = memo(function ResourceNav({
             // Đang xem mục cấp cluster (Nodes): chọn namespace → Pods của namespace đó.
             if (!open && view === 'nodes') onGo('pods')
           },
-          <ChevronRight
-            size={12}
-            aria-hidden
-            className={cx('shrink-0 text-ds-fg-3 transition-transform', open && 'rotate-90')}
-          />
+          <>
+            {failingBadge(
+              failingIn('pods', [ns]) + failingIn('deployments', [ns]),
+              'k8s-nav-ns-failing'
+            )}
+            <ChevronRight
+              size={12}
+              aria-hidden
+              className={cx('shrink-0 text-ds-fg-3 transition-transform', open && 'rotate-90')}
+            />
+          </>
         )}
         {open && quick.map((x) => item(x, 1))}
       </div>

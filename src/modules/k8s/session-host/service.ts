@@ -41,6 +41,7 @@ import {
   argoRefresh,
   argoSync,
   counts,
+  health,
   helmRelease,
   helmReleases,
   logTargets,
@@ -435,6 +436,8 @@ export class K8sService implements HostModuleSession {
         return debugEphemeral(client, op.namespace, op.pod, op.image, op.target, signal)
       case 'debug.node':
         return debugNode(client, op.node, op.image, op.namespace, signal)
+      case 'health':
+        return health(client, signal)
       case 'counts':
         return counts(
           client,

@@ -341,6 +341,20 @@ export function TerminalView({
             </span>
           )}
           <div className="flex-1" />
+          {/* Số liệu server ngay trên thanh phiên (thiết kế v0.5); ô hẹp thì ẩn. */}
+          <span className="mr-2 hidden @3xl:flex">
+            {stats ? (
+              <ServerStatsBar stats={stats} inline />
+            ) : (
+              // Chờ lần đo đầu (vài giây sau khi vào server): giữ chỗ thay vì để số nhảy ra đột ngột.
+              stats === undefined &&
+              isSsh &&
+              connected &&
+              statsEnabled &&
+              visible &&
+              !multiExec && <StatsLoading key={`stats-${String(connectedSeq)}`} />
+            )}
+          </span>
           <LookMenu />
           <ToolbarButton
             testId="open-find"
@@ -471,17 +485,6 @@ export function TerminalView({
               />
             )}
           </div>
-          {stats ? (
-            <ServerStatsBar stats={stats} />
-          ) : (
-            // Chờ lần đo đầu (vài giây sau khi vào server): giữ chỗ thay vì để thanh nhảy ra đột ngột.
-            stats === undefined &&
-            isSsh &&
-            connected &&
-            statsEnabled &&
-            visible &&
-            !multiExec && <StatsLoading key={`stats-${String(connectedSeq)}`} />
-          )}
         </div>
         {deploying && (
           <DeployKeyDialog
@@ -573,7 +576,7 @@ function StatsLoading(): React.JSX.Element | null {
       window.clearTimeout(timer)
     }
   }, [])
-  return expired ? null : <ServerStatsPlaceholder />
+  return expired ? null : <ServerStatsPlaceholder inline />
 }
 
 /** "just now", "4 min", "1 h 05 min" — thời gian từ lúc phiên vào được server. */

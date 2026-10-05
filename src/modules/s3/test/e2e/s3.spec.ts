@@ -208,9 +208,14 @@ test('sắp xếp: menu Sort (dung lượng, thời gian, đảo chiều), nhớ
     await form.getByTestId('s3-account-path-style').check()
     await form.getByTestId('s3-account-save').click()
     const account = page.locator('[data-testid="s3-account"][data-name="Sort test"]')
-    await account.dblclick()
+    // Explorer (thiết kế v0.5): mở tài khoản → danh sách bucket; bấm bucket → tab tại bucket đó.
+    await account.getByTestId('s3-account-expand').click()
+    const buckets = page.getByTestId('s3-explorer-bucket')
+    await expect(buckets).toHaveCount(2)
+    await expect(buckets.first()).toHaveAttribute('data-name', 'demo')
+    await page.locator('[data-testid="s3-explorer-bucket"][data-name="demo"]').click()
     const view = page.getByTestId('s3-view').last()
-    await view.locator('[data-testid="s3-bucket"][data-name="demo"]').dblclick()
+    await expect(view.getByTestId('s3-path')).toContainText('demo')
     await app.evaluate(
       ({ dialog }, files) => {
         dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: files })

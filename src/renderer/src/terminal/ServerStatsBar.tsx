@@ -20,9 +20,14 @@ function level(percent: number): string {
   return percent >= 90 ? 'text-danger' : percent >= 75 ? 'text-warning' : 'text-muted'
 }
 
-function Meter({ percent }: { percent: number }): React.JSX.Element {
+function Meter({ percent, inline }: { percent: number; inline?: boolean }): React.JSX.Element {
   return (
-    <span className="relative hidden h-1 w-10 overflow-hidden rounded-full bg-ds-chart-track @md:inline-block">
+    <span
+      className={cx(
+        'relative h-1 overflow-hidden rounded-full bg-ds-chart-track',
+        inline ? 'inline-block w-6' : 'hidden w-10 @md:inline-block'
+      )}
+    >
       <span
         className={cx(
           'absolute inset-y-0 left-0 rounded-full transition-[width] duration-500',
@@ -62,6 +67,10 @@ function Item({
 const BAR_CLASS =
   '@container flex h-6 shrink-0 items-center gap-4 overflow-hidden border-t border-ds-border-subtle bg-surface px-3 text-xs whitespace-nowrap text-muted tabular-nums'
 
+/** Trên thanh phiên (thiết kế v0.5): chỉ CPU · Mem · Disk dạng %, chi tiết ở tooltip. */
+const INLINE_CLASS =
+  'flex shrink-0 items-center gap-3 text-xs whitespace-nowrap text-muted tabular-nums'
+
 /** Ô xám nhấp nháy giữ chỗ cho một số liệu chưa có. */
 function Skeleton({ className }: { className?: string }): React.JSX.Element {
   return (
@@ -76,10 +85,10 @@ function Skeleton({ className }: { className?: string }): React.JSX.Element {
  * Thanh giữ chỗ trong lúc chờ lần đo đầu tiên: cùng chiều cao với thanh thật (không giật bố cục),
  * các ô xám thay cho số liệu.
  */
-export function ServerStatsPlaceholder(): React.JSX.Element {
+export function ServerStatsPlaceholder({ inline }: { inline?: boolean }): React.JSX.Element {
   return (
     <div
-      className={BAR_CLASS}
+      className={inline ? INLINE_CLASS : BAR_CLASS}
       data-testid="server-stats-loading"
       role="status"
       aria-busy="true"
@@ -97,21 +106,39 @@ export function ServerStatsPlaceholder(): React.JSX.Element {
         <HardDrive size={12} className="text-faint" />
         <Skeleton className="w-8" />
       </span>
-      <span className="hidden text-faint @md:inline">{t('Loading server stats…')}</span>
+      {!inline && (
+        <span className="hidden text-faint @md:inline">{t('Loading server stats…')}</span>
+      )}
     </div>
   )
 }
 
 /** Thanh số liệu server dưới terminal SSH (MobaXterm-style). */
-export function ServerStatsBar({ stats }: { stats: ServerStats }): React.JSX.Element {
+export function ServerStatsBar({
+  stats,
+  inline
+}: {
+  stats: ServerStats
+  /** Gọn trên thanh phiên: CPU · Mem · Disk (%), mạng / uptime ở tooltip. */
+  inline?: boolean
+}): React.JSX.Element {
   const mem = stats.memTotal > 0 ? (stats.memUsed / stats.memTotal) * 100 : 0
   const disk = stats.diskPercent
+  const extra = [
+    stats.rxRate !== null &&
+      stats.txRate !== null &&
+      `↓ ${formatRate(stats.rxRate)} ↑ ${formatRate(stats.txRate)}`,
+    t('up {time}', { time: formatDuration(stats.uptimeSeconds * 1000) })
+  ]
+    .filter(Boolean)
+    .join(' · ')
   return (
     <div
-      className={BAR_CLASS}
+      className={inline ? INLINE_CLASS : BAR_CLASS}
       data-testid="server-stats"
       role="status"
       aria-label={t('Server statistics')}
+      {...(inline ? { title: extra } : {})}
     >
       <Item
         icon={<Cpu size={12} />}
@@ -128,7 +155,7 @@ export function ServerStatsBar({ stats }: { stats: ServerStats }): React.JSX.Ele
         ) : (
           <span className={level(stats.cpu)}>{percent(Math.round(stats.cpu))}</span>
         )}
-        <Meter percent={stats.cpu ?? 0} />
+        <Meter percent={stats.cpu ?? 0} inline={inline} />
       </Item>
       <Item
         icon={<MemoryStick size={12} />}
@@ -139,9 +166,11 @@ export function ServerStatsBar({ stats }: { stats: ServerStats }): React.JSX.Ele
         testId="stats-mem"
       >
         <span className={level(mem)}>
-          {formatBytes(stats.memUsed)} / {formatBytes(stats.memTotal)}
+          {inline
+            ? percent(Math.round(mem))
+            : `${formatBytes(stats.memUsed)} / ${formatBytes(stats.memTotal)}`}
         </span>
-        <Meter percent={mem} />
+        <Meter percent={mem} inline={inline} />
       </Item>
       {stats.diskTotal > 0 && (
         <Item
@@ -153,12 +182,13 @@ export function ServerStatsBar({ stats }: { stats: ServerStats }): React.JSX.Ele
           testId="stats-disk"
         >
           <span className={level(disk)}>{percent(disk)}</span>
-          <span className="hidden text-faint @lg:inline">
+          {inline && <Meter percent={disk} inline />}
+          <span className={cx('text-faint', inline ? 'hidden' : 'hidden @lg:inline')}>
             {t('of {total}', { total: formatBytes(stats.diskTotal) })}
           </span>
         </Item>
       )}
-      {stats.rxRate !== null && stats.txRate !== null && (
+      {!inline && stats.rxRate !== null && stats.txRate !== null && (
         <Item
           icon={<ArrowDown size={12} />}
           title={t('Network download / upload')}
@@ -169,10 +199,14 @@ export function ServerStatsBar({ stats }: { stats: ServerStats }): React.JSX.Ele
           <span>{formatRate(stats.txRate)}</span>
         </Item>
       )}
-      <div className="flex-1" />
-      <Item icon={<Clock size={12} />} title={t('Uptime')} className="hidden @md:flex">
-        {t('up {time}', { time: formatDuration(stats.uptimeSeconds * 1000) })}
-      </Item>
+      {!inline && (
+        <>
+          <div className="flex-1" />
+          <Item icon={<Clock size={12} />} title={t('Uptime')} className="hidden @md:flex">
+            {t('up {time}', { time: formatDuration(stats.uptimeSeconds * 1000) })}
+          </Item>
+        </>
+      )}
     </div>
   )
 }

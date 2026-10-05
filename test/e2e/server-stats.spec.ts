@@ -31,7 +31,9 @@ test('thanh số liệu server: hiện dưới terminal SSH, tắt được tron
 
   const bar = page.getByTestId('server-stats')
   await expect(bar).toBeVisible({ timeout: 15_000 })
-  await expect(bar.getByTestId('stats-mem')).toContainText(/\d+(\.\d)? (MB|GB) \/ \d/)
+  // Trên thanh phiên: % dùng; dung lượng còn trống ở tooltip.
+  await expect(bar.getByTestId('stats-mem')).toContainText(/\d+%/)
+  await expect(bar.getByTestId('stats-mem')).toHaveAttribute('title', /(MB|GB) available/)
   // Lần đo thứ hai: có CPU %.
   await expect(bar.getByTestId('stats-cpu')).toContainText(/\d+%/, { timeout: 15_000 })
 

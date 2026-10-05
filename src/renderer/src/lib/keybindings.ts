@@ -16,11 +16,31 @@ function bindings(): Map<string, string> {
   return cache
 }
 
+/**
+ * Windows / Linux: Ctrl+K mở bảng lệnh như thiết kế (⌘K trên macOS) — trừ khi đang gõ trong
+ * terminal / code editor, nơi Ctrl+K thuộc về shell (xoá tới cuối dòng) hay editor. Phím chính
+ * (Ctrl+Shift+P) vẫn dùng được ở mọi nơi.
+ */
+const PALETTE_ALT = 'Ctrl+K'
+
+function inTextSurface(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('.xterm, .cm-editor, .monaco-editor') !== null
+}
+
 /** Lệnh ứng với phím vừa bấm (theo cài đặt hiện tại), hoặc null. */
 export function matchCommand(event: KeyboardEvent): string | null {
   if (event.type !== 'keydown') return null
   const key = eventToKeybinding(event)
-  return key ? (bindings().get(key) ?? null) : null
+  if (!key) return null
+  const bound = bindings().get(key)
+  if (bound) return bound
+  if (!isMac && key === PALETTE_ALT && !inTextSurface(event.target)) return 'palette.open'
+  return null
+}
+
+/** Phím phụ của một lệnh hiện cho người dùng (command center): Ctrl+K của bảng lệnh. */
+export function altKeybinding(id: string): string | null {
+  return !isMac && id === 'palette.open' && !bindings().has(PALETTE_ALT) ? PALETTE_ALT : null
 }
 
 /** Hiển thị phím cho người dùng (macOS dùng ký hiệu ⌘ ⇧ ⌥ ⌃). */

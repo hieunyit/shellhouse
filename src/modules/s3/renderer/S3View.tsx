@@ -373,6 +373,11 @@ export function S3View({
           (list) => {
             if (cancelled) return
             setBuckets(list as S3Bucket[])
+            // Explorer liệt kê bucket dưới tài khoản (cùng danh sách, không đọc lại).
+            useS3.getState().setBuckets(
+              accountId,
+              (list as S3Bucket[]).map((b) => b.name)
+            )
             // Mở từ mục ghim / nhân bản tab / workspace: vào thẳng vị trí đó.
             const start = firstLocation.current
             if (start) void load(start.bucket, start.prefix)
@@ -404,11 +409,15 @@ export function S3View({
     try {
       const list = (await run({ op: 'listBuckets' })) as S3Bucket[]
       setBuckets(list)
+      useS3.getState().setBuckets(
+        accountId,
+        list.map((b) => b.name)
+      )
     } catch (e) {
       setBuckets([])
       setError(cleanError(e))
     }
-  }, [run])
+  }, [run, accountId])
 
   const refresh = (): void => {
     if (bucket === null) void loadBuckets()

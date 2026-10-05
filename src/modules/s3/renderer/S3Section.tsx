@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, Cloud, Database, Pencil, PinOff, Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, Cloud, Database, Pencil, Pin, PinOff, Plus, Trash2 } from 'lucide-react'
 import { endpointWarning, pinLabel, S3AccountInput, type S3AccountSummary } from '../shared/ops'
 import {
   Button,
@@ -12,7 +12,7 @@ import {
   Notice
 } from '../../../renderer/src/components/ui'
 import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
-import { useS3 } from './store'
+import { useS3, type BucketList } from './store'
 import { openS3, s3Api } from './api'
 import {
   confirmAction,
@@ -31,6 +31,18 @@ export function S3Section(): React.JSX.Element {
   const accounts = useS3((s) => s.accounts)
   const [open, setOpen] = useState(true)
   const [editing, setEditing] = useState<S3AccountSummary | 'new' | null>(null)
+  // Tài khoản đang mở trong Explorer (hiện bucket bên dưới) — như cây của thiết kế v0.5.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const buckets = useS3((s) => s.buckets)
+  const toggleAccount = (id: string): void => {
+    const next = new Set(expanded)
+    if (next.has(id)) next.delete(id)
+    else {
+      next.add(id)
+      void useS3.getState().loadBuckets(id)
+    }
+    setExpanded(next)
+  }
   const { menu, open: openMenu } = useContextMenu()
   const environments = useEnvironments()
   const sourceEnvs = useSourceEnvironmentMap()
@@ -129,12 +141,36 @@ export function S3Section(): React.JSX.Element {
                 ])
               }}
             >
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-label={expanded.has(a.id) ? t('Hide buckets') : t('Show buckets')}
+                aria-expanded={expanded.has(a.id)}
+                data-testid="s3-account-expand"
+                className="-ml-1 flex size-4 shrink-0 items-center justify-center rounded-ds-sm text-ds-fg-3 hover:text-ds-fg"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleAccount(a.id)
+                }}
+              >
+                <ChevronRight
+                  size={12}
+                  className={cx('transition-transform', expanded.has(a.id) && 'rotate-90')}
+                />
+              </button>
               <Cloud size={14} strokeWidth={1.6} className="shrink-0 text-ds-fg-3" />
               <span className="min-w-0 flex-1 truncate text-ds-base text-ds-fg-2 group-hover:text-ds-fg">
                 {a.name}
               </span>
               <AccountEnv id={a.id} />
             </div>
+            {expanded.has(a.id) && (
+              <BucketRows
+                list={buckets[a.id]}
+                onOpen={(bucket) => openS3(a, { bucket, prefix: '' })}
+                onRetry={() => void useS3.getState().loadBuckets(a.id, true)}
+              />
+            )}
             {/* Mục ghim: lối tắt đã lưu (không giữ kết nối) — bấm là mở tab ngay tại đó. */}
             {a.pins.map((pin) => (
               <button
@@ -163,7 +199,7 @@ export function S3Section(): React.JSX.Element {
                   ])
                 }}
               >
-                <Database size={14} strokeWidth={1.6} className="shrink-0 text-ds-fg-3" />
+                <Pin size={12} className="shrink-0 text-ds-fg-3" />
                 <span className="min-w-0 flex-1 truncate">{pinLabel(pin)}</span>
               </button>
             ))}
@@ -179,6 +215,60 @@ export function S3Section(): React.JSX.Element {
         />
       )}
     </div>
+  )
+}
+
+/** Bucket của một tài khoản trong Explorer (đọc khi mở tài khoản). */
+function BucketRows({
+  list,
+  onOpen,
+  onRetry
+}: {
+  list: BucketList | undefined
+  onOpen: (bucket: string) => void
+  onRetry: () => void
+}): React.JSX.Element {
+  if (!list || list.state === 'loading')
+    return <p className="py-1 pr-2 pl-9 text-ds-sm text-ds-fg-3">{t('Loading…')}</p>
+  if (list.state === 'error')
+    return (
+      <div
+        className="flex items-center gap-2 py-1 pr-2 pl-9 text-ds-sm"
+        data-testid="s3-buckets-error"
+      >
+        <span className="min-w-0 flex-1 truncate text-ds-danger" title={list.message}>
+          {t('Could not list buckets')}
+        </span>
+        <button
+          type="button"
+          className="shrink-0 text-ds-accent-text hover:underline"
+          onClick={onRetry}
+        >
+          {t('Retry')}
+        </button>
+      </div>
+    )
+  if (list.names.length === 0)
+    return <p className="py-1 pr-2 pl-9 text-ds-sm text-ds-fg-3">{t('No buckets')}</p>
+  return (
+    <>
+      {list.names.map((name) => (
+        <button
+          key={name}
+          type="button"
+          data-testid="s3-explorer-bucket"
+          data-name={name}
+          title={`s3://${name}`}
+          className="flex h-7 w-full items-center gap-2 rounded-ds-md pr-2 pl-7 text-left text-ds-base text-ds-fg-2 outline-none hover:bg-ds-hover hover:text-ds-fg focus-visible:shadow-ds-focus"
+          onClick={() => {
+            onOpen(name)
+          }}
+        >
+          <Database size={14} strokeWidth={1.6} className="shrink-0 text-ds-fg-3" />
+          <span className="min-w-0 flex-1 truncate">{name}</span>
+        </button>
+      ))}
+    </>
   )
 }
 

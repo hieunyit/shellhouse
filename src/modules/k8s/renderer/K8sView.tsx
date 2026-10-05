@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   PanelLeft,
   Box,
+  ChevronDown,
   ChevronRight,
   Copy,
   FileCode,
@@ -142,6 +143,8 @@ export function ClusterTab({
   const [view, setView] = useState<string>('pods')
   const [drill, setDrill] = useState<Drill[]>([])
   const [query, setQuery] = useState('')
+  /** Chip lọc theo cột của bảng (Pods: Status, Node) — xoá khi đổi loại tài nguyên. */
+  const [facets, setFacets] = useState<Record<string, string>>({})
   const [suggestAt, setSuggestAt] = useState(0)
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [detailKey, setDetailKey] = useState<string | null>(null)
@@ -202,7 +205,7 @@ export function ClusterTab({
   const { guard } = guardProvider.value
 
   const refKey = contextKey(params.ref)
-  const { kinds, allNamespaces, namespaces, setNamespaces, counts } = useClusterCatalog({
+  const { kinds, allNamespaces, namespaces, setNamespaces, counts, health } = useClusterCatalog({
     ready,
     request,
     active,
@@ -253,6 +256,7 @@ export function ClusterTab({
     setSelected(new Set())
     setDetailKey(null)
     setQuery(filter)
+    setFacets({})
   }, [])
 
   const openRefLate = (k: string, ns: string | undefined, name: string): void => {
@@ -273,7 +277,7 @@ export function ClusterTab({
   // ——— Dòng của bảng ———
   const commandMode = query.startsWith(':')
   const objects = list.objects
-  const { rows, q, selector, single, detail } = useResourceRows({
+  const { rows, q, selector, single, detail, facetValues } = useResourceRows({
     objects,
     kindId,
     query,
@@ -281,7 +285,8 @@ export function ClusterTab({
     metrics,
     selected,
     detailKey,
-    active
+    active,
+    facets
   })
   // Loại đang xem: số sống theo bảng (watch), không đợi lần đếm sau. Nhớ lại → thanh điều hướng
   // (memo) không vẽ lại theo mỗi lô watch khi số không đổi.
@@ -872,6 +877,7 @@ export function ClusterTab({
                   counts={navCounts}
                   allNamespaces={allNamespaces}
                   namespaces={namespaces}
+                  health={health}
                   onNamespaces={setNamespaces}
                   onGo={go}
                   placement={placement}
@@ -1001,6 +1007,67 @@ export function ClusterTab({
                   </div>
                 )}
               </div>
+              {/* Chip lọc kiểu thiết kế v0.5: Status / Node (Pods). */}
+              {kindId === 'pods' &&
+                !onOverview &&
+                !onMap &&
+                !onHelm &&
+                (
+                  [
+                    ['status', t('Status')],
+                    ['node', t('Node')]
+                  ] as const
+                ).map(([col, label]) => {
+                  const value = facets[col]
+                  return (
+                    <button
+                      key={col}
+                      type="button"
+                      data-testid={`k8s-chip-${col}`}
+                      aria-haspopup="menu"
+                      className={cx(
+                        'flex h-ds-ctl shrink-0 items-center gap-1 rounded-ds-md border px-2 text-xs outline-none focus-visible:shadow-ds-focus',
+                        value
+                          ? 'border-ds-accent bg-ds-accent-soft text-ds-fg'
+                          : 'border-ds-border-control text-ds-fg-2 hover:border-faint hover:text-ds-fg'
+                      )}
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        openMenu(
+                          {
+                            clientX: r.left,
+                            clientY: r.bottom + 4,
+                            preventDefault: () => undefined
+                          },
+                          [
+                            {
+                              id: `chip-${col}-any`,
+                              label: t('Any'),
+                              onSelect: () => {
+                                setFacets((f) =>
+                                  Object.fromEntries(Object.entries(f).filter(([k]) => k !== col))
+                                )
+                              }
+                            },
+                            'separator',
+                            ...(facetValues[col] ?? []).map(([v, n]): MenuEntry => ({
+                              id: `chip-${col}-${v}`,
+                              label: v,
+                              hint: formatNumber(n),
+                              onSelect: () => {
+                                setFacets((f) => ({ ...f, [col]: v }))
+                              }
+                            }))
+                          ]
+                        )
+                      }}
+                    >
+                      <span className="text-ds-fg-3">{label}:</span>
+                      <span className="font-medium">{value ?? t('Any')}</span>
+                      <ChevronDown size={12} className="text-ds-fg-3" />
+                    </button>
+                  )
+                })}
               <div className="flex-1" />
               {!onOverview && !onMap && !onHelm && (
                 <IconButton
@@ -1032,6 +1099,16 @@ export function ClusterTab({
                         })
                       : formatNumber(rows.length)
                     : ''}
+                </span>
+              )}
+              {!onOverview && !onMap && !onHelm && list.objects && !list.error && (
+                <span
+                  className="flex shrink-0 items-center gap-1 text-ds-fg-3"
+                  data-testid="k8s-live"
+                  title={t('Updates live (Kubernetes watch)')}
+                >
+                  <span className="size-1.5 rounded-full bg-ds-success" aria-hidden />
+                  {t('Live')}
                 </span>
               )}
             </div>

@@ -180,3 +180,21 @@ test('Quick connect: gõ tên host đã lưu hoặc user@host; Ctrl+Enter lưu t
   await expect(form.getByTestId('host-port')).toHaveValue('2200')
   await expect(form.getByTestId('host-username')).toHaveValue('ops')
 })
+
+test('bảng lệnh: Ctrl+K ngoài terminal (Windows / Linux); trong terminal Ctrl+K thuộc về shell', async ({
+  page
+}) => {
+  test.skip(isMac, 'macOS dùng ⌘K')
+  const tab = await activeTab(page)
+  // Trong terminal: không mở bảng lệnh.
+  await page.getByTestId(`terminal-${tab}`).click()
+  await page.keyboard.press('Control+K')
+  await page.waitForTimeout(300)
+  await expect(page.getByTestId('command-palette')).toHaveCount(0)
+  // Ngoài terminal (Home): mở bảng lệnh; command center hiện Ctrl K.
+  await expect(page.getByTestId('command-center')).toContainText('K')
+  await openArea(page, 'home')
+  await page.getByTestId('welcome').click({ position: { x: 5, y: 60 } })
+  await page.keyboard.press('Control+K')
+  await expect(page.getByTestId('command-palette')).toBeVisible()
+})

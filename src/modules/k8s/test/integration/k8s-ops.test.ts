@@ -10,6 +10,7 @@ import type {
   MetricsResult,
   HelmRelease,
   HelmReleaseDetail,
+  HealthResult,
   OverviewResult,
   RbacReach,
   RelatedResult,
@@ -95,6 +96,10 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
 
   it('tổng quan: node sẵn sàng, pod theo trạng thái, requests / allocatable / mức dùng, cảnh báo', async () => {
     const { run } = await setup()
+    // Pod / deployment lỗi theo namespace cho Explorer ("N failing").
+    const h = await run<HealthResult>({ op: 'health' })
+    expect(h.pods['shop']).toBe(1)
+    expect(h.deployments['shop']).toBe(1)
     const o = await run<OverviewResult>({ op: 'overview', namespaces: ['shop'] })
     expect(o.version).toBe('v1.31.2')
     expect(o.nodes).toEqual({ total: 2, ready: 1, cordoned: 0 })

@@ -4,6 +4,7 @@ import { t } from '@shared/i18n'
 import { Button, IconButton, Kbd } from '../ds'
 import { cx, ICON_SM } from '../ds/utils'
 import { useSettings } from '../stores/settings'
+import { altKeybinding } from '../lib/keybindings'
 import { kbdKeys } from './keys'
 import { useShell } from './store'
 
@@ -25,7 +26,9 @@ export const TitleBar = memo(function TitleBar({
   const canBack = useShell((s) => s.historyAt > 0)
   const canForward = useShell((s) => s.historyAt < s.history.length - 1)
   const overrides = useSettings((s) => s.settings.keybindings)
-  const paletteKeys = kbdKeys('palette.open', overrides)
+  // Windows / Linux: hiện Ctrl K như thiết kế (Ctrl+Shift+P vẫn dùng được, xem keybindings.ts).
+  const paletteKeys =
+    altKeybinding('palette.open')?.split('+').join(' ') ?? kbdKeys('palette.open', overrides)
   return (
     <header
       className="sh-titlebar sh-titlebar-lead sh-titlebar-trail relative grid h-(--ds-titlebar-h) shrink-0 grid-cols-[1fr_minmax(0,460px)_1fr] items-center gap-3 bg-ds-bg pr-2 pl-3 text-ds-sm text-ds-fg-2"

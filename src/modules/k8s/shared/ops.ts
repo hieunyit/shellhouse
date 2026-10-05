@@ -168,6 +168,8 @@ export const K8sOp = z.discriminatedUnion('op', [
     kinds: z.array(Kind).max(200),
     namespaces: z.array(Namespace).max(64)
   }),
+  /** Số pod / deployment lỗi theo namespace (Explorer: "2 failing"), cả cluster. */
+  z.object({ op: z.literal('health') }),
   /** Tài nguyên liên quan (kiểu Rancher): service, ConfigMap, Secret, PVC, HPA… / "Used by". */
   z.object({ op: z.literal('related'), kind: Kind, namespace: Namespace, name: Name }),
   /**
@@ -560,6 +562,12 @@ export interface OverviewResult {
   truncated?: boolean
   /** Vấn đề cần xem, theo nhóm (thiếu ở bản cũ). */
   problems?: Record<ProblemGroup, { total: number; items: OverviewProblem[] }>
+}
+
+/** Kết quả `health`: namespace → số pod lỗi (crash / kéo image hỏng / Failed), deployment chưa đủ. */
+export interface HealthResult {
+  pods: Record<string, number>
+  deployments: Record<string, number>
 }
 
 /** Nhóm vấn đề của trang tổng quan. */

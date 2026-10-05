@@ -29,6 +29,9 @@ export function cachedRow(kindId: string, obj: K8sObject): ResourceRow {
  * Dòng của bảng: chỉ tính lại khi dữ liệu / bộ lọc / cách xếp đổi (không theo mỗi lần render);
  * chữ lọc hoãn (useDeferredValue) để gõ không giật với vài nghìn dòng.
  */
+/** Cột có chip lọc (Pods: Status, Node). */
+const FACET_COLUMNS = ['status', 'node'] as const
+
 export function useResourceRows({
   objects,
   kindId,
@@ -37,7 +40,8 @@ export function useResourceRows({
   metrics,
   selected,
   detailKey,
-  active
+  active,
+  facets = {}
 }: {
   objects: Map<string, K8sObject> | null
   kindId: string
@@ -47,6 +51,8 @@ export function useResourceRows({
   selected: ReadonlySet<string>
   detailKey: string | null
   active: boolean
+  /** Chip lọc theo cột (Status, Node…): cột → giá trị phải khớp; thiếu = không lọc. */
+  facets?: Readonly<Record<string, string>>
 }): {
   rows: Row[]
   /** Chữ lọc đang áp dụng (chữ thường, '' = không lọc / đang gõ lệnh / đang lọc theo nhãn). */
@@ -55,6 +61,8 @@ export function useResourceRows({
   selector: SelectorParse | null
   single: Row | undefined
   detail: Row | undefined
+  /** Giá trị có trong bảng (trước chip) theo cột có chip, kèm số dòng — cho menu của chip. */
+  facetValues: Readonly<Record<string, [string, number][]>>
 } {
   /** Nhịp 30 giây cho cột tuổi (dòng bảng nhớ theo đối tượng). */
   const [ageTick, setAgeTick] = useState(0)
@@ -84,13 +92,28 @@ export function useResourceRows({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [objects, kindId, ageTick]
   )
-  const filteredRows = useMemo(
-    () =>
-      selector?.ok
-        ? allRows.filter((r) => matchesSelector(r.obj.metadata.labels, selector.requirements))
-        : filterRows(allRows, q),
-    [allRows, q, selector]
-  )
+  const facetKey = JSON.stringify(facets)
+  const filteredRows = useMemo(() => {
+    const base = selector?.ok
+      ? allRows.filter((r) => matchesSelector(r.obj.metadata.labels, selector.requirements))
+      : filterRows(allRows, q)
+    const entries = Object.entries(JSON.parse(facetKey) as Record<string, string>)
+    return entries.length === 0
+      ? base
+      : base.filter((r) => entries.every(([col, v]) => (r.row.cells[col] ?? '') === v))
+  }, [allRows, q, selector, facetKey])
+  const facetValues = useMemo(() => {
+    const out: Record<string, [string, number][]> = {}
+    for (const column of FACET_COLUMNS) {
+      const counts = new Map<string, number>()
+      for (const r of allRows) {
+        const v = r.row.cells[column]
+        if (v) counts.set(v, (counts.get(v) ?? 0) + 1)
+      }
+      out[column] = [...counts.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))
+    }
+    return out
+  }, [allRows])
   // Số liệu chỉ ảnh hưởng thứ tự khi đang xếp theo CPU / RAM.
   const sortMetrics = sort.key === 'cpu' || sort.key === 'mem' ? metrics : null
   const rows = useMemo(
@@ -105,5 +128,5 @@ export function useResourceRows({
   // Chi tiết lấy từ dữ liệu, không từ dòng đang lọc: gõ lọc không đóng mất chi tiết đang xem.
   const detailObj = detailKey ? objects?.get(detailKey) : undefined
   const detail = detailObj ? { obj: detailObj, row: cachedRow(kindId, detailObj) } : undefined
-  return { rows, q, selector, single, detail }
+  return { rows, q, selector, single, detail, facetValues }
 }

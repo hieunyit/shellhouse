@@ -93,6 +93,22 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     server.remove('pods', 'shop', 'web-4')
     await expect(rows).toHaveCount(3)
 
+    // Thiết kế v0.5: bảng đang watch → "Live"; pod lỗi → "N failing" ở namespace và Pods; chip
+    // Status lọc theo trạng thái.
+    await expect(view.getByTestId('k8s-live')).toBeVisible()
+    // shop: 1 pod lỗi + 1 deployment chưa sẵn sàng.
+    await expect(page.getByTestId('k8s-nav-ns-failing').first()).toContainText('2 failing')
+    await expect(page.getByTestId('k8s-nav-pods').getByTestId('k8s-nav-failing')).toContainText(
+      '1 failing'
+    )
+    await view.getByTestId('k8s-chip-status').click()
+    await page.getByTestId('menu-chip-status-CrashLoopBackOff').click()
+    await expect(rows).toHaveCount(1)
+    await expect(view.getByTestId('k8s-chip-status')).toContainText('CrashLoopBackOff')
+    await view.getByTestId('k8s-chip-status').click()
+    await page.getByTestId('menu-chip-status-any').click()
+    await expect(rows).toHaveCount(3)
+
     // Mô tả (phím d): tab Overview có container; tab Events có sự kiện liên quan.
     await view.locator('[data-testid="k8s-row"][data-name="shop/web-2"]').click()
     await page.keyboard.press('d')

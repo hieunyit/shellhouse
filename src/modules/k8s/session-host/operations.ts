@@ -10,6 +10,7 @@ import type {
   MetricsResult,
   OverviewProblem,
   OverviewResult,
+  HealthResult,
   RolloutRevision,
   Usage
 } from '../shared/ops'
@@ -317,7 +318,9 @@ export function findProblems(
   nodes: readonly K8sObject[],
   pods: readonly K8sObject[],
   pvcs: readonly K8sObject[],
-  now = Date.now()
+  now = Date.now(),
+  /** Số mục giữ lại mỗi nhóm (tổng vẫn đếm đủ); đếm theo namespace cần giữ hết. */
+  max = PROBLEMS_MAX
 ): NonNullable<OverviewResult['problems']> {
   const groups: NonNullable<OverviewResult['problems']> = {
     failing: { total: 0, items: [] },
@@ -329,7 +332,7 @@ export function findProblems(
   const add = (group: keyof typeof groups, item: OverviewProblem): void => {
     const g = groups[group]
     g.total++
-    if (g.items.length < PROBLEMS_MAX) g.items.push(item)
+    if (g.items.length < max) g.items.push(item)
   }
   for (const p of pods) {
     if (p.metadata.deletionTimestamp) continue
@@ -873,6 +876,36 @@ export async function pool<T, R>(
     })
   )
   return out
+}
+
+/**
+ * Pod / deployment lỗi theo namespace, cả cluster (Explorer hiện "2 failing" cạnh namespace, Pods,
+ * Deployments). Pod lỗi = nhóm failing + imagePull của trang tổng quan; deployment chưa đủ =
+ * còn replica chưa sẵn sàng. Không đọc được (thiếu quyền) → rỗng.
+ */
+export async function health(client: KubeClient, signal?: AbortSignal): Promise<HealthResult> {
+  const opts = { signal, max: 5000 }
+  const none = { items: [] as K8sObject[], truncated: false }
+  const [podList, deployList] = await Promise.all([
+    listPaged(client, '/api/v1/pods', opts).catch(() => none),
+    listPaged(client, '/apis/apps/v1/deployments', opts).catch(() => none)
+  ])
+  const pods: Record<string, number> = {}
+  const problems = findProblems([], podList.items, [], Date.now(), Number.POSITIVE_INFINITY)
+  for (const p of [...problems.failing.items, ...problems.imagePull.items]) {
+    const n = p.namespace ?? ''
+    pods[n] = (pods[n] ?? 0) + 1
+  }
+  const deployments: Record<string, number> = {}
+  for (const d of deployList.items) {
+    const wanted = (d.spec?.['replicas'] as number | undefined) ?? 1
+    const available = (d.status?.['availableReplicas'] as number | undefined) ?? 0
+    if (wanted > 0 && available < wanted) {
+      const n = d.metadata.namespace ?? ''
+      deployments[n] = (deployments[n] ?? 0) + 1
+    }
+  }
+  return { pods, deployments }
 }
 
 /** Đếm theo trang tối đa chừng này đối tượng mỗi loại / namespace (quá → "N+"). */

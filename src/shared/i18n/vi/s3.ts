@@ -616,5 +616,9 @@ export const s3: Readonly<Record<string, string>> = {
   'Use 3–63 lowercase letters, numbers, dots and hyphens':
     'Dùng 3–63 ký tự gồm chữ thường, số, dấu chấm và gạch ngang',
   'Invalid bucket name': 'Tên bucket không hợp lệ',
-  'Filter by prefix…': 'Lọc theo tiền tố…'
+  'Filter by prefix…': 'Lọc theo tiền tố…',
+  'Hide buckets': 'Ẩn bucket',
+  'Show buckets': 'Hiện bucket',
+  'Could not list buckets': 'Không đọc được danh sách bucket',
+  'No buckets': 'Chưa có bucket nào'
 }
