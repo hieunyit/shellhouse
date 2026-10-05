@@ -875,10 +875,8 @@ export function ClusterTab({
                   view={view}
                   drilled={Boolean(top)}
                   counts={navCounts}
-                  allNamespaces={allNamespaces}
                   namespaces={namespaces}
                   health={health}
-                  onNamespaces={setNamespaces}
                   onGo={go}
                   placement={placement}
                 />

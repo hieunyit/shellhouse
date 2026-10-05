@@ -6,6 +6,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- Kubernetes sidebar is back to resource groups (Workloads, Service Discovery, Storage…) with the
+  namespace picked in the header — easier than the per-namespace tree. "N failing" stays next to
+  Pods and Deployments.
+
 ## [1.2.0-beta.15] - 2026-10-05
 
 ### Fixed

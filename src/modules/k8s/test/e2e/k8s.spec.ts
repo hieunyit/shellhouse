@@ -93,11 +93,9 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     server.remove('pods', 'shop', 'web-4')
     await expect(rows).toHaveCount(3)
 
-    // Thiết kế v0.5: bảng đang watch → "Live"; pod lỗi → "N failing" ở namespace và Pods; chip
+    // Bảng đang watch → "Live"; pod lỗi → "N failing" cạnh Pods; chip
     // Status lọc theo trạng thái.
     await expect(view.getByTestId('k8s-live')).toBeVisible()
-    // shop: 1 pod lỗi + 1 deployment chưa sẵn sàng.
-    await expect(page.getByTestId('k8s-nav-ns-failing').first()).toContainText('2 failing')
     await expect(page.getByTestId('k8s-nav-pods').getByTestId('k8s-nav-failing')).toContainText(
       '1 failing'
     )
@@ -227,16 +225,12 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await expect(view.getByTestId('k8s-describe')).toContainText('web')
     await page.keyboard.press('Escape')
 
-    // Thanh bên (thiết kế v0.5): namespace đang xem mở ra loại hay dùng; loại còn lại ở "More
-    // resources" (thu gọn, lựa chọn được nhớ). Chọn "All namespaces" → loại hay dùng ở đó.
-    await expect(page.getByTestId('k8s-nav-ns-shop')).toBeVisible()
-    await expect(page.getByTestId('k8s-nav-secrets')).toBeVisible()
-    await expect(page.getByTestId('k8s-nav-replicasets.apps')).toHaveCount(0)
-    await page.getByTestId('k8s-nav-group-more').click()
+    // Thanh bên: nhóm thu gọn được — chỉ Workloads mở sẵn; lựa chọn được nhớ.
+    await expect(page.getByTestId('k8s-nav-secrets')).toHaveCount(0)
     await page.getByTestId('k8s-nav-group-Workloads').click()
-    await expect(page.getByTestId('k8s-nav-replicasets.apps')).toBeVisible()
-    await page.getByTestId('k8s-nav-group-more').click()
-    await expect(page.getByTestId('k8s-nav-replicasets.apps')).toHaveCount(0)
+    await expect(page.getByTestId('k8s-nav-pods')).toHaveCount(0)
+    await page.getByTestId('k8s-nav-group-Workloads').click()
+    await expect(page.getByTestId('k8s-nav-pods')).toBeVisible()
 
     // Bảng phím tắt đầy đủ (phím ?) — thanh dưới chỉ hiện vài phím chính.
     await view.getByTestId('key-hints-all').click()
@@ -279,6 +273,7 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
         ).toString('base64')
       }
     })
+    await page.getByTestId('k8s-nav-group-Apps').click()
     await page.getByTestId('k8s-nav-helm-releases').click()
     const release = view.locator('[data-testid="k8s-helm-release"][data-name="shop/shop-db"]')
     await expect(release).toContainText('postgresql-15.1.0')
@@ -293,6 +288,7 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await expect(page.getByTestId('k8s-helm-uninstall-dialog')).toContainText('Uninstall shop-db?')
     await page.keyboard.press('Escape')
     await expect(page.getByTestId('k8s-helm-uninstall-dialog')).toHaveCount(0)
+    await page.getByTestId('k8s-nav-group-Apps').click()
 
     // Tổng quan cluster.
     await page.getByTestId('k8s-nav-overview').click()
@@ -302,6 +298,7 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await expect(view.getByTestId('k8s-ov-problem-nodes')).toBeVisible()
 
     // Secret: giá trị ẩn, bấm mới hiện.
+    await page.getByTestId('k8s-nav-group-Storage').click()
     await page.getByTestId('k8s-nav-secrets').click()
     await view.locator('[data-testid="k8s-row"][data-name="shop/db"]').click()
     await page.keyboard.press('d')
