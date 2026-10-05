@@ -33,6 +33,19 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   starts with "S3 storage"; accounts in the sidebar take one line (the endpoint is in the tooltip).
 - Files opens "This computer" when no session has its file manager open, instead of showing a
   terminal.
+- Server stats (CPU, memory, disk) sit on the session bar; network and uptime are in its tooltip.
+
+### Added
+
+- Notifications: a bell on the status bar counts new messages and lists the recent ones.
+- Your initials on the activity bar (click to lock the vault).
+- Transfers: Pause all / Resume all for SFTP transfers (paused transfers keep their partial file
+  and continue where they stopped).
+- Kubernetes: "N failing" next to namespaces, Pods and Deployments; Status and Node chips to filter
+  Pods; a Live indicator while the table follows changes.
+- S3: expand an account in the sidebar to list its buckets; click a bucket to open it.
+- Windows / Linux: Ctrl+K opens the command palette (inside a terminal Ctrl+K still goes to the
+  shell; Ctrl+Shift+P works everywhere).
 
 ## [1.2.0-beta.14] - 2026-10-05
 

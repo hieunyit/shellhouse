@@ -1,11 +1,29 @@
-import { memo } from 'react'
-import { ArrowLeftRight, Languages, LockOpen, Moon, Sun } from 'lucide-react'
+import { memo, useState } from 'react'
+import {
+  ArrowLeftRight,
+  Bell,
+  CircleAlert,
+  CircleCheck,
+  Info,
+  Languages,
+  LockOpen,
+  Moon,
+  Sun,
+  TriangleAlert
+} from 'lucide-react'
 import { language, t, tn } from '@shared/i18n'
-import { formatPercent } from '@shared/i18n/format'
+import { formatPercent, formatRelative } from '@shared/i18n/format'
+import { Popover } from '../ds'
 import { cx, ICON_SM } from '../ds/utils'
 import { useAppearance } from '../stores/appearance'
 import { useSettings } from '../stores/settings'
 import { useTabStatus } from '../stores/tab-status'
+import {
+  clearNotifications,
+  markNotificationsRead,
+  useToasts,
+  type ToastTone
+} from '../stores/toasts'
 import { transferSummary, useTransfers } from '../stores/transfers'
 import { useShell } from './store'
 
@@ -117,6 +135,111 @@ export const StatusBar = memo(function StatusBar(): React.JSX.Element {
       >
         {dark ? <Moon {...ICON_SM} /> : <Sun {...ICON_SM} />}
       </button>
+      <NotificationBell />
     </footer>
   )
 })
+
+const TONE_ICON: Record<Exclude<ToastTone, 'loading'>, React.ReactNode> = {
+  success: <CircleCheck {...ICON_SM} className="text-ds-success" />,
+  error: <CircleAlert {...ICON_SM} className="text-ds-danger" />,
+  warning: <TriangleAlert {...ICON_SM} className="text-ds-warning" />,
+  info: <Info {...ICON_SM} className="text-ds-info" />
+}
+
+/** Chuông thông báo (thiết kế v0.5): số chưa xem; mở → các thông báo gần đây, mới nhất trước. */
+function NotificationBell(): React.JSX.Element {
+  const history = useToasts((s) => s.history)
+  const unread = useToasts((s) => s.unread)
+  const [open, setOpen] = useState(false)
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v)
+        if (v) markNotificationsRead()
+      }}
+      side="top"
+      align="end"
+      label={t('Notifications')}
+      className="w-80 p-0"
+      trigger={
+        <button
+          type="button"
+          className={ITEM}
+          aria-label={
+            unread > 0 ? t('Notifications ({n} new)', { n: String(unread) }) : t('Notifications')
+          }
+          title={t('Notifications')}
+          data-testid="statusbar-notifications"
+        >
+          <Bell {...ICON_SM} />
+          {unread > 0 && (
+            <span className="tabular-nums" data-testid="statusbar-notifications-count">
+              {unread}
+            </span>
+          )}
+        </button>
+      }
+    >
+      <div data-testid="notifications-panel">
+        <div className="flex h-9 items-center gap-2 border-b border-ds-border-subtle px-3">
+          <span className="flex-1 text-ds-sm font-medium text-ds-fg">{t('Notifications')}</span>
+          {history.length > 0 && (
+            <button
+              type="button"
+              className="rounded-ds-sm px-1.5 py-0.5 text-ds-sm text-ds-fg-3 hover:bg-ds-hover hover:text-ds-fg"
+              data-testid="notifications-clear"
+              onClick={() => {
+                clearNotifications()
+              }}
+            >
+              {t('Clear all')}
+            </button>
+          )}
+        </div>
+        {history.length === 0 ? (
+          <p className="px-3 py-6 text-center text-ds-sm text-ds-fg-3">
+            {t('No notifications yet.')}
+          </p>
+        ) : (
+          <ul className="max-h-96 overflow-auto py-1">
+            {history.map((n) => (
+              <li
+                key={n.id}
+                className="flex gap-2.5 px-3 py-2 hover:bg-ds-hover"
+                data-testid="notification-item"
+                data-tone={n.tone}
+              >
+                <span className="mt-0.5 shrink-0">
+                  {n.tone === 'loading' ? null : TONE_ICON[n.tone]}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-ds-sm font-medium text-ds-fg">{n.title}</div>
+                  {n.description && (
+                    <div className="mt-0.5 text-ds-sm text-ds-fg-3">{n.description}</div>
+                  )}
+                  <div className="mt-0.5 flex items-center gap-2 text-ds-xs text-ds-fg-4">
+                    {formatRelative(n.createdAt)}
+                    {n.action && (
+                      <button
+                        type="button"
+                        className="text-ds-accent-text hover:underline"
+                        onClick={() => {
+                          n.action?.run()
+                          setOpen(false)
+                        }}
+                      >
+                        {n.action.label}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </Popover>
+  )
+}

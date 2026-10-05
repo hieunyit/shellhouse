@@ -88,10 +88,29 @@ test('Home: co giãn theo cửa sổ — nhỏ rồi phóng to thì lưới giã
   const columns = (): Promise<number> =>
     grid.evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length)
   await expect.poll(columns).toBeLessThanOrEqual(2)
-  const small = await home.locator('header').evaluate((el) => el.getBoundingClientRect().width)
+  // Đổi cỡ cửa sổ xong thì bố cục còn chạy vài khung hình — đợi độ rộng đứng yên rồi mới đo.
+  const headerWidth = (): Promise<number> =>
+    home.locator('header').evaluate((el) => Math.round(el.getBoundingClientRect().width))
+  const settled = async (): Promise<number> => {
+    let last = -1
+    await expect
+      .poll(
+        async () => {
+          const now = await headerWidth()
+          const same = now === last
+          last = now
+          return same
+        },
+        { intervals: [250] }
+      )
+      .toBe(true)
+    return last
+  }
+  const small = await settled()
 
   await setWindowSize(launched, 1600, 900)
   await expect.poll(columns).toBe(4)
+  await expect.poll(headerWidth).toBeGreaterThan(small + 300)
   const content = await home.locator('header').evaluate((el) => {
     const box = el.getBoundingClientRect()
     const area = el.closest('[data-testid="welcome"]')?.getBoundingClientRect()

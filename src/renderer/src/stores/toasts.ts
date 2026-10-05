@@ -36,9 +36,38 @@ export interface ToastInput {
 
 interface ToastState {
   toasts: Toast[]
+  /**
+   * Trung tâm thông báo (chuông ở status bar): toast đã xong (không gồm "đang chạy"), mới nhất
+   * trước, tối đa HISTORY_MAX; `unread` = số chưa xem kể từ lần mở chuông gần nhất.
+   */
+  history: Toast[]
+  unread: number
 }
 
-export const useToasts = create<ToastState>(() => ({ toasts: [] }))
+export const useToasts = create<ToastState>(() => ({ toasts: [], history: [], unread: 0 }))
+
+const HISTORY_MAX = 50
+
+/** Ghi (hoặc thay theo id) vào lịch sử thông báo. */
+function remember(toast: Toast): void {
+  if (toast.tone === 'loading') return
+  useToasts.setState((s) => {
+    const exists = s.history.some((h) => h.id === toast.id)
+    return {
+      history: [toast, ...s.history.filter((h) => h.id !== toast.id)].slice(0, HISTORY_MAX),
+      unread: exists ? s.unread : s.unread + 1
+    }
+  })
+}
+
+/** Mở chuông: đánh dấu đã xem hết. */
+export function markNotificationsRead(): void {
+  if (useToasts.getState().unread) useToasts.setState({ unread: 0 })
+}
+
+export function clearNotifications(): void {
+  useToasts.setState({ history: [], unread: 0 })
+}
 
 const MAX = 5
 let nextId = 1
@@ -77,6 +106,7 @@ function show(tone: ToastTone, title: string, input: ToastInput = {}): number {
     return { toasts: [...kept, toast].slice(-MAX) }
   })
   schedule(id, input.duration ?? defaultDuration(tone))
+  remember(toast)
   return id
 }
 
@@ -103,8 +133,11 @@ export function update(id: number, tone: ToastTone, title: string, input: ToastI
       }
     })
   }))
-  if (found) schedule(id, input.duration ?? defaultDuration(tone))
-  else show(tone, title, input)
+  if (found) {
+    schedule(id, input.duration ?? defaultDuration(tone))
+    const updated = useToasts.getState().toasts.find((t) => t.id === id)
+    if (updated) remember(updated)
+  } else show(tone, title, input)
 }
 
 /** Tạm dừng / chạy lại hẹn giờ đóng (rê chuột lên toast). */

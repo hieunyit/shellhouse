@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
-import { release } from 'node:os'
+import { release, userInfo } from 'node:os'
 import { join } from 'node:path'
 import {
   app,
@@ -292,7 +292,14 @@ function registerIpc(): void {
     arch: process.arch,
     packaged: app.isPackaged,
     testHooks,
-    windowsBuild: process.platform === 'win32' ? Number(release().split('.')[2]) || null : null
+    windowsBuild: process.platform === 'win32' ? Number(release().split('.')[2]) || null : null,
+    userName: (() => {
+      try {
+        return userInfo().username
+      } catch {
+        return ''
+      }
+    })()
   }))
 
   handle('sessionHost:getStatus', isTrustedSender, () => supervisor.getStatus())

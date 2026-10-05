@@ -4,6 +4,7 @@ import {
   CircleAlert,
   Download,
   FolderOpen,
+  Pause,
   Play,
   RotateCcw,
   Search,
@@ -87,6 +88,13 @@ export function TransfersPage(): React.JSX.Element {
   const running = all.filter(({ x }) => x.state === 'running')
   const speed = running.reduce((n, { x }) => n + x.bytesPerSecond, 0)
   const finished = all.some(({ x }) => x.state !== 'running' && x.state !== 'queued')
+  // Tạm dừng = huỷ nhưng giữ file part (nguồn tiếp tục được — SFTP); tiếp tục = thử lại từ chỗ dừng.
+  const pausable = all.filter(
+    ({ src, x }) => src.retry && (x.state === 'running' || x.state === 'queued')
+  )
+  const paused = all.filter(
+    ({ src, x }) => src.retry && x.state === 'cancelled' && x.resumable === true
+  )
   const failed = all.filter(({ x }) => x.state === 'error')
   const filterTitle = TRANSFER_FILTERS.find((f) => f.id === filter)?.title() ?? ''
 
@@ -143,6 +151,32 @@ export function TransfersPage(): React.JSX.Element {
                 .filter(Boolean)
                 .join(' · ')}
             </span>
+          )}
+          {pausable.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Pause {...ICON_SM} />}
+              data-testid="transfers-pause-all"
+              onClick={() => {
+                for (const { src, x } of pausable) src.cancel(x.id)
+              }}
+            >
+              {t('Pause all')}
+            </Button>
+          )}
+          {paused.length > 0 && pausable.length === 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Play {...ICON_SM} />}
+              data-testid="transfers-resume-all"
+              onClick={() => {
+                for (const { src, x } of paused) src.retry?.(x.id)
+              }}
+            >
+              {t('Resume all')}
+            </Button>
           )}
           {finished && (
             <Button

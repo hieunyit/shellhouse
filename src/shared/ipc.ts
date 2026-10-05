@@ -87,7 +87,9 @@ export const AppInfo = z.object({
   language: z.enum(['en', 'vi']),
   locale: z.string(),
   /** Ngôn ngữ hệ điều hành sẽ chọn khi cài đặt là 'system' — để ghi "Theo hệ thống (…)". */
-  systemLanguage: z.enum(['en', 'vi'])
+  systemLanguage: z.enum(['en', 'vi']),
+  /** Tên đăng nhập trên máy (chữ viết tắt ở avatar của activity bar); '' nếu không đọc được. */
+  userName: z.string()
 })
 export type AppInfo = z.infer<typeof AppInfo>
 

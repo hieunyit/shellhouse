@@ -91,5 +91,11 @@ export const shell: Readonly<Record<string, string>> = {
   'Downloaded (resumed)': 'Đã tải về (tiếp tục)',
   Downloaded: 'Đã tải về',
   upload: 'tải lên',
-  download: 'tải về'
+  download: 'tải về',
+  Notifications: 'Thông báo',
+  'Notifications ({n} new)': 'Thông báo ({n} mới)',
+  'Clear all': 'Xoá hết',
+  'No notifications yet.': 'Chưa có thông báo nào.',
+  'Pause all': 'Tạm dừng tất cả',
+  'Resume all': 'Tiếp tục tất cả'
 }

@@ -198,3 +198,24 @@ test('bảng lệnh: Ctrl+K ngoài terminal (Windows / Linux); trong terminal Ct
   await page.keyboard.press('Control+K')
   await expect(page.getByTestId('command-palette')).toBeVisible()
 })
+
+test('chuông thông báo: số chưa xem, mở ra thấy thông báo, xoá hết; avatar khoá vault', async ({
+  page
+}) => {
+  await expect(page.getByTestId('statusbar-notifications-count')).toHaveCount(0)
+  // Chưa đóng tab nào → toast "No recently closed tabs".
+  await page.keyboard.press(isMac ? 'Meta+Alt+T' : 'Control+Alt+T')
+  await expect(page.getByTestId('statusbar-notifications-count')).toHaveText('1')
+  await page.getByTestId('statusbar-notifications').click()
+  const panel = page.getByTestId('notifications-panel')
+  await expect(panel.getByTestId('notification-item')).toContainText('No recently closed tabs')
+  await expect(page.getByTestId('statusbar-notifications-count')).toHaveCount(0)
+  await panel.getByTestId('notifications-clear').click()
+  await expect(panel).toContainText('No notifications yet.')
+  await page.keyboard.press('Escape')
+
+  // Avatar ở đáy activity bar: chữ viết tắt; bấm = khoá vault.
+  await expect(page.getByTestId('lock-vault')).toHaveText(/^[A-Z0-9]{1,2}$/)
+  await page.getByTestId('lock-vault').click()
+  await expect(page.getByTestId('vault-gate')).toBeVisible()
+})

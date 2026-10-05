@@ -1,11 +1,21 @@
-import { memo, type ReactNode } from 'react'
-import { ArrowLeftRight, Folder, House, Lock, Puzzle, Server, Settings } from 'lucide-react'
+import { memo, useEffect, useState, type ReactNode } from 'react'
+import {
+  ArrowLeftRight,
+  Folder,
+  House,
+  Lock,
+  LockOpen,
+  Puzzle,
+  Server,
+  Settings
+} from 'lucide-react'
 import { t } from '@shared/i18n'
 import { Tooltip } from '../ds'
-import { cx } from '../ds/utils'
+import { cx, ICON_SM } from '../ds/utils'
 import { moduleIcon, useEnabledModules } from '../../../modules/registry/renderer-kit'
 import { browseModules } from '../stores/module-ui'
 import { useTransfers } from '../stores/transfers'
+import { initials } from './initials'
 import { useShell, type Area } from './store'
 
 const ICON = { size: 18, strokeWidth: 1.5 } as const
@@ -142,12 +152,42 @@ export const ActivityBar = memo(function ActivityBar(): React.JSX.Element {
           else shell.openSettings()
         }}
       />
-      <Item
-        label={t('Lock (sessions keep running)')}
-        icon={<Lock {...ICON} />}
-        testId="lock-vault"
-        onClick={() => void window.shellhouse.lockVault()}
-      />
+      <AccountAvatar />
     </nav>
   )
 })
+
+/**
+ * Avatar ở đáy activity bar (thiết kế v0.5): chữ viết tắt của người dùng trên máy + khoá mở nhỏ;
+ * bấm = khoá vault (phiên vẫn chạy).
+ */
+function AccountAvatar(): React.JSX.Element {
+  const [name, setName] = useState('')
+  useEffect(() => {
+    void window.shellhouse.getInfo().then((info) => {
+      setName(info.userName)
+    })
+  }, [])
+  const label = t('Lock (sessions keep running)')
+  return (
+    <Tooltip content={label} side="right">
+      <button
+        type="button"
+        aria-label={label}
+        data-testid="lock-vault"
+        className="relative flex size-8 items-center justify-center rounded-ds-md outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus"
+        onClick={() => void window.shellhouse.lockVault()}
+      >
+        <span className="flex size-6 items-center justify-center rounded-full bg-ds-surface-3 text-[10px] font-semibold text-ds-fg-2">
+          {initials(name) || <Lock {...ICON_SM} />}
+        </span>
+        <span
+          aria-hidden
+          className="absolute right-0.5 bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-ds-bg text-ds-success"
+        >
+          <LockOpen size={9} strokeWidth={2} />
+        </span>
+      </button>
+    </Tooltip>
+  )
+}
