@@ -311,6 +311,8 @@ function HostsEmpty(): React.JSX.Element {
             <Button
               variant="primary"
               icon={<Plus {...ICON_SM} />}
+              // Chưa có tab nào thì dải tab (và nút + của nó) không hiện — nút này thay chỗ.
+              data-testid="new-tab"
               onClick={() => useTabs.getState().addLocal()}
             >
               {t('New terminal')}

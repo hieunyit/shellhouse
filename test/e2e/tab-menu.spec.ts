@@ -142,6 +142,22 @@ test('tab: kéo thả đổi thứ tự; "Recently closed" mở lại đúng tab
   await expect(tabs).toHaveCount(3)
   const ids = async (): Promise<(string | null)[]> =>
     tabs.evaluateAll((els) => els.map((e) => e.getAttribute('data-tab-id')))
+  // Shell của tab mới đặt tiêu đề ("user@host: ~") ngay sau khi chạy → tab giãn ra; kéo đúng lúc
+  // đó thì vị trí thả lệch. Đợi độ rộng các tab đứng yên.
+  const widths = async (): Promise<string> =>
+    JSON.stringify(await tabs.evaluateAll((els) => els.map((e) => e.clientWidth)))
+  let last = ''
+  await expect
+    .poll(
+      async () => {
+        const now = await widths()
+        const stable = now === last
+        last = now
+        return stable
+      },
+      { intervals: [400] }
+    )
+    .toBe(true)
   const before = await ids()
   // Kéo tab cuối lên đầu.
   await tabs.last().dragTo(tabs.first())
