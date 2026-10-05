@@ -67,6 +67,7 @@ import {
   type TopoFlowNode,
   type TopoTraffic
 } from './TopoFlow'
+import { idleBelow, useTrafficUnit } from '../trafficUnit'
 
 const OPTIONS_KEY = 'shellhouse.k8s.topology'
 /** Từ chừng này namespace / workload trở lên: mặc định gập hết, mở cái cần xem. */
@@ -169,6 +170,7 @@ function TopologyInner({
   onShell,
   onPortForward
 }: TopologyMapProps): React.JSX.Element {
+  const unit = useTrafficUnit()
   const rf = useReactFlow<TopoFlowNode, TopoFlowEdge>()
   const [options, setOptionsRaw] = useState(loadOptions)
   const setOptions = (patch: Partial<Options>): void => {
@@ -563,7 +565,7 @@ function TopologyInner({
     const labelled = new Set<string>()
     return layout.edges.map((e) => {
       const rate = e.kind === 'select' ? topoTraffic?.rates.get(e.to)?.in : undefined
-      const label = rate !== undefined && rate >= 1 && !labelled.has(e.to)
+      const label = rate !== undefined && rate >= idleBelow(unit) && !labelled.has(e.to)
       if (label) labelled.add(e.to)
       return {
         id: e.id,
@@ -575,7 +577,7 @@ function TopologyInner({
         data: { edge: e, ...(rate !== undefined ? { rate } : {}), ...(label ? { label } : {}) }
       }
     })
-  }, [layout, topoTraffic])
+  }, [layout, topoTraffic, unit])
 
   const ctx = useMemo<TopoCtx>(
     () => ({

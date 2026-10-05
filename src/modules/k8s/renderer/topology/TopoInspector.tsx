@@ -20,7 +20,7 @@ import type { TrafficRate } from '../../shared/traffic'
 import { KindIcon, TechIcon } from '../icons'
 import type { MapRef } from '../mapModel'
 import type { TrafficState } from '../useTraffic'
-import { trafficText } from './text'
+import { rateText, useTrafficUnit } from '../trafficUnit'
 
 const DOT: Record<MapTone, string> = {
   ok: 'bg-success',
@@ -600,6 +600,7 @@ function PodFacts({ pod }: { pod: MapPod }): React.JSX.Element {
 }
 
 function TrafficSection({ traffic }: { traffic: NodeTraffic }): React.JSX.Element {
+  const unit = useTrafficUnit()
   const label = (r: TrafficRate, dir: 'in' | 'out'): string => {
     const p = dir === 'in' ? r.client : r.server
     return p.kind === 'external' || !p.ns ? p.name : `${p.ns}/${p.name}`
@@ -616,7 +617,7 @@ function TrafficSection({ traffic }: { traffic: NodeTraffic }): React.JSX.Elemen
         </p>
       )}
       {traffic.status === 'connecting' && (
-        <p className="text-xs text-faint">{t('Measuring traffic from Caretta…')}</p>
+        <p className="text-xs text-faint">{t('Measuring traffic…')}</p>
       )}
       {traffic.status === 'live' && (
         <>
@@ -627,8 +628,8 @@ function TrafficSection({ traffic }: { traffic: NodeTraffic }): React.JSX.Elemen
             )}
           >
             {t('In {in} · out {out} · updated {when}', {
-              in: trafficText(sum(traffic.incoming)),
-              out: trafficText(sum(traffic.outgoing)),
+              in: rateText(unit)(sum(traffic.incoming)),
+              out: rateText(unit)(sum(traffic.outgoing)),
               when: formatRelative(traffic.updated)
             })}
           </p>
@@ -649,7 +650,9 @@ function TrafficSection({ traffic }: { traffic: NodeTraffic }): React.JSX.Elemen
                     <span className="min-w-0 flex-1 truncate font-mono text-fg">
                       {label(r, dir)}
                     </span>
-                    <span className="shrink-0 text-faint tabular-nums">{trafficText(r.rate)}</span>
+                    <span className="shrink-0 text-faint tabular-nums">
+                      {rateText(unit)(r.rate)}
+                    </span>
                   </div>
                 ))}
               </div>

@@ -1,6 +1,6 @@
 import { MarkerType } from '@xyflow/react'
 import type { MapLayout, MapNode } from '../shared/map'
-import { bandOf } from '../shared/traffic'
+import { bandOf, type TrafficUnit } from '../shared/traffic'
 import { sides, type Band, type MapFlowEdge } from './MapFlow'
 import { EDGE_Z, type Palette } from './mapModel'
 
@@ -22,7 +22,8 @@ export function buildMapEdges({
   focusId,
   palette,
   structural,
-  traffic
+  traffic,
+  unit = 'bytes'
 }: {
   band: Band
   layout: MapLayout | null
@@ -35,6 +36,8 @@ export function buildMapEdges({
   structural: boolean
   /** Traffic đã quy về node trên bản đồ (rỗng = tắt). */
   traffic: readonly TrafficLink[]
+  /** Đơn vị của tốc độ (Caretta: byte / giây · Hubble: kết nối / giây). */
+  unit?: TrafficUnit
 }): MapFlowEdge[] {
   const out: MapFlowEdge[] = []
   // Mũi tên cỡ cố định (không phình theo độ dày đường traffic).
@@ -102,7 +105,7 @@ export function buildMapEdges({
     }
     const list = [...local, ...cross.values()]
     for (const t of list) {
-      const color = palette.ramp[bandOf(t.rate)] ?? palette.edge
+      const color = palette.ramp[bandOf(t.rate, unit)] ?? palette.edge
       const sa = byId.get(t.from)
       const sb = byId.get(t.to)
       // Thẻ ở hai namespace khác nhau (nhìn gần): đi vòng ra bên phải hai đảo rồi vào cạnh phải

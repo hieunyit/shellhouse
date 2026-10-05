@@ -26,6 +26,7 @@
     "src/modules/*/test/unit/**/*",
     "src/modules/*/test/integration/**/*",
     "src/modules/*/test/*-server.ts",
+    "src/modules/k8s/test/hubble-flows.ts",
     "test/unit/**/*",
     "test/integration/**/*",
     "test/compat/**/*",

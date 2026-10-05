@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { cleanError } from '../../../renderer/src/lib/format'
 import type { K8sOp } from '../shared/ops'
-import { trafficRates, windowRates, type TrafficRate, type TrafficSample } from '../shared/traffic'
+import {
+  trafficRates,
+  windowRates,
+  type TrafficRate,
+  type TrafficSample,
+  type TrafficSource,
+  type TrafficUnit
+} from '../shared/traffic'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 
@@ -21,6 +28,10 @@ export interface TrafficState {
   /** Vài chục mẫu gần nhất (vẽ sparkline). */
   history: { at: number; rates: TrafficRate[] }[]
   updated: number
+  /** Nguồn đang dùng: Hubble (Cilium) hoặc Caretta; thiếu = chưa biết. */
+  source?: TrafficSource
+  /** Đơn vị của `rates`: byte / giây (Caretta) hay kết nối mới / giây (Hubble). */
+  unit?: TrafficUnit
 }
 
 const HISTORY = 40
@@ -88,17 +99,34 @@ function tick(hub: Hub, request: Request): void {
         schedule(hub, request, INTERVAL_MS * 4)
         return
       }
+      // Đổi nguồn giữa chừng (vừa cài Hubble…) → đơn vị khác: bỏ mẫu cũ, không trộn byte với kết nối.
+      if (
+        hub.samples.length &&
+        (hub.samples.at(-1)?.source ?? 'caretta') !== (s.source ?? 'caretta')
+      )
+        hub.samples = []
       const prevLatest = hub.samples.at(-1)
       hub.samples = [...hub.samples.filter((x) => s.at - x.at <= WINDOW_MS), s]
+      const origin = {
+        source: s.source ?? 'caretta',
+        unit: s.unit ?? 'bytes'
+      } as const
       const oldest = hub.samples[0]
       if (!prevLatest || !oldest || oldest === s) {
-        publish(hub, { ...hub.state, status: 'connecting', agents: s.agents, updated: s.at })
+        publish(hub, {
+          ...hub.state,
+          ...origin,
+          status: 'connecting',
+          agents: s.agents,
+          updated: s.at
+        })
         schedule(hub, request, FIRST_GAP_MS)
         return
       }
       const rates = windowRates(hub.samples)
       const step = trafficRates(prevLatest, s)
       publish(hub, {
+        ...origin,
         status: 'live',
         agents: s.agents,
         rates,

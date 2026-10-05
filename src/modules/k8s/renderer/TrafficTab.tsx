@@ -5,16 +5,17 @@ import { Heading, Sparkline } from '../../../renderer/src/components/panels'
 import { t, tn } from '../../registry/renderer-kit'
 import type { K8sOp } from '../shared/ops'
 import type { K8sObject } from '../shared/resources'
-import {
-  BANDS,
-  WORKLOAD_KIND_ID,
-  bandOf,
-  formatRate,
-  type TrafficPeer,
-  type TrafficRate
-} from '../shared/traffic'
+import { WORKLOAD_KIND_ID, bandsFor, type TrafficPeer, type TrafficRate } from '../shared/traffic'
 import { useTraffic } from './useTraffic'
 import { TrafficFocusMap } from './TrafficMap'
+import {
+  HUBBLE_ENABLE,
+  TrafficUnitContext,
+  bandFor,
+  rateText,
+  sourceName,
+  useTrafficUnit
+} from './trafficUnit'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 
@@ -74,113 +75,122 @@ export function TrafficOf({
       : traffic.status
 
   return (
-    <div className="flex flex-col gap-4" data-testid="k8s-traffic" data-status={status}>
-      <div className="flex items-center gap-2 text-xs">
-        <span
-          className={cx(
-            'size-2 rounded-full',
-            status === 'live'
-              ? 'bg-success'
+    <TrafficUnitContext.Provider value={traffic.unit ?? 'bytes'}>
+      <div className="flex flex-col gap-4" data-testid="k8s-traffic" data-status={status}>
+        <div className="flex items-center gap-2 text-xs">
+          <span
+            className={cx(
+              'size-2 rounded-full',
+              status === 'live'
+                ? 'bg-success'
+                : status === 'connecting'
+                  ? 'animate-pulse bg-warning'
+                  : 'bg-line-strong'
+            )}
+          />
+          <span className="font-medium text-fg" data-testid="k8s-traffic-status">
+            {status === 'live'
+              ? t('Live')
               : status === 'connecting'
-                ? 'animate-pulse bg-warning'
-                : 'bg-line-strong'
-          )}
-        />
-        <span className="font-medium text-fg" data-testid="k8s-traffic-status">
-          {status === 'live'
-            ? t('Live')
-            : status === 'connecting'
-              ? t('Connecting…')
-              : status === 'empty'
-                ? t('No traffic')
-                : t('Unavailable')}
-        </span>
-        <span className="text-faint">
-          {status === 'live' &&
-            tn(
-              traffic.agents,
-              'from {n} Caretta agent · average over the last minute',
-              'from {n} Caretta agents · average over the last minute'
-            )}
-          {status === 'connecting' && t('taking the first two samples to measure throughput')}
-          {status === 'empty' &&
-            t(
-              'Caretta is running but saw no connections to or from this workload in the last interval.'
-            )}
-          {status === 'unavailable' && (traffic.reason ?? t('Caretta is not available'))}
-        </span>
-      </div>
-      {status === 'unavailable' && (
-        <p className="rounded-md border border-line bg-subtle px-3 py-2 text-xs text-muted">
-          {t('Live traffic comes from')} <span className="font-mono text-fg">Caretta</span>{' '}
-          {t(
-            '(eBPF, by groundcover), read directly from its agents through the API server — no Prometheus needed.'
-          )}{' '}
-          {t('Install it with')}{' '}
-          <span className="font-mono text-fg">
-            helm install caretta groundcover/caretta -n caretta --create-namespace
+                ? t('Connecting…')
+                : status === 'empty'
+                  ? t('No traffic')
+                  : t('Unavailable')}
           </span>
-          . {t('Reading its metrics needs permission to')}{' '}
-          <span className="font-mono">get pods/proxy</span> {t('in its namespace.')}
-        </p>
-      )}
-      {(status === 'live' || status === 'empty') && (
-        <>
-          <div className="grid grid-cols-3 gap-2">
-            <Total
-              label={t('Total')}
-              value={totalIn + totalOut}
-              series={history.map((h) => h.in + h.out)}
-            />
-            <Total
-              label={t('Incoming')}
-              value={totalIn}
-              series={history.map((h) => h.in)}
-              icon={<ArrowDownLeft size={12} />}
-            />
-            <Total
-              label={t('Outgoing')}
-              value={totalOut}
-              series={history.map((h) => h.out)}
-              icon={<ArrowUpRight size={12} />}
-            />
-          </div>
-          {(mine.incoming.length > 0 || mine.outgoing.length > 0) && (
-            <section>
-              <Heading>
-                {t('Service map')}{' '}
-                <span className="ml-1 font-normal text-faint normal-case">
-                  {t('callers → this workload → callees')}
-                </span>
-              </Heading>
-              <TrafficFocusMap
-                rates={traffic.rates}
-                focus={focus}
-                {...(onNavigate ? { onNavigate } : {})}
-              />
-            </section>
-          )}
-          <Peers
-            title={t('Incoming from')}
-            rates={mine.incoming}
-            peer={(r) => r.client}
-            {...(onNavigate ? { onNavigate } : {})}
-          />
-          <Peers
-            title={t('Outgoing to')}
-            rates={mine.outgoing}
-            peer={(r) => r.server}
-            {...(onNavigate ? { onNavigate } : {})}
-          />
-          <p className="text-[11px] text-faint">
+          <span className="text-faint">
+            {status === 'live' &&
+              tn(
+                traffic.agents,
+                'from {n} Caretta agent · average over the last minute',
+                'from {n} Caretta agents · average over the last minute'
+              )}
+            {status === 'connecting' && t('taking the first two samples to measure throughput')}
+            {status === 'empty' &&
+              t(
+                '{source} is running but saw no connections to or from this workload in the last interval.',
+                { source: sourceName(traffic.source) }
+              )}
+            {status === 'unavailable' && (traffic.reason ?? t('Caretta is not available'))}
+          </span>
+        </div>
+        {status === 'unavailable' && (
+          <p className="rounded-md border border-line bg-subtle px-3 py-2 text-xs text-muted">
+            {t('Live traffic comes from')} <span className="font-mono text-fg">Caretta</span>{' '}
             {t(
-              'Bands are absolute ({bands}) so traffic is comparable across clusters. Traffic sent to a Service is counted for the workloads behind it.',
-              { bands: BANDS.map((b) => b.label).join(' · ') }
-            )}
+              '(eBPF, by groundcover), read directly from its agents through the API server — no Prometheus needed.'
+            )}{' '}
+            {t('Install it with')}{' '}
+            <span className="font-mono text-fg">
+              helm install caretta groundcover/caretta -n caretta --create-namespace
+            </span>
+            . {t('Reading its metrics needs permission to')}{' '}
+            <span className="font-mono">get pods/proxy</span> {t('in its namespace.')}{' '}
+            {t('On a Cilium cluster, Hubble works instead — enable Hubble Relay with')}{' '}
+            <span className="font-mono text-fg">{HUBBLE_ENABLE}</span>.
           </p>
-        </>
-      )}
-    </div>
+        )}
+        {(status === 'live' || status === 'empty') && (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              <Total
+                label={t('Total')}
+                value={totalIn + totalOut}
+                series={history.map((h) => h.in + h.out)}
+              />
+              <Total
+                label={t('Incoming')}
+                value={totalIn}
+                series={history.map((h) => h.in)}
+                icon={<ArrowDownLeft size={12} />}
+              />
+              <Total
+                label={t('Outgoing')}
+                value={totalOut}
+                series={history.map((h) => h.out)}
+                icon={<ArrowUpRight size={12} />}
+              />
+            </div>
+            {(mine.incoming.length > 0 || mine.outgoing.length > 0) && (
+              <section>
+                <Heading>
+                  {t('Service map')}{' '}
+                  <span className="ml-1 font-normal text-faint normal-case">
+                    {t('callers → this workload → callees')}
+                  </span>
+                </Heading>
+                <TrafficFocusMap
+                  rates={traffic.rates}
+                  focus={focus}
+                  {...(onNavigate ? { onNavigate } : {})}
+                />
+              </section>
+            )}
+            <Peers
+              title={t('Incoming from')}
+              rates={mine.incoming}
+              peer={(r) => r.client}
+              {...(onNavigate ? { onNavigate } : {})}
+            />
+            <Peers
+              title={t('Outgoing to')}
+              rates={mine.outgoing}
+              peer={(r) => r.server}
+              {...(onNavigate ? { onNavigate } : {})}
+            />
+            <p className="text-[11px] text-faint">
+              {t(
+                'Bands are absolute ({bands}) so traffic is comparable across clusters. Traffic sent to a Service is counted for the workloads behind it.',
+                {
+                  bands: bandsFor(traffic.unit)
+                    .map((b) => b.label)
+                    .join(' · ')
+                }
+              )}
+            </p>
+          </>
+        )}
+      </div>
+    </TrafficUnitContext.Provider>
   )
 }
 
@@ -195,6 +205,7 @@ function Total({
   series: number[]
   icon?: React.ReactNode
 }): React.JSX.Element {
+  const unit = useTrafficUnit()
   return (
     <div className="rounded-md border border-line p-2" data-testid="k8s-traffic-total">
       {/* Nhãn trên, số dưới — ba thẻ một hàng vẫn đủ chỗ trong bảng hẹp. */}
@@ -202,7 +213,7 @@ function Total({
         {icon}
         {label}
       </div>
-      <div className="text-sm font-semibold text-fg tabular-nums">{formatRate(value)}</div>
+      <div className="text-sm font-semibold text-fg tabular-nums">{rateText(unit)(value)}</div>
       <Sparkline
         values={series.length > 1 ? series : [value, value]}
         max={Math.max(...series, value, 1)}
@@ -222,6 +233,7 @@ function Peers({
   peer: (r: TrafficRate) => TrafficPeer
   onNavigate?: (kind: string, name: string, namespace?: string) => void
 }): React.JSX.Element {
+  const unit = useTrafficUnit()
   const max = Math.max(...rates.map((r) => r.rate), 1)
   return (
     <section>
@@ -233,7 +245,7 @@ function Peers({
         {rates.map((r) => {
           const p = peer(r)
           const kindId = WORKLOAD_KIND_ID[p.kind] ?? (p.kind === 'Pod' ? 'pods' : '')
-          const band = bandOf(r.rate)
+          const band = bandFor(unit)(r.rate)
           return (
             <div
               key={`${p.kind}|${p.ns}|${p.name}|${r.port}`}
@@ -265,14 +277,14 @@ function Peers({
               </span>
               <div
                 className="h-1.5 overflow-hidden rounded-full bg-subtle"
-                title={BANDS[band]?.label}
+                title={bandsFor(unit)[band]?.label}
               >
                 <div
                   className={cx('h-full rounded-full', band >= 4 ? 'bg-warning' : 'bg-info')}
                   style={{ width: `${Math.max(4, (r.rate / max) * 100)}%` }}
                 />
               </div>
-              <span className="text-right text-fg tabular-nums">{formatRate(r.rate)}</span>
+              <span className="text-right text-fg tabular-nums">{rateText(unit)(r.rate)}</span>
             </div>
           )
         })}

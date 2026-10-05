@@ -357,5 +357,24 @@ export const k8sMap: Readonly<Record<string, string>> = {
   'Top {n} only': 'Chỉ top {n}',
   'Expand {n}': 'Mở rộng {n}',
   'Service map': 'Service map',
-  'callers → this workload → callees': 'bên gọi → workload này → bên được gọi'
+  'callers → this workload → callees': 'bên gọi → workload này → bên được gọi',
+  'Connections measured by Hubble (Cilium) or byte rates by Caretta (eBPF) — optional':
+    'Số kết nối do Hubble (Cilium) đo hoặc tốc độ byte do Caretta (eBPF) đo — không bắt buộc',
+  'Live from Hubble (Cilium) · updated {when}': 'Trực tiếp từ Hubble (Cilium) · cập nhật {when}',
+  'Measuring traffic…': 'Đang đo traffic…',
+  'Cilium cluster: enable Hubble Relay': 'Cluster dùng Cilium: bật Hubble Relay',
+  'Otherwise install Caretta (no Prometheus needed):':
+    'Nếu không, cài Caretta (không cần Prometheus):',
+  '{reason}. The service map is drawn from Hubble (Cilium) or Caretta (eBPF) — no Prometheus or sidecars needed. The Topology view works without it.':
+    '{reason}. Bản đồ dịch vụ dựng từ Hubble (Cilium) hoặc Caretta (eBPF) — không cần Prometheus hay sidecar. Chế độ Topology vẫn dùng được khi không có.',
+  '{source} is running but saw no connections in the last minute.':
+    '{source} đang chạy nhưng không thấy kết nối nào trong phút vừa qua.',
+  '{source} saw traffic elsewhere in the cluster, but none to or from this scope.':
+    '{source} thấy traffic ở chỗ khác trong cluster, nhưng không có traffic vào / ra phạm vi này.',
+  '{source} is running but saw no connections to or from this workload in the last interval.':
+    '{source} đang chạy nhưng không thấy kết nối nào vào / ra workload này trong lượt đo vừa rồi.',
+  'On a Cilium cluster, Hubble works instead — enable Hubble Relay with':
+    'Cluster dùng Cilium thì dùng Hubble thay thế — bật Hubble Relay bằng',
+  'Live traffic: in / out': 'Traffic trực tiếp: vào / ra',
+  '{n} conn/s': '{n} kết nối/s'
 }

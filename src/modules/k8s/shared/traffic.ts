@@ -4,7 +4,7 @@
  * Thuần (Session Host, renderer, test dùng chung): parse, gộp, tính tốc độ, băng lưu lượng cố định.
  */
 import { t } from '@shared/i18n'
-import { formatRate as formatBytesRate } from '@shared/i18n/format'
+import { formatNumber, formatRate as formatBytesRate } from '@shared/i18n/format'
 
 export interface TrafficPeer {
   ns: string
@@ -21,10 +21,18 @@ export interface TrafficLink {
   bytes: number
 }
 
+/** Nguồn số liệu traffic: Hubble (Cilium) hoặc Caretta. */
+export type TrafficSource = 'hubble' | 'caretta'
+/** Đơn vị của bộ đếm / tốc độ: byte (Caretta) hay số kết nối mới (Hubble không đếm byte). */
+export type TrafficUnit = 'bytes' | 'connections'
+
 export interface TrafficSample {
-  /** unavailable = không có Caretta / không đọc được; ok = đã đọc agent. */
+  /** unavailable = không có Caretta / Hubble hoặc không đọc được; ok = đã đọc. */
   status: 'unavailable' | 'ok'
   reason?: string
+  /** Thiếu (bản cũ) = Caretta, byte. */
+  source?: TrafficSource
+  unit?: TrafficUnit
   /** ms epoch lúc đọc. */
   at: number
   agents: number
@@ -103,9 +111,14 @@ export interface TrafficRate {
   client: TrafficPeer
   server: TrafficPeer
   port: string
-  /** Byte / giây. */
+  /** Byte / giây (Caretta) hoặc kết nối mới / giây (Hubble — xem `unit`). */
   rate: number
+  /** Thiếu = byte. */
+  unit?: TrafficUnit
 }
+
+const unitOf = (s: TrafficSample): Pick<TrafficRate, 'unit'> =>
+  s.unit === 'connections' ? { unit: 'connections' } : {}
 
 /** Tốc độ giữa hai lần đọc; counter giảm (agent khởi động lại) → bỏ kết nối đó lần này. */
 export function trafficRates(prev: TrafficSample, cur: TrafficSample): TrafficRate[] {
@@ -116,7 +129,13 @@ export function trafficRates(prev: TrafficSample, cur: TrafficSample): TrafficRa
   for (const l of cur.links) {
     const b = before.get(linkKey(l))
     if (b === undefined || l.bytes < b) continue
-    out.push({ client: l.client, server: l.server, port: l.port, rate: (l.bytes - b) / dt })
+    out.push({
+      client: l.client,
+      server: l.server,
+      port: l.port,
+      rate: (l.bytes - b) / dt,
+      ...unitOf(cur)
+    })
   }
   return out
 }
@@ -152,7 +171,8 @@ export function windowRates(samples: readonly TrafficSample[]): TrafficRate[] {
       client: l.client,
       server: l.server,
       port: l.port,
-      rate: (l.bytes - from.bytes) / dt
+      rate: (l.bytes - from.bytes) / dt,
+      ...unitOf(latest)
     })
   }
   return out
@@ -171,13 +191,35 @@ export const BANDS = [
   { max: Number.POSITIVE_INFINITY, label: '> 10 MB/s', width: 9 }
 ] as const
 
-export function bandOf(rate: number): number {
-  const i = BANDS.findIndex((b) => rate < b.max)
-  return i < 0 ? BANDS.length - 1 : i
+/** Băng theo số kết nối mới / giây (Hubble): cùng độ dày với băng byte tương ứng. */
+export const CONNECTION_BANDS = [
+  { max: 0.1, label: '< 0.1 conn/s', width: 1.5 },
+  { max: 1, label: '0.1–1 conn/s', width: 2.5 },
+  { max: 10, label: '1–10 conn/s', width: 3.5 },
+  { max: 100, label: '10–100 conn/s', width: 5 },
+  { max: 1_000, label: '100–1000 conn/s', width: 7 },
+  { max: Number.POSITIVE_INFINITY, label: '> 1000 conn/s', width: 9 }
+] as const
+
+export function bandsFor(
+  unit: TrafficUnit | undefined
+): readonly { max: number; label: string; width: number }[] {
+  return unit === 'connections' ? CONNECTION_BANDS : BANDS
 }
 
-/** Tốc độ theo locale (1.2 MB/s · 1,2 MB/s); dưới 1 B/s là "idle". */
-export function formatRate(rate: number): string {
+export function bandOf(rate: number, unit?: TrafficUnit): number {
+  const bands = bandsFor(unit)
+  const i = bands.findIndex((b) => rate < b.max)
+  return i < 0 ? bands.length - 1 : i
+}
+
+/**
+ * Tốc độ theo locale (1.2 MB/s · 1,2 MB/s); dưới 1 B/s là "idle". Hubble: kết nối mới / giây
+ * (0.4 conn/s); dưới 0.01 là "idle".
+ */
+export function formatRate(rate: number, unit?: TrafficUnit): string {
+  if (unit === 'connections')
+    return rate < 0.01 ? t('idle') : t('{n} conn/s', { n: formatNumber(rate, rate < 10 ? 1 : 0) })
   return rate < 1 ? t('idle') : formatBytesRate(rate)
 }
 

@@ -19,6 +19,7 @@ import type {
 } from '../../shared/ops'
 import type { TrafficSample } from '../../shared/traffic'
 import { startApiTestServer, TEST_CA, TOKEN, type ApiTestServer } from '../api-test-server'
+import { hubbleFlow } from '../hubble-flows'
 
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => {
@@ -675,6 +676,68 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     ])
     // Không bao giờ có giá trị Secret.
     expect(JSON.stringify(g)).not.toContain(Buffer.from('s3cr3t').toString('base64'))
+  })
+
+  it('traffic (Hubble): có Relay → dùng Hubble thay Caretta; đếm kết nối mới theo cặp, tên miền đích ngoài', async () => {
+    const { server, run, until } = await setup()
+    server.enableHubble()
+    // Có cả Caretta: Hubble được ưu tiên (biết từng pod, có tên miền).
+    server.enableCaretta()
+    const backend = {
+      ns: 'shop',
+      pod: 'web-1',
+      workload: ['Deployment', 'web'] as [string, string]
+    }
+    server.emitFlow(
+      hubbleFlow({
+        from: backend,
+        to: { ip: '104.26.12.64', names: ['api.stripe.com'] },
+        port: 443
+      })
+    )
+    // Lượt đầu mở luồng GetFlows (chưa có số) — các lượt sau đọc bộ đếm.
+    const first = await run<TrafficSample>({ op: 'traffic' })
+    expect(first).toMatchObject({ status: 'ok', source: 'hubble', unit: 'connections' })
+    await until(() => server.hubbleStreams() === 1)
+    server.emitFlow(
+      hubbleFlow({
+        from: backend,
+        to: { ip: '104.26.12.64', names: ['api.stripe.com'] },
+        port: 443
+      })
+    )
+    // Gói giữa chừng / trả lời không đếm.
+    server.emitFlow(
+      hubbleFlow({
+        from: backend,
+        to: { ip: '104.26.12.64', names: ['api.stripe.com'] },
+        port: 443,
+        packet: 'ack'
+      })
+    )
+    server.emitFlow(
+      hubbleFlow({
+        from: {
+          ns: 'ingress-nginx',
+          pod: 'ctrl',
+          workload: ['Deployment', 'ingress-nginx-controller']
+        },
+        to: backend,
+        port: 8080
+      })
+    )
+    let s: TrafficSample = first
+    await until(() => {
+      void run<TrafficSample>({ op: 'traffic' }).then((x) => {
+        s = x
+      })
+      return s.links.length >= 2
+    })
+    const pairs = Object.fromEntries(
+      s.links.map((l) => [`${l.client.name}>${l.server.kind}/${l.server.name}:${l.port}`, l.bytes])
+    )
+    expect(pairs['web>external/api.stripe.com:443']).toBe(2)
+    expect(pairs['ingress-nginx-controller>Deployment/web:8080']).toBe(1)
   })
 
   it('traffic (Caretta): không cài → unavailable; không được đọc → lý do; có → link, Service quy về Deployment', async () => {

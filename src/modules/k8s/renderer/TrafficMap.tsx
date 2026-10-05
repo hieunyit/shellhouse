@@ -29,9 +29,8 @@ import {
 } from '@xyflow/react'
 import { cx } from '../../../renderer/src/components/ui'
 import {
-  BANDS,
   WORKLOAD_KIND_ID,
-  bandOf,
+  bandsFor,
   flowGraph,
   layoutFlow,
   peerKey,
@@ -40,15 +39,16 @@ import {
   type FlowLayoutOptions,
   type FlowNode,
   type TrafficPeer,
-  type TrafficRate
+  type TrafficRate,
+  type TrafficUnit
 } from '../shared/traffic'
 import { sides } from './MapFlow'
 import type { MapRef } from './mapModel'
 import { KindIcon } from './icons'
 import { formatRelative, t, tn } from '../../registry/renderer-kit'
 import { CARETTA_INSTALL, useElementWidth } from './MapControls'
-import { trafficText } from './topology/text'
 import type { TrafficState } from './useTraffic'
+import { bandFor, idleBelow, rateText, sourceName, useTrafficUnit } from './trafficUnit'
 
 /**
  * Service map dựng từ Caretta: workload của các namespace đang chọn là node riêng, bên ngoài phạm
@@ -159,6 +159,7 @@ function NodeIcon({ n, size }: { n: FlowNode; size: number }): React.JSX.Element
 }
 
 const FlowNodeView = memo(function FlowNodeView({ data }: NodeProps<FNode>): React.JSX.Element {
+  const unit = useTrafficUnit()
   const ctx = useFlow()
   const { n } = data
   const title = flowTitle(n)
@@ -208,7 +209,7 @@ const FlowNodeView = memo(function FlowNodeView({ data }: NodeProps<FNode>): Rea
             )}
           </div>
           <div className="truncate text-[11px] text-faint tabular-nums">
-            {data.rate !== undefined ? trafficText(data.rate) : sub}
+            {data.rate !== undefined ? rateText(unit)(data.rate) : sub}
           </div>
         </div>
         <Handles />
@@ -244,8 +245,12 @@ const FlowNodeView = memo(function FlowNodeView({ data }: NodeProps<FNode>): Rea
         {/* Ba dòng: tên · chỗ ở · tốc độ — không dòng nào phải nhường chỗ (cắt chữ) cho dòng khác. */}
         <div className="truncate text-[12px] leading-4 text-faint">{sub}</div>
         <div className="flex gap-2.5 overflow-hidden text-[12px] leading-4 whitespace-nowrap text-muted tabular-nums">
-          {n.inRate >= 1 && <span title={t('Received')}>↓ {trafficText(n.inRate)}</span>}
-          {n.outRate >= 1 && <span title={t('Sent')}>↑ {trafficText(n.outRate)}</span>}
+          {n.inRate >= idleBelow(unit) && (
+            <span title={t('Received')}>↓ {rateText(unit)(n.inRate)}</span>
+          )}
+          {n.outRate >= idleBelow(unit) && (
+            <span title={t('Sent')}>↑ {rateText(unit)(n.outRate)}</span>
+          )}
           {!n.active && <span className="text-faint">{t('idle')}</span>}
         </div>
       </div>
@@ -302,6 +307,7 @@ function pointAtX(sx: number, sy: number, tx: number, ty: number, x: number): [n
 }
 
 const FlowEdgeView = memo(function FlowEdgeView(props: EdgeProps<FEdge>): React.JSX.Element {
+  const unit = useTrafficUnit()
   const ctx = useFlow()
   const d = props.data
   const [path, mx, my] = getBezierPath(props)
@@ -312,7 +318,7 @@ const FlowEdgeView = memo(function FlowEdgeView(props: EdgeProps<FEdge>): React.
     (props.source === ctx.selected || props.target === ctx.selected)
   const hovered = ctx.hoverEdge === props.id
   const faded = (focusing && !hot) || (ctx.matches !== null && !hovered)
-  const band = bandOf(d?.rate ?? 0)
+  const band = bandFor(unit)(d?.rate ?? 0)
   const width = d?.idle ? 1.4 : (WIDTHS[band] ?? 1.4)
   const color = d?.color ?? 'currentColor'
   const showLabel = hovered || hot || ctx.labels
@@ -371,7 +377,7 @@ const FlowEdgeView = memo(function FlowEdgeView(props: EdgeProps<FEdge>): React.
             }}
             data-testid="k8s-traffic-edge-label"
           >
-            {trafficText(d.rate)}
+            {rateText(unit)(d.rate)}
             {hovered && d.ports.length > 0 && (
               <span className="ml-1 font-normal text-faint">
                 :{d.ports.slice(0, 3).join(', :')}
@@ -392,7 +398,8 @@ const EDGE_TYPES = { flow: FlowEdgeView }
 function toFlow(
   graph: FlowGraph,
   layout: FlowLayout,
-  rateOf?: (n: FlowNode) => number | undefined
+  rateOf?: (n: FlowNode) => number | undefined,
+  unit: TrafficUnit = 'bytes'
 ): { nodes: FNode[]; edges: FEdge[] } {
   const nodes: FNode[] = []
   for (const n of graph.nodes) {
@@ -416,8 +423,8 @@ function toFlow(
     const a = layout.nodes.get(e.from)
     const b = layout.nodes.get(e.to)
     if (!a || !b) continue
-    const idle = e.rate < 1
-    const color = idle ? IDLE : (RAMP[Math.min(bandOf(e.rate), RAMP.length - 1)] ?? IDLE)
+    const idle = e.rate < idleBelow(unit)
+    const color = idle ? IDLE : (RAMP[Math.min(bandFor(unit)(e.rate), RAMP.length - 1)] ?? IDLE)
     edges.push({
       id: e.id,
       source: e.from,
@@ -459,6 +466,7 @@ function TrafficMapInner({
   scope: readonly string[]
   onOpen: (ref: MapRef) => void
 }): React.JSX.Element {
+  const unit = useTrafficUnit()
   const rf = useReactFlow<FNode, FEdge>()
   const [selected, setSelected] = useState<string | null>(null)
   const [showIdle, setShowIdle] = useState(false)
@@ -494,7 +502,7 @@ function TrafficMapInner({
   // Toàn cluster có kết nối nhưng phạm vi không có → gợi ý xem mọi namespace.
   const clusterHasLinks = traffic.rates.length > 0
   const layout = useMemo(() => layoutFlow(graph, MAP_LAYOUT), [graph])
-  const flow = useMemo(() => toFlow(graph, layout), [graph, layout])
+  const flow = useMemo(() => toFlow(graph, layout, undefined, unit), [graph, layout, unit])
   // Canvas bị gỡ (phạm vi trống) → lần gắn lại đợi onInit mới.
   if (ready && !graph.nodes.length) setReady(false)
   const byId = useMemo(() => new Map(graph.allNodes.map((n) => [n.id, n])), [graph])
@@ -648,7 +656,7 @@ function TrafficMapInner({
         <span className="block text-[13px] font-medium text-fg">{t('No live traffic data')}</span>
         <span className="mt-1 block">
           {t(
-            '{reason}. The service map is drawn from Caretta (eBPF) — no Prometheus or sidecars needed. The Topology view works without it.',
+            '{reason}. The service map is drawn from Hubble (Cilium) or Caretta (eBPF) — no Prometheus or sidecars needed. The Topology view works without it.',
             {
               reason: traffic.reason ?? t('Caretta is not installed')
             }
@@ -662,9 +670,7 @@ function TrafficMapInner({
   if (traffic.status !== 'live')
     return (
       <Empty>
-        <span className="block text-[13px] font-medium text-fg">
-          {t('Measuring traffic from Caretta…')}
-        </span>
+        <span className="block text-[13px] font-medium text-fg">{t('Measuring traffic…')}</span>
         <span className="mt-1 block">{t('Rates appear after two samples (a few seconds).')}</span>
       </Empty>
     )
@@ -673,7 +679,9 @@ function TrafficMapInner({
       <Empty>
         <span className="block text-[13px] font-medium text-fg">{t('No connections yet')}</span>
         <span className="mt-1 block">
-          {t('Caretta is running but saw no connections in the last minute.')}
+          {t('{source} is running but saw no connections in the last minute.', {
+            source: sourceName(traffic.source)
+          })}
         </span>
       </Empty>
     )
@@ -812,7 +820,12 @@ function TrafficMapInner({
                 {t('No connections in {scope}', { scope: scopeLabel })}
               </span>
               <span className="mt-1 block">
-                {t('Caretta saw traffic elsewhere in the cluster, but none to or from this scope.')}
+                {t(
+                  '{source} saw traffic elsewhere in the cluster, but none to or from this scope.',
+                  {
+                    source: sourceName(traffic.source)
+                  }
+                )}
               </span>
               {effScope.length > 0 && (
                 <button
@@ -918,6 +931,7 @@ function Legend({
   stats: string
   onZoom: (dir: 'in' | 'out' | 'fit') => void
 }): React.JSX.Element {
+  const unit = useTrafficUnit()
   const shown = [0, 2, 4, 5] as const
   return (
     <div
@@ -938,7 +952,7 @@ function Legend({
                 strokeLinecap="round"
               />
             </svg>
-            {BANDS[b].label}
+            {bandsFor(unit)[b]?.label}
           </span>
         ))}
         <span className="flex items-center gap-1.5">
@@ -1012,6 +1026,7 @@ function Panel({
   onOpen: (ref: MapRef) => void
   onClose: () => void
 }): React.JSX.Element {
+  const unit = useTrafficUnit()
   const flows = graph.allEdges.filter((e) => e.from === node.id || e.to === node.id)
   const kind = node.peer ? WORKLOAD_KIND_ID[node.peer.kind] : undefined
   const group = !node.peer && node.kind !== 'peer'
@@ -1115,10 +1130,10 @@ function Panel({
                     <span
                       className={cx(
                         'shrink-0 tabular-nums',
-                        e.rate >= 1 ? 'text-fg' : 'text-faint'
+                        e.rate >= idleBelow(unit) ? 'text-fg' : 'text-faint'
                       )}
                     >
-                      {trafficText(e.rate)}
+                      {rateText(unit)(e.rate)}
                     </span>
                   </button>
                 )
@@ -1138,7 +1153,7 @@ function Panel({
                 data-testid="k8s-traffic-panel-member"
               >
                 <span className="min-w-0 flex-1 truncate font-mono text-muted">{m.peer.name}</span>
-                <span className="shrink-0 text-faint tabular-nums">{trafficText(m.rate)}</span>
+                <span className="shrink-0 text-faint tabular-nums">{rateText(unit)(m.rate)}</span>
               </div>
             ))}
           </section>
@@ -1149,10 +1164,11 @@ function Panel({
 }
 
 function Stat({ label, value }: { label: string; value: number }): React.JSX.Element {
+  const unit = useTrafficUnit()
   return (
     <div className="rounded-md border border-line px-2 py-1.5">
       <div className="text-[11px] text-faint">{label}</div>
-      <div className="text-[13px] font-semibold text-fg tabular-nums">{trafficText(value)}</div>
+      <div className="text-[13px] font-semibold text-fg tabular-nums">{rateText(unit)(value)}</div>
     </div>
   )
 }
@@ -1194,6 +1210,7 @@ function FocusInner({
   focus: TrafficPeer
   onNavigate?: (kind: string, name: string, namespace?: string) => void
 }): React.JSX.Element | null {
+  const unit = useTrafficUnit()
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set())
   const [hoverEdge, setHoverEdge] = useState<string | null>(null)
   const [boxRef, width] = useElementWidth()
@@ -1223,14 +1240,19 @@ function FocusInner({
   const focusId = `p:${peerKey(focus)}`
   const flow = useMemo(
     () =>
-      toFlow(graph, layout, (n) => {
-        if (n.focus) return undefined
-        const e = graph.edges.find(
-          (x) => (x.from === n.id && x.to === focusId) || (x.to === n.id && x.from === focusId)
-        )
-        return e?.rate
-      }),
-    [graph, layout, focusId]
+      toFlow(
+        graph,
+        layout,
+        (n) => {
+          if (n.focus) return undefined
+          const e = graph.edges.find(
+            (x) => (x.from === n.id && x.to === focusId) || (x.to === n.id && x.from === focusId)
+          )
+          return e?.rate
+        },
+        unit
+      ),
+    [graph, layout, focusId, unit]
   )
   const ctx = useMemo<FlowCtx>(
     () => ({

@@ -22,9 +22,9 @@ import {
   type TopoBadge
 } from '../../shared/appTopology'
 import type { MapPod, MapTone } from '../../shared/map'
-import { BANDS, bandOf } from '../../shared/traffic'
+import { BANDS } from '../../shared/traffic'
 import { HelmBadge, KindIcon, TechIcon } from '../icons'
-import { trafficText } from './text'
+import { bandFor, idleBelow, rateText, useTrafficUnit } from '../trafficUnit'
 
 /**
  * Thẻ và đường nối của Topology tĩnh (React Flow). Trạng thái hay đổi (chọn, rê chuột, tìm, chỉ xem
@@ -377,6 +377,7 @@ function StatusLine({
 export const WorkloadCard = memo(function WorkloadCard({
   data
 }: NodeProps<TopoFlowNode>): React.JSX.Element {
+  const unit = useTrafficUnit()
   const ctx = useTopo()
   if (!('node' in data)) return <></>
   const n = data.node
@@ -427,13 +428,13 @@ export const WorkloadCard = memo(function WorkloadCard({
         {(n.badges ?? []).map((b) => (
           <Badge key={b.text} b={b} />
         ))}
-        {rate && (rate.in >= 1 || rate.out >= 1) && (
+        {rate && (rate.in >= idleBelow(unit) || rate.out >= idleBelow(unit)) && (
           <span
             className="ml-auto shrink-0 font-mono text-[11px] text-faint tabular-nums"
-            title={t('Live traffic (Caretta): in / out')}
+            title={t('Live traffic: in / out')}
             data-testid="k8s-topo-rate"
           >
-            ↓{trafficText(rate.in)} ↑{trafficText(rate.out)}
+            ↓{rateText(unit)(rate.in)} ↑{rateText(unit)(rate.out)}
           </span>
         )}
       </div>
@@ -857,6 +858,7 @@ const EDGE_COLOR: Record<PlacedTopoEdge['kind'], string> = {
 export const TopoEdgeComp = memo(function TopoEdgeComp(
   props: EdgeProps<TopoFlowEdge>
 ): React.JSX.Element | null {
+  const unit = useTrafficUnit()
   const ctx = useTopo()
   const d = props.data
   if (!d) return null
@@ -879,8 +881,8 @@ export const TopoEdgeComp = memo(function TopoEdgeComp(
   const faded = ctx.lit !== null && !hot
   const color = e.broken ? 'var(--map-bad)' : EDGE_COLOR[e.kind]
   const rate = d.rate ?? 0
-  const live = rate >= 1
-  const width = live ? (BANDS[bandOf(rate)]?.width ?? 1.5) : hot ? 2.2 : 1.5
+  const live = rate >= idleBelow(unit)
+  const width = live ? (BANDS[bandFor(unit)(rate)]?.width ?? 1.5) : hot ? 2.2 : 1.5
   const dash = e.broken ? '5 4' : e.kind === 'uses' || e.kind === 'mounts' ? '4 4' : undefined
   const head =
     tree?.head ??
@@ -908,7 +910,7 @@ export const TopoEdgeComp = memo(function TopoEdgeComp(
           ...(dash && !ctx.far ? { strokeDasharray: dash } : {})
         }}
       >
-        {live && <title>{trafficText(rate)}</title>}
+        {live && <title>{rateText(unit)(rate)}</title>}
       </path>
       {!ctx.far && e.kind !== 'uses' && e.kind !== 'mounts' && e.kind !== 'run' && (
         <path d={head} style={{ fill: color }} />
@@ -925,7 +927,7 @@ export const TopoEdgeComp = memo(function TopoEdgeComp(
             }}
             data-testid="k8s-topo-edge-rate"
           >
-            {trafficText(rate)}
+            {rateText(unit)(rate)}
           </div>
         </EdgeLabelRenderer>
       )}

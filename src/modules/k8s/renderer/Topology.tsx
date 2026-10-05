@@ -56,6 +56,7 @@ import {
   type PlacedNode,
   type TopologyCategory
 } from '../shared/topology'
+import { TrafficUnitContext } from './trafficUnit'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 
@@ -212,7 +213,7 @@ export function TopologyOf({
     const extra = liveTopology(
       { id: graph.root, kindLabel: liveKind, namespace: ns ?? '', name },
       traffic.rates,
-      formatRate,
+      (rate: number) => formatRate(rate, traffic.unit ?? 'bytes'),
       // Ingress phía trước root (Ingress → Service → root) trong đồ thị đã có.
       graph.nodes
         .filter(
@@ -223,7 +224,7 @@ export function TopologyOf({
         .map((n) => n.name)
     )
     return extra.edges.length ? mergeTopology(graph, extra) : graph
-  }, [graph, liveKind, traffic.status, traffic.rates, ns, name])
+  }, [graph, liveKind, traffic.status, traffic.rates, traffic.unit, ns, name])
   const filtered = useMemo(
     () => (withLive ? filterTopology(withLive, hidden) : null),
     [withLive, hidden]
@@ -454,187 +455,189 @@ export function TopologyOf({
   const missing = graph.nodes.filter((n) => n.missing)
 
   return (
-    <div className="flex h-full min-h-[420px] flex-col gap-2" data-testid="k8s-topology">
-      <div className="flex flex-wrap items-center gap-1">
-        {/* Loại đang ẩn vẫn giữ chip (gạch ngang) để bật lại: ẩn "live traffic" là ngừng đo traffic
+    <TrafficUnitContext.Provider value={traffic.unit ?? 'bytes'}>
+      <div className="flex h-full min-h-[420px] flex-col gap-2" data-testid="k8s-topology">
+        <div className="flex flex-wrap items-center gap-1">
+          {/* Loại đang ẩn vẫn giữ chip (gạch ngang) để bật lại: ẩn "live traffic" là ngừng đo traffic
             → không còn đường live nào để suy ra chip. */}
-        {CATEGORIES.filter((c) => categories.includes(c) || hidden.has(c)).map((c) => {
-          const on = !hidden.has(c)
-          return (
-            <button
-              key={c}
-              type="button"
-              aria-pressed={on}
-              data-testid="k8s-topology-filter"
-              data-category={c}
-              className={cx(
-                'inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11px]',
-                on ? 'border-line-strong text-fg' : 'border-line text-faint line-through'
-              )}
+          {CATEGORIES.filter((c) => categories.includes(c) || hidden.has(c)).map((c) => {
+            const on = !hidden.has(c)
+            return (
+              <button
+                key={c}
+                type="button"
+                aria-pressed={on}
+                data-testid="k8s-topology-filter"
+                data-category={c}
+                className={cx(
+                  'inline-flex h-6 items-center gap-1.5 rounded-full border px-2 text-[11px]',
+                  on ? 'border-line-strong text-fg' : 'border-line text-faint line-through'
+                )}
+                onClick={() => {
+                  setHidden((h) => {
+                    const next = new Set(h)
+                    if (next.has(c)) next.delete(c)
+                    else next.add(c)
+                    return next
+                  })
+                }}
+              >
+                <svg width="16" height="6" className={STYLE[c].color} aria-hidden>
+                  <line
+                    x1="0"
+                    y1="3"
+                    x2="16"
+                    y2="3"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeDasharray={STYLE[c].dash}
+                  />
+                </svg>
+                {categoryLabel(c)}
+              </button>
+            )
+          })}
+          <span className="ml-auto flex items-center gap-0.5">
+            <IconButton
+              label={t('Zoom out')}
               onClick={() => {
-                setHidden((h) => {
-                  const next = new Set(h)
-                  if (next.has(c)) next.delete(c)
-                  else next.add(c)
-                  return next
-                })
+                zoom(1 / 1.25)
               }}
             >
-              <svg width="16" height="6" className={STYLE[c].color} aria-hidden>
-                <line
-                  x1="0"
-                  y1="3"
-                  x2="16"
-                  y2="3"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeDasharray={STYLE[c].dash}
-                />
-              </svg>
-              {categoryLabel(c)}
-            </button>
-          )
-        })}
-        <span className="ml-auto flex items-center gap-0.5">
-          <IconButton
-            label={t('Zoom out')}
-            onClick={() => {
-              zoom(1 / 1.25)
-            }}
-          >
-            <Minus size={13} />
-          </IconButton>
-          <IconButton
-            label={t('Zoom in')}
-            onClick={() => {
-              zoom(1.25)
-            }}
-          >
-            <Plus size={13} />
-          </IconButton>
-          <IconButton
-            label={t('Fit')}
-            onClick={() => {
-              fit(true)
-            }}
-            testId="k8s-topology-fit"
-          >
-            <Maximize size={13} />
-          </IconButton>
-          {Object.keys(moved).length > 0 && (
-            <button
-              type="button"
-              className="mr-1 rounded px-1.5 text-[11px] text-accent hover:bg-hover"
-              data-testid="k8s-topology-reset"
+              <Minus size={13} />
+            </IconButton>
+            <IconButton
+              label={t('Zoom in')}
               onClick={() => {
-                setMoved({ key: '', pos: {} })
+                zoom(1.25)
               }}
             >
-              {t('Reset layout')}
-            </button>
+              <Plus size={13} />
+            </IconButton>
+            <IconButton
+              label={t('Fit')}
+              onClick={() => {
+                fit(true)
+              }}
+              testId="k8s-topology-fit"
+            >
+              <Maximize size={13} />
+            </IconButton>
+            {Object.keys(moved).length > 0 && (
+              <button
+                type="button"
+                className="mr-1 rounded px-1.5 text-[11px] text-accent hover:bg-hover"
+                data-testid="k8s-topology-reset"
+                onClick={() => {
+                  setMoved({ key: '', pos: {} })
+                }}
+              >
+                {t('Reset layout')}
+              </button>
+            )}
+            <IconButton
+              label={t('Reload')}
+              onClick={() => {
+                setTick((t) => t + 1)
+              }}
+            >
+              <RefreshCw size={13} />
+            </IconButton>
+          </span>
+        </div>
+        {missing.length > 0 && (
+          <p className="rounded-md bg-danger-soft px-2 py-1.5 text-xs text-danger">
+            {tn(
+              missing.length,
+              '{n} referenced object is missing: {list}',
+              '{n} referenced objects are missing: {list}',
+              { list: missing.map((m) => `${m.kindLabel} ${m.name}`).join(', ') }
+            )}
+          </p>
+        )}
+        <div
+          ref={wrapRef}
+          className="k8s-topology-flow k8s-map relative min-h-0 flex-1 overflow-hidden rounded-md border border-line"
+          data-testid="k8s-topology-canvas"
+        >
+          {view && (
+            <TopoContext.Provider value={ctx}>
+              <ReactFlow<TopoFlowNode, TopoFlowEdge>
+                nodes={flowNodes}
+                edges={flowEdges}
+                nodeTypes={TOPO_NODE_TYPES}
+                edgeTypes={TOPO_EDGE_TYPES}
+                viewport={{ x: view.x, y: view.y, zoom: view.k }}
+                onViewportChange={(v) => {
+                  setView({ x: v.x, y: v.y, k: v.zoom })
+                }}
+                minZoom={0.15}
+                maxZoom={2.5}
+                nodesDraggable
+                onNodesChange={onNodesChange}
+                nodesConnectable={false}
+                elementsSelectable={false}
+                nodesFocusable={false}
+                edgesFocusable={false}
+                disableKeyboardA11y
+                zoomOnDoubleClick={false}
+                proOptions={{ hideAttribution: true }}
+                onNodeClick={(_, n) => {
+                  setSelected(n.id === selected ? null : n.id)
+                }}
+                onNodeDoubleClick={(_, n) => {
+                  const m = byId.get(n.id)
+                  if (m) open(m)
+                }}
+                onNodeMouseEnter={(_, n) => {
+                  setHover(n.id)
+                }}
+                onNodeMouseLeave={() => {
+                  setHover(null)
+                }}
+                onPaneClick={() => {
+                  setSelected(null)
+                }}
+              >
+                <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+              </ReactFlow>
+            </TopoContext.Provider>
           )}
-          <IconButton
-            label={t('Reload')}
-            onClick={() => {
-              setTick((t) => t + 1)
+        </div>
+        {sel ? (
+          <SelectionBar
+            node={sel}
+            root={sel.id === graph.root}
+            expanded={expanded.has(sel.id)}
+            busy={expanding === sel.id}
+            impact={impact}
+            affected={affected}
+            byId={byId}
+            edges={layout.edges}
+            onImpact={setImpact}
+            onExpand={() => {
+              expand(sel)
             }}
-          >
-            <RefreshCw size={13} />
-          </IconButton>
-        </span>
-      </div>
-      {missing.length > 0 && (
-        <p className="rounded-md bg-danger-soft px-2 py-1.5 text-xs text-danger">
-          {tn(
-            missing.length,
-            '{n} referenced object is missing: {list}',
-            '{n} referenced objects are missing: {list}',
-            { list: missing.map((m) => `${m.kindLabel} ${m.name}`).join(', ') }
-          )}
-        </p>
-      )}
-      <div
-        ref={wrapRef}
-        className="k8s-topology-flow k8s-map relative min-h-0 flex-1 overflow-hidden rounded-md border border-line"
-        data-testid="k8s-topology-canvas"
-      >
-        {view && (
-          <TopoContext.Provider value={ctx}>
-            <ReactFlow<TopoFlowNode, TopoFlowEdge>
-              nodes={flowNodes}
-              edges={flowEdges}
-              nodeTypes={TOPO_NODE_TYPES}
-              edgeTypes={TOPO_EDGE_TYPES}
-              viewport={{ x: view.x, y: view.y, zoom: view.k }}
-              onViewportChange={(v) => {
-                setView({ x: v.x, y: v.y, k: v.zoom })
-              }}
-              minZoom={0.15}
-              maxZoom={2.5}
-              nodesDraggable
-              onNodesChange={onNodesChange}
-              nodesConnectable={false}
-              elementsSelectable={false}
-              nodesFocusable={false}
-              edgesFocusable={false}
-              disableKeyboardA11y
-              zoomOnDoubleClick={false}
-              proOptions={{ hideAttribution: true }}
-              onNodeClick={(_, n) => {
-                setSelected(n.id === selected ? null : n.id)
-              }}
-              onNodeDoubleClick={(_, n) => {
-                const m = byId.get(n.id)
-                if (m) open(m)
-              }}
-              onNodeMouseEnter={(_, n) => {
-                setHover(n.id)
-              }}
-              onNodeMouseLeave={() => {
-                setHover(null)
-              }}
-              onPaneClick={() => {
-                setSelected(null)
-              }}
-            >
-              <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-            </ReactFlow>
-          </TopoContext.Provider>
+            onOpen={
+              onNavigate && sel.kind && !sel.missing && sel.id !== graph.root
+                ? () => {
+                    open(sel)
+                  }
+                : undefined
+            }
+          />
+        ) : (
+          <p className="text-[11px] text-faint">
+            {tn(layout.nodes.length, '{n} object', '{n} objects')} ·{' '}
+            {tn(layout.edges.length, '{n} relationship', '{n} relationships')}.{' '}
+            {t('Click an object to trace it; double-click to open it.')}
+            {graph.notes.length > 0 && (
+              <span className="text-warning"> {graph.notes.join(' · ')}</span>
+            )}
+          </p>
         )}
       </div>
-      {sel ? (
-        <SelectionBar
-          node={sel}
-          root={sel.id === graph.root}
-          expanded={expanded.has(sel.id)}
-          busy={expanding === sel.id}
-          impact={impact}
-          affected={affected}
-          byId={byId}
-          edges={layout.edges}
-          onImpact={setImpact}
-          onExpand={() => {
-            expand(sel)
-          }}
-          onOpen={
-            onNavigate && sel.kind && !sel.missing && sel.id !== graph.root
-              ? () => {
-                  open(sel)
-                }
-              : undefined
-          }
-        />
-      ) : (
-        <p className="text-[11px] text-faint">
-          {tn(layout.nodes.length, '{n} object', '{n} objects')} ·{' '}
-          {tn(layout.edges.length, '{n} relationship', '{n} relationships')}.{' '}
-          {t('Click an object to trace it; double-click to open it.')}
-          {graph.notes.length > 0 && (
-            <span className="text-warning"> {graph.notes.join(' · ')}</span>
-          )}
-        </p>
-      )}
-    </div>
+    </TrafficUnitContext.Provider>
   )
 }
 

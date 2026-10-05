@@ -8,6 +8,7 @@ import {
   type TrafficSample
 } from '../shared/traffic'
 import { KubeError, type KubeClient } from './client'
+import { HubbleCollector } from './hubble'
 import { pool } from './operations'
 import { podTemplate } from './related'
 
@@ -36,6 +37,8 @@ export interface TrafficCache {
   services?: { at: number; byNs: Map<string, Promise<Map<string, TrafficPeer[]>>> }
   /** Bộ đếm tích luỹ (xem `accumulate`). */
   counters?: TrafficCounters
+  /** Bộ đọc Hubble (Cilium) của client đang dùng — đổi client (kết nối lại) thì tạo mới. */
+  hubble?: { client: KubeClient; collector: HubbleCollector }
 }
 
 /**
@@ -241,6 +244,41 @@ export async function trafficSample(
   signal?: AbortSignal
 ): Promise<TrafficSample> {
   const at = Date.now()
+  // Hubble (Cilium) trước: biết từng pod, có tên miền của đích ngoài cluster.
+  if (cache.hubble?.client !== client) {
+    cache.hubble?.collector.dispose()
+    cache.hubble = { client, collector: new HubbleCollector(client) }
+  }
+  const hubble = cache.hubble.collector
+  await hubble.touch(signal)
+  if (hubble.present && (hubble.state === 'ok' || hubble.state === 'connecting'))
+    return {
+      status: 'ok',
+      source: 'hubble',
+      unit: 'connections',
+      at,
+      agents: 1,
+      links: hubble.snapshot()
+    }
+  const caretta = await carettaSample(client, cache, at, signal)
+  // Có Relay mà không đọc được, Caretta cũng không có → báo lỗi của Hubble (rõ hơn).
+  if (caretta.status === 'unavailable' && hubble.present)
+    return { ...caretta, reason: hubble.reason }
+  return caretta
+}
+
+/** Dọn bộ đọc nền (đóng luồng Hubble) khi phiên cluster đóng. */
+export function disposeTrafficCache(cache: TrafficCache): void {
+  cache.hubble?.collector.dispose()
+  delete cache.hubble
+}
+
+async function carettaSample(
+  client: KubeClient,
+  cache: TrafficCache,
+  at: number,
+  signal?: AbortSignal
+): Promise<TrafficSample> {
   // Chỉ nhớ khi đã thấy agent — chưa cài / chưa được phép thì lần sau dò lại (vừa cài là thấy ngay).
   let found: { pods: K8sObject[] } | { reason: string }
   if (cache.agents && at - cache.agents.at <= CACHE_MS) found = cache.agents.value
@@ -288,5 +326,5 @@ export async function trafficSample(
   }
   cache.counters ??= { agents: new Map(), acc: new Map() }
   const links = await resolveServices(client, accumulate(cache.counters, reads, at), cache, signal)
-  return { status: 'ok', at, agents: seen.ok, links }
+  return { status: 'ok', source: 'caretta', unit: 'bytes', at, agents: seen.ok, links }
 }

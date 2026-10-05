@@ -23,10 +23,10 @@ import {
   type MapNode
 } from '../shared/map'
 import { type TrafficPeer, type TrafficRate } from '../shared/traffic'
-import { trafficText as formatRate } from './topology/text'
 import { TechIcon } from './icons'
 import { type TrafficState } from './useTraffic'
 import { type MapRef, kindTitle, routeTitle, titleOf, peerLabel, DOT } from './mapModel'
+import { rateText, useTrafficUnit } from './trafficUnit'
 
 /** "2 pods", "1 service"… — số mục bị ảnh hưởng theo loại. */
 function impactText(kind: MapNode['kind'], n: number): string {
@@ -61,6 +61,7 @@ function TrafficSection({
     outgoing: TrafficRate[]
   }
 }): React.JSX.Element {
+  const unit = useTrafficUnit()
   const row = (r: TrafficRate, peer: TrafficPeer): React.JSX.Element => (
     <div
       key={`${peer.kind}|${peer.ns}|${peer.name}`}
@@ -70,7 +71,7 @@ function TrafficSection({
       <span className="min-w-0 flex-1 truncate font-mono text-fg" title={peerLabel(peer)}>
         {peerLabel(peer)}
       </span>
-      <span className="shrink-0 text-faint tabular-nums">{formatRate(r.rate)}</span>
+      <span className="shrink-0 text-faint tabular-nums">{rateText(unit)(r.rate)}</span>
     </div>
   )
   return (
@@ -84,7 +85,7 @@ function TrafficSection({
         </p>
       )}
       {traffic.status === 'connecting' && (
-        <p className="text-xs text-faint">{t('Measuring traffic from Caretta…')}</p>
+        <p className="text-xs text-faint">{t('Measuring traffic…')}</p>
       )}
       {traffic.status === 'live' && !traffic.incoming.length && !traffic.outgoing.length && (
         <p className="text-xs text-faint">{t('No traffic observed in the last minute.')}</p>
@@ -137,6 +138,7 @@ export function MapPanel({
   onImpact: (on: boolean) => void
   traffic: React.ComponentProps<typeof TrafficSection>['traffic'] | null
 }): React.JSX.Element {
+  const unit = useTrafficUnit()
   const affected = useMemo(
     () =>
       layout && node.kind !== 'region' && node.kind !== 'namespace'
@@ -317,7 +319,7 @@ export function MapPanel({
                 [
                   t('In / out'),
                   traffic?.status === 'live'
-                    ? `${formatRate(traffic.incoming.reduce((n, r) => n + r.rate, 0))} / ${formatRate(traffic.outgoing.reduce((n, r) => n + r.rate, 0))}`
+                    ? `${rateText(unit)(traffic.incoming.reduce((n, r) => n + r.rate, 0))} / ${rateText(unit)(traffic.outgoing.reduce((n, r) => n + r.rate, 0))}`
                     : '—',
                   ''
                 ],

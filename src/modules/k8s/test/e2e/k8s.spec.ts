@@ -14,6 +14,7 @@ import {
   waitForText
 } from '../../../../../test/e2e/fixtures'
 import { startApiTestServer, TEST_CA, TOKEN, type ApiTestServer } from '../api-test-server'
+import { hubbleFlow } from '../hubble-flows'
 
 async function enableK8s(page: Page): Promise<void> {
   await page.getByTestId('open-settings').click()
@@ -913,6 +914,58 @@ test('Kubernetes: Metrics lấy lịch sử từ Prometheus trong cluster (chọ
   } finally {
     await launched.close()
     await server.close()
+  }
+})
+
+test('Kubernetes: traffic từ Hubble (Cilium, không cần Caretta) — kết nối / giây, tên miền đích ngoài', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  server.enableHubble()
+  const web = { ns: 'shop', pod: 'web-1', workload: ['Deployment', 'web'] as [string, string] }
+  // Luồng kết nối đều đặn: web gọi api.stripe.com, ingress gọi web.
+  const timer = setInterval(() => {
+    server.emitFlow(
+      hubbleFlow({ from: web, to: { ip: '104.26.12.64', names: ['api.stripe.com'] }, port: 443 })
+    )
+    server.emitFlow(
+      hubbleFlow({
+        from: {
+          ns: 'ingress-nginx',
+          pod: 'ctrl',
+          workload: ['Deployment', 'ingress-nginx-controller']
+        },
+        to: web,
+        port: 8080
+      })
+    )
+  }, 200)
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await page.getByTestId('k8s-nav-deployments.apps').click()
+    await view.locator('[data-testid="k8s-row"][data-name="shop/web"]').click()
+    await page.keyboard.press('d')
+    const detail = view.getByTestId('k8s-describe')
+    await detail.getByTestId('k8s-detail-tab-traffic').click()
+    const traffic = detail.getByTestId('k8s-traffic')
+    await expect(traffic).toHaveAttribute('data-status', 'live', { timeout: 20_000 })
+    const stripe = traffic.locator('[data-testid="k8s-traffic-peer"][data-name="api.stripe.com"]')
+    await expect(stripe).toHaveCount(1)
+    await expect(stripe).toContainText('conn/s')
+    await expect(
+      traffic.locator('[data-testid="k8s-traffic-peer"][data-name="ingress-nginx-controller"]')
+    ).toHaveCount(1)
+  } finally {
+    clearInterval(timer)
+    await launched.close()
+    await server.close()
+    rmSync(dir, { recursive: true, force: true })
   }
 })
 

@@ -6,6 +6,14 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- Kubernetes: live traffic from **Hubble** on Cilium clusters — no Caretta needed. Shellhouse
+  follows Hubble Relay's flow stream through the API server (port-forward), counts new connections
+  per pair of workloads and shows them as connections per second (Hubble has no byte counts);
+  external destinations show their DNS name when Cilium's DNS visibility is on. When both are
+  installed, Hubble is used.
+
 ### Fixed
 
 - Kubernetes: "r.items is not iterable" on Helm releases (and missing counts / Map data) when a

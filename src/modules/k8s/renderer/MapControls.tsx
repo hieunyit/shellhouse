@@ -5,6 +5,7 @@ import { useStore } from '@xyflow/react'
 import { cx, Segmented } from '../../../renderer/src/components/ui'
 import { formatRelative, t } from '../../registry/renderer-kit'
 import { type TrafficState } from './useTraffic'
+import { HUBBLE_ENABLE } from './trafficUnit'
 
 /**
  * Độ rộng hiện tại của một phần tử (ResizeObserver) — gắn `ref` trả về vào phần tử cần đo. Đo
@@ -427,7 +428,9 @@ export function TrafficMenu({
       <MenuToggle
         on={on}
         label={t('Show live traffic')}
-        hint={t('Rates between workloads measured by Caretta (eBPF) — optional')}
+        hint={t(
+          'Connections measured by Hubble (Cilium) or byte rates by Caretta (eBPF) — optional'
+        )}
         testId="k8s-map-traffic-toggle"
         onChange={onChange}
       />
@@ -437,13 +440,17 @@ export function TrafficMenu({
           <span className="text-faint">{t('Off — the topology does not need it.')}</span>
         ) : traffic.status === 'live' ? (
           <span className="text-muted">
-            {t('Live from {n} Caretta agents · updated {when}', {
-              n: traffic.agents,
-              when: formatRelative(traffic.updated)
-            })}
+            {traffic.source === 'hubble'
+              ? t('Live from Hubble (Cilium) · updated {when}', {
+                  when: formatRelative(traffic.updated)
+                })
+              : t('Live from {n} Caretta agents · updated {when}', {
+                  n: traffic.agents,
+                  when: formatRelative(traffic.updated)
+                })}
           </span>
         ) : traffic.status === 'connecting' ? (
-          <span className="text-muted">{t('Measuring traffic from Caretta…')}</span>
+          <span className="text-muted">{t('Measuring traffic…')}</span>
         ) : (
           <div className="flex flex-col gap-1.5">
             <span className="text-muted">
@@ -452,7 +459,11 @@ export function TrafficMenu({
               })}
             </span>
             <span className="text-faint">
-              {t('To see traffic, install Caretta (no Prometheus needed):')}
+              {t('Cilium cluster: enable Hubble Relay')}{' '}
+              <code className="font-mono text-fg select-all">{HUBBLE_ENABLE}</code>
+            </span>
+            <span className="text-faint">
+              {t('Otherwise install Caretta (no Prometheus needed):')}
             </span>
             <code className="block rounded bg-subtle px-1.5 py-1 font-mono text-[11px] break-all text-fg select-all">
               {CARETTA_INSTALL}

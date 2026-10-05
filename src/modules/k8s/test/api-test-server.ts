@@ -5,7 +5,13 @@ import {
   type IncomingMessage,
   type ServerResponse
 } from 'node:http'
-import type { AddressInfo } from 'node:net'
+import { connect as netConnect, type AddressInfo } from 'node:net'
+import {
+  createServer as createHttp2Server,
+  type Http2Server,
+  type ServerHttp2Stream
+} from 'node:http2'
+import { grpcFrame, writeMessage } from '../session-host/protobuf'
 import { join } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 
@@ -57,6 +63,15 @@ export interface ApiTestServer {
   enableCaretta(options?: { forbidden?: boolean; realistic?: boolean; idle?: boolean }): void
   /** Cài Prometheus giả (monitoring/prometheus-operated:9090) trả lời query / query_range. */
   enablePrometheus(): void
+  /**
+   * Cài Hubble Relay giả (kube-system/hubble-relay, gRPC h2c cổng 4245): mỗi luồng GetFlows nhận
+   * các flow đã có rồi theo dõi tiếp (`emitFlow`). Flow là message `flow.Flow` đã mã hoá.
+   */
+  enableHubble(): void
+  /** Đẩy một flow tới mọi luồng GetFlows đang mở (và nhớ cho luồng mở sau). */
+  emitFlow(flow: Uint8Array): void
+  /** Số luồng GetFlows đang mở. */
+  hubbleStreams(): number
   /**
    * Cluster mẫu giống thật cho ảnh chụp (Topology / Map): nhiều namespace, Ingress nhiều host / path /
    * TLS, Service đủ loại (ClusterIP, headless, NodePort, LoadBalancer, ExternalName, không endpoint),
@@ -116,6 +131,7 @@ const POD_SPEC = {
   ],
   nodeName: 'node-1'
 }
+const HUBBLE_POD = 'hubble-relay-7d9f8c6b5-abcde'
 const RUNNING = {
   phase: 'Running',
   containerStatuses: [{ name: 'app', ready: true, restartCount: 2, state: { running: {} } }]
@@ -998,6 +1014,32 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       return
     }
     wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
+      // Hubble Relay giả: nối kênh portforward với máy chủ gRPC (HTTP/2) thật chạy cục bộ.
+      if (
+        hubble &&
+        url.pathname === `/api/v1/namespaces/kube-system/pods/${HUBBLE_POD}/portforward` &&
+        url.searchParams.get('ports') === '4245'
+      ) {
+        const prefix = Buffer.alloc(2)
+        prefix.writeUInt16LE(4245)
+        ws.send(Buffer.concat([Buffer.from([0]), prefix]))
+        ws.send(Buffer.concat([Buffer.from([1]), prefix]))
+        const tcp = netConnect(hubble.port, '127.0.0.1')
+        tcp.on('data', (chunk: Buffer) => {
+          ws.send(Buffer.concat([Buffer.from([0]), chunk]))
+        })
+        tcp.on('close', () => {
+          ws.close()
+        })
+        tcp.on('error', () => {
+          ws.close()
+        })
+        ws.on('message', (data: Buffer) => {
+          if (data[0] === 0) tcp.write(data.subarray(1))
+        })
+        ws.on('close', () => tcp.destroy())
+        return
+      }
       if (url.pathname.endsWith('/attach')) {
         // Gắn vào container (debug): báo container, dội stdin.
         ws.send(
@@ -1051,6 +1093,38 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       })
     })
   })
+  // ——— Hubble Relay giả ———
+  let hubble: { port: number; server: Http2Server } | null = null
+  const hubbleFlows: Uint8Array[] = []
+  const hubbleOpen = new Set<ServerHttp2Stream>()
+  const flowFrame = (flow: Uint8Array): Buffer =>
+    // GetFlowsResponse { flow = 1 }
+    grpcFrame(writeMessage([[1, flow]]))
+  const startHubble = async (): Promise<void> => {
+    if (hubble) return
+    const h2 = createHttp2Server()
+    h2.on('stream', (stream, headers) => {
+      if (headers[':path'] !== '/observer.Observer/GetFlows') {
+        stream.respond(
+          { ':status': 200, 'content-type': 'application/grpc' },
+          { waitForTrailers: true }
+        )
+        stream.on('wantTrailers', () => {
+          stream.sendTrailers({ 'grpc-status': '12', 'grpc-message': 'unimplemented' })
+        })
+        stream.end()
+        return
+      }
+      stream.respond({ ':status': 200, 'content-type': 'application/grpc' })
+      for (const f of hubbleFlows) stream.write(flowFrame(f))
+      hubbleOpen.add(stream)
+      stream.on('close', () => hubbleOpen.delete(stream))
+      stream.on('error', () => hubbleOpen.delete(stream))
+    })
+    await new Promise<void>((resolve) => h2.listen(0, '127.0.0.1', resolve))
+    hubble = { port: (h2.address() as AddressInfo).port, server: h2 }
+  }
+
   let connections = 0
   server.on('connection', () => {
     connections++
@@ -1757,6 +1831,43 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         })
       )
     },
+    enableHubble: () => {
+      void startHubble()
+      const pods = store.get('pods')
+      const services = store.get('services')
+      services?.set(
+        'kube-system/hubble-relay',
+        make('v1', 'Service', 'hubble-relay', 'kube-system', {
+          spec: {
+            selector: { 'k8s-app': 'hubble-relay' },
+            ports: [{ name: 'grpc', port: 80, targetPort: 'grpc' }]
+          }
+        })
+      )
+      pods?.set(
+        `kube-system/${HUBBLE_POD}`,
+        make('v1', 'Pod', HUBBLE_POD, 'kube-system', {
+          spec: {
+            nodeName: 'node-1',
+            containers: [
+              {
+                name: 'hubble-relay',
+                image: 'quay.io/cilium/hubble-relay:v1.16.0',
+                ports: [{ name: 'grpc', containerPort: 4245 }]
+              }
+            ]
+          },
+          status: RUNNING
+        })
+      )
+      const relay = pods?.get(`kube-system/${HUBBLE_POD}`)
+      if (relay) relay.metadata.labels = { 'k8s-app': 'hubble-relay' }
+    },
+    emitFlow: (flow) => {
+      hubbleFlows.push(flow)
+      for (const st of hubbleOpen) st.write(flowFrame(flow))
+    },
+    hubbleStreams: () => hubbleOpen.size,
     enableCaretta: (options = {}) => {
       caretta = {
         forbidden: options.forbidden ?? false,
@@ -1814,6 +1925,8 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       for (const w of watchers) w.res.end()
     },
     close: async () => {
+      for (const st of hubbleOpen) st.destroy()
+      hubble?.server.close()
       for (const w of watchers) w.res.destroy()
       for (const c of wss.clients) c.terminate()
       server.closeAllConnections()

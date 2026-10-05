@@ -57,7 +57,7 @@ import { helmRevision, helmRollback, helmUninstall } from './helm'
 import { mapData } from './map'
 import { related } from './related'
 import { rbacReach, topology } from './topology'
-import { trafficSample, type TrafficCache } from './traffic'
+import { disposeTrafficCache, trafficSample, type TrafficCache } from './traffic'
 
 /** Kết quả `fromMain('resolve')` (xem main/kubeconfig.ts). */
 export interface ResolvedClusterConfig {
@@ -1427,6 +1427,7 @@ export class K8sService implements HostModuleSession {
 
   dispose(): void {
     this.disposed = true
+    disposeTrafficCache(this.trafficCache)
     for (const stop of this.subscriptions.values()) stop()
     this.subscriptions.clear()
     for (const w of this.watches.values()) w.controller.abort()

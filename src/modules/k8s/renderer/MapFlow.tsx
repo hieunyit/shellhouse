@@ -15,10 +15,11 @@ import {
 } from '@xyflow/react'
 import { cx } from '../../../renderer/src/components/ui'
 import { fitLabel, podGrid, workloadKindLabel, type MapNode, type MapTone } from '../shared/map'
-import { BANDS, bandOf, formatRate } from '../shared/traffic'
+import { BANDS } from '../shared/traffic'
 import { HelmBadge, KindIcon, TechIcon } from './icons'
 import { t, tn } from '../../registry/renderer-kit'
 import { regionTitle } from './mapModel'
+import { bandFor, rateText, useTrafficUnit } from './trafficUnit'
 
 /**
  * Node / cạnh của bản đồ cluster trên React Flow. Trạng thái thay đổi thường (chọn, quan hệ, chỉ
@@ -571,6 +572,7 @@ const PHOTONS = [1, 1, 2, 3, 4]
 export const MapEdgeComp = memo(function MapEdgeComp(
   props: EdgeProps<MapFlowEdge>
 ): React.JSX.Element {
+  const unit = useTrafficUnit()
   const ctx = useMap()
   const d = props.data
   const traffic = d?.kind === 'traffic'
@@ -584,7 +586,7 @@ export const MapEdgeComp = memo(function MapEdgeComp(
   const faded = focusing && !hot
   const color = d?.color ?? 'currentColor'
   if (d?.kind === 'traffic') {
-    const band = bandOf(d.rate ?? 0)
+    const band = bandFor(unit)(d.rate ?? 0)
     const width = BANDS[band]?.width ?? 1.5
     const photons = ctx.particles && (!focusing || hot) ? (PHOTONS[band] ?? 1) : 0
     const dist = Math.hypot(props.targetX - props.sourceX, props.targetY - props.sourceY)
@@ -647,7 +649,7 @@ export const MapEdgeComp = memo(function MapEdgeComp(
                 borderColor: color
               }}
             >
-              {formatRate(d.rate ?? 0)}
+              {rateText(unit)(d.rate ?? 0)}
             </div>
           </EdgeLabelRenderer>
         )}
