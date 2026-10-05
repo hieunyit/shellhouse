@@ -59,7 +59,7 @@ test('mọi màn hình chính chỉ có tiếng Anh', async ({ page }) => {
   await expectEnglish(page, 'snippets')
   await page.keyboard.press('Escape')
 
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+P' : 'Control+Shift+P')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+Shift+P')
   await expect(page.getByTestId('command-palette')).toBeVisible()
   await expectEnglish(page, 'command palette')
   await page.keyboard.press('Escape')

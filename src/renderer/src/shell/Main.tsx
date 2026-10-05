@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { t } from '@shared/i18n'
 import { Breadcrumb, Button, EmptyState, EnvLabel, IconButton, ProdLine, type Crumb } from '../ds'
+import type { IDockviewHeaderActionsProps } from 'dockview-react'
 import { cx, ICON, ICON_SM } from '../ds/utils'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import { panelContent, Workspace } from '../components/Workspace'
@@ -57,8 +58,11 @@ function Layer({
   return (
     <div
       className={cx(
-        'absolute inset-0 flex min-h-0 min-w-0 flex-col',
-        !shown && 'pointer-events-none invisible'
+        // isolate: z-index bên trong (watermark của dockview…) không tràn ra đè lớp khác. Lớp ẩn có
+        // thêm opacity-0: dockview gắn class "visible" (trùng utility visibility: visible của
+        // Tailwind) cho ô của nó — visibility của con ghi đè được cha, opacity thì không.
+        'absolute inset-0 isolate flex min-h-0 min-w-0 flex-col',
+        !shown && 'pointer-events-none invisible opacity-0'
       )}
       inert={!shown}
       aria-hidden={shown ? undefined : true}
@@ -91,10 +95,7 @@ function HostsHeader({ onSnippets }: { onSnippets: () => void }): React.JSX.Elem
   const env = useHostEnvironment(hostId)
   const groupTree = useHosts((s) => s.groupTree)
   const path = host?.groupId ? groupTree.path(host.groupId) : []
-  const broadcasting = useBroadcast((s) => s.enabled)
-  const tabCount = useTabs((s) => s.tabs.filter((x) => inDockview(x.target)).length)
   const overrides = useSettings((s) => s.settings.keybindings)
-  const { menu, open: openMenu } = useContextMenu()
   const items: Crumb[] = [
     {
       id: 'area',
@@ -107,9 +108,6 @@ function HostsHeader({ onSnippets }: { onSnippets: () => void }): React.JSX.Elem
     ...path.map((name, i) => ({ id: `g${String(i)}`, label: name })),
     ...(tab ? [{ id: 'tab', label: tab.title }] : [])
   ]
-  const splitKeys = displayKeybinding(keybindingFor('pane.splitRight', overrides, isMac))
-  const downKeys = displayKeybinding(keybindingFor('pane.splitDown', overrides, isMac))
-  const multiKeys = kbdKeys('multiexec.toggle', overrides)
   const focusKeys = kbdKeys('view.focus', overrides)
   return (
     <div
@@ -118,7 +116,6 @@ function HostsHeader({ onSnippets }: { onSnippets: () => void }): React.JSX.Elem
       data-env={env?.id}
     >
       <Breadcrumb items={items} {...(env ? { env } : {})} className="min-w-0 flex-1" />
-      {menu}
       <IconButton
         label={t('Snippets')}
         data-testid="open-snippets"
@@ -128,55 +125,6 @@ function HostsHeader({ onSnippets }: { onSnippets: () => void }): React.JSX.Elem
         onClick={onSnippets}
       >
         <ScrollText {...ICON} />
-      </IconButton>
-      <IconButton
-        label={t('Layout')}
-        data-testid="layout-menu"
-        disabled={!tab}
-        aria-haspopup="menu"
-        onClick={(e) => {
-          const rect = e.currentTarget.getBoundingClientRect()
-          openMenu(
-            { clientX: rect.left, clientY: rect.bottom + 4, preventDefault: () => undefined },
-            [
-              {
-                id: 'split-right',
-                label: t('Split right'),
-                icon: <Columns2 size={14} />,
-                ...(splitKeys ? { hint: splitKeys } : {}),
-                onSelect: () => {
-                  useTabs.getState().split('right')
-                }
-              },
-              {
-                id: 'split-below',
-                label: t('Split down'),
-                icon: <Rows2 size={14} />,
-                ...(downKeys ? { hint: downKeys } : {}),
-                onSelect: () => {
-                  useTabs.getState().split('below')
-                }
-              }
-            ]
-          )
-        }}
-      >
-        <Columns2 {...ICON} />
-      </IconButton>
-      <IconButton
-        label={
-          broadcasting
-            ? t('Exit MultiExec')
-            : t('MultiExec: show all terminals and type into them at once')
-        }
-        data-testid="toggle-broadcast"
-        aria-pressed={broadcasting}
-        disabled={tabCount < 2 && !broadcasting}
-        className={cx(broadcasting && 'text-ds-warning')}
-        {...(multiKeys ? { shortcut: multiKeys } : {})}
-        onClick={toggleMultiExec}
-      >
-        <Radio {...ICON} />
       </IconButton>
       <IconButton
         label={t('Focus mode: only the terminal')}
@@ -189,10 +137,22 @@ function HostsHeader({ onSnippets }: { onSnippets: () => void }): React.JSX.Elem
       >
         <Maximize2 {...ICON} />
       </IconButton>
-      <div className="mx-1 h-4 w-px bg-ds-border" />
+    </div>
+  )
+}
+
+/** Dải tab phiên (header actions của dockview), chỉ ở nhóm đang active: tab mới + chọn shell. */
+function TabStripNew({ isGroupActive }: IDockviewHeaderActionsProps): React.JSX.Element | null {
+  const overrides = useSettings((s) => s.settings.keybindings)
+  const { menu, open: openMenu } = useContextMenu()
+  if (!isGroupActive) return null
+  return (
+    <div className="flex h-full items-center pl-1">
+      {menu}
       <span className="flex items-center">
         <Button
           variant="ghost"
+          size="sm"
           icon={<Plus {...ICON_SM} />}
           aria-label={t('New terminal')}
           title={`${t('New terminal')} (${displayKeybinding(keybindingFor('tab.new', overrides, isMac))})`}
@@ -262,6 +222,75 @@ function HostsHeader({ onSnippets }: { onSnippets: () => void }): React.JSX.Elem
           <ChevronDown {...ICON_SM} />
         </IconButton>
       </span>
+    </div>
+  )
+}
+
+/** Bên phải dải tab phiên: chia màn hình, MultiExec (như prototype). */
+function TabStripRight({ isGroupActive }: IDockviewHeaderActionsProps): React.JSX.Element | null {
+  const tab = useActiveSessionTab()
+  const broadcasting = useBroadcast((s) => s.enabled)
+  const tabCount = useTabs((s) => s.tabs.filter((x) => inDockview(x.target)).length)
+  const overrides = useSettings((s) => s.settings.keybindings)
+  const { menu, open: openMenu } = useContextMenu()
+  if (!isGroupActive) return null
+  const splitKeys = displayKeybinding(keybindingFor('pane.splitRight', overrides, isMac))
+  const downKeys = displayKeybinding(keybindingFor('pane.splitDown', overrides, isMac))
+  const multiKeys = kbdKeys('multiexec.toggle', overrides)
+  return (
+    <div className="flex h-full items-center gap-0.5 pr-1">
+      {menu}
+      <IconButton
+        size="sm"
+        label={t('Layout')}
+        data-testid="layout-menu"
+        disabled={!tab}
+        aria-haspopup="menu"
+        onClick={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect()
+          openMenu(
+            { clientX: rect.left, clientY: rect.bottom + 4, preventDefault: () => undefined },
+            [
+              {
+                id: 'split-right',
+                label: t('Split right'),
+                icon: <Columns2 size={14} />,
+                ...(splitKeys ? { hint: splitKeys } : {}),
+                onSelect: () => {
+                  useTabs.getState().split('right')
+                }
+              },
+              {
+                id: 'split-below',
+                label: t('Split down'),
+                icon: <Rows2 size={14} />,
+                ...(downKeys ? { hint: downKeys } : {}),
+                onSelect: () => {
+                  useTabs.getState().split('below')
+                }
+              }
+            ]
+          )
+        }}
+      >
+        <Columns2 {...ICON_SM} />
+      </IconButton>
+      <IconButton
+        size="sm"
+        label={
+          broadcasting
+            ? t('Exit MultiExec')
+            : t('MultiExec: show all terminals and type into them at once')
+        }
+        data-testid="toggle-broadcast"
+        aria-pressed={broadcasting}
+        disabled={tabCount < 2 && !broadcasting}
+        className={cx(broadcasting && 'text-ds-warning')}
+        {...(multiKeys ? { shortcut: multiKeys } : {})}
+        onClick={toggleMultiExec}
+      >
+        <Radio {...ICON_SM} />
+      </IconButton>
     </div>
   )
 }
@@ -388,8 +417,8 @@ const StageTab = memo(function StageTab({
   return (
     <div
       className={cx(
-        'absolute inset-0 flex min-h-0 flex-col',
-        !shown && 'pointer-events-none invisible'
+        'absolute inset-0 isolate flex min-h-0 flex-col',
+        !shown && 'pointer-events-none invisible opacity-0'
       )}
       inert={!shown}
       aria-hidden={shown ? undefined : true}
@@ -523,7 +552,11 @@ export const Main = memo(function Main({
           {!focus && <HostsHeader onSnippets={onSnippets} />}
           {focus && <FocusPill />}
           <div className="relative min-h-0 flex-1 overflow-clip">
-            <Workspace Watermark={HostsEmpty} />
+            <Workspace
+              Watermark={HostsEmpty}
+              leftActions={TabStripNew}
+              rightActions={TabStripRight}
+            />
             {multiExec && <MultiExecView />}
           </div>
           <TerminalMenu />

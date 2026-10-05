@@ -31,7 +31,7 @@ export const s3Manifest: ModuleManifest = {
     { kind: 'secrets', detail: 'Stores secret access keys encrypted in the vault' }
   ],
   version: 1,
-  icon: 'cloud',
+  icon: 'database',
   enabledByDefault: true,
   contributes: {
     sidebarSection: true,

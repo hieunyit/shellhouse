@@ -51,7 +51,7 @@ test('hộp thoại: focus bị giữ bên trong khi Tab, Esc trả focus về t
   await expect.poll(() => focusedIn(page, `terminal-${tab}`)).toBe(true)
 
   // Bảng lệnh: mở, chọn bằng phím mũi tên / Enter, không cần chuột.
-  await page.keyboard.press(isMac ? 'Meta+Shift+P' : 'Control+Shift+P')
+  await page.keyboard.press(isMac ? 'Meta+K' : 'Control+Shift+P')
   expect(await focusedTestId(page)).toBe('palette-input')
   await page.keyboard.type('new terminal')
   await page.keyboard.press('Enter')

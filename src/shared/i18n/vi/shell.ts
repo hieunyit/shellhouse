@@ -62,5 +62,34 @@ export const shell: Readonly<Record<string, string>> = {
   'Jump host “{name}” is not a saved host — add it first':
     'Jump host “{name}” chưa được lưu — hãy thêm host đó trước',
   'Pick a host in the sidebar to copy files to or from it.':
-    'Chọn một host ở thanh bên để chép file qua lại.'
+    'Chọn một host ở thanh bên để chép file qua lại.',
+  'Theme, density, language and what the sidebar shows.':
+    'Giao diện sáng / tối, mật độ, ngôn ngữ và những gì thanh bên hiển thị.',
+  'Font, colors and behavior for SSH, Telnet, serial and local terminals.':
+    'Font, màu và cách hoạt động của terminal SSH, Telnet, serial và máy này.',
+  'Keyboard shortcuts for tabs, panes and the command palette.':
+    'Phím tắt cho tab, chia màn hình và bảng lệnh.',
+  'File manager and transfer behavior for SFTP and S3.':
+    'Trình quản lý file và cách truyền file cho SFTP và S3.',
+  'Labels, colors and safety rules for production, staging and other environments.':
+    'Nhãn, màu và quy tắc an toàn cho production, staging và các môi trường khác.',
+  'Shared accounts and SSH keys, stored in the encrypted vault.':
+    'Tài khoản dùng chung và khoá SSH, lưu trong vault đã mã hoá.',
+  'Vault, auto-lock and how secrets are stored.': 'Vault, tự khoá và cách lưu thông tin bí mật.',
+  'Turn on Kubernetes, Docker, S3 and other tools.':
+    'Bật Kubernetes, Docker, S3 và các công cụ khác.',
+  'Release channel and automatic updates.': 'Kênh phát hành và tự động cập nhật.',
+  'Logs and performance information for troubleshooting.': 'Log và thông tin hiệu năng để tìm lỗi.',
+  'Version, licenses and links.': 'Phiên bản, giấy phép và liên kết.',
+  'Search settings': 'Tìm trong cài đặt',
+  'Filter transfers': 'Lọc lượt truyền',
+  Any: 'Bất kỳ',
+  Direction: 'Chiều',
+  '{percent} of {total}': '{percent} của {total}',
+  'Uploaded (resumed)': 'Đã tải lên (tiếp tục)',
+  Uploaded: 'Đã tải lên',
+  'Downloaded (resumed)': 'Đã tải về (tiếp tục)',
+  Downloaded: 'Đã tải về',
+  upload: 'tải lên',
+  download: 'tải về'
 }

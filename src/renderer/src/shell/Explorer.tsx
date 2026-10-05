@@ -19,7 +19,7 @@ import { IconButton } from '../ds'
 import { cx, ICON_SM } from '../ds/utils'
 import { Sidebar } from '../components/Sidebar'
 import { HostAvatar } from '../components/HostAvatar'
-import { SETTINGS_NAV } from '../components/settings/settings-sections'
+import { SETTINGS_NAV, settingsDescription } from '../components/settings/settings-sections'
 import { connect } from '../components/sidebar/actions'
 import {
   rendererModule,
@@ -345,25 +345,46 @@ function TransfersExplorer(): React.JSX.Element {
 function SettingsExplorer(): React.JSX.Element {
   const section = useShell((s) => s.settingsSection)
   const current = section === 'accounts' || section === 'keys' ? 'keychain' : section
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const groups = SETTINGS_NAV.map((g) => ({
+    ...g,
+    items: g.items.filter(
+      (i) =>
+        !q ||
+        i.title().toLowerCase().includes(q) ||
+        settingsDescription(i.id).toLowerCase().includes(q)
+    )
+  })).filter((g) => g.items.length > 0)
   return (
-    <nav aria-label={t('Settings')} className="min-h-0 flex-1 overflow-auto px-2 pb-2">
-      {SETTINGS_NAV.map((g) => (
-        <ExplorerGroup key={g.items[0]?.id} title={g.group()}>
-          {g.items.map((s) => (
-            <ExplorerItem
-              key={s.id}
-              testId={`settings-nav-${s.id}`}
-              icon={<s.icon {...ICON_SM} />}
-              label={s.title()}
-              current={current === s.id}
-              onClick={() => {
-                useShell.getState().openSettings(s.id)
-              }}
-            />
-          ))}
-        </ExplorerGroup>
-      ))}
-    </nav>
+    <>
+      <div className="px-2.5 pb-2">
+        <ExplorerSearch
+          value={query}
+          onChange={setQuery}
+          placeholder={t('Search settings')}
+          testId="explorer-settings-search"
+        />
+      </div>
+      <nav aria-label={t('Settings')} className="min-h-0 flex-1 overflow-auto px-2 pb-2">
+        {groups.map((g) => (
+          <ExplorerGroup key={g.group()} title={g.group()}>
+            {g.items.map((s) => (
+              <ExplorerItem
+                key={s.id}
+                testId={`settings-nav-${s.id}`}
+                icon={<s.icon {...ICON_SM} />}
+                label={s.title()}
+                current={current === s.id}
+                onClick={() => {
+                  useShell.getState().openSettings(s.id)
+                }}
+              />
+            ))}
+          </ExplorerGroup>
+        ))}
+      </nav>
+    </>
   )
 }
 

@@ -343,16 +343,8 @@ export function TerminalView({
           <div className="flex-1" />
           <LookMenu />
           <ToolbarButton
-            testId="session-focus"
-            icon={<Maximize2 size={13} />}
-            onClick={() => {
-              useShell.getState().setFocus(true)
-            }}
-          >
-            {t('Focus')}
-          </ToolbarButton>
-          <ToolbarButton
             testId="open-find"
+            iconOnly
             icon={<Search size={13} />}
             onClick={() => {
               useTerminalFind.getState().open(tabId)
@@ -364,6 +356,7 @@ export function TerminalView({
             <>
               <ToolbarButton
                 testId="toggle-files"
+                iconOnly
                 pressed={view === 'files'}
                 icon={<Columns2 size={13} />}
                 onClick={() => {
@@ -375,6 +368,7 @@ export function TerminalView({
               </ToolbarButton>
               <ToolbarButton
                 testId="open-deploy-key"
+                iconOnly
                 disabled={!connected}
                 icon={<KeyRound size={13} />}
                 onClick={() => {
@@ -408,6 +402,16 @@ export function TerminalView({
               </ToolbarButton>
             </>
           )}
+          <ToolbarButton
+            testId="session-focus"
+            iconOnly
+            icon={<Maximize2 size={14} />}
+            onClick={() => {
+              useShell.getState().setFocus(true)
+            }}
+          >
+            {t('Focus mode: only the terminal')}
+          </ToolbarButton>
         </div>
       )}
       {detected.length > 0 && (
@@ -520,6 +524,7 @@ function ToolbarButton({
   pressed,
   disabled,
   icon,
+  iconOnly,
   onClick,
   children
 }: {
@@ -527,6 +532,8 @@ function ToolbarButton({
   pressed?: boolean
   disabled?: boolean
   icon: React.ReactNode
+  /** Chỉ icon (tên ở tooltip) — như thanh phiên của thiết kế v0.5; SFTP / Forwards giữ chữ. */
+  iconOnly?: boolean
   onClick: () => void
   children: React.ReactNode
 }): React.JSX.Element {
@@ -540,7 +547,9 @@ function ToolbarButton({
       aria-pressed={pressed}
       disabled={disabled}
       className={cx(
-        'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-ds-sm px-2 font-medium transition-colors duration-(--ds-dur-fast) outline-none focus-visible:shadow-ds-focus disabled:opacity-40 [&_svg]:text-faint',
+        'inline-flex h-6 shrink-0 items-center gap-1.5 rounded-ds-sm font-medium',
+        iconOnly ? 'w-6 justify-center' : 'px-2',
+        ' transition-colors duration-(--ds-dur-fast) outline-none focus-visible:shadow-ds-focus disabled:opacity-40 [&_svg]:text-faint',
         pressed
           ? 'bg-ds-active text-fg [&_svg]:text-fg'
           : 'text-muted hover:bg-ds-hover hover:text-fg'
@@ -548,7 +557,7 @@ function ToolbarButton({
       onClick={onClick}
     >
       {icon}
-      <span className="hidden @lg:inline">{children}</span>
+      {!iconOnly && <span className="hidden @lg:inline">{children}</span>}
     </button>
   )
 }

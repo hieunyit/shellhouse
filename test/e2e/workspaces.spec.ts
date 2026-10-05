@@ -29,7 +29,7 @@ test('workspace: lưu bố cục chia màn hình, đóng hết, mở lại đún
   await expect(page.getByTestId('tab')).toHaveCount(0)
 
   // Mở lại từ bảng lệnh.
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+P' : 'Control+Shift+P')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+Shift+P')
   await page.getByTestId('palette-input').fill('Dev layout')
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('tab')).toHaveCount(3)

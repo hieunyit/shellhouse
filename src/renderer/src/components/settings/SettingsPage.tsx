@@ -2,7 +2,15 @@ import { useEffect, useRef } from 'react'
 import { t } from '@shared/i18n'
 import { Diagnostics } from '../Diagnostics'
 import { cx } from '../ui'
-import { resolveSettingsSection, settingsTitle, type SettingsSectionId } from './settings-sections'
+import { Settings } from 'lucide-react'
+import { ICON_SM } from '../../ds/utils'
+import { AreaHeader } from '../AreaHeader'
+import {
+  resolveSettingsSection,
+  settingsDescription,
+  settingsTitle,
+  type SettingsSectionId
+} from './settings-sections'
 import { AppearanceSection } from './AppearanceSection'
 import { EnvironmentsSection } from './EnvironmentsSection'
 import { FilesSection } from './FilesSection'
@@ -45,6 +53,12 @@ export function SettingsPage({
       role="region"
       aria-label={t('Settings')}
     >
+      <AreaHeader icon={<Settings {...ICON_SM} />} title={t('Settings')}>
+        <span className="text-ds-base text-ds-fg-3">/</span>
+        <span className="truncate text-ds-base font-medium text-ds-fg-2">
+          {settingsTitle(section)}
+        </span>
+      </AreaHeader>
       <div
         className={cx(
           'min-h-0 flex-1',
@@ -60,9 +74,14 @@ export function SettingsPage({
           )}
         >
           {section !== 'keychain' && (
-            <h1 className="mb-5 text-ds-xl font-semibold tracking-[-0.018em] text-ds-fg">
-              {settingsTitle(section)}
-            </h1>
+            <div className="mb-6">
+              <h2 className="text-ds-xl font-semibold tracking-[-0.018em] text-ds-fg">
+                {settingsTitle(section)}
+              </h2>
+              {settingsDescription(section) && (
+                <p className="mt-1 text-ds-base text-ds-fg-3">{settingsDescription(section)}</p>
+              )}
+            </div>
           )}
           {section === 'appearance' && <AppearanceSection />}
           {section === 'environments' && <EnvironmentsSection />}

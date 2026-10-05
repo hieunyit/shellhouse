@@ -3,6 +3,7 @@ import {
   DockviewReact,
   type DockviewApi,
   type DockviewTheme,
+  type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
   type IDockviewPanelProps
 } from 'dockview-react'
@@ -323,10 +324,16 @@ const tabComponents = { tab: TabHeader }
  * dockview chỉ giữ vị trí. Hai chiều đồng bộ qua sự kiện.
  */
 export const Workspace = memo(function Workspace({
-  Watermark
+  Watermark,
+  leftActions,
+  rightActions
 }: {
   /** Vẽ khi không còn tab phiên nào (mặc định: Home). */
   Watermark?: React.FunctionComponent
+  /** Ngay sau dải tab của mỗi nhóm (nút tab mới). */
+  leftActions?: React.FunctionComponent<IDockviewHeaderActionsProps>
+  /** Bên phải dải tab của mỗi nhóm (chia màn hình, MultiExec). */
+  rightActions?: React.FunctionComponent<IDockviewHeaderActionsProps>
 }): React.JSX.Element {
   const apiRef = useRef<DockviewApi | null>(null)
   const [api, setApi] = useState<DockviewApi | null>(null)
@@ -395,6 +402,8 @@ export const Workspace = memo(function Workspace({
       components={components}
       tabComponents={tabComponents}
       watermarkComponent={Watermark ?? HomeView}
+      {...(leftActions ? { leftHeaderActionsComponent: leftActions } : {})}
+      {...(rightActions ? { rightHeaderActionsComponent: rightActions } : {})}
       defaultRenderer="always"
       onReady={(event) => {
         apiRef.current = event.api

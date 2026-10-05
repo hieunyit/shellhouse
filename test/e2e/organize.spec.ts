@@ -263,6 +263,7 @@ test('MultiExec: mọi terminal xếp đều trên một màn hình, chọn ô n
   // Nút trên thanh công cụ: bật MultiExec với tất cả terminal được chọn.
   await page.getByTestId('toggle-broadcast').click()
   await expect(page.getByTestId('multiexec-summary')).toHaveText('Typing goes to 3 of 3 terminals')
-  await page.getByTestId('toggle-broadcast').click()
+  // Đang MultiExec, dải tab bị lưới che — thoát bằng nút của thanh MultiExec (như prototype).
+  await page.getByTestId('multiexec-exit').click()
   await expect(grid).toHaveCount(0)
 })

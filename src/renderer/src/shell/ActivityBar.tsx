@@ -10,6 +10,13 @@ import { useShell, type Area } from './store'
 
 const ICON = { size: 18, strokeWidth: 1.5 } as const
 
+/** Thứ tự module trên activity bar theo thiết kế: Kubernetes → Docker → S3; module khác xếp sau. */
+const MODULE_ORDER = ['k8s', 'docker', 's3']
+const moduleRank = (id: string): number => {
+  const i = MODULE_ORDER.indexOf(id)
+  return i === -1 ? MODULE_ORDER.length : i
+}
+
 function Item({
   area,
   label,
@@ -84,7 +91,9 @@ function Item({
  * Settings, khoá vault. Mục đang chọn: nền active + vạch teal 2px bên trái.
  */
 export const ActivityBar = memo(function ActivityBar(): React.JSX.Element {
-  const modules = useEnabledModules().filter((m) => m.SidebarSection)
+  const modules = useEnabledModules()
+    .filter((m) => m.SidebarSection)
+    .sort((a, b) => moduleRank(a.manifest.id) - moduleRank(b.manifest.id))
   const active = useTransfers((s) => s.activeCount())
   return (
     <nav
@@ -93,6 +102,7 @@ export const ActivityBar = memo(function ActivityBar(): React.JSX.Element {
       data-testid="activity-bar"
     >
       <Item area="home" label={t('Home')} icon={<House {...ICON} />} testId="open-home" />
+      <div role="separator" className="my-1 h-px w-5 bg-ds-border" />
       <Item area="hosts" label={t('Hosts')} icon={<Server {...ICON} />} testId="activity-hosts" />
       <Item area="files" label={t('Files')} icon={<Folder {...ICON} />} testId="activity-files" />
       {modules.map((m) => {

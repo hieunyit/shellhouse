@@ -55,7 +55,7 @@ test('Home: mở bằng nút Home (một tab duy nhất), kết nối gần đâ
   const card = home
     .getByTestId('home-recent')
     .locator('[data-testid="home-host-card"][data-name="web-01 production"]')
-  await expect(card).toContainText('Connected just now')
+  await expect(card).toContainText('just now')
 
   // Mở file (SFTP) từ thẻ → tab trình quản lý file.
   await card.getByTestId('home-sftp').click()

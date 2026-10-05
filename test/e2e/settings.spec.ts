@@ -57,7 +57,7 @@ test('phím tắt tuỳ chỉnh + bảng lệnh', async ({ page }) => {
   await expect(page.getByTestId('tab')).toHaveCount(2)
 
   // Bảng lệnh: tìm mờ "split rig" → "Split right".
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+P' : 'Control+Shift+P')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+Shift+P')
   await page.getByTestId('palette-input').fill('split rig')
   await page.getByTestId('palette-input').press('Enter')
   await expect(page.getByTestId('tab')).toHaveCount(3)

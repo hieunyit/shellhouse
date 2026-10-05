@@ -67,6 +67,13 @@ export function formatDate(value: DateInput): string {
   return dateFormatter('date', { day: 'numeric', month: 'short', year: 'numeric' }).format(d)
 }
 
+/** Thứ, ngày tháng (lời chào Home): Thứ Hai, 5 tháng 10 (vi) · Monday, October 5 (en). */
+export function formatLongDay(value: DateInput): string {
+  const d = toDate(value)
+  if (Number.isNaN(d.getTime())) return '—'
+  return dateFormatter('longDay', { weekday: 'long', day: 'numeric', month: 'long' }).format(d)
+}
+
 /** Chỉ giờ: 22:44:05 (vi) · 10:44:05 PM (en-US). */
 export function formatTime(value: DateInput, seconds = true): string {
   const d = toDate(value)

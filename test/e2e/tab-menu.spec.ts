@@ -50,7 +50,7 @@ test('ẩn / hiện thanh bên bằng nút và phím tắt; tìm host thì tự 
   await expect(search).toBeVisible()
   await page.getByTestId('sidebar-collapse').click()
   await expect(search).toHaveCount(0)
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+Shift+K')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+K' : 'Control+Shift+K')
   await expect(search).toBeFocused()
 })
 

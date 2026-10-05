@@ -31,7 +31,7 @@ async function openKit(page: Page): Promise<void> {
   )
 
   // Bảng lệnh → "Open design kit".
-  await page.keyboard.press(isMac ? 'Meta+Shift+P' : 'Control+Shift+P')
+  await page.keyboard.press(isMac ? 'Meta+K' : 'Control+Shift+P')
   await page.getByTestId('palette-input').fill('design kit')
   await expect(page.locator('[data-command="designkit.open"]')).toBeVisible()
   await page.keyboard.press('Enter')

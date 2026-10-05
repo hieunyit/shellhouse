@@ -89,3 +89,33 @@ export function settingsTitle(section: SettingsSection): string {
   for (const g of SETTINGS_NAV) for (const i of g.items) if (i.id === section) return i.title()
   return t('Settings')
 }
+
+/** Dòng mô tả dưới tiêu đề của từng mục (thiết kế v0.5). */
+export function settingsDescription(section: SettingsSection): string {
+  switch (section) {
+    case 'appearance':
+      return t('Theme, density, language and what the sidebar shows.')
+    case 'terminal':
+      return t('Font, colors and behavior for SSH, Telnet, serial and local terminals.')
+    case 'shortcuts':
+      return t('Keyboard shortcuts for tabs, panes and the command palette.')
+    case 'files':
+      return t('File manager and transfer behavior for SFTP and S3.')
+    case 'environments':
+      return t('Labels, colors and safety rules for production, staging and other environments.')
+    case 'keychain':
+      return t('Shared accounts and SSH keys, stored in the encrypted vault.')
+    case 'security':
+      return t('Vault, auto-lock and how secrets are stored.')
+    case 'modules':
+      return t('Turn on Kubernetes, Docker, S3 and other tools.')
+    case 'updates':
+      return t('Release channel and automatic updates.')
+    case 'diagnostics':
+      return t('Logs and performance information for troubleshooting.')
+    case 'about':
+      return t('Version, licenses and links.')
+    default:
+      return ''
+  }
+}

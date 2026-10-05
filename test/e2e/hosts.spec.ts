@@ -90,7 +90,7 @@ test('tìm kiếm mờ bằng Ctrl+Shift+K, Enter để kết nối', async ({ p
   await createHost(page, { hostname: '10.9.9.9', port: 22, username: 'x', label: 'staging-db' })
 
   await page.getByTestId(`terminal-${await activeTab(page)}`).click()
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+Shift+K')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+K' : 'Control+Shift+K')
   await expect(page.getByTestId('host-search')).toBeFocused()
   await page.keyboard.type('pw01')
   const rows = page.getByTestId('host-row')

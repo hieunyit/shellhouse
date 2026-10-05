@@ -120,7 +120,7 @@ test('bảng lệnh: "Modules: Browse" mở trang Modules; gõ từ khoá tìm r
   await page.getByTestId('settings-nav-modules').click()
   await page.getByTestId('module-toggle-s3').click()
   await page.keyboard.press('Escape')
-  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+P' : 'Control+Shift+P')
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+Shift+P')
   const palette = page.getByTestId('command-palette')
   await palette.getByTestId('palette-input').fill('bucket')
   await expect(palette.getByRole('option').first()).toContainText('Modules: Enable S3 storage')

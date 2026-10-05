@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
-import { ArrowRight, FileInput, FolderOpen, Plus, RotateCw, Zap } from 'lucide-react'
+import { ArrowRight, FileInput, FolderOpen, House, Plus, RotateCw, Zap } from 'lucide-react'
 import { t, tn } from '@shared/i18n'
-import { formatRelative } from '@shared/i18n/format'
+import { formatLongDay, formatRelative } from '@shared/i18n/format'
 import type { HostSummary } from '@shared/hosts'
 import { parseQuickConnect } from '@shared/quick-connect'
 import { Button, EnvLabel, StatusChip } from '../ds'
@@ -13,6 +13,7 @@ import { useTabStatus } from '../stores/tab-status'
 import { useTabs } from '../stores/tabs'
 import { openSidebarDialog } from '../stores/ui-requests'
 import { controllers } from '../terminal/registry'
+import { AreaHeader } from './AreaHeader'
 import { HostAvatar } from './HostAvatar'
 
 function greeting(now = new Date()): string {
@@ -158,7 +159,7 @@ function RecentRow({ host }: { host: HostSummary }): React.JSX.Element {
       <HostActions host={host} />
       {host.lastUsedAt !== null && (
         <span className="shrink-0 text-xs text-faint tabular-nums">
-          {t('Connected {time}', { time: formatRelative(host.lastUsedAt) })}
+          {formatRelative(host.lastUsedAt)}
         </span>
       )}
       <button
@@ -273,11 +274,7 @@ export function HomeView(): React.JSX.Element {
     [hosts, recent, favorites]
   )
   const hasHosts = hosts.length > 0
-  const today = new Date().toLocaleDateString(undefined, {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long'
-  })
+  const today = formatLongDay(Date.now())
   const connect = (): void => {
     const target = parseQuickConnect(value)
     if (!target) {
@@ -292,152 +289,159 @@ export function HomeView(): React.JSX.Element {
   return (
     // @container: bố cục co giãn theo độ rộng THẬT của vùng Home, không theo cửa sổ.
     <div
-      className="animate-fade-in @container/home h-full overflow-auto bg-ds-surface-0"
+      className="animate-fade-in flex h-full min-h-0 flex-col bg-ds-surface-0"
       data-testid="welcome"
     >
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-6 py-8 @3xl/home:px-10">
-        <header className="flex flex-wrap items-start gap-4">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-ds-xl font-semibold tracking-[-0.018em] text-fg">
-              {hasHosts ? greeting() : t('Welcome to Shellhouse')}
-            </h1>
-            <p className="mt-0.5 text-[13px] text-muted">
-              {hasHosts
-                ? [
-                    today,
-                    summary(hosts.length, groups),
-                    tn(sessions, '{n} session open', '{n} sessions open')
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')
-                : t(
-                    'SSH, SFTP, Telnet, serial and more in one place. How would you like to start?'
-                  )}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <Button
-              icon={<FileInput {...ICON_SM} />}
-              data-testid="home-import"
-              onClick={() => void openSidebarDialog('import-hosts')}
-            >
-              {t('Import')}
-            </Button>
-            <Button
-              variant="primary"
-              icon={<Plus {...ICON_SM} />}
-              data-testid="home-new-host"
-              onClick={() => void openSidebarDialog('new-host')}
-            >
-              {t('New host')}
-            </Button>
-          </div>
-        </header>
-
-        <form
-          className="flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            connect()
-          }}
-        >
-          <div
-            className={cx(
-              'flex h-ds-ctl-lg min-w-0 flex-1 items-center gap-2.5 rounded-ds-md border bg-ds-surface-1 px-3 transition-[border-color,box-shadow]',
-              invalid
-                ? 'border-ds-danger ring-3 ring-ds-danger-soft'
-                : 'border-ds-border-control focus-within:border-ds-accent focus-within:ring-3 focus-within:ring-ds-accent-soft hover:border-faint'
-            )}
-          >
-            <Zap {...ICON_SM} className="shrink-0 text-faint" />
-            <span className="shrink-0 text-xs font-medium text-faint">SSH</span>
-            <input
-              className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-fg outline-none placeholder:font-sans placeholder:text-faint"
-              placeholder={t('user@host:port — e.g. deploy@10.10.1.11:22')}
-              ref={quickRef}
-              aria-label={t('Quick connect')}
-              aria-invalid={invalid}
-              data-testid="home-quick-connect"
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value)
-                setInvalid(false)
-              }}
-            />
-            {invalid && (
-              <span role="alert" className="shrink-0 text-xs text-ds-danger">
-                {t('Use user@host or user@host:port')}
-              </span>
-            )}
-          </div>
-          <Button size="lg" type="submit" data-testid="home-quick-connect-go">
-            {t('Connect')}
-          </Button>
-        </form>
-
-        {favorites.length > 0 && (
-          <Section title={t('Favorites')} count={favorites.length} testId="home-favorites">
-            <div className="grid grid-cols-1 gap-x-4 gap-y-0.5 @2xl/home:grid-cols-2 @4xl/home:grid-cols-3">
-              {favorites.map((h) => (
-                <FavoriteItem key={h.id} host={h} />
-              ))}
+      <AreaHeader icon={<House {...ICON_SM} />} title={t('Home')} />
+      <div className="@container/home min-h-0 flex-1 overflow-auto">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 px-6 py-8 @3xl/home:px-10">
+          <header className="flex flex-wrap items-start gap-4">
+            <div className="min-w-0 flex-1">
+              <h1 className="text-ds-xl font-semibold tracking-[-0.018em] text-fg">
+                {hasHosts ? greeting() : t('Welcome to Shellhouse')}
+              </h1>
+              <p className="mt-0.5 text-[13px] text-muted">
+                {hasHosts
+                  ? [
+                      today,
+                      summary(hosts.length, groups),
+                      tn(sessions, '{n} session open', '{n} sessions open')
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : t(
+                      'SSH, SFTP, Telnet, serial and more in one place. How would you like to start?'
+                    )}
+              </p>
             </div>
-          </Section>
-        )}
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                icon={<FileInput {...ICON_SM} />}
+                data-testid="home-import"
+                onClick={() => void openSidebarDialog('import-hosts')}
+              >
+                {t('Import')}
+              </Button>
+              <Button
+                variant="primary"
+                icon={<Plus {...ICON_SM} />}
+                data-testid="home-new-host"
+                onClick={() => void openSidebarDialog('new-host')}
+              >
+                {t('New host')}
+              </Button>
+            </div>
+          </header>
 
-        {(recent.length > 0 || saved.length > 0) && (
-          <div className="grid grid-cols-1 gap-8 @4xl/home:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-            {recent.length > 0 ? (
-              <Section title={t('Recent')} count={recent.length} testId="home-recent">
-                <div className="flex flex-col">
-                  {recent.map((h) => (
-                    <RecentRow key={h.id} host={h} />
-                  ))}
-                </div>
-              </Section>
-            ) : (
-              <Section title={t('Your hosts')} testId="home-saved">
-                <div className="flex flex-col">
-                  {saved.map((h) => (
-                    <RecentRow key={h.id} host={h} />
-                  ))}
-                </div>
-              </Section>
-            )}
-            <AttentionList />
-          </div>
-        )}
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              connect()
+            }}
+          >
+            <div
+              className={cx(
+                'flex h-ds-ctl-lg min-w-0 flex-1 items-center gap-2.5 rounded-ds-md border bg-ds-surface-1 px-3 transition-[border-color,box-shadow]',
+                invalid
+                  ? 'border-ds-danger ring-3 ring-ds-danger-soft'
+                  : 'border-ds-border-control focus-within:border-ds-accent focus-within:ring-3 focus-within:ring-ds-accent-soft hover:border-faint'
+              )}
+            >
+              <Zap {...ICON_SM} className="shrink-0 text-faint" />
+              <span className="shrink-0 text-xs font-medium text-faint">SSH</span>
+              <input
+                className="min-w-0 flex-1 bg-transparent font-mono text-[13px] text-fg outline-none placeholder:font-sans placeholder:text-faint"
+                placeholder={t('user@host:port — e.g. deploy@10.10.1.11:22')}
+                ref={quickRef}
+                aria-label={t('Quick connect')}
+                aria-invalid={invalid}
+                data-testid="home-quick-connect"
+                value={value}
+                onChange={(e) => {
+                  setValue(e.target.value)
+                  setInvalid(false)
+                }}
+              />
+              {invalid && (
+                <span role="alert" className="shrink-0 text-xs text-ds-danger">
+                  {t('Use user@host or user@host:port')}
+                </span>
+              )}
+            </div>
+            <Button size="lg" type="submit" data-testid="home-quick-connect-go">
+              {t('Connect')}
+            </Button>
+          </form>
 
-        <Section title={hasHosts ? t('Start something new') : t('Get started')}>
-          <div className="grid grid-cols-1 gap-4 border-t border-ds-border-subtle pt-4 @xl/home:grid-cols-2 @4xl/home:grid-cols-4">
-            <StartLink
-              title={t('Add a host')}
-              text={t('Save a server with its login — connect later in one click.')}
-              testId="welcome-add-host"
-              onClick={() => void openSidebarDialog('new-host')}
-            />
-            <StartLink
-              title={t('Import hosts')}
-              text={t('From ~/.ssh/config, MobaXterm, Termius or a CSV file.')}
-              testId="welcome-import"
-              onClick={() => void openSidebarDialog('import-hosts')}
-            />
-            <StartLink
-              title={t('Local terminal')}
-              text={t('Open a shell on this computer.')}
-              testId="welcome-new-terminal"
-              onClick={() => useTabs.getState().addLocal()}
-            />
-            <StartLink
-              title={t('Add tools')}
-              text={t('S3 storage, Docker and Kubernetes — turn on what you need.')}
-              testId="welcome-add-tools"
-              onClick={() => {
-                browseModules()
-              }}
-            />
-          </div>
-        </Section>
+          {favorites.length > 0 && (
+            <Section title={t('Favorites')} count={favorites.length} testId="home-favorites">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-0.5 @2xl/home:grid-cols-2 @4xl/home:grid-cols-3">
+                {favorites.map((h) => (
+                  <FavoriteItem key={h.id} host={h} />
+                ))}
+              </div>
+            </Section>
+          )}
+
+          {(recent.length > 0 || saved.length > 0) && (
+            <div className="grid grid-cols-1 gap-8 @4xl/home:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+              {recent.length > 0 ? (
+                <Section title={t('Recent')} count={recent.length} testId="home-recent">
+                  <div className="flex flex-col">
+                    {recent.map((h) => (
+                      <RecentRow key={h.id} host={h} />
+                    ))}
+                  </div>
+                </Section>
+              ) : (
+                <Section title={t('Your hosts')} testId="home-saved">
+                  <div className="flex flex-col">
+                    {saved.map((h) => (
+                      <RecentRow key={h.id} host={h} />
+                    ))}
+                  </div>
+                </Section>
+              )}
+              <AttentionList />
+            </div>
+          )}
+
+          {/* Đã có host kết nối gần đây / ghim: trang chủ là việc đang làm — gợi ý bắt đầu chỉ hiện khi
+            chưa có gì (như prototype). */}
+          {recent.length === 0 && favorites.length === 0 && (
+            <Section title={hasHosts ? t('Start something new') : t('Get started')}>
+              <div className="grid grid-cols-1 gap-4 border-t border-ds-border-subtle pt-4 @xl/home:grid-cols-2 @4xl/home:grid-cols-4">
+                <StartLink
+                  title={t('Add a host')}
+                  text={t('Save a server with its login — connect later in one click.')}
+                  testId="welcome-add-host"
+                  onClick={() => void openSidebarDialog('new-host')}
+                />
+                <StartLink
+                  title={t('Import hosts')}
+                  text={t('From ~/.ssh/config, MobaXterm, Termius or a CSV file.')}
+                  testId="welcome-import"
+                  onClick={() => void openSidebarDialog('import-hosts')}
+                />
+                <StartLink
+                  title={t('Local terminal')}
+                  text={t('Open a shell on this computer.')}
+                  testId="welcome-new-terminal"
+                  onClick={() => useTabs.getState().addLocal()}
+                />
+                <StartLink
+                  title={t('Add tools')}
+                  text={t('S3 storage, Docker and Kubernetes — turn on what you need.')}
+                  testId="welcome-add-tools"
+                  onClick={() => {
+                    browseModules()
+                  }}
+                />
+              </div>
+            </Section>
+          )}
+        </div>
       </div>
     </div>
   )

@@ -6,6 +6,25 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Fixed
+
+- With no open sessions, the "No open sessions" panel covered Home and other pages.
+- The date on Home followed the system language instead of the app language.
+
+### Changed
+
+- Closer to the v0.5 design: the command center is centered in the title bar (⌘K on macOS;
+  Search hosts moves to ⌘⇧K), Kubernetes / Docker / S3 follow Files on the activity bar, interface
+  text uses Inter like the design (host and resource names are no longer monospaced), every page
+  has a header with its icon and breadcrumb, Settings has a search box and a short description
+  per page.
+- Session tabs: the open tab is highlighted, "+ Terminal" sits right after the tabs, Split and
+  MultiExec on the right of the tab bar; the session bar uses icon buttons (SFTP and Forwarding
+  keep their labels).
+- Transfers lists transfers by state (Failed, Active, Queued, Completed) with the route
+  (from → to), progress and speed, and filters by name, source and direction.
+- Home shows "Start something new" only until you have recent or favorite hosts.
+
 ## [1.2.0-beta.14] - 2026-10-05
 
 ### Changed

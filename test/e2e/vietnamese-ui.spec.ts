@@ -60,7 +60,7 @@ test('giao diện tiếng Việt: thanh bên, form host, cài đặt, định d�
 
     // Trang chủ.
     await page.getByTestId('open-home').click()
-    await expect(page.getByTestId('welcome')).toContainText('Thêm host')
+    await expect(page.getByTestId('welcome')).toContainText('Gần đây')
     await expect(page.getByTestId('home-host-card').first()).toContainText('Kết nối')
   } finally {
     await launched.close()
