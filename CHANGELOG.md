@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.17] - 2026-10-05
+
 ### Added
 
 - Kubernetes: live traffic from **Hubble** on Cilium clusters — no Caretta needed. Shellhouse
