@@ -43,6 +43,8 @@ jobs:
         run: pnpm typecheck
 
       - name: Unit tests
+        # Test treo (handle chưa đóng) → fail kèm log sau 20 phút, không chạy tới giới hạn 6 giờ.
+        timeout-minutes: 20
         shell: bash
         run: set -o pipefail; pnpm test 2>&1 | tee unit.log
 

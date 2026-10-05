@@ -5,10 +5,11 @@ import {
   type IncomingMessage,
   type ServerResponse
 } from 'node:http'
-import { connect as netConnect, type AddressInfo } from 'node:net'
+import { connect as netConnect, type AddressInfo, type Socket } from 'node:net'
 import {
   createServer as createHttp2Server,
   type Http2Server,
+  type ServerHttp2Session,
   type ServerHttp2Stream
 } from 'node:http2'
 import { grpcFrame, writeMessage } from '../session-host/protobuf'
@@ -1025,6 +1026,8 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         ws.send(Buffer.concat([Buffer.from([0]), prefix]))
         ws.send(Buffer.concat([Buffer.from([1]), prefix]))
         const tcp = netConnect(hubble.port, '127.0.0.1')
+        hubbleSockets.add(tcp)
+        tcp.on('close', () => hubbleSockets.delete(tcp))
         tcp.on('data', (chunk: Buffer) => {
           ws.send(Buffer.concat([Buffer.from([0]), chunk]))
         })
@@ -1097,12 +1100,19 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
   let hubble: { port: number; server: Http2Server } | null = null
   const hubbleFlows: Uint8Array[] = []
   const hubbleOpen = new Set<ServerHttp2Stream>()
+  // Phiên HTTP/2 + socket nối portforward: đóng hết khi tắt server (còn mở là giữ tiến trình sống).
+  const hubbleSessions = new Set<ServerHttp2Session>()
+  const hubbleSockets = new Set<Socket>()
   const flowFrame = (flow: Uint8Array): Buffer =>
     // GetFlowsResponse { flow = 1 }
     grpcFrame(writeMessage([[1, flow]]))
   const startHubble = async (): Promise<void> => {
     if (hubble) return
     const h2 = createHttp2Server()
+    h2.on('session', (session) => {
+      hubbleSessions.add(session)
+      session.on('close', () => hubbleSessions.delete(session))
+    })
     h2.on('stream', (stream, headers) => {
       if (headers[':path'] !== '/observer.Observer/GetFlows') {
         stream.respond(
@@ -1926,7 +1936,12 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     },
     close: async () => {
       for (const st of hubbleOpen) st.destroy()
-      hubble?.server.close()
+      for (const ses of hubbleSessions) ses.destroy()
+      for (const sock of hubbleSockets) sock.destroy()
+      if (hubble) {
+        const h2 = hubble.server
+        await new Promise<void>((resolve) => h2.close(() => { resolve(); }))
+      }
       for (const w of watchers) w.res.destroy()
       for (const c of wss.clients) c.terminate()
       server.closeAllConnections()
