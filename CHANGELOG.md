@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.16] - 2026-10-05
+
 ### Changed
 
 - Kubernetes sidebar is back to resource groups (Workloads, Service Discovery, Storage…) with the
