@@ -107,7 +107,9 @@ export const useShell = create<ShellState>((set, get) => {
     if (!area) return
     set({ historyAt: at, area })
     const tab = tabFor(area, s.lastTab)
-    if (!tab) return
+    // Chỉ kích hoạt tab thuộc đúng khu vực: tab của khu vực khác (vd. terminal khi sang Files) sẽ
+    // kéo khu vực ngược về chỗ của nó.
+    if (!tab || tabArea(tab) !== area) return
     const tabs = useTabs.getState()
     if (tabs.activeId !== tab.id) tabs.activate(tab.id)
     if (sharesDockview(area))
@@ -124,7 +126,12 @@ export const useShell = create<ShellState>((set, get) => {
       return
     }
     enter(area)
-    if (!tab) return
+    // Files chưa có trình quản lý file của phiên nào: mở file trên máy này (không hiện terminal).
+    if (area === 'files' && (!tab || tabArea(tab) !== 'files')) {
+      set({ filesLocal: true })
+      return
+    }
+    if (!tab || tabArea(tab) !== area) return
     const tabs = useTabs.getState()
     if (tabs.activeId !== tab.id) tabs.activate(tab.id)
     // Quay lại khu vực phiên: đưa focus về terminal đang chọn.

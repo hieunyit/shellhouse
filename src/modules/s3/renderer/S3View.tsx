@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import {
+  Database,
   ArrowLeftRight,
   ArrowUp,
   BarChart3,
@@ -1171,6 +1172,11 @@ export function S3View({
           data-testid="s3-path"
           title={location ? `s3://${location}` : undefined}
         >
+          <span className="hidden shrink-0 items-center gap-1.5 px-1.5 text-ds-fg-3 @3xl:flex">
+            <Database size={14} strokeWidth={1.5} />
+            {t('S3 storage')}
+            <span className="pl-1 text-ds-fg-4">/</span>
+          </span>
           <button
             type="button"
             className={cx(
@@ -1265,38 +1271,6 @@ export function S3View({
           )}
         </nav>
         {env && <EnvLabel env={env} size="md" className="mr-1" />}
-        <label className="flex h-7 w-28 shrink-0 items-center gap-1.5 rounded-md border border-line bg-subtle px-2 focus-within:border-accent @xl:w-44">
-          <Search size={12} className="shrink-0 text-faint" />
-          <input
-            className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-faint"
-            placeholder={bucket === null ? t('Filter buckets') : t('Filter')}
-            aria-label={bucket === null ? t('Filter buckets') : t('Filter this folder')}
-            data-testid="s3-filter"
-            value={filter}
-            onChange={(e) => {
-              setFilter(e.target.value)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape' && filter) {
-                e.preventDefault()
-                e.stopPropagation()
-                setFilter('')
-              }
-            }}
-          />
-          {filter && (
-            <button
-              type="button"
-              aria-label={t('Clear filter')}
-              className="text-faint hover:text-fg"
-              onClick={() => {
-                setFilter('')
-              }}
-            >
-              <X size={12} />
-            </button>
-          )}
-        </label>
         {bucket === null ? (
           <SortMenu
             options={
@@ -1334,19 +1308,40 @@ export function S3View({
         role="toolbar"
         aria-label={t('Actions')}
       >
+        <label className="mr-2 flex h-ds-ctl w-36 shrink-0 items-center gap-1.5 rounded-ds-md border border-ds-border-control bg-ds-surface-1 px-2 focus-within:border-ds-accent @xl:w-56">
+          <Search size={12} className="shrink-0 text-faint" />
+          <input
+            className="min-w-0 flex-1 bg-transparent text-ds-sm outline-none placeholder:text-ds-fg-3"
+            placeholder={bucket === null ? t('Filter buckets') : t('Filter by prefix…')}
+            aria-label={bucket === null ? t('Filter buckets') : t('Filter this folder')}
+            data-testid="s3-filter"
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && filter) {
+                e.preventDefault()
+                e.stopPropagation()
+                setFilter('')
+              }
+            }}
+          />
+          {filter && (
+            <button
+              type="button"
+              aria-label={t('Clear filter')}
+              className="text-faint hover:text-fg"
+              onClick={() => {
+                setFilter('')
+              }}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </label>
         {bucket === null ? (
           <>
-            <ToolButton
-              icon={<Plus size={14} />}
-              label={t('New bucket')}
-              labelAt="md"
-              primary
-              testId="s3-new-bucket"
-              disabled={!ready}
-              onClick={() => {
-                setDialog({ kind: 'bucket' })
-              }}
-            />
             {calculating ? (
               <ToolButton
                 icon={<Square size={13} />}
@@ -1416,17 +1411,20 @@ export function S3View({
                 />
               </>
             )}
+            <ToolButton
+              icon={<Plus size={14} />}
+              label={t('New bucket')}
+              labelAt="md"
+              primary
+              testId="s3-new-bucket"
+              disabled={!ready}
+              onClick={() => {
+                setDialog({ kind: 'bucket' })
+              }}
+            />
           </>
         ) : (
           <>
-            <ToolButton
-              icon={<Upload size={14} />}
-              label={t('Upload')}
-              labelAt="md"
-              primary
-              testId="s3-upload"
-              onClick={() => void window.shellhouse.pickFilesToUpload().then(upload)}
-            />
             <ToolButton
               icon={<FolderUp size={14} />}
               label={t('Upload folder')}
@@ -1587,6 +1585,14 @@ export function S3View({
               onClick={() => {
                 toggleDetails()
               }}
+            />
+            <ToolButton
+              icon={<Upload size={14} />}
+              label={t('Upload')}
+              labelAt="md"
+              primary
+              testId="s3-upload"
+              onClick={() => void window.shellhouse.pickFilesToUpload().then(upload)}
             />
           </>
         )}

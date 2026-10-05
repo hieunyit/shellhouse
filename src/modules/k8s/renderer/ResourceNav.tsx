@@ -1,12 +1,32 @@
 import { memo, useState } from 'react'
-import { ChevronRight, LayoutDashboard, Map as MapIcon } from 'lucide-react'
+import {
+  Box,
+  Boxes,
+  ChevronRight,
+  Clock,
+  Copy,
+  Database,
+  HardDrive,
+  Hash,
+  KeyRound,
+  Layers,
+  LayoutDashboard,
+  ListChecks,
+  LogIn,
+  Map as MapIcon,
+  Network,
+  Package,
+  Server,
+  SlidersHorizontal,
+  type LucideIcon
+} from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { COUNT_CAPPED, type DiscoveredKind } from '../shared/ops'
 import { BUILTIN_KINDS, CRD_SECTIONS, type ResourceSection } from '../shared/resources'
 import { formatNumber, t, type NavPlacement } from '../../registry/renderer-kit'
 import { HELM, MAP, OVERVIEW } from './nav'
 
-/** Thứ tự nhóm như Rancher; CRD có nhóm riêng (Gateway API, Argo CD) đứng sau, rồi Apps. */
+/** Thứ tự nhóm như Rancher; CRD có nhóm riêng (Gateway API, Argo CD) đứng sau. */
 const SECTIONS: readonly ResourceSection[] = [
   'Workloads',
   'Service Discovery',
@@ -15,9 +35,41 @@ const SECTIONS: readonly ResourceSection[] = [
   'Access Control',
   'Cluster'
 ]
+/**
+ * Loại hay dùng hiện ngay dưới namespace đang chọn (thiết kế v0.5: Explorer › cluster › namespace ›
+ * Pods, Deployments…). Loại còn lại nằm ở "More resources".
+ */
+const QUICK = [
+  'pods',
+  'deployments.apps',
+  'statefulsets.apps',
+  'daemonsets.apps',
+  'jobs.batch',
+  'cronjobs.batch',
+  'services',
+  'ingresses.networking.k8s.io',
+  'configmaps',
+  'secrets',
+  'persistentvolumeclaims'
+]
+/** Icon nét đơn sắc cho loại hay dùng (Explorer của thiết kế v0.5). */
+const QUICK_ICON: Record<string, LucideIcon> = {
+  pods: Box,
+  'deployments.apps': Layers,
+  'statefulsets.apps': Database,
+  'daemonsets.apps': Copy,
+  'jobs.batch': ListChecks,
+  'cronjobs.batch': Clock,
+  services: Network,
+  'ingresses.networking.k8s.io': LogIn,
+  configmaps: SlidersHorizontal,
+  secrets: KeyRound,
+  persistentvolumeclaims: HardDrive
+}
+/** Mục cấp cluster (trên danh sách namespace). */
+const CLUSTER_LEVEL = new Set([OVERVIEW, MAP, HELM, 'nodes'])
 /** Id nhóm (cũng là test id) — tiêu đề hiện dịch lúc vẽ. */
-const CUSTOM = 'Custom resources'
-const APPS = 'Apps'
+const MORE = 'more'
 const STORE_KEY = 'shellhouse.k8s.nav'
 
 /** Nhóm người dùng đã tự mở / đóng (nhớ giữa các lần mở app — chỉ là tiện lợi, lỗi thì bỏ qua). */
@@ -52,15 +104,19 @@ function plural(kind: string): string {
 }
 
 /**
- * Thanh điều hướng kiểu Rancher / Lens: nhóm thu gọn được (Workloads, Service Discovery, Storage,
- * Policy, Access Control, Cluster; Gateway API / Argo CD khi cluster có), mỗi loại có số đối
- * tượng. Mặc định mở Workloads và nhóm đang xem; lựa chọn mở / đóng được nhớ.
+ * Điều hướng của một cluster (thiết kế v0.5): Overview · Map · Helm releases · Nodes; rồi danh sách
+ * namespace — namespace đang xem mở ra các loại hay dùng (Pods, Deployments, Services…) kèm số
+ * đối tượng; "More resources" giữ đủ mọi loại theo nhóm kiểu Rancher (RBAC, Storage, CRD…).
+ * Lựa chọn mở / đóng nhóm được nhớ.
  */
 export const ResourceNav = memo(function ResourceNav({
   kinds,
   view,
   drilled,
   counts,
+  allNamespaces,
+  namespaces,
+  onNamespaces,
   onGo,
   placement = 'inline'
 }: {
@@ -70,6 +126,11 @@ export const ResourceNav = memo(function ResourceNav({
   drilled: boolean
   /** Số đối tượng theo loại (namespace đang chọn); thiếu / null = chưa biết. */
   counts: Readonly<Record<string, number | null>>
+  /** Mọi namespace của cluster (đọc được). */
+  allNamespaces: readonly string[]
+  /** Namespace đang xem: [] = mọi namespace; null = chưa biết. */
+  namespaces: readonly string[] | null
+  onNamespaces: (v: string[]) => void
   onGo: (id: string) => void
   /** Trong Explorer của khung app (không khung riêng) hay cột bên trái của view. */
   placement?: NavPlacement
@@ -79,10 +140,20 @@ export const ResourceNav = memo(function ResourceNav({
     (x) => !x.forbidden
   )
   const builtin = new Map(BUILTIN_KINDS.map((b) => [b.id, b]))
-  const groups: { id: string; title: string; items: Item[]; sub?: boolean }[] = []
+  const visibleIds = new Set(visible.map((x) => x.id))
+  const quick: Item[] = QUICK.filter((id) => visibleIds.has(id)).map((id) => ({
+    id,
+    title: builtin.get(id)?.title ?? id
+  }))
+  const groups: { id: string; title: string; items: Item[] }[] = []
   for (const section of SECTIONS) {
     const items = visible
-      .filter((x) => builtin.get(x.id)?.section === section)
+      .filter(
+        (x) =>
+          builtin.get(x.id)?.section === section &&
+          !QUICK.includes(x.id) &&
+          !CLUSTER_LEVEL.has(x.id)
+      )
       .map((x) => ({ id: x.id, title: builtin.get(x.id)?.title ?? x.kind }))
     // Tên nhóm là hằng tiếng Anh (cũng là id / test id) → dịch lúc vẽ.
     if (items.length) groups.push({ id: section, title: t(section), items })
@@ -95,7 +166,6 @@ export const ResourceNav = memo(function ResourceNav({
       .sort((a, b) => a.title.localeCompare(b.title))
     if (items.length) groups.push({ id: title, title, items })
   }
-  groups.push({ id: APPS, title: t('Apps'), items: [{ id: HELM, title: t('Helm releases') }] })
   const byGroup = new Map<string, Item[]>()
   for (const x of custom) {
     if (CRD_SECTIONS[x.group]) continue
@@ -107,8 +177,7 @@ export const ResourceNav = memo(function ResourceNav({
     .map(([g, items]) => ({
       id: `crd:${g}`,
       title: g,
-      items: items.sort((a, b) => a.title.localeCompare(b.title)),
-      sub: true
+      items: items.sort((a, b) => a.title.localeCompare(b.title))
     }))
 
   const has = (items: Item[]): boolean => !drilled && items.some((i) => i.id === view)
@@ -120,44 +189,68 @@ export const ResourceNav = memo(function ResourceNav({
     saveChoices(next)
   }
 
-  const item = (x: Item, indent: boolean): React.JSX.Element => {
-    const current = view === x.id && !drilled
-    const n = counts[x.id]
+  const row = (
+    id: string,
+    label: string,
+    icon: React.ReactNode,
+    level: number,
+    current: boolean,
+    onClick: () => void,
+    meta?: React.ReactNode
+  ): React.JSX.Element => (
+    <button
+      key={id}
+      type="button"
+      data-testid={`k8s-nav-${id}`}
+      aria-current={current}
+      title={label}
+      className={cx(
+        'flex h-7 w-full shrink-0 items-center gap-2 rounded-ds-md pr-2 text-left text-ds-base outline-none focus-visible:shadow-ds-focus',
+        current
+          ? 'bg-ds-active font-medium text-ds-fg'
+          : 'text-ds-fg-2 hover:bg-ds-hover hover:text-ds-fg'
+      )}
+      style={{ paddingLeft: `${String(8 + level * 14)}px` }}
+      onClick={onClick}
+    >
+      {icon && <span className="flex shrink-0 text-ds-fg-3">{icon}</span>}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {meta}
+    </button>
+  )
+
+  const count = (id: string): React.ReactNode => {
+    const n = counts[id]
+    if (typeof n !== 'number') return null
     // Loại quá nhiều đối tượng để đếm hết: số là mức tối thiểu.
-    const capped = counts[`${COUNT_CAPPED}${x.id}`] === 1
+    const capped = counts[`${COUNT_CAPPED}${id}`] === 1
     return (
-      <button
-        key={x.id}
-        type="button"
-        data-testid={`k8s-nav-${x.id}`}
-        aria-current={current}
-        title={x.id}
+      <span
         className={cx(
-          'flex w-full items-center gap-2 rounded-md py-1 pr-2 text-left text-[13px]',
-          indent ? 'pl-9' : 'pl-7',
-          current
-            ? 'bg-ds-active font-medium text-fg'
-            : 'text-muted hover:bg-ds-hover hover:text-fg'
+          'shrink-0 text-ds-xs tabular-nums',
+          n === 0 ? 'text-ds-fg-4' : 'text-ds-fg-3'
         )}
-        onClick={() => {
-          onGo(x.id)
-        }}
+        data-testid="k8s-nav-count"
+        title={capped ? t('At least {n}', { n: formatNumber(n) }) : undefined}
       >
-        <span className="min-w-0 flex-1 truncate">{x.title}</span>
-        {typeof n === 'number' && (
-          <span
-            className={cx(
-              'shrink-0 text-[11px] tabular-nums',
-              n === 0 ? 'text-faint/70' : 'text-faint'
-            )}
-            data-testid="k8s-nav-count"
-            title={capped ? t('At least {n}', { n: formatNumber(n) }) : undefined}
-          >
-            {formatNumber(n)}
-            {capped ? '+' : ''}
-          </span>
-        )}
-      </button>
+        {formatNumber(n)}
+        {capped ? '+' : ''}
+      </span>
+    )
+  }
+
+  const item = (x: Item, level: number): React.JSX.Element => {
+    const Icon = QUICK_ICON[x.id]
+    return row(
+      x.id,
+      x.title,
+      Icon ? <Icon size={14} /> : null,
+      level,
+      view === x.id && !drilled,
+      () => {
+        onGo(x.id)
+      },
+      count(x.id)
     )
   }
 
@@ -166,24 +259,25 @@ export const ResourceNav = memo(function ResourceNav({
     title: string,
     open: boolean,
     active: boolean,
-    sub = false
+    level: number
   ): React.JSX.Element => (
     <button
+      key={id}
       type="button"
       data-testid={`k8s-nav-group-${id}`}
       aria-expanded={open}
       className={cx(
-        'flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left hover:bg-hover',
-        sub ? 'pl-4 text-xs' : 'pl-1.5 text-[13px] font-medium',
-        active && !open ? 'text-accent' : sub ? 'text-muted' : 'text-fg'
+        'flex h-7 w-full items-center gap-1.5 rounded-ds-md pr-2 text-left text-ds-base outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus',
+        active && !open ? 'text-ds-accent-text' : 'text-ds-fg-2'
       )}
+      style={{ paddingLeft: `${String(4 + level * 14)}px` }}
       onClick={() => {
         toggle(id, open)
       }}
     >
       <ChevronRight
-        size={13}
-        className={cx('shrink-0 text-faint transition-transform', open && 'rotate-90')}
+        size={12}
+        className={cx('shrink-0 text-ds-fg-3 transition-transform', open && 'rotate-90')}
       />
       <span className="min-w-0 flex-1 truncate" title={title}>
         {title}
@@ -191,69 +285,123 @@ export const ResourceNav = memo(function ResourceNav({
     </button>
   )
 
-  const onOverview = view === OVERVIEW && !drilled
-  const customItems = crdGroups.flatMap((g) => g.items)
-  const customOpen = isOpen(CUSTOM, customItems, false)
+  // Namespace đang mở: một namespace đang xem; [] = "All namespaces"; nhiều namespace = nhóm chọn.
+  const single = namespaces && namespaces.length === 1 ? namespaces[0] : null
+  const all = namespaces !== null && namespaces.length === 0
+  const many = namespaces && namespaces.length > 1 ? namespaces : null
+  const nsRow = (ns: string): React.JSX.Element => {
+    const open = single === ns
+    return (
+      <div key={`ns:${ns}`}>
+        {row(
+          `ns-${ns}`,
+          ns,
+          <Hash size={14} />,
+          0,
+          false,
+          () => {
+            onNamespaces(open ? [] : [ns])
+            // Đang xem mục cấp cluster (Nodes): chọn namespace → Pods của namespace đó.
+            if (!open && view === 'nodes') onGo('pods')
+          },
+          <ChevronRight
+            size={12}
+            aria-hidden
+            className={cx('shrink-0 text-ds-fg-3 transition-transform', open && 'rotate-90')}
+          />
+        )}
+        {open && quick.map((x) => item(x, 1))}
+      </div>
+    )
+  }
+
+  const moreItems = [...groups.flatMap((g) => g.items), ...crdGroups.flatMap((g) => g.items)]
+  const moreOpen = isOpen(MORE, moreItems, false)
   return (
     <nav
       className={cx(
-        'flex flex-col gap-0.5',
+        'flex flex-col gap-px',
         placement === 'inline' &&
           'w-60 shrink-0 overflow-auto border-r border-ds-border-subtle bg-ds-bg p-2'
       )}
       data-testid="k8s-nav"
     >
-      <button
-        type="button"
-        data-testid={`k8s-nav-${OVERVIEW}`}
-        aria-current={onOverview}
-        className={cx(
-          'mb-1 flex items-center gap-2 rounded-md px-2 py-1 text-left text-[13px]',
-          onOverview
-            ? 'bg-surface font-medium text-fg shadow-sm'
-            : 'text-muted hover:bg-hover hover:text-fg'
-        )}
-        onClick={() => {
+      {row(
+        OVERVIEW,
+        t('Overview'),
+        <LayoutDashboard size={14} />,
+        0,
+        view === OVERVIEW && !drilled,
+        () => {
           onGo(OVERVIEW)
-        }}
-      >
-        <LayoutDashboard size={13} /> {t('Overview')}
-      </button>
-      <button
-        type="button"
-        data-testid={`k8s-nav-${MAP}`}
-        aria-current={view === MAP && !drilled}
-        className={cx(
-          'mb-1 flex items-center gap-2 rounded-md px-2 py-1 text-left text-[13px]',
-          view === MAP && !drilled
-            ? 'bg-surface font-medium text-fg shadow-sm'
-            : 'text-muted hover:bg-hover hover:text-fg'
-        )}
-        onClick={() => {
-          onGo(MAP)
-        }}
-      >
-        <MapIcon size={13} /> {t('Map')}
-      </button>
-      {groups.map((g) => {
-        const open = isOpen(g.id, g.items, g.id === 'Workloads')
-        return (
-          <div key={g.id}>
-            {header(g.id, g.title, open, has(g.items))}
-            {open && g.items.map((x) => item(x, false))}
-          </div>
-        )
+        }
+      )}
+      {row(MAP, t('Map'), <MapIcon size={14} />, 0, view === MAP && !drilled, () => {
+        onGo(MAP)
       })}
-      {crdGroups.length > 0 && (
+      {row(HELM, t('Helm releases'), <Package size={14} />, 0, view === HELM && !drilled, () => {
+        onGo(HELM)
+      })}
+      {visibleIds.has('nodes') &&
+        row(
+          'nodes',
+          t('Nodes'),
+          <Server size={14} />,
+          0,
+          view === 'nodes' && !drilled,
+          () => {
+            onGo('nodes')
+          },
+          count('nodes')
+        )}
+
+      <div className="mt-3 mb-1 flex h-6 items-center px-2 text-ds-sm font-medium text-ds-fg-3">
+        {t('Namespaces')}
+      </div>
+      <div>
+        {row(
+          'ns-all',
+          t('All namespaces'),
+          <Boxes size={14} />,
+          0,
+          false,
+          () => {
+            onNamespaces([])
+          },
+          <ChevronRight
+            size={12}
+            aria-hidden
+            className={cx('shrink-0 text-ds-fg-3 transition-transform', all && 'rotate-90')}
+          />
+        )}
+        {all && quick.map((x) => item(x, 1))}
+      </div>
+      {many && (
         <div>
-          {header(CUSTOM, t('Custom resources'), customOpen, has(customItems))}
-          {customOpen &&
-            crdGroups.map((g) => {
+          {row(
+            'ns-selected',
+            t('{n} namespaces', { n: formatNumber(many.length) }),
+            <Boxes size={14} />,
+            0,
+            false,
+            () => undefined,
+            <ChevronRight size={12} aria-hidden className="shrink-0 rotate-90 text-ds-fg-3" />
+          )}
+          {quick.map((x) => item(x, 1))}
+        </div>
+      )}
+      {allNamespaces.map(nsRow)}
+
+      {moreItems.length > 0 && (
+        <div className="mt-3">
+          {header(MORE, t('More resources'), moreOpen, has(moreItems), 0)}
+          {moreOpen &&
+            [...groups, ...crdGroups].map((g) => {
               const open = isOpen(g.id, g.items, false)
               return (
                 <div key={g.id}>
-                  {header(g.id, g.title, open, has(g.items), true)}
-                  {open && g.items.map((x) => item(x, true))}
+                  {header(g.id, g.title, open, has(g.items), 1)}
+                  {open && g.items.map((x) => item(x, 2))}
                 </div>
               )
             })}

@@ -28,7 +28,7 @@ export const TitleBar = memo(function TitleBar({
   const paletteKeys = kbdKeys('palette.open', overrides)
   return (
     <header
-      className="sh-titlebar sh-titlebar-lead sh-titlebar-trail relative flex h-(--ds-titlebar-h) shrink-0 items-center justify-between gap-3 bg-ds-bg pr-2 pl-3 text-ds-sm text-ds-fg-2"
+      className="sh-titlebar sh-titlebar-lead sh-titlebar-trail relative grid h-(--ds-titlebar-h) shrink-0 grid-cols-[1fr_minmax(0,460px)_1fr] items-center gap-3 bg-ds-bg pr-2 pl-3 text-ds-sm text-ds-fg-2"
       data-testid="titlebar"
     >
       <div className="flex min-w-0 items-center gap-1">
@@ -63,12 +63,12 @@ export const TitleBar = memo(function TitleBar({
           <ArrowRight {...ICON_SM} />
         </IconButton>
       </div>
-      {/* Giữa CẢ cửa sổ (không phải giữa phần còn lại sau chỗ chừa nút cửa sổ) — như prototype. */}
+      {/* Cột giữa của lưới 3 cột: không bao giờ đè lên nút hai bên (cửa sổ hẹp, nút cửa sổ). */}
       <button
         type="button"
         data-testid="command-center"
         className={cx(
-          'absolute top-1/2 left-1/2 flex h-6.5 w-[min(460px,calc(100vw-700px))] -translate-x-1/2 -translate-y-1/2 items-center gap-2 rounded-ds-md border border-ds-border bg-ds-surface-1 px-2.5 text-ds-sm text-ds-fg-3',
+          'flex h-6.5 min-w-0 items-center gap-2 rounded-ds-md border border-ds-border bg-ds-surface-1 px-2.5 text-ds-sm text-ds-fg-3',
           'outline-none hover:border-ds-border-strong hover:text-ds-fg-2 focus-visible:shadow-ds-focus'
         )}
         onClick={onPalette}

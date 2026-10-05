@@ -164,9 +164,16 @@ for (const theme of ['dark', 'light'] as const) {
         await page.getByTestId('titlebar-connect').click()
         await page.getByTestId('quick-connect').fill('prod')
       })
-      await page.keyboard.press('Escape')
+      // Esc đầu xoá chữ đã gõ, Esc sau mới đóng Quick connect.
+      for (let i = 0; i < 3 && (await page.getByTestId('quick-connect').isVisible()); i++)
+        await page.keyboard.press('Escape')
       await shot('02d-files', async () => {
         await page.getByTestId('activity-files').click()
+        await page.locator('[data-testid="explorer"][data-area="files"]').waitFor()
+      })
+      await shot('02e-files-local', async () => {
+        await page.getByTestId('explorer-files-local').click()
+        await page.waitForTimeout(600)
       })
 
       await shot('03-k8s-empty', async () => {

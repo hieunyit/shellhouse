@@ -79,6 +79,19 @@ describe('shell/store', () => {
     expect(useShell.getState().area).toBe('m:k8s')
   })
 
+  it('sang Files khi chưa có trình quản lý file: không kích hoạt terminal (không bị kéo về Hosts)', async () => {
+    const { useShell, useTabs } = await load()
+    const first = useTabs.getState().addLocal()
+    const second = useTabs.getState().addLocal()
+    useTabs.getState().activate(second)
+    useShell.getState().go('files')
+    expect(useShell.getState().area).toBe('files')
+    expect(useTabs.getState().activeId).toBe(second)
+    useShell.getState().go('hosts')
+    expect(useShell.getState().area).toBe('hosts')
+    expect(first).not.toBe(second)
+  })
+
   it('đóng tab: ưu tiên tab kề bên cùng khu vực; tab cuối của khu vực → giữ khu vực', async () => {
     const { useShell, useTabs } = await load()
     const term = useTabs.getState().addLocal()

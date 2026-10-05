@@ -1240,5 +1240,6 @@ export const k8s: Readonly<Record<string, string>> = {
   'k8s|System': 'System',
   // Nút apply YAML: "Apply" của kubectl, không phải "Áp dụng" chung của app.
   'k8s|Apply': 'Apply',
-  'k8s|Applying…': 'Đang apply…'
+  'k8s|Applying…': 'Đang apply…',
+  'More resources': 'Tài nguyên khác'
 }

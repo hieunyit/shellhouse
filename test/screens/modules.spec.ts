@@ -439,6 +439,7 @@ for (const theme of ['light', 'dark'] as const) {
     try {
       await setTheme(page, theme)
       await shot('s3-01-account-form', async () => {
+        await page.getByTestId('activity-s3').click()
         await page.getByTestId('s3-add-account').click()
         const form = page.getByTestId('s3-account-form')
         await form.getByTestId('s3-account-name').fill('MinIO test')

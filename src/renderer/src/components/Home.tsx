@@ -274,7 +274,8 @@ export function HomeView(): React.JSX.Element {
     [hosts, recent, favorites]
   )
   const hasHosts = hosts.length > 0
-  const today = formatLongDay(Date.now())
+  // Tính một lần lúc mở trang (Date.now() không được gọi trong lúc render).
+  const [today] = useState(() => formatLongDay(Date.now()))
   const connect = (): void => {
     const target = parseQuickConnect(value)
     if (!target) {

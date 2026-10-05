@@ -809,7 +809,7 @@ export function ClusterTab({
             <span className="flex items-center">
               <Button
                 size="sm"
-                variant="primary"
+                variant="ghost"
                 icon={<Plus size={13} />}
                 data-testid="k8s-create"
                 title={t('Create a resource with a form')}
@@ -870,6 +870,9 @@ export function ClusterTab({
                   view={view}
                   drilled={Boolean(top)}
                   counts={navCounts}
+                  allNamespaces={allNamespaces}
+                  namespaces={namespaces}
+                  onNamespaces={setNamespaces}
                   onGo={go}
                   placement={placement}
                 />

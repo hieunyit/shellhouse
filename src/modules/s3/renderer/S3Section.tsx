@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, Cloud, Pencil, Pin, PinOff, Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, Cloud, Database, Pencil, PinOff, Plus, Trash2 } from 'lucide-react'
 import { endpointWarning, pinLabel, S3AccountInput, type S3AccountSummary } from '../shared/ops'
 import {
   Button,
@@ -80,8 +80,8 @@ export function S3Section(): React.JSX.Element {
               tabIndex={0}
               data-testid="s3-account"
               data-name={a.name}
-              className="group flex h-10 cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus"
-              title={t('Double-click to open')}
+              className="group flex h-7 cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus"
+              title={`${a.endpoint ? new URL(a.endpoint).host : `AWS ${a.region || 'us-east-1'}`} · ${t('Double-click to open')}`}
               onDoubleClick={() => openS3(a)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') openS3(a)
@@ -129,12 +129,9 @@ export function S3Section(): React.JSX.Element {
                 ])
               }}
             >
-              <Cloud size={15} strokeWidth={1.6} className="shrink-0 text-faint" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[13px] text-fg">{a.name}</span>
-                <span className="block truncate font-mono text-xs text-faint">
-                  {a.endpoint ? new URL(a.endpoint).host : `AWS ${a.region || 'us-east-1'}`}
-                </span>
+              <Cloud size={14} strokeWidth={1.6} className="shrink-0 text-ds-fg-3" />
+              <span className="min-w-0 flex-1 truncate text-ds-base text-ds-fg-2 group-hover:text-ds-fg">
+                {a.name}
               </span>
               <AccountEnv id={a.id} />
             </div>
@@ -146,7 +143,7 @@ export function S3Section(): React.JSX.Element {
                 data-testid="s3-pin"
                 data-name={pinLabel(pin)}
                 title={`s3://${pin.bucket}/${pin.prefix}`}
-                className="flex h-7 w-full items-center gap-2 rounded-ds-md pr-2 pl-8 text-left text-[13px] text-muted hover:bg-ds-hover hover:text-fg"
+                className="flex h-7 w-full items-center gap-2 rounded-ds-md pr-2 pl-7 text-left text-ds-base text-ds-fg-2 hover:bg-ds-hover hover:text-ds-fg"
                 onClick={() => openS3(a, pin)}
                 onContextMenu={(e) => {
                   e.preventDefault()
@@ -166,7 +163,7 @@ export function S3Section(): React.JSX.Element {
                   ])
                 }}
               >
-                <Pin size={12} className="shrink-0 text-accent" />
+                <Database size={14} strokeWidth={1.6} className="shrink-0 text-ds-fg-3" />
                 <span className="min-w-0 flex-1 truncate">{pinLabel(pin)}</span>
               </button>
             ))}

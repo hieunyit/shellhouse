@@ -10,6 +10,7 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 - With no open sessions, the "No open sessions" panel covered Home and other pages.
 - The date on Home followed the system language instead of the app language.
+- Clicking Files with two or more sessions open jumped back to Hosts.
 
 ### Changed
 
@@ -24,6 +25,14 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - Transfers lists transfers by state (Failed, Active, Queued, Completed) with the route
   (from → to), progress and speed, and filters by name, source and direction.
 - Home shows "Start something new" only until you have recent or favorite hosts.
+- Kubernetes sidebar follows the design: Overview, Map, Helm releases and Nodes for the cluster,
+  then the namespaces — the namespace you are viewing opens its common resources (Pods,
+  Deployments, Services…) with counts; everything else is under "More resources". Create is a
+  quiet button.
+- S3: the filter sits at the start of the toolbar and Upload / New bucket at its end; the path
+  starts with "S3 storage"; accounts in the sidebar take one line (the endpoint is in the tooltip).
+- Files opens "This computer" when no session has its file manager open, instead of showing a
+  terminal.
 
 ## [1.2.0-beta.14] - 2026-10-05
 

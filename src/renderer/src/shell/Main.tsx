@@ -499,8 +499,13 @@ function SettingsEscape(): null {
 /** Môi trường của khu vực đang xem (vạch ở đỉnh vùng chính theo quy tắc Top line). */
 function useMainEnv(area: Area, stageTab: string | null): EnvironmentDef | undefined {
   const tab = useActiveSessionTab()
+  // Files › This computer: file trên máy này, không thuộc môi trường của phiên nào.
+  const filesLocal = useShell((s) => s.filesLocal)
   const hostId =
-    sharesDockview(area) && tab && (tab.target.kind === 'host' || tab.target.kind === 'rdp')
+    sharesDockview(area) &&
+    !(area === 'files' && filesLocal) &&
+    tab &&
+    (tab.target.kind === 'host' || tab.target.kind === 'rdp')
       ? tab.target.hostId
       : null
   const hostEnv = useHostEnvironment(hostId)

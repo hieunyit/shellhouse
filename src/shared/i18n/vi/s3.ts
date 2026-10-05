@@ -615,5 +615,6 @@ export const s3: Readonly<Record<string, string>> = {
   'The name cannot contain “/”': 'Tên không được chứa “/”',
   'Use 3–63 lowercase letters, numbers, dots and hyphens':
     'Dùng 3–63 ký tự gồm chữ thường, số, dấu chấm và gạch ngang',
-  'Invalid bucket name': 'Tên bucket không hợp lệ'
+  'Invalid bucket name': 'Tên bucket không hợp lệ',
+  'Filter by prefix…': 'Lọc theo tiền tố…'
 }
