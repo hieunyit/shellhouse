@@ -159,35 +159,17 @@ test('tab: kéo thả đổi thứ tự; "Recently closed" mở lại đúng tab
     )
     .toBe(true)
   const before = await ids()
-  // Chẩn đoán (macOS CI): ghi sự kiện kéo thả + vị trí tab để biết bước nào hụt.
-  await page.evaluate(() => {
-    const log: string[] = []
-    ;(window as unknown as { __dnd: string[] }).__dnd = log
-    for (const type of ['dragstart', 'dragenter', 'dragover', 'drop', 'dragend'])
-      document.addEventListener(
-        type,
-        (e) => {
-          const el = (e.target as HTMLElement).closest('[data-testid],[class]')
-          const name = el?.getAttribute('data-testid') ?? el?.className.toString().slice(0, 30)
-          const entry = `${type}:${String(name)}@${String(Math.round((e as DragEvent).clientX))}`
-          if (log.at(-1) !== entry) log.push(entry)
-        },
-        true
-      )
-  })
-  const rects = await tabs.evaluateAll((els) =>
-    els.map((e) => {
-      const r = e.getBoundingClientRect()
-      return `${String(Math.round(r.x))}+${String(Math.round(r.width))}`
-    })
-  )
-  // Kéo tab cuối lên đầu.
-  await tabs.last().dragTo(tabs.first())
-  await expect
-    .poll(ids, {
-      message: `rects ${rects.join(' ')} · dnd ${await page.evaluate(() => (window as unknown as { __dnd: string[] }).__dnd.slice(0, 40).join(' '))}`
-    })
-    .not.toEqual(before)
+  // Kéo tab cuối lên đầu — chuột đi nhiều bước như người dùng: dockview chỉ hiện vùng thả sau vài
+  // lần dragover (dragTo trên macOS nhảy thẳng tới đích, chỉ một dragover → thả hụt).
+  const from = await tabs.last().boundingBox()
+  const to = await tabs.first().boundingBox()
+  if (!from || !to) throw new Error('no tab box')
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 })
+  await page.mouse.move(to.x + to.width / 3, to.y + to.height / 2, { steps: 4 })
+  await page.mouse.up()
+  await expect.poll(ids).not.toEqual(before)
   expect((await ids()).sort()).toEqual([...before].sort())
 
   // Đóng hai tab, mở lại tab đóng TRƯỚC (không phải tab gần nhất) từ menu. (Không so tiêu đề:
