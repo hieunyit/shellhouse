@@ -351,6 +351,10 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     }
     helmSecret(1, 'superseded', '15.0.0')
     helmSecret(2, 'deployed', '15.1.0')
+    // Namespace không có release: list chỉ metadata trả `items: null` → danh sách rỗng, không lỗi.
+    expect(await run<HelmRelease[]>({ op: 'helm.releases', namespaces: ['monitoring'] })).toEqual(
+      []
+    )
     const releases = await run<HelmRelease[]>({ op: 'helm.releases', namespaces: [] })
     expect(releases).toEqual([
       {

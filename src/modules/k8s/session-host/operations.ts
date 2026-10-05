@@ -104,7 +104,9 @@ export async function listPaged(
   const items: K8sObject[] = []
   let cont: string | undefined
   do {
-    const r = await client.json<{ items: K8sObject[]; metadata?: { continue?: string } }>(
+    // `items: null` khi rỗng: PartialObjectMetadataList (list chỉ metadata) của API server, một số
+    // proxy (Rancher) — coi như danh sách rỗng.
+    const r = await client.json<{ items: K8sObject[] | null; metadata?: { continue?: string } }>(
       'GET',
       path,
       {
@@ -113,7 +115,7 @@ export async function listPaged(
         ...(options.accept ? { accept: options.accept } : {})
       }
     )
-    for (const it of r.items) items.push(it)
+    for (const it of r.items ?? []) items.push(it)
     cont = r.metadata?.continue || undefined
     if (cont && items.length >= max) return { items, truncated: true }
   } while (cont)
@@ -927,14 +929,14 @@ export async function counts(
     let cont: string | undefined
     for (let page = 0; ; page++) {
       const r = await client.json<{
-        items: unknown[]
+        items: unknown[] | null
         metadata?: { remainingItemCount?: number; continue?: string }
       }>('GET', path, {
         query: { limit: page === 0 ? 1 : 1000, continue: cont },
         accept: METADATA_ONLY,
         ...(signal ? { signal } : {})
       })
-      total += r.items.length
+      total += r.items?.length ?? 0
       if (page === 0 && typeof r.metadata?.remainingItemCount === 'number')
         return { n: total + r.metadata.remainingItemCount, capped: false }
       cont = r.metadata?.continue || undefined

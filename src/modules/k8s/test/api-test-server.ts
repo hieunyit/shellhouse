@@ -816,7 +816,8 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
                 }
               : {})
           },
-          items: page
+          // API server thật: PartialObjectMetadataList rỗng có `items: null` (không phải []).
+          items: metaOnly && page.length === 0 ? null : page
         })
       }
       const k = key(namespace, name)

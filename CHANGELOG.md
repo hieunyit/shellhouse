@@ -6,6 +6,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Fixed
+
+- Kubernetes: "r.items is not iterable" on Helm releases (and missing counts / Map data) when a
+  namespace has nothing of that kind — the API server answers an empty metadata-only list with
+  `items: null`.
+
 ## [1.2.0-beta.16] - 2026-10-05
 
 ### Changed

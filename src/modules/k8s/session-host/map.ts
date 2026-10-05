@@ -86,16 +86,16 @@ async function listAll(
     let cont: string | undefined
     try {
       do {
-        const r = await client.json<{ items: K8sObject[]; metadata?: { continue?: string } }>(
-          'GET',
-          path,
-          {
-            query: { limit: PAGE, continue: cont },
-            ...(signal ? { signal } : {}),
-            ...(accept ? { accept } : {})
-          }
-        )
-        for (const it of r.items) items.push(it)
+        // `items: null` khi rỗng (list chỉ metadata, một số proxy) → danh sách rỗng.
+        const r = await client.json<{
+          items: K8sObject[] | null
+          metadata?: { continue?: string }
+        }>('GET', path, {
+          query: { limit: PAGE, continue: cont },
+          ...(signal ? { signal } : {}),
+          ...(accept ? { accept } : {})
+        })
+        for (const it of r.items ?? []) items.push(it)
         cont = r.metadata?.continue || undefined
         if (cont && items.length >= MAX_PER_KIND) truncated = true
       } while (cont && !truncated)
