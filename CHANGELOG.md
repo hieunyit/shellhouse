@@ -11,6 +11,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - Kubernetes: "r.items is not iterable" on Helm releases (and missing counts / Map data) when a
   namespace has nothing of that kind — the API server answers an empty metadata-only list with
   `items: null`.
+- Kubernetes Topology: hiding "live traffic" removed its chip, so it could not be turned back on
+  without leaving the tab.
 
 ## [1.2.0-beta.16] - 2026-10-05
 

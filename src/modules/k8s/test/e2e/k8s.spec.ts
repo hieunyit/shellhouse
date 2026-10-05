@@ -993,9 +993,19 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await expect(
       topo.locator('[data-testid="k8s-topology-node"][data-name="db.example.com"]')
     ).toHaveCount(1)
+    const liveChip = topo.locator('[data-testid="k8s-topology-filter"][data-category="live"]')
+    await expect(liveChip).toBeVisible()
+    // Ẩn live traffic → chip vẫn còn (gạch ngang) để bật lại; bật lại → node traffic quay về.
+    await liveChip.click()
+    await expect(liveChip).toHaveAttribute('aria-pressed', 'false')
     await expect(
-      topo.locator('[data-testid="k8s-topology-filter"][data-category="live"]')
-    ).toBeVisible()
+      topo.locator('[data-testid="k8s-topology-node"][data-name="db.example.com"]')
+    ).toHaveCount(0)
+    await liveChip.click()
+    await expect(liveChip).toHaveAttribute('aria-pressed', 'true')
+    await expect(
+      topo.locator('[data-testid="k8s-topology-node"][data-name="db.example.com"]')
+    ).toHaveCount(1)
 
     // Map → Traffic: service map dựng từ Caretta trên mọi namespace (luồng đo dùng chung → có ngay).
     await page.keyboard.press('Escape')

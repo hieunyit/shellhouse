@@ -456,7 +456,9 @@ export function TopologyOf({
   return (
     <div className="flex h-full min-h-[420px] flex-col gap-2" data-testid="k8s-topology">
       <div className="flex flex-wrap items-center gap-1">
-        {CATEGORIES.filter((c) => categories.includes(c)).map((c) => {
+        {/* Loại đang ẩn vẫn giữ chip (gạch ngang) để bật lại: ẩn "live traffic" là ngừng đo traffic
+            → không còn đường live nào để suy ra chip. */}
+        {CATEGORIES.filter((c) => categories.includes(c) || hidden.has(c)).map((c) => {
           const on = !hidden.has(c)
           return (
             <button
