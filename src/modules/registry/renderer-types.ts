@@ -64,4 +64,9 @@ export interface RendererModule {
   commands?: () => ModuleCommand[]
   /** Trang riêng trong Settings → Modules. */
   SettingsPage?: ComponentType
+  /**
+   * Việc nền khi module bật và vault đã mở (theo dõi cluster / Docker cho Home): chạy một lần, trả
+   * về hàm dừng (module bị tắt / đóng cửa sổ).
+   */
+  background?: () => () => void
 }

@@ -14,6 +14,8 @@ import { cx, IconButton } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
 import {
   environmentMenu,
+  monitorMenuItem,
+  useSourceMonitorMap,
   hostEnvironmentId,
   setSourceEnvironment,
   t,
@@ -70,6 +72,7 @@ export function DockerSection(): React.JSX.Element {
 
   const environments = useEnvironments()
   const sourceEnvs = useSourceEnvironmentMap()
+  const monitorMap = useSourceMonitorMap()
   const rowMenu = (hostId: string | null, readOnly: boolean): MenuEntry[] => [
     {
       id: 'docker-open',
@@ -83,6 +86,11 @@ export function DockerSection(): React.JSX.Element {
       icon: <Eye size={14} />,
       onSelect: () => void dockerApi.setReadOnly(hostId, !readOnly)
     },
+    monitorMenuItem(
+      `docker:${endpointKey(hostId)}`,
+      sourceEnvs[`docker:${endpointKey(hostId)}`] ?? hostEnvironmentId(hostId),
+      monitorMap
+    ),
     'separator',
     ...environmentMenu(
       environments,

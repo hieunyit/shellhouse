@@ -931,6 +931,63 @@ test('Kubernetes: Metrics lấy lịch sử từ Prometheus trong cluster (chọ
   }
 })
 
+test('Home › Infrastructure: cluster Production tự theo dõi (không mở tab), vấn đề lên Needs attention, tắt theo dõi', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    const context = page.locator('[data-testid="k8s-context"][data-name="test"]')
+    // Chưa thuộc Production → không theo dõi.
+    await page.getByTestId('open-home').click()
+    await expect(page.getByTestId('home-infra')).toHaveCount(0)
+    await openArea(page, 'k8s')
+    await context.click({ button: 'right' })
+    await page.getByTestId('menu-env-prod').click()
+
+    // Không mở tab nào: Home vẫn có trạng thái cluster (kết nối nền, chỉ đọc).
+    await page.getByTestId('open-home').click()
+    const row = page.getByTestId('home-infra').getByTestId('home-infra-item')
+    await expect(row).toHaveCount(1)
+    await expect(row).toHaveAttribute('data-id', /^k8s:/)
+    await expect(row).toHaveAttribute('data-state', 'warning', { timeout: 15_000 })
+    await expect(row).toContainText('Kubernetes · v1.')
+    await expect(row.getByTestId('home-infra-stats')).toContainText('Failing pods')
+    // Vấn đề của cluster theo dõi lên Needs attention; bấm → mở tab tới đúng pod.
+    const item = page
+      .getByTestId('home-attention-item')
+      .filter({ hasText: 'web-2' })
+      .filter({ hasText: 'CrashLoopBackOff' })
+    await expect(item).toBeVisible()
+    await item.click()
+    const view = page.getByTestId('k8s-view')
+    await expect(view.getByTestId('k8s-describe')).toContainText('web-2')
+    // Tab cluster đang mở không báo trùng (cluster đã được theo dõi nền).
+    await page.getByTestId('open-home').click()
+    await expect(page.getByTestId('home-attention-item').filter({ hasText: 'web-2' })).toHaveCount(
+      1
+    )
+    // Bấm hàng → về tab cluster đang mở (không mở thêm).
+    await row.getByRole('button').first().click()
+    await expect(view).toBeVisible()
+
+    // Tắt theo dõi cluster này → hàng biến mất.
+    await openArea(page, 'k8s')
+    await context.click({ button: 'right' })
+    await page.getByTestId('menu-monitor-home').click()
+    await page.getByTestId('open-home').click()
+    await expect(page.getByTestId('home-infra')).toHaveCount(0)
+  } finally {
+    await launched.close()
+    await server.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('Home › Needs attention: pod lỗi của cluster đang mở; bấm mở đúng pod; tắt trong Settings', async () => {
   test.setTimeout(60_000)
   const server = await startApiTestServer()

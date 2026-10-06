@@ -452,6 +452,7 @@ export function ClusterTab({
   const homeAttention = useHomeAttentionEnabled()
   useClusterAttention({
     tabId,
+    contextKey: refKey,
     ready,
     request,
     cluster: params.label,
@@ -461,6 +462,19 @@ export function ClusterTab({
       openRef(kind, ns, name)
     }
   })
+
+  // Mở từ Home › Needs attention: tới thẳng đối tượng khi đã có danh mục loại, rồi bỏ tham số (mở
+  // lại tab / workspace không nhảy lại).
+  const reveal = params.reveal
+  const revealRef = useRef(openRef)
+  useEffect(() => {
+    revealRef.current = openRef
+  })
+  useEffect(() => {
+    if (!reveal || !ready || !kinds) return
+    revealRef.current(reveal.kind, reveal.namespace, reveal.name)
+    setModuleTabParams(tabId, { ...params, reveal: undefined })
+  }, [reveal, ready, kinds, params, tabId])
 
   /**
    * Bấm đúp / Enter: namespace → chuyển namespace; node → pod trên node; workload, service,

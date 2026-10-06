@@ -208,6 +208,8 @@ export class KubeClient {
   /** Agent theo chứng chỉ client (exec plugin có thể đổi chứng chỉ → kết nối cũ không dùng nữa). */
   private pool: { key: string; agent: PoolAgent } | null = null
   private closed = false
+  /** Hạn chứng chỉ của API server (ISO), đọc ở lần bắt tay TLS gần nhất — null nếu chưa / không TLS. */
+  serverCertExpiry: string | null = null
 
   constructor(
     private readonly endpoint: ClusterEndpoint,
@@ -304,6 +306,9 @@ export class KubeClient {
       }
       socket.once('secureConnect', () => {
         clearTimeout(timer)
+        const valid = socket.getPeerCertificate().valid_to
+        const at = valid ? new Date(valid) : null
+        if (at && !Number.isNaN(at.getTime())) this.serverCertExpiry = at.toISOString()
         socket.removeListener('error', onError)
         // Lỗi về sau do request đang dùng kết nối bắt; kết nối rảnh trong agent cũng có listener.
         // Listener rỗng này chỉ để lỗi muộn (sau khi request đã xong) không làm sập Session Host.

@@ -96,7 +96,7 @@ export function AppearanceSection(): React.JSX.Element {
         <SettingRow
           title={t('Show “Needs attention”')}
           description={t(
-            'Failing pods, unhealthy containers and dropped sessions from the tabs you have open. Off: nothing is checked in the background.'
+            'Problems in your Kubernetes clusters — failing pods, image pull errors, nodes not ready — from open cluster tabs and monitored clusters.'
           )}
           control={
             <Switch
@@ -104,6 +104,20 @@ export function AppearanceSection(): React.JSX.Element {
               checked={settings.appearance.homeAttention}
               data-testid="setting-home-attention"
               onChange={(e) => void update({ appearance: { homeAttention: e.target.checked } })}
+            />
+          }
+        />
+        <SettingRow
+          title={t('Monitor infrastructure')}
+          description={t(
+            'When Shellhouse starts, connect read-only to Kubernetes clusters and Docker hosts in Production (or marked “Monitor on Home” in their right-click menu) and show their status on Home. Never asks for a password.'
+          )}
+          control={
+            <Switch
+              label={t('Monitor infrastructure')}
+              checked={settings.appearance.homeMonitor}
+              data-testid="setting-home-monitor"
+              onChange={(e) => void update({ appearance: { homeMonitor: e.target.checked } })}
             />
           }
         />

@@ -99,6 +99,47 @@ export const shell: Readonly<Record<string, string>> = {
   '{n} item needs attention': '{n} mục cần chú ý',
   '{n} items need attention': '{n} mục cần chú ý',
   'Show “Needs attention”': 'Hiện “Cần chú ý”',
-  'Failing pods, unhealthy containers and dropped sessions from the tabs you have open. Off: nothing is checked in the background.':
-    'Pod lỗi, container không khoẻ và phiên bị rớt từ các tab đang mở. Tắt: không kiểm tra gì ở nền.'
+  'Problems in your Kubernetes clusters — failing pods, image pull errors, nodes not ready — from open cluster tabs and monitored clusters.':
+    'Vấn đề của cluster Kubernetes — pod lỗi, lỗi kéo image, node chưa sẵn sàng — từ tab cluster đang mở và cluster đang theo dõi.',
+  'Running containers / all containers': 'Container đang chạy / tổng số container',
+  'Exited with error': 'Thoát do lỗi',
+  'Docker did not answer in time.': 'Docker không trả lời kịp.',
+  '{provider} may support it longer.': '{provider} có thể còn hỗ trợ lâu hơn.',
+  'Kubernetes {version} reached end of support on {date}.':
+    'Kubernetes {version} đã hết hỗ trợ từ {date}.',
+  'Kubernetes {version} is no longer supported.': 'Kubernetes {version} không còn được hỗ trợ.',
+  'Kubernetes {version} support ends in {n} day ({date}).':
+    'Kubernetes {version} hết hỗ trợ sau {n} ngày ({date}).',
+  'Kubernetes {version} support ends in {n} days ({date}).':
+    'Kubernetes {version} hết hỗ trợ sau {n} ngày ({date}).',
+  'All nodes ready': 'Mọi node đều sẵn sàng',
+  'The cluster did not answer in time.': 'Cluster không trả lời kịp.',
+  '{n} node not ready': '{n} node chưa sẵn sàng',
+  '{n} nodes not ready': '{n} node chưa sẵn sàng',
+  'The API server certificate expired on {date}.':
+    'Chứng chỉ của API server đã hết hạn ngày {date}.',
+  'The API server certificate expires in {n} day ({date}).':
+    'Chứng chỉ của API server hết hạn sau {n} ngày ({date}).',
+  'The API server certificate expires in {n} days ({date}).':
+    'Chứng chỉ của API server hết hạn sau {n} ngày ({date}).',
+  'Your client certificate in the kubeconfig expired on {date}.':
+    'Chứng chỉ client trong kubeconfig của bạn đã hết hạn ngày {date}.',
+  'Your client certificate in the kubeconfig expires in {n} day ({date}).':
+    'Chứng chỉ client trong kubeconfig của bạn hết hạn sau {n} ngày ({date}).',
+  'Your client certificate in the kubeconfig expires in {n} days ({date}).':
+    'Chứng chỉ client trong kubeconfig của bạn hết hạn sau {n} ngày ({date}).',
+  'Needs sign-in — open it once to connect.': 'Cần đăng nhập — mở một lần để kết nối.',
+  'Monitor on Home': 'Theo dõi trên Home',
+  Unreachable: 'Không kết nối được',
+  'Needs sign-in': 'Cần đăng nhập',
+  Infrastructure: 'Hạ tầng',
+  Manage: 'Quản lý',
+  'Monitor infrastructure': 'Theo dõi hạ tầng',
+  'When Shellhouse starts, connect read-only to Kubernetes clusters and Docker hosts in Production (or marked “Monitor on Home” in their right-click menu) and show their status on Home. Never asks for a password.':
+    'Khi mở Shellhouse, kết nối chỉ đọc tới cluster Kubernetes và máy Docker thuộc Production (hoặc được đánh dấu “Theo dõi trên Home” trong menu chuột phải) và hiện trạng thái trên Home. Không bao giờ hỏi mật khẩu.',
+  'Connection refused': 'Bị từ chối kết nối',
+  'The server did not answer in time': 'Server không trả lời kịp',
+  'Server name not found': 'Không tìm thấy tên server',
+  'No route to the server': 'Không có đường tới server',
+  'The connection was reset': 'Kết nối bị ngắt'
 }

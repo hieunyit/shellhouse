@@ -28,6 +28,8 @@ import {
   confirmAction,
   environmentFromColor,
   environmentMenu,
+  monitorMenuItem,
+  useSourceMonitorMap,
   EnvironmentPicker,
   environmentRules,
   setSourceEnvironment,
@@ -71,6 +73,7 @@ export function K8sSection(): React.JSX.Element {
   const { menu, open: openMenu } = useContextMenu()
   const environments = useEnvironments()
   const sourceEnvs = useSourceEnvironmentMap()
+  const monitorMap = useSourceMonitorMap()
   const currentEnv = (c: ContextEntry): string | null =>
     sourceEnvs[`k8s:${c.key}`] ?? environmentFromColor(c.settings.color ?? null) ?? null
 
@@ -228,6 +231,7 @@ export function K8sSection(): React.JSX.Element {
                     setEditing(c)
                   }
                 },
+                monitorMenuItem(`k8s:${c.key}`, currentEnv(c), monitorMap),
                 'separator',
                 ...environmentMenu(
                   environments,

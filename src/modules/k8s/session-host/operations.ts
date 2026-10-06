@@ -10,6 +10,7 @@ import type {
   MetricsResult,
   OverviewProblem,
   OverviewResult,
+  FleetResult,
   HealthResult,
   RolloutRevision,
   Usage
@@ -24,6 +25,7 @@ import {
   type K8sObject,
   type ResourceKind
 } from '../shared/resources'
+import { certExpiry } from './certs'
 import { KubeError, type KubeClient } from './client'
 
 /** Các thao tác kiểu k9s / Lens không phải CRUD đơn giản (ADR-014 mục 7.4). */
@@ -897,6 +899,34 @@ export async function problems(
     listPaged(client, '/api/v1/persistentvolumeclaims', opts).catch(() => none)
   ])
   return findProblems(nodes.items, pods.items, pvcs.items)
+}
+
+/**
+ * Tóm tắt cho bảng theo dõi (Home): phiên bản, node sẵn sàng, vấn đề (như `problems`), hạn chứng
+ * chỉ API server (đọc lúc bắt tay TLS) và chứng chỉ client trong kubeconfig.
+ */
+export async function fleet(
+  client: KubeClient,
+  clientCert: string | undefined,
+  signal?: AbortSignal
+): Promise<FleetResult> {
+  const opts = { signal, max: 5000 }
+  const none = { items: [] as K8sObject[], truncated: false }
+  const [version, nodes, pods, pvcs] = await Promise.all([
+    client.json<{ gitVersion?: string }>('GET', '/version', signal ? { signal } : {}),
+    listPaged(client, '/api/v1/nodes', opts).catch(() => none),
+    listPaged(client, '/api/v1/pods', opts).catch(() => none),
+    listPaged(client, '/api/v1/persistentvolumeclaims', opts).catch(() => none)
+  ])
+  const found = findProblems(nodes.items, pods.items, pvcs.items)
+  const clientCertExpiry = clientCert ? certExpiry(clientCert) : null
+  return {
+    version: version.gitVersion ?? '',
+    nodes: { total: nodes.items.length, ready: nodes.items.length - found.nodes.total },
+    problems: found,
+    ...(client.serverCertExpiry ? { serverCertExpiry: client.serverCertExpiry } : {}),
+    ...(clientCertExpiry ? { clientCertExpiry } : {})
+  }
 }
 
 /**

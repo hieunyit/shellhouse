@@ -45,5 +45,17 @@ export const dockerRenderer: RendererModule = {
       }
     }
   ],
-  SettingsPage: lazyModuleComponent(() => import('./DockerSettings').then((m) => m.DockerSettings))
+  SettingsPage: lazyModuleComponent(() => import('./DockerSettings').then((m) => m.DockerSettings)),
+  // Theo dõi nền cho Home (chunk riêng — chỉ nạp khi module bật).
+  background: () => {
+    let stop: (() => void) | null = null
+    let dead = false
+    void import('./fleet').then((m) => {
+      if (!dead) stop = m.startDockerFleet()
+    })
+    return () => {
+      dead = true
+      stop?.()
+    }
+  }
 }

@@ -11,6 +11,7 @@ import type {
   HelmRelease,
   HelmReleaseDetail,
   HealthResult,
+  FleetResult,
   OverviewResult,
   RbacReach,
   RelatedResult,
@@ -102,6 +103,13 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     expect(pr.failing.items.map((i) => `${i.namespace ?? ''}/${i.name}:${i.reason}`)).toContain(
       'shop/web-2:CrashLoopBackOff'
     )
+    // Tóm tắt cho Home › Infrastructure: phiên bản, node, vấn đề, hạn chứng chỉ API server (TLS).
+    const fl = await run<FleetResult>({ op: 'fleet' })
+    expect(fl.version).toMatch(/^v1\./)
+    expect(fl.nodes.total).toBeGreaterThan(0)
+    expect(fl.problems.failing.items.map((i) => i.name)).toContain('web-2')
+    expect(fl.serverCertExpiry).toBe('2126-09-06T23:08:03.000Z')
+    expect(fl.clientCertExpiry).toBeUndefined()
     // Pod / deployment lỗi theo namespace cho Explorer ("N failing").
     const h = await run<HealthResult>({ op: 'health' })
     expect(h.pods['shop']).toBe(1)

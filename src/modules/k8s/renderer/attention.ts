@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { tn, usePublishAttention, type AttentionItem } from '../../registry/renderer-kit'
+import {
+  tn,
+  useFleetMonitored,
+  usePublishAttention,
+  type AttentionItem
+} from '../../registry/renderer-kit'
 import type { K8sOp, OverviewResult, ProblemGroup } from '../shared/ops'
 
 type Request = <T>(op: K8sOp) => Promise<T>
@@ -9,6 +14,14 @@ type Problems = NonNullable<OverviewResult['problems']>
 const EVERY_MS = 60_000
 /** Hàm mở đối tượng của từng tab cluster (tabId → bản mới nhất). */
 const openers = new Map<string, (kind: string, ns: string | undefined, name: string) => void>()
+/**
+ * Tab đang mở theo context (khoá context → tab + hàm mở) — theo dõi nền mở đối tượng trong tab có
+ * sẵn thay vì mở tab mới.
+ */
+export const clusterTabs = new Map<
+  string,
+  { tabId: string; open: (kind: string, ns: string | undefined, name: string) => void }
+>()
 /** Tối đa số mục mỗi cluster gửi lên Home (danh sách đầy đủ ở Overview của cluster). */
 const MAX_ITEMS = 12
 
@@ -54,19 +67,25 @@ export function attentionOf(
  */
 export function useClusterAttention({
   tabId,
+  contextKey,
   ready,
   request,
   cluster,
-  enabled,
+  enabled: setting,
   open
 }: {
   tabId: string
+  /** Khoá context (`source#context`). */
+  contextKey: string
   ready: boolean
   request: Request
   cluster: string
   enabled: boolean
   open: (kind: string, ns: string | undefined, name: string) => void
 }): void {
+  // Cluster đang được theo dõi nền: nó đã báo vấn đề lên Home — tab không báo trùng.
+  const monitored = useFleetMonitored(`k8s:${contextKey}`)
+  const enabled = setting && !monitored
   const [problems, setProblems] = useState<Problems | null>(null)
   useEffect(() => {
     if (!ready || !enabled) return
@@ -90,12 +109,19 @@ export function useClusterAttention({
   useEffect(() => {
     openers.set(tabId, open)
   })
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const entry = {
+      tabId,
+      open: (kind: string, ns: string | undefined, name: string) => {
+        openers.get(tabId)?.(kind, ns, name)
+      }
+    }
+    clusterTabs.set(contextKey, entry)
+    return () => {
       openers.delete(tabId)
-    },
-    [tabId]
-  )
+      if (clusterTabs.get(contextKey) === entry) clusterTabs.delete(contextKey)
+    }
+  }, [tabId, contextKey])
   const items = useMemo(
     () =>
       !enabled

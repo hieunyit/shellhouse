@@ -39,5 +39,17 @@ export const k8sRenderer: RendererModule = {
       }
     }
   ],
-  SettingsPage: lazyModuleComponent(() => import('./K8sSettings').then((m) => m.K8sSettings))
+  SettingsPage: lazyModuleComponent(() => import('./K8sSettings').then((m) => m.K8sSettings)),
+  // Theo dõi nền cho Home (chunk riêng — chỉ nạp khi module bật).
+  background: () => {
+    let stop: (() => void) | null = null
+    let dead = false
+    void import('./fleet').then((m) => {
+      if (!dead) stop = m.startK8sFleet()
+    })
+    return () => {
+      dead = true
+      stop?.()
+    }
+  }
 }

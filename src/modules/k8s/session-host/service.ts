@@ -43,6 +43,7 @@ import {
   counts,
   health,
   problems,
+  fleet,
   helmRelease,
   helmReleases,
   logTargets,
@@ -441,6 +442,8 @@ export class K8sService implements HostModuleSession {
         return health(client, signal)
       case 'problems':
         return problems(client, signal)
+      case 'fleet':
+        return fleet(client, this.cluster?.auth.cert, signal)
       case 'counts':
         return counts(
           client,

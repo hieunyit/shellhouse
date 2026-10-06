@@ -80,8 +80,13 @@ const AppearanceSettings = z.object({
   /** Mục "Favorites" / "Recent" ở đầu thanh bên (host đã có trong cây nhóm — lặp lại cho nhanh). */
   showFavorites: z.boolean().catch(true),
   showRecent: z.boolean().catch(true),
-  /** Mục "Needs attention" trên Home (pod lỗi, container unhealthy… từ tab đang mở). */
+  /** Mục "Needs attention" trên Home (vấn đề của cluster Kubernetes đang mở / đang theo dõi). */
   homeAttention: z.boolean().catch(true),
+  /**
+   * Home › Infrastructure: mở app là tự kết nối tới cluster / Docker đang theo dõi (mặc định: nguồn
+   * thuộc môi trường Production) để lấy trạng thái.
+   */
+  homeMonitor: z.boolean().catch(true),
   /** Mở app: trang Home hay một terminal local; chưa chọn = Home. */
   startup: z.enum(['home', 'terminal']).optional().catch(undefined),
   /** Mật độ hiển thị: hàng 32 px (comfortable, mặc định) hay 28 px (compact). */
@@ -160,7 +165,12 @@ export const AppSettings = z.object({
    * Môi trường của nguồn trong module (cluster, Docker endpoint, tài khoản S3): khoá
    * `<module>:<id nguồn>` → id môi trường.
    */
-  sourceEnvironments: SourceEnvironments.catch({})
+  sourceEnvironments: SourceEnvironments.catch({}),
+  /**
+   * Theo dõi ở Home (tự kết nối khi mở app) — ghi đè mặc định "Production thì theo dõi": khoá
+   * `<module>:<id nguồn>` → bật / tắt.
+   */
+  sourceMonitor: z.record(SourceKey, z.boolean()).catch({})
 })
 export type AppSettings = z.infer<typeof AppSettings>
 
@@ -225,7 +235,9 @@ export const SettingsPatch = z.object({
   /** Thay cả danh sách. */
   environments: z.array(EnvironmentDef).min(1).max(20).optional(),
   /** Gộp vào bảng hiện có; giá trị null = bỏ môi trường của nguồn đó. */
-  sourceEnvironments: z.record(SourceKey, z.string().max(32).nullable()).optional()
+  sourceEnvironments: z.record(SourceKey, z.string().max(32).nullable()).optional(),
+  /** Gộp vào bảng hiện có; null = về mặc định (theo môi trường). */
+  sourceMonitor: z.record(SourceKey, z.boolean().nullable()).optional()
 })
 export type SettingsPatch = z.infer<typeof SettingsPatch>
 
@@ -255,6 +267,13 @@ export function applyPatch(current: AppSettings, patch: MainSettingsPatch): AppS
           )
         )
       : current.sourceEnvironments,
+    sourceMonitor: patch.sourceMonitor
+      ? Object.fromEntries(
+          Object.entries({ ...current.sourceMonitor, ...patch.sourceMonitor }).filter(
+            (e): e is [string, boolean] => e[1] !== null
+          )
+        )
+      : current.sourceMonitor,
     modules: patch.modules
       ? {
           ...current.modules,

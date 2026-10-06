@@ -33,12 +33,13 @@ export const k8sApi = {
     })
 }
 
-export function openCluster(c: ContextEntry): string | null {
+export function openCluster(c: ContextEntry, reveal?: K8sClusterParams['reveal']): string | null {
   const params: K8sClusterParams = {
     ref: c.ref,
     label: c.name,
     ...(c.settings.bastionHostId ? { bastionHostId: c.settings.bastionHostId } : {}),
-    ...(c.settings.namespace ? { namespace: c.settings.namespace } : {})
+    ...(c.settings.namespace ? { namespace: c.settings.namespace } : {}),
+    ...(reveal ? { reveal } : {})
   }
   return openModuleTab('k8s', 'cluster', params)
 }

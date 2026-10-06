@@ -172,6 +172,8 @@ export const K8sOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('health') }),
   /** Vấn đề cần xem cả cluster (Home › Needs attention): pod lỗi, node, PVC — không metrics. */
   z.object({ op: z.literal('problems') }),
+  /** Tóm tắt cho bảng theo dõi ở Home: phiên bản, node, vấn đề, hạn chứng chỉ. */
+  z.object({ op: z.literal('fleet') }),
   /** Tài nguyên liên quan (kiểu Rancher): service, ConfigMap, Secret, PVC, HPA… / "Used by". */
   z.object({ op: z.literal('related'), kind: Kind, namespace: Namespace, name: Name }),
   /**
@@ -566,6 +568,17 @@ export interface OverviewResult {
   problems?: Record<ProblemGroup, { total: number; items: OverviewProblem[] }>
 }
 
+/** Kết quả `fleet` (Home › Infrastructure). */
+export interface FleetResult {
+  /** gitVersion của API server (v1.34.2-eks-…). */
+  version: string
+  nodes: { total: number; ready: number }
+  problems: Record<ProblemGroup, { total: number; items: OverviewProblem[] }>
+  /** Hạn chứng chỉ (ISO): của API server và của client-certificate trong kubeconfig. */
+  serverCertExpiry?: string
+  clientCertExpiry?: string
+}
+
 /** Kết quả `health`: namespace → số pod lỗi (crash / kéo image hỏng / Failed), deployment chưa đủ. */
 export interface HealthResult {
   pods: Record<string, number>
@@ -667,7 +680,9 @@ export const K8sClusterParams = z.object({
   label: z.string().max(253),
   /** Host SSH làm bastion (API server nằm sau nó). */
   bastionHostId: z.string().min(1).max(64).optional(),
-  namespace: z.string().max(63).optional()
+  namespace: z.string().max(63).optional(),
+  /** Mở tab rồi tới thẳng đối tượng này (từ Home › Needs attention). Dùng xong thì bỏ. */
+  reveal: z.object({ kind: Kind, namespace: Namespace.optional(), name: Name }).optional()
 })
 export type K8sClusterParams = z.infer<typeof K8sClusterParams>
 

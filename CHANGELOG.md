@@ -8,6 +8,14 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Added
 
+- Home › **Infrastructure**: when Shellhouse starts it connects read-only to your Production
+  Kubernetes clusters and Docker hosts (or any you mark “Monitor on Home” in their right-click
+  menu) and shows their status — Kubernetes version and end-of-support date, nodes ready, failing
+  pods, API server and kubeconfig client certificates about to expire; Docker containers running,
+  restarting, unhealthy or exited with an error. Checked every 3 minutes, never asks for a password
+  (a host that needs one shows “Needs sign-in”). Problems of monitored clusters appear in “Needs
+  attention” without opening a tab. Turn it off in Settings › Appearance › Home.
+
 - Kubernetes Map › Topology finds more broken links: an IngressClass that does not exist (or no
   class and no default one), two Ingresses claiming the same host / path, TLS certificates that
   expired or expire within 14 days, and PodDisruptionBudgets that allow no disruptions (node drains

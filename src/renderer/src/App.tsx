@@ -31,6 +31,7 @@ import { QuickConnectDialog } from './shell/QuickConnect'
 import { StatusBar } from './shell/StatusBar'
 import { TitleBar } from './shell/TitleBar'
 import { useShell } from './shell/store'
+import { useModuleBackgrounds } from '../../modules/registry/renderer-kit'
 
 type Overlay =
   | { kind: 'snippets' }
@@ -73,6 +74,9 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     void useHosts.getState().reload()
   }, [])
+
+  // Việc nền của module (theo dõi cluster / Docker cho Home) — chỉ chạy khi vault đã mở.
+  useModuleBackgrounds()
 
   useEffect(() => {
     void preloadLazyParts()

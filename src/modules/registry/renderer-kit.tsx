@@ -1,4 +1,4 @@
-import { createElement, lazy, Suspense, useMemo, type ComponentType } from 'react'
+import { createElement, lazy, Suspense, useEffect, useMemo, type ComponentType } from 'react'
 import { useHostStatus } from '../../renderer/src/stores/host-status'
 import { create } from 'zustand'
 import {
@@ -20,13 +20,22 @@ import { useTabs, type ModuleTerminalTarget } from '../../renderer/src/stores/ta
 import { useTabStatus } from '../../renderer/src/stores/tab-status'
 import { useSettings } from '../../renderer/src/stores/settings'
 import { useHosts } from '../../renderer/src/stores/hosts'
+import { useAttention, type AttentionItem } from '../../renderer/src/stores/attention'
+import {
+  isMonitored as isMonitoredSource,
+  useFleet,
+  type FleetItem
+} from '../../renderer/src/stores/fleet'
+import { Activity, Check } from 'lucide-react'
 import { PromptDialog } from '../../renderer/src/terminal/PromptDialog'
 import { ErrorBoundary } from '../../renderer/src/components/ErrorBoundary'
 import { toast } from '../../renderer/src/stores/toasts'
+import { t } from '@shared/i18n'
 import { SessionClient } from '../../renderer/src/terminal/session-client'
 import type { TerminalState } from '../../renderer/src/terminal/controller'
 import type { HostContext, ModuleMenuEntry, ModuleTabDef, RendererModule } from './renderer-types'
 import type { ModuleState } from './types'
+import { BackgroundSession, type BackgroundSessionHandlers } from './renderer-background'
 
 /**
  * Bộ công cụ renderer cho module (ADR-014 mục 3.8): trạng thái bật / tắt, mở tab, gọi IPC, phiên
@@ -66,6 +75,13 @@ export function whenHostRunning(timeoutMs = 15_000): Promise<void> {
 export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
 export { usePublishTransfers } from '../../renderer/src/stores/transfers'
 export { usePublishAttention, type AttentionItem } from '../../renderer/src/stores/attention'
+export {
+  isMonitored,
+  type FleetItem,
+  type FleetNote,
+  type FleetStat,
+  type FleetState
+} from '../../renderer/src/stores/fleet'
 export {
   hostEnvironmentId,
   setSourceEnvironment,
@@ -190,6 +206,43 @@ export function startModules(): void {
   window.shellhouse.onModuleEvent((event) => {
     for (const l of eventListeners.get(`${event.module}:${event.name}`) ?? []) l(event.data)
   })
+}
+
+/** Việc nền đang chạy theo module (id → hàm dừng). */
+const backgrounds = new Map<string, () => void>()
+
+/**
+ * Chạy `background` của module đang bật (gọi trong App — chỉ khi vault đã mở); tắt module → dừng
+ * việc của nó; App unmount (khoá vault) → dừng hết.
+ */
+export function useModuleBackgrounds(): void {
+  const enabled = useModules((s) =>
+    Object.values(s.states)
+      .filter((m) => m.enabled)
+      .map((m) => m.id)
+      .sort()
+      .join(',')
+  )
+  useEffect(() => {
+    const want = new Set(enabled.split(',').filter(Boolean))
+    for (const [id, stop] of backgrounds)
+      if (!want.has(id)) {
+        stop()
+        backgrounds.delete(id)
+      }
+    for (const id of want) {
+      if (backgrounds.has(id)) continue
+      const start = rendererModule(id)?.background
+      if (start) backgrounds.set(id, start())
+    }
+  }, [enabled])
+  useEffect(
+    () => () => {
+      for (const stop of backgrounds.values()) stop()
+      backgrounds.clear()
+    },
+    []
+  )
 }
 
 export function isModuleEnabled(id: string): boolean {
@@ -353,6 +406,90 @@ export function openModuleTab(module: string, tab: string, params: unknown): str
 /** Cài đặt "Needs attention" trên Home đang bật (module chỉ báo vấn đề khi bật). */
 export function useHomeAttentionEnabled(): boolean {
   return useSettings((s) => s.settings.appearance.homeAttention)
+}
+
+// ——— Theo dõi nền (Home › Infrastructure) ———
+
+/** Đẩy / gỡ trạng thái một nguồn đang theo dõi (ngoài React). */
+export function publishFleet(item: FleetItem): void {
+  useFleet.getState().put(item)
+}
+
+export function removeFleet(id: string): void {
+  useFleet.getState().remove(id)
+}
+
+/** Nguồn `<module>:<id>` đang được theo dõi nền (tab có thể nhường việc báo vấn đề cho nó). */
+export function useFleetMonitored(id: string): boolean {
+  return useFleet((s) => id in s.items)
+}
+
+/** Báo vấn đề lên Home › Needs attention ngoài React; null = gỡ. */
+export function publishAttention(sourceId: string, items: AttentionItem[] | null): void {
+  if (items) useAttention.getState().publish(sourceId, items)
+  else useAttention.getState().remove(sourceId)
+}
+
+/** Cài đặt liên quan tới theo dõi nền (đọc tại chỗ). */
+export interface MonitorConfig {
+  /** Đã nạp cài đặt và danh sách host (trước đó chưa biết nguồn nào thuộc Production). */
+  loaded: boolean
+  enabled: boolean
+  attention: boolean
+  overrides: Readonly<Record<string, boolean>>
+  sourceEnvironments: Readonly<Record<string, string>>
+}
+
+export function monitorConfig(): MonitorConfig {
+  const s = useSettings.getState()
+  return {
+    loaded: s.loaded && useHosts.getState().loaded,
+    enabled: s.settings.appearance.homeMonitor,
+    attention: s.settings.appearance.homeAttention,
+    overrides: s.settings.sourceMonitor,
+    sourceEnvironments: s.settings.sourceEnvironments
+  }
+}
+
+/** Gọi lại khi cài đặt hoặc cây host đổi (môi trường kế thừa từ nhóm host). */
+export function onMonitorConfigChange(listener: () => void): () => void {
+  const a = useSettings.subscribe(listener)
+  const b = useHosts.subscribe(listener)
+  return () => {
+    a()
+    b()
+  }
+}
+
+/** Bật / tắt theo dõi một nguồn; null = về mặc định (theo môi trường). */
+export function setSourceMonitor(key: string, on: boolean | null): Promise<void> {
+  return useSettings.getState().update({ sourceMonitor: { [key]: on } })
+}
+
+/** Lựa chọn theo dõi của người dùng (`<module>:<id>` → bật / tắt) — để vẽ menu. */
+export function useSourceMonitorMap(): Readonly<Record<string, boolean>> {
+  return useSettings((s) => s.settings.sourceMonitor)
+}
+
+/**
+ * Mục menu "Monitor on Home" của một nguồn: đánh dấu khi đang theo dõi; bấm để đổi (trùng mặc
+ * định theo môi trường thì bỏ lựa chọn riêng).
+ */
+export function monitorMenuItem(
+  key: string,
+  environment: string | null,
+  overrides: Readonly<Record<string, boolean>>
+): { id: string; label: string; icon: React.ReactNode; onSelect: () => void } {
+  const on = isMonitoredSource(overrides, key, environment)
+  return {
+    id: 'monitor-home',
+    label: t('Monitor on Home'),
+    icon: on ? createElement(Check, { size: 14 }) : createElement(Activity, { size: 14 }),
+    onSelect: () => {
+      const next = !on
+      void setSourceMonitor(key, next === isMonitoredSource({}, key, environment) ? null : next)
+    }
+  }
 }
 
 /** Chuyển tới tab (vd. từ trung tâm Transfers về đúng tab đang truyền). */
@@ -523,6 +660,28 @@ export class ModuleSessionClient {
     this.client?.close()
     this.client = null
   }
+}
+
+// ——— Phiên chạy nền ———
+
+export {
+  BACKGROUND_RETRY_MS,
+  friendlyError,
+  isSignInError,
+  type BackgroundSession,
+  type BackgroundSessionHandlers
+} from './renderer-background'
+
+/** Phiên module chạy nền (theo dõi cho Home) — xem BackgroundSession. */
+export function backgroundSession(
+  module: string,
+  target: () => ModuleSessionTarget,
+  handlers: BackgroundSessionHandlers
+): BackgroundSession {
+  return new BackgroundSession(module, target, handlers, {
+    open: (m, t, e) => ModuleSessionClient.open(m, t, e),
+    whenHostRunning
+  })
 }
 
 // ——— Component lazy ———

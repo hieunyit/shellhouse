@@ -25,6 +25,8 @@ import { useSettings } from '../stores/settings'
 import { attentionItems, useAttention, type AttentionSeverity } from '../stores/attention'
 import { openSidebarDialog } from '../stores/ui-requests'
 import { AreaHeader } from './AreaHeader'
+import { InfraList } from './HomeInfra'
+import { Section } from './HomeSection'
 import { HostAvatar } from './HostAvatar'
 
 function greeting(now = new Date()): string {
@@ -45,32 +47,6 @@ function summary(hosts: number, groups: number): string {
         groups: tn(groups, '{n} group', '{n} groups')
       })
     : tn(hosts, '{n} saved host', '{n} saved hosts')
-}
-
-function Section({
-  title,
-  count,
-  action,
-  testId,
-  children
-}: {
-  title: string
-  count?: number
-  action?: React.ReactNode
-  testId?: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <section data-testid={testId} className="min-w-0">
-      <div className="mb-2 flex items-center gap-2">
-        <h2 className="text-[13px] font-semibold text-fg">{title}</h2>
-        {count !== undefined && <span className="text-[13px] text-faint">{count}</span>}
-        <div className="flex-1" />
-        {action}
-      </div>
-      {children}
-    </section>
-  )
 }
 
 /** Đường dẫn nhóm "Production › Web". */
@@ -208,7 +184,7 @@ const SEV_TONE: Record<AttentionSeverity, 'danger' | 'warning' | 'progress'> = {
 }
 
 /**
- * Cần chú ý: vấn đề của các cluster Kubernetes đang mở (pod CrashLoop, lỗi kéo image, node
+ * Cần chú ý: vấn đề của các cluster Kubernetes đang mở / đang theo dõi (pod CrashLoop, lỗi kéo image, node
  * NotReady…) — icon mức độ, chip lý do, mô tả, nguồn; bấm để mở đúng chỗ. Chỉ đọc khi tab cluster
  * còn mở (không chạy nền); tắt được trong Settings › Appearance.
  */
@@ -420,11 +396,16 @@ export function HomeView(): React.JSX.Element {
             </Section>
           )}
 
-          {(recent.length > 0 || saved.length > 0 || attentionCount > 0) && (
-            <div className="grid grid-cols-1 gap-8 @4xl/home:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-              {recent.length === 0 && saved.length === 0 ? (
-                <div />
-              ) : recent.length > 0 ? (
+          <InfraList />
+
+          {(recent.length > 0 || saved.length > 0) && (
+            <div
+              className={cx(
+                'grid grid-cols-1 gap-8',
+                attentionCount > 0 && '@4xl/home:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]'
+              )}
+            >
+              {recent.length > 0 ? (
                 <Section title={t('Recent')} count={recent.length} testId="home-recent">
                   <div className="flex flex-col">
                     {recent.map((h) => (
@@ -444,6 +425,8 @@ export function HomeView(): React.JSX.Element {
               <AttentionList />
             </div>
           )}
+          {/* Chưa có host: "Needs attention" chiếm cả hàng (không để cột trái trống). */}
+          {recent.length === 0 && saved.length === 0 && <AttentionList />}
 
           {/* Đã có host kết nối gần đây / ghim: trang chủ là việc đang làm — gợi ý bắt đầu chỉ hiện khi
             chưa có gì (như prototype). */}
