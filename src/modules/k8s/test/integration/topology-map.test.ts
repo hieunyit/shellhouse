@@ -103,6 +103,20 @@ describe('Topology tĩnh — từ API server tới bố cục', () => {
       { host: 'shop.example.com', path: '/legacy', service: 'legacy-api', port: '80' },
       { host: 'admin.example.com', path: '/', service: 'admin', port: '80' }
     ])
+    // IngressClass, PDB, hạn chứng chỉ của Secret TLS (chỉ ngày — không giữ nội dung).
+    expect(d.ingressClasses).toEqual([{ name: 'nginx', default: true }])
+    expect(d.pdbs).toEqual([
+      {
+        ns: 'shop',
+        name: 'api',
+        selector: { matchLabels: { app: 'api' } },
+        allowed: 0,
+        expected: 3,
+        rule: 'minAvailable 3'
+      }
+    ])
+    expect(d.tlsExpiry).toEqual({ 'shop/shop-tls': '2126-09-06T23:08:03.000Z' })
+    expect(JSON.stringify(d)).not.toContain('BEGIN CERTIFICATE')
     const apiWl = d.workloads.find((w) => w.name === 'api')
     expect(apiWl).toMatchObject({
       ports: [{ name: 'http', port: 8080 }],

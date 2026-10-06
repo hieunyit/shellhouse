@@ -637,6 +637,9 @@ test('Kubernetes: Topology tĩnh — vấn đề giải thích bằng lời, tì
     await map.getByTestId('k8s-topo-search').press('Enter')
     await expect(panel).toContainText('Deployment · shop')
     await expect(panel.getByTestId('k8s-topo-problems')).toContainText('at its maximum')
+    // PDB không cho evict pod nào → nói rõ, kèm gợi ý sửa.
+    await expect(panel.getByTestId('k8s-topo-problems')).toContainText('allows no disruptions')
+    await expect(panel.getByTestId('k8s-topo-problem-fix').first()).toBeVisible()
 
     // Mở danh sách pod → chọn pod → Shell / Logs / YAML.
     await map

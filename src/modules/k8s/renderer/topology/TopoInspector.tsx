@@ -242,7 +242,17 @@ export function TopoInspector({
                   ) : (
                     <Info size={14} className="mt-px shrink-0" />
                   )}
-                  <span>{p.text}</span>
+                  <span className="min-w-0">
+                    <span className="block">{p.text}</span>
+                    {p.fix && (
+                      <span
+                        className="mt-1 block border-t border-current/20 pt-1 text-muted"
+                        data-testid="k8s-topo-problem-fix"
+                      >
+                        {p.fix}
+                      </span>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>

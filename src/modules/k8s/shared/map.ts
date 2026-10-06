@@ -191,6 +191,19 @@ export interface MapPolicy {
   egressRules?: number
 }
 
+export interface MapPdb {
+  ns: string
+  name: string
+  /** LabelSelector của PodDisruptionBudget. */
+  selector: unknown
+  /** status.disruptionsAllowed — 0 = không pod nào được evict (drain node bị chặn). */
+  allowed: number
+  /** status.expectedPods — số pod PDB đang canh. */
+  expected: number
+  /** "minAvailable 2" / "maxUnavailable 0" (để giải thích). */
+  rule: string
+}
+
 export interface MapData {
   /** labels: nhãn của namespace (chỉ có khi list được namespace — xem cả cluster). */
   namespaces: { name: string; active: boolean; labels?: Record<string, string> }[]
@@ -214,6 +227,12 @@ export interface MapData {
    */
   configMaps?: string[]
   secrets?: string[]
+  /** IngressClass có thật (không list được → không có trường — không kết luận "thiếu"). */
+  ingressClasses?: { name: string; default: boolean }[]
+  /** PodDisruptionBudget (không có quyền → không có trường). */
+  pdbs?: MapPdb[]
+  /** Hạn chứng chỉ của Secret TLS mà Ingress dùng ("ns/name" → ISO notAfter). Không đọc được → thiếu. */
+  tlsExpiry?: Record<string, string>
 }
 
 // ——— Vùng theo mục đích ———

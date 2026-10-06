@@ -396,6 +396,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     ['ingresses', new Map()],
     ['horizontalpodautoscalers', new Map()],
     ['poddisruptionbudgets', new Map()],
+    ['ingressclasses', new Map()],
     ['applications', new Map()]
   ])
   for (const rs of store.get('replicasets')?.values() ?? []) {
@@ -495,6 +496,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       kind: 'PodDisruptionBudget',
       namespaced: true
     },
+    ingressclasses: { apiVersion: 'networking.k8s.io/v1', kind: 'IngressClass', namespaced: false },
     applications: { apiVersion: 'argoproj.io/v1alpha1', kind: 'Application', namespaced: true },
     persistentvolumes: { apiVersion: 'v1', kind: 'PersistentVolume', namespaced: false },
     roles: { apiVersion: 'rbac.authorization.k8s.io/v1', kind: 'Role', namespaced: true },
@@ -607,7 +609,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         ],
         '/apis/apps/v1': ['deployments', 'replicasets'],
         '/apis/batch/v1': ['cronjobs', 'jobs'],
-        '/apis/networking.k8s.io/v1': ['ingresses'],
+        '/apis/networking.k8s.io/v1': ['ingresses', 'ingressclasses'],
         '/apis/autoscaling/v2': ['horizontalpodautoscalers'],
         '/apis/policy/v1': ['poddisruptionbudgets']
       }
@@ -1490,7 +1492,28 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     )
     put(
       'secrets',
-      make('v1', 'Secret', 'shop-tls', 'shop', { type: 'kubernetes.io/tls', data: {} })
+      make('v1', 'Secret', 'shop-tls', 'shop', {
+        type: 'kubernetes.io/tls',
+        // Chứng chỉ thật của fixture (hạn 2126) — để đọc hạn chứng chỉ TLS.
+        data: { 'tls.crt': readFileSync(join(FIXTURES, 'server.crt')).toString('base64') }
+      })
+    )
+    put(
+      'ingressclasses',
+      meta(
+        make('networking.k8s.io/v1', 'IngressClass', 'nginx', undefined, {
+          spec: { controller: 'k8s.io/ingress-nginx' }
+        }),
+        { annotations: { 'ingressclass.kubernetes.io/is-default-class': 'true' } }
+      )
+    )
+    // PDB đòi đủ 3 pod: không evict được pod nào — drain node có pod api sẽ treo.
+    put(
+      'poddisruptionbudgets',
+      make('policy/v1', 'PodDisruptionBudget', 'api', 'shop', {
+        spec: { minAvailable: 3, selector: { matchLabels: { app: 'api' } } },
+        status: { disruptionsAllowed: 0, expectedPods: 3, currentHealthy: 3, desiredHealthy: 3 }
+      })
     )
     put('secrets', make('v1', 'Secret', 'db-credentials', 'shop', { type: 'Opaque', data: {} }))
     put(

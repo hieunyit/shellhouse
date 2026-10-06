@@ -6,6 +6,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- Kubernetes Map › Topology finds more broken links: an IngressClass that does not exist (or no
+  class and no default one), two Ingresses claiming the same host / path, TLS certificates that
+  expired or expire within 14 days, and PodDisruptionBudgets that allow no disruptions (node drains
+  would hang). Every problem now comes with a one-line hint on how to fix it.
+
 ## [1.2.0-beta.19] - 2026-10-06
 
 ### Added

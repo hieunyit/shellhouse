@@ -1,10 +1,12 @@
 import { t, tn } from '@shared/i18n'
+import { formatDate } from '@shared/i18n/format'
 import {
   LabelIndex,
   regionOf,
   selectorMatches,
   workloadKindLabel,
   type MapData,
+  type MapPdb,
   type MapPod,
   type MapRoute,
   type MapRouteRule,
@@ -54,6 +56,8 @@ export interface TopoProblem {
   severity: TopoSeverity
   /** Câu giải thích (đã dịch). */
   text: string
+  /** Gợi ý cách sửa (đã dịch) — một câu, hiện dưới lời giải thích. */
+  fix?: string
 }
 
 /** Một dòng trong thẻ (luật Ingress, cổng Service, listener Gateway) — có điểm nối riêng. */
@@ -174,6 +178,8 @@ export interface TopoOptions {
   showAll: ReadonlySet<string>
   /** Chế độ tập trung: chỉ đường đi qua node này (lên + xuống). */
   focus?: string | null
+  /** Thời điểm tính hạn chứng chỉ (test); mặc định bây giờ. */
+  now?: number
 }
 
 /** Workload tối đa mỗi namespace trước khi gộp "+N". */
@@ -289,9 +295,29 @@ interface Index {
   pvcs: Map<string, MapData['pvcs']>
   policies: Map<string, MapData['policies']>
   hpas: Map<string, MapData['hpas'][number]>
+  pdbs: Map<string, MapPdb[]>
+  /** "class|host|path" của Ingress → các Ingress khai báo nó ("ns/name") — tìm host trùng. */
+  ingressPaths: Map<string, string[]>
+  now: number
 }
 
-function indexData(data: MapData): Index {
+/** Chứng chỉ TLS còn ít hơn chừng này ngày → cảnh báo. */
+export const CERT_WARN_DAYS = 14
+const DAY_MS = 86_400_000
+
+/** Lớp của Ingress để so trùng host: không ghi → lớp mặc định. */
+function ingressPathKeys(r: MapRoute, defaultClass: string): string[] {
+  const cls = r.className || defaultClass
+  return [
+    ...new Set(
+      (r.rules ?? [])
+        .filter((x) => x.host && !x.default)
+        .map((x) => `${cls}|${x.host}|${x.path || '/'}`)
+    )
+  ]
+}
+
+function indexData(data: MapData, now: number): Index {
   const workloadKeys = new Set(
     data.workloads.map((w) => `${w.ns}|${workloadKindLabel(w.kind)}|${w.name}`)
   )
@@ -300,6 +326,15 @@ function indexData(data: MapData): Index {
     const key = `${h.ns}|${h.target.kind}|${h.target.name}`
     if (!hpas.has(key)) hpas.set(key, h)
   }
+  const defaultClass = data.ingressClasses?.find((c) => c.default)?.name ?? ''
+  const ingressPaths = new Map<string, string[]>()
+  for (const r of data.routes)
+    if (r.kind === 'ingresses.networking.k8s.io')
+      for (const key of ingressPathKeys(r, defaultClass)) {
+        const list = ingressPaths.get(key)
+        if (list) list.push(`${r.ns}/${r.name}`)
+        else ingressPaths.set(key, [`${r.ns}/${r.name}`])
+      }
   return {
     workloads: groupBy(data.workloads, (w) => w.ns),
     services: groupBy(data.services, (s) => s.ns),
@@ -312,7 +347,10 @@ function indexData(data: MapData): Index {
     gateways: groupBy(data.gateways ?? [], (g) => g.ns),
     pvcs: groupBy(data.pvcs, (v) => v.ns),
     policies: groupBy(data.policies, (p) => p.ns),
-    hpas
+    hpas,
+    pdbs: groupBy(data.pdbs ?? [], (p) => p.ns),
+    ingressPaths,
+    now
   }
 }
 
@@ -556,6 +594,21 @@ function namespaceGraph(
             names: ingressPolicies.map((p) => p.name).join(', ')
           })
         })
+      // PDB không cho evict pod nào: drain node / nâng cấp node pool đứng chờ mãi.
+      for (const b of ix.pdbs.get(ns) ?? [])
+        if (b.expected > 0 && b.allowed === 0 && selectorMatches(b.selector, w.labels))
+          problems.push({
+            code: 'pdb-blocking',
+            severity: 'warn',
+            text: t(
+              'PodDisruptionBudget {name} ({rule}) allows no disruptions — draining a node with these pods will hang',
+              { name: b.name, rule: b.rule || '—' }
+            ),
+            fix:
+              w.ready < w.desired
+                ? t('Get the pods healthy first; the budget opens up once they are ready.')
+                : t('Run more replicas or relax minAvailable / maxUnavailable.')
+          })
     } else {
       status = tn(pods.length, '{n} pod without a controller', '{n} pods without a controller')
       problems.push(...podProblems(pods))
@@ -950,6 +1003,79 @@ function namespaceGraph(
           text: t('Service {name} has no port {port}', { name: x.service, port: x.port })
         })
     }
+    if (ingress && data.ingressClasses) {
+      const classes = data.ingressClasses
+      if (r.className && !classes.some((c) => c.name === r.className))
+        problems.push({
+          code: 'ing-class-missing',
+          severity: 'bad',
+          text: t('IngressClass {name} does not exist — no controller serves this Ingress', {
+            name: r.className
+          }),
+          fix: t('Use one of: {names}', {
+            names: classes.map((c) => c.name).join(', ') || t('(no IngressClass installed)')
+          })
+        })
+      else if (!r.className && !classes.some((c) => c.default))
+        problems.push({
+          code: 'ing-no-class',
+          severity: 'warn',
+          text: t('No ingress class and no default IngressClass — the controller may ignore it'),
+          ...(classes.length
+            ? { fix: t('Set spec.ingressClassName: {name}', { name: classes[0]?.name ?? '' }) }
+            : {})
+        })
+    }
+    if (ingress) {
+      const defaultClass = data.ingressClasses?.find((c) => c.default)?.name ?? ''
+      const self = `${ns}/${r.name}`
+      for (const key of ingressPathKeys(r, defaultClass)) {
+        const others = (ix.ingressPaths.get(key) ?? []).filter((x) => x !== self)
+        if (!others.length) continue
+        const [, host = '', path = '/'] = key.split('|')
+        problems.push({
+          code: 'ing-host-conflict',
+          severity: 'warn',
+          text: t(
+            '{host}{path} is also defined by Ingress {others} — the controller picks only one',
+            {
+              host,
+              path,
+              others: others
+                .map((x) => (x.startsWith(`${ns}/`) ? x.slice(ns.length + 1) : x))
+                .join(', ')
+            }
+          )
+        })
+      }
+    }
+    if (ingress && data.tlsExpiry)
+      for (const x of r.tls ?? []) {
+        const at = x.secret ? data.tlsExpiry[`${ns}/${x.secret}`] : undefined
+        if (!at) continue
+        const left = (Date.parse(at) - ix.now) / DAY_MS
+        if (left < 0)
+          problems.push({
+            code: 'ing-tls-expired',
+            severity: 'bad',
+            text: t('Certificate in {name} expired on {date} — browsers reject HTTPS', {
+              name: x.secret,
+              date: formatDate(at)
+            }),
+            fix: t('Renew the certificate (cert-manager: check the Certificate resource).')
+          })
+        else if (left < CERT_WARN_DAYS)
+          problems.push({
+            code: 'ing-tls-expiring',
+            severity: 'warn',
+            text: tn(
+              Math.max(1, Math.floor(left)),
+              'Certificate in {name} expires in {n} day ({date})',
+              'Certificate in {name} expires in {n} days ({date})',
+              { name: x.secret, date: formatDate(at) }
+            )
+          })
+      }
     const badges: TopoBadge[] = []
     if (ingress && r.tls?.length) {
       const missingTls = data.secrets
@@ -965,7 +1091,12 @@ function namespaceGraph(
         })
       badges.push({
         text: 'TLS',
-        tone: missingTls.length ? 'bad' : 'ok',
+        tone:
+          missingTls.length || problems.some((p) => p.code === 'ing-tls-expired')
+            ? 'bad'
+            : problems.some((p) => p.code === 'ing-tls-expiring')
+              ? 'warn'
+              : 'ok',
         title: r.tls
           .map((x) => `${x.hosts.join(', ') || '*'} → ${x.secret || t('default certificate')}`)
           .join('\n')
@@ -1096,8 +1227,41 @@ export function pathThrough(
 }
 
 /** Đồ thị hiện trên màn hình: gom namespace, cắt bớt / gập, chế độ tập trung. */
+/** Gợi ý sửa chung theo mã lỗi (mã có gợi ý riêng theo ngữ cảnh thì đặt ngay lúc phát hiện). */
+const FIXES: Partial<Record<string, () => string>> = {
+  'svc-no-match': () =>
+    t('Compare the selector with the pod labels of the workload it should reach.'),
+  'svc-no-ready': () => t('Check the readiness probe and the logs of the selected pods.'),
+  'svc-target-port': () =>
+    t('Point targetPort at a port the container listens on (number or containerPort name).'),
+  'svc-lb-pending': () =>
+    t(
+      'The cluster needs a load-balancer controller (cloud provider, MetalLB…) — or use NodePort / Ingress.'
+    ),
+  'ing-missing-svc': () => t('Create the Service, or fix the backend name in the Ingress.'),
+  'route-missing-svc': () => t('Create the Service, or fix the backend name in the route.'),
+  'ing-bad-port': () => t('Use a port number or port name that the Service declares.'),
+  'ing-missing-tls': () =>
+    t('Create the Secret (kubectl create secret tls …) or let cert-manager issue it.'),
+  'route-missing-gw': () => t('Fix parentRefs or create the Gateway.'),
+  'cm-missing': () =>
+    t('Create it in this namespace — pods wait in CreateContainerConfigError until then.'),
+  'secret-missing': () =>
+    t('Create it in this namespace — pods wait in CreateContainerConfigError until then.'),
+  'pvc-missing': () => t('Create the PersistentVolumeClaim or fix the claim name.'),
+  'pvc-unbound': () =>
+    t('Check the StorageClass and the provisioner — the claim waits for a volume.'),
+  'hpa-max': () => t('Raise maxReplicas, or give each pod more CPU / memory.'),
+  'pod-image': () => t('Check the image name / tag and the imagePullSecrets for the registry.'),
+  'pod-crash': () => t('Open the logs of the previous container run to see why it exits.'),
+  'pod-pending': () =>
+    t('Open the pod events — usually not enough CPU / memory, or a volume / node selector.'),
+  'pod-not-ready': () =>
+    t('Check the readiness probe — path, port and how long the app takes to start.')
+}
+
 export function buildTopology(data: MapData, options: TopoOptions): TopoGraph {
-  const ix = indexData(data)
+  const ix = indexData(data, options.now ?? Date.now())
   const nsNames = [
     ...new Set([
       ...data.namespaces.map((n) => n.name),
@@ -1142,8 +1306,13 @@ export function buildTopology(data: MapData, options: TopoOptions): TopoGraph {
     const g = full.get(ns)
     if (!g) continue
     for (const n of g.nodes)
-      for (const p of n.problems)
+      for (const p of n.problems) {
+        if (!p.fix) {
+          const fix = FIXES[p.code]?.()
+          if (fix) p.fix = fix
+        }
         problems.push({ node: n.id, ns, name: n.name, title: n.title, problem: p })
+      }
   }
   const rank = { bad: 0, warn: 1, info: 2 }
   problems.sort(

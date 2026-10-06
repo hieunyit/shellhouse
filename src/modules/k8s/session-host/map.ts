@@ -6,6 +6,7 @@ import type {
   MapRouteRule,
   MapHpa,
   MapNodeInfo,
+  MapPdb,
   MapPod,
   MapPolicy,
   MapPvc,
@@ -23,6 +24,7 @@ import {
   type K8sObject
 } from '../shared/resources'
 import { KubeError, type KubeClient } from './client'
+import { certExpiry } from './certs'
 import { METADATA_ONLY, metrics } from './operations'
 import type { MetricsResult } from '../shared/ops'
 
@@ -300,6 +302,8 @@ export async function mapData(
     slices,
     configMapList,
     secretList,
+    ingressClassList,
+    pdbList,
     ...workloadLists
   ] = await Promise.all([
     namespaces.length
@@ -334,6 +338,12 @@ export async function mapData(
       truncated: false,
       denied: true
     })),
+    listAll(client, '/apis/networking.k8s.io/v1', 'ingressclasses', [], signal).catch(
+      (): Listed => ({ items: [], truncated: false, denied: true })
+    ),
+    listAll(client, '/apis/policy/v1', 'poddisruptionbudgets', namespaces, signal).catch(
+      (): Listed => ({ items: [], truncated: false, denied: true })
+    ),
     ...WORKLOAD_KINDS.map((k) => listAll(client, k.path, k.plural, namespaces, signal))
   ])
 
@@ -743,6 +753,42 @@ export async function mapData(
   const configMaps = existing(configMapList, wantCm)
   const secrets = existing(secretList, wantSecret)
 
+  const known = (l: Listed): boolean => !l.denied && !l.missing && !l.truncated
+  const ingressClasses = known(ingressClassList)
+    ? ingressClassList.items.map((c) => ({
+        name: c.metadata.name,
+        default: c.metadata.annotations?.['ingressclass.kubernetes.io/is-default-class'] === 'true'
+      }))
+    : undefined
+  const pdbs: MapPdb[] | undefined = known(pdbList)
+    ? pdbList.items.map((p) => {
+        const spec = o(p.spec)
+        const st = o(p.status)
+        // minAvailable / maxUnavailable: số hoặc phần trăm ("50%").
+        const intOrString = (v: unknown): string => (typeof v === 'number' ? String(v) : s(v))
+        const rule =
+          spec['minAvailable'] !== undefined
+            ? `minAvailable ${intOrString(spec['minAvailable'])}`
+            : spec['maxUnavailable'] !== undefined
+              ? `maxUnavailable ${intOrString(spec['maxUnavailable'])}`
+              : ''
+        return {
+          ns: p.metadata.namespace ?? '',
+          name: p.metadata.name,
+          selector: spec['selector'] ?? {},
+          allowed: num(st['disruptionsAllowed']),
+          expected: num(st['expectedPods']),
+          rule
+        }
+      })
+    : undefined
+  const tlsExpiry = await ingressCertExpiry(
+    client,
+    routes,
+    secrets ? new Set(secrets) : null,
+    signal
+  )
+
   return {
     namespaces: nsList.items.map((n) => ({
       name: n.metadata.name,
@@ -761,6 +807,56 @@ export async function mapData(
     nodeList,
     truncated: [pods, rs, services, ...workloadLists].some((l) => l.truncated),
     ...(configMaps ? { configMaps } : {}),
-    ...(secrets ? { secrets } : {})
+    ...(secrets ? { secrets } : {}),
+    ...(ingressClasses ? { ingressClasses } : {}),
+    ...(pdbs ? { pdbs } : {}),
+    ...(tlsExpiry ? { tlsExpiry } : {})
   }
+}
+
+/** Đọc tối đa chừng này Secret TLS (cluster nhiều Ingress: bản đồ không chờ quá lâu). */
+const MAX_TLS_SECRETS = 100
+
+/**
+ * Hạn chứng chỉ của các Secret TLS mà Ingress dùng: đọc Secret, chỉ giữ ngày hết hạn (không giữ /
+ * gửi nội dung). Không có quyền đọc Secret → undefined (không báo gì).
+ */
+async function ingressCertExpiry(
+  client: KubeClient,
+  routes: readonly MapRoute[],
+  existing: Set<string> | null,
+  signal?: AbortSignal
+): Promise<Record<string, string> | undefined> {
+  const want = [
+    ...new Set(
+      routes.flatMap((r) => (r.tls ?? []).filter((x) => x.secret).map((x) => `${r.ns}/${x.secret}`))
+    )
+  ]
+    .filter((k) => !existing || existing.has(k))
+    .slice(0, MAX_TLS_SECRETS)
+  if (!want.length) return undefined
+  const out: Record<string, string> = {}
+  // Đổi trong callback (eslint không theo được biến let qua closure).
+  const state = { denied: false }
+  // 8 yêu cầu song song — đủ nhanh, không dồn API server.
+  for (let i = 0; i < want.length && !state.denied; i += 8)
+    await Promise.all(
+      want.slice(i, i + 8).map(async (key) => {
+        const [ns = '', name = ''] = key.split('/')
+        try {
+          const sec = await client.json<{ data?: Record<string, string> }>(
+            'GET',
+            `/api/v1/namespaces/${encodeURIComponent(ns)}/secrets/${encodeURIComponent(name)}`,
+            signal ? { signal } : {}
+          )
+          const crt = sec.data?.['tls.crt']
+          const at = crt ? certExpiry(Buffer.from(crt, 'base64')) : null
+          if (at) out[key] = at
+        } catch (error) {
+          if (error instanceof KubeError && error.status === 403) state.denied = true
+          else if (!(error instanceof KubeError)) throw error
+        }
+      })
+    )
+  return state.denied && !Object.keys(out).length ? undefined : out
 }

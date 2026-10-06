@@ -268,6 +268,73 @@ describe('Topology tĩnh (Entry → Routes → Services → Workloads → Pods �
     expect(n.get('pods:wl:deployments.apps:shop/web')?.pods?.[0]?.name).toBe('web-2')
   })
 
+  it('IngressClass thiếu, host trùng, chứng chỉ sắp / đã hết hạn, PDB chặn drain; có gợi ý sửa', () => {
+    const d = data()
+    const now = Date.parse('2026-10-06T00:00:00Z')
+    d.ingressClasses = [{ name: 'traefik', default: true }]
+    d.routes.push({
+      kind: 'ingresses.networking.k8s.io',
+      ns: 'shop',
+      name: 'shop-copy',
+      hosts: ['shop.example.com'],
+      backends: ['web'],
+      // Không ghi lớp → lớp mặc định (traefik), không trùng với Ingress "shop" (nginx).
+      rules: [{ host: 'shop.example.com', path: '/', service: 'web', port: '80' }]
+    })
+    d.routes.push({
+      kind: 'ingresses.networking.k8s.io',
+      ns: 'shop',
+      name: 'shop-dup',
+      hosts: ['shop.example.com'],
+      backends: ['web'],
+      className: 'traefik',
+      rules: [{ host: 'shop.example.com', path: '/', service: 'web', port: '80' }]
+    })
+    d.tlsExpiry = {
+      'shop/shop-tls': '2026-10-10T00:00:00Z',
+      'shop/admin-tls': '2026-09-01T00:00:00Z'
+    }
+    d.pdbs = [
+      {
+        ns: 'shop',
+        name: 'api-pdb',
+        selector: { matchLabels: { app: 'api' } },
+        allowed: 0,
+        expected: 2,
+        rule: 'minAvailable 2'
+      },
+      {
+        ns: 'shop',
+        name: 'db-pdb',
+        selector: { matchLabels: { app: 'db' } },
+        allowed: 1,
+        expected: 1,
+        rule: 'maxUnavailable 1'
+      }
+    ]
+    const n = byId(buildTopology(d, { ...OPTS, now }))
+    const ing = n.get('ing:shop/shop')
+    expect(codes(ing)).toEqual(
+      expect.arrayContaining(['ing-class-missing', 'ing-tls-expiring', 'ing-tls-expired'])
+    )
+    expect(ing?.problems.find((p) => p.code === 'ing-class-missing')?.fix).toContain('traefik')
+    expect(ing?.problems.find((p) => p.code === 'ing-tls-expiring')?.text).toContain('4 days')
+    expect(codes(n.get('ing:shop/shop-copy'))).toEqual(['ing-host-conflict'])
+    expect(n.get('ing:shop/shop-copy')?.problems[0]?.text).toContain('shop-dup')
+    expect(codes(n.get('ing:shop/shop-dup'))).toEqual(['ing-host-conflict'])
+    expect(codes(n.get('wl:deployments.apps:shop/api'))).toContain('pdb-blocking')
+    expect(codes(n.get('wl:statefulsets.apps:shop/db'))).not.toContain('pdb-blocking')
+    // Mã chung có gợi ý sửa.
+    expect(n.get('svc:shop/orphan')?.problems[0]?.fix).toContain('selector')
+    // Không có IngressClass mặc định + Ingress không ghi lớp → cảnh báo.
+    d.ingressClasses = [{ name: 'traefik', default: false }]
+    const m = byId(buildTopology(d, { ...OPTS, now }))
+    expect(codes(m.get('ing:shop/shop-copy'))).toContain('ing-no-class')
+    // Không list được IngressClass / PDB / chứng chỉ → không kết luận gì.
+    const plain = byId(buildTopology(data(), OPTS))
+    expect(codes(plain.get('ing:shop/shop'))).not.toContain('ing-class-missing')
+  })
+
   it('chỉ ra lỗi cấu hình bằng lời', () => {
     const g = buildTopology(data(), OPTS)
     const n = byId(g)

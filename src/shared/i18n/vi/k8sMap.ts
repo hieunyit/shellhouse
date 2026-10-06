@@ -376,5 +376,61 @@ export const k8sMap: Readonly<Record<string, string>> = {
   'On a Cilium cluster, Hubble works instead — enable Hubble Relay with':
     'Cluster dùng Cilium thì dùng Hubble thay thế — bật Hubble Relay bằng',
   'Live traffic: in / out': 'Traffic trực tiếp: vào / ra',
-  '{n} conn/s': '{n} kết nối/s'
+  '{n} conn/s': '{n} kết nối/s',
+  'Get the pods healthy first; the budget opens up once they are ready.':
+    'Làm cho pod khoẻ lại trước; khi pod sẵn sàng, PDB sẽ cho phép gián đoạn.',
+  'Run more replicas or relax minAvailable / maxUnavailable.':
+    'Chạy thêm replica hoặc nới minAvailable / maxUnavailable.',
+  'PodDisruptionBudget {name} ({rule}) allows no disruptions — draining a node with these pods will hang':
+    'PodDisruptionBudget {name} ({rule}) không cho gián đoạn pod nào — drain node chứa các pod này sẽ bị treo',
+  'IngressClass {name} does not exist — no controller serves this Ingress':
+    'IngressClass {name} không tồn tại — không controller nào phục vụ Ingress này',
+  'Use one of: {names}': 'Dùng một trong: {names}',
+  '(no IngressClass installed)': '(chưa cài IngressClass nào)',
+  'No ingress class and no default IngressClass — the controller may ignore it':
+    'Không ghi ingress class và không có IngressClass mặc định — controller có thể bỏ qua Ingress này',
+  'Set spec.ingressClassName: {name}': 'Đặt spec.ingressClassName: {name}',
+  '{host}{path} is also defined by Ingress {others} — the controller picks only one':
+    '{host}{path} cũng được khai báo ở Ingress {others} — controller chỉ chọn một',
+  'Certificate in {name} expired on {date} — browsers reject HTTPS':
+    'Chứng chỉ trong {name} đã hết hạn ngày {date} — trình duyệt từ chối HTTPS',
+  'Renew the certificate (cert-manager: check the Certificate resource).':
+    'Gia hạn chứng chỉ (cert-manager: kiểm tra tài nguyên Certificate).',
+  'Certificate in {name} expires in {n} day ({date})':
+    'Chứng chỉ trong {name} hết hạn sau {n} ngày ({date})',
+  'Certificate in {name} expires in {n} days ({date})':
+    'Chứng chỉ trong {name} hết hạn sau {n} ngày ({date})',
+  'Compare the selector with the pod labels of the workload it should reach.':
+    'So selector với nhãn pod của workload mà Service cần trỏ tới.',
+  'Check the readiness probe and the logs of the selected pods.':
+    'Kiểm tra readiness probe và log của các pod được chọn.',
+  'Point targetPort at a port the container listens on (number or containerPort name).':
+    'Đặt targetPort là cổng container thật sự lắng nghe (số hoặc tên containerPort).',
+  'The cluster needs a load-balancer controller (cloud provider, MetalLB…) — or use NodePort / Ingress.':
+    'Cluster cần controller load balancer (cloud, MetalLB…) — hoặc dùng NodePort / Ingress.',
+  'Create the Service, or fix the backend name in the Ingress.':
+    'Tạo Service, hoặc sửa tên backend trong Ingress.',
+  'Create the Service, or fix the backend name in the route.':
+    'Tạo Service, hoặc sửa tên backend trong route.',
+  'Use a port number or port name that the Service declares.':
+    'Dùng số cổng hoặc tên cổng mà Service khai báo.',
+  'Create the Secret (kubectl create secret tls …) or let cert-manager issue it.':
+    'Tạo Secret (kubectl create secret tls …) hoặc để cert-manager cấp.',
+  'Fix parentRefs or create the Gateway.': 'Sửa parentRefs hoặc tạo Gateway.',
+  'Create it in this namespace — pods wait in CreateContainerConfigError until then.':
+    'Tạo nó trong namespace này — trước đó pod đứng ở CreateContainerConfigError.',
+  'Create the PersistentVolumeClaim or fix the claim name.':
+    'Tạo PersistentVolumeClaim hoặc sửa tên claim.',
+  'Check the StorageClass and the provisioner — the claim waits for a volume.':
+    'Kiểm tra StorageClass và provisioner — claim đang chờ volume.',
+  'Raise maxReplicas, or give each pod more CPU / memory.':
+    'Tăng maxReplicas, hoặc cấp thêm CPU / RAM cho mỗi pod.',
+  'Check the image name / tag and the imagePullSecrets for the registry.':
+    'Kiểm tra tên / tag image và imagePullSecrets của registry.',
+  'Open the logs of the previous container run to see why it exits.':
+    'Mở log của lần chạy trước (previous) để xem vì sao container thoát.',
+  'Open the pod events — usually not enough CPU / memory, or a volume / node selector.':
+    'Mở event của pod — thường do thiếu CPU / RAM, hoặc volume / node selector.',
+  'Check the readiness probe — path, port and how long the app takes to start.':
+    'Kiểm tra readiness probe — path, cổng và thời gian app cần để khởi động.'
 }
