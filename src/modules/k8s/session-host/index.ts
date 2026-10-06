@@ -3,6 +3,7 @@ import type { Duplex } from 'node:stream'
 import type { HostModule, HostModuleContext } from '../../registry/host-types'
 import { k8sManifest } from '../manifest'
 import type { RawConnect } from './client'
+import type { RecordedEvent } from '../shared/timeline'
 import { K8sService, type ResolvedClusterConfig } from './service'
 
 /**
@@ -39,6 +40,15 @@ function service(ctx: HostModuleContext, rawConnect: RawConnect): K8sService {
     persistOidc: async (ref, tokens) => {
       await ctx.fromMain('persistOidc', { ref, ...tokens })
     },
+    recordEvents: async (cluster, events) => {
+      await ctx.fromMain('events.record', { cluster, events })
+    },
+    // Main kiểm và trả đúng dạng (QueryEvents → { events, recording }).
+    queryEvents: async (q) =>
+      (await ctx.fromMain('events.query', q)) as {
+        events: RecordedEvent[]
+        recording: boolean
+      },
     spawn: ctx.spawn,
     emit: (event, data) => {
       ctx.emit(event, data)

@@ -137,7 +137,7 @@ function claimNames(kind: string, w: K8sObject, pvcNames: readonly string[]): st
 }
 
 /** ConfigMap / Secret / ServiceAccount / cổng container của pod template (như podRefs, gọn hơn). */
-function templateRefs(tpl: Obj): {
+export function templateRefs(tpl: Obj): {
   configMaps: string[]
   secrets: string[]
   serviceAccount: string

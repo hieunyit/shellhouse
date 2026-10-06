@@ -13,6 +13,7 @@ import type { Transport, TransportCallbacks } from '../../../session-host/transp
 import {
   K8sOp,
   K8sTerminalParams,
+  contextKey,
   isMutating,
   type ContextRef,
   type DiscoveredKind,
@@ -57,6 +58,9 @@ import { debugEphemeral, debugNode } from './debug'
 import { diffObjects } from './diff'
 import { helmRevision, helmRollback, helmUninstall } from './helm'
 import { mapData } from './map'
+import { recordEvents } from './eventRecorder'
+import { workloadTimeline } from './timeline'
+import type { QueryEvents, RecordedEvent } from '../shared/timeline'
 import { related } from './related'
 import { rbacReach, topology } from './topology'
 import { disposeTrafficCache, trafficSample, type TrafficCache } from './traffic'
@@ -125,6 +129,10 @@ export interface K8sServiceDeps {
   checkEditFile?(path: string): Promise<boolean>
   /** Lưu token OIDC vừa làm mới vào kubeconfig / bản import (refresh token xoay vòng). */
   persistOidc?(ref: ContextRef, tokens: OidcTokens): Promise<void>
+  /** Ghi một lô event của cluster (main lưu 7 ngày) — thiếu → không ghi. */
+  recordEvents?(cluster: string, events: RecordedEvent[]): Promise<void>
+  /** Event đã ghi trên máy + cluster có đang được ghi không. */
+  queryEvents?(q: QueryEvents): Promise<{ events: RecordedEvent[]; recording: boolean }>
 }
 
 /** Nhóm API có sẵn của Kubernetes — tài nguyên nhóm khác là CRD ("Custom resources"). */
@@ -217,6 +225,10 @@ async function writeNoFollow(path: string, text: string): Promise<void> {
 export class K8sService implements HostModuleSession {
   private client: KubeClient | null = null
   private cluster: ResolvedClusterConfig | null = null
+  /** Khoá context đang kết nối (`source#context`). */
+  private refKey: string | null = null
+  /** Đang ghi event của cluster về máy (theo dõi ở Home). */
+  private recorder: AbortController | null = null
   private readOnly = false
   private kinds = new Map<string, ResourceKind>(BUILTIN_KINDS.map((k) => [k.id, k]))
   private readonly subscriptions = new Map<string, () => void>()
@@ -286,7 +298,10 @@ export class K8sService implements HostModuleSession {
     }
     if (op.op === 'connect') {
       this.readOnly = op.readOnly
+      // Đổi context: bộ ghi event của cluster cũ dừng (renderer bật lại nếu cần).
+      if (this.refKey !== contextKey(op.ref)) this.stopRecorder()
       const client = await this.connect(op.ref)
+      this.refKey = contextKey(op.ref)
       const version = await client.json<{ gitVersion?: string }>('GET', '/version', { signal })
       return {
         version: version.gitVersion ?? '',
@@ -444,6 +459,25 @@ export class K8sService implements HostModuleSession {
         return problems(client, signal)
       case 'fleet':
         return fleet(client, this.cluster?.auth.cert, signal)
+      case 'events.record':
+        if (op.on) this.startRecorder(client)
+        else this.stopRecorder()
+        return { recording: this.recorder !== null }
+      case 'timeline': {
+        const cluster = this.refKey
+        const deps = this.deps
+        return workloadTimeline(
+          client,
+          op.kind,
+          op.namespace,
+          op.name,
+          (q) =>
+            cluster && deps.queryEvents
+              ? deps.queryEvents({ ...q, cluster })
+              : Promise.resolve({ events: [], recording: false }),
+          signal
+        )
+      }
       case 'counts':
         return counts(
           client,
@@ -1431,8 +1465,36 @@ export class K8sService implements HostModuleSession {
     return transport
   }
 
+  private startRecorder(client: KubeClient): void {
+    const cluster = this.refKey
+    const deps = this.deps
+    if (this.recorder || !cluster || !deps.recordEvents) return
+    const controller = new AbortController()
+    this.recorder = controller
+    void recordEvents(
+      client,
+      (events) => deps.recordEvents?.(cluster, events) ?? Promise.resolve(),
+      controller.signal
+    )
+      .catch((error: unknown) => {
+        this.deps.log(
+          'warn',
+          `event recorder stopped: ${error instanceof Error ? error.message : String(error)}`
+        )
+      })
+      .finally(() => {
+        if (this.recorder === controller) this.recorder = null
+      })
+  }
+
+  private stopRecorder(): void {
+    this.recorder?.abort()
+    this.recorder = null
+  }
+
   dispose(): void {
     this.disposed = true
+    this.stopRecorder()
     disposeTrafficCache(this.trafficCache)
     for (const stop of this.subscriptions.values()) stop()
     this.subscriptions.clear()

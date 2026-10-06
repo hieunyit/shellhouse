@@ -803,6 +803,27 @@ test('Kubernetes: trang Deployment (Status / Resources / Pods / ReplicaSets), To
     await detail.getByTestId('k8s-detail-wide').click()
     await expect(detail).toHaveAttribute('data-expanded', 'true')
 
+    // Timeline: rollout (image đổi), event lỗi; lọc theo làn; "trước lần chết" = 30 phút trước nó.
+    await detail.getByTestId('k8s-detail-tab-timeline').click()
+    const tl = detail.getByTestId('k8s-timeline')
+    const tlEntry = tl.getByTestId('k8s-timeline-entry')
+    await expect(
+      tlEntry.filter({ hasText: 'Rollout · revision 2' }).filter({ hasText: 'nginx: 1.26 → 1.27' })
+    ).toHaveCount(1)
+    await expect(tl.getByTestId('k8s-timeline-crash')).toContainText('BackOff')
+    await tl.getByTestId('k8s-timeline-lane-rollout').click()
+    await expect(
+      tl.locator('[data-testid="k8s-timeline-entry"]:not([data-lane="rollout"])')
+    ).toHaveCount(0)
+    await tl.getByTestId('k8s-timeline-lane-rollout').click()
+    await expect(tlEntry.filter({ hasText: 'BackOff' })).toHaveCount(1)
+    await tl.getByTestId('k8s-timeline-before').click()
+    await expect(tl.getByTestId('k8s-timeline-focus')).toBeVisible()
+    await expect(
+      tl.locator('[data-testid="k8s-timeline-entry"][data-severity="danger"]')
+    ).not.toHaveCount(0)
+    await expect(tl.getByTestId('k8s-timeline-history')).toContainText('about an hour')
+
     // Topology: Deployment → ReplicaSet → Pod → Node, ConfigMap, ServiceAccount → RBAC.
     await detail.getByTestId('k8s-detail-tab-topology').click()
     const topo = detail.getByTestId('k8s-topology')

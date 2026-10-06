@@ -8,6 +8,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Added
 
+- Kubernetes: **Timeline** tab for Deployments, StatefulSets and DaemonSets — rollouts (with the
+  image that changed), pods created, containers that crashed (OOMKilled, exit code), ConfigMaps /
+  Secrets edited, node Ready / NotReady changes and events on one time axis, filterable by lane and
+  by the last hour / 24 hours / 7 days. “What changed before?” jumps to the 30 minutes before the
+  last crash. For clusters monitored on Home, events are recorded on this computer and kept for 7
+  days (the cluster itself keeps them for about an hour).
+
 - Home › **Infrastructure**: when Shellhouse starts it connects read-only to your Production
   Kubernetes clusters and Docker hosts (or any you mark “Monitor on Home” in their right-click
   menu) and shows their status — Kubernetes version and end-of-support date, nodes ready, failing

@@ -14,6 +14,9 @@ import {
 import { ContextRef, contextKey, type ContextInfo } from '../shared/ops'
 import m0001 from '../migrations/0001_contexts.sql?raw'
 import m0002 from '../migrations/0002_hidden.sql?raw'
+import m0003 from '../migrations/0003_events.sql?raw'
+import { QueryEvents, RecordEvents } from '../shared/timeline'
+import { EventStore } from './events'
 import {
   deleteContextFromYaml,
   embedReferences,
@@ -360,10 +363,12 @@ export const k8sMain: MainModule = {
   manifest: k8sManifest,
   migrations: [
     { version: 1, name: 'contexts', sql: m0001 },
-    { version: 2, name: 'hidden', sql: m0002 }
+    { version: 2, name: 'hidden', sql: m0002 },
+    { version: 3, name: 'events', sql: m0003 }
   ],
   activate(ctx) {
     const configs = new Kubeconfigs(ctx)
+    const events = new EventStore(ctx.db)
     const changed = (): void => {
       ctx.events.emit('changed', null)
     }
@@ -393,6 +398,7 @@ export const k8sMain: MainModule = {
     ctx.ipc.handle('deleteContext', K8sIpc.deleteContext, async (ref) => {
       try {
         const r = await configs.deleteContext(ref)
+        events.forget(contextKey(ref))
         return { ok: true, backup: r.backup }
       } catch (error) {
         return { ok: false, message: error instanceof Error ? error.message : String(error) }
@@ -416,6 +422,13 @@ export const k8sMain: MainModule = {
           return ctx.ownsEditFile?.(path) === true
         }
         if (name === 'persistOidc') return configs.persistOidc(OidcPersist.parse(params))
+        // Event của cluster đang theo dõi (giữ 7 ngày cho tab Timeline).
+        if (name === 'events.record') {
+          const batch = RecordEvents.parse(params)
+          events.record(batch.cluster, batch.events)
+          return null
+        }
+        if (name === 'events.query') return events.query(QueryEvents.parse(params))
         throw new Error(`Unknown request ${name}`)
       }
     }

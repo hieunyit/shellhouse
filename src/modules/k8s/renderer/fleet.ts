@@ -146,6 +146,8 @@ class ClusterMonitor {
       {
         ready: async (client) => {
           await client.request({ op: 'connect', ref: this.entry.ref, readOnly: true })
+          // Ghi event của cluster về máy (7 ngày) cho tab Timeline — chạy trong phiên này.
+          void client.request({ op: 'events.record', on: true }).catch(() => undefined)
           await this.poll()
         },
         failed: (state, message) => {

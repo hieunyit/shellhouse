@@ -419,9 +419,15 @@ export function removeFleet(id: string): void {
   useFleet.getState().remove(id)
 }
 
-/** Nguồn `<module>:<id>` đang được theo dõi nền (tab có thể nhường việc báo vấn đề cho nó). */
+/**
+ * Nguồn `<module>:<id>` đang được theo dõi nền VÀ đọc được (tab nhường việc báo vấn đề cho nó;
+ * theo dõi nền đang lỗi / cần đăng nhập thì tab vẫn tự báo).
+ */
 export function useFleetMonitored(id: string): boolean {
-  return useFleet((s) => id in s.items)
+  return useFleet((s) => {
+    const state = s.items[id]?.state
+    return state === 'ok' || state === 'warning'
+  })
 }
 
 /** Báo vấn đề lên Home › Needs attention ngoài React; null = gỡ. */

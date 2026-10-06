@@ -174,6 +174,15 @@ export const K8sOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('problems') }),
   /** Tóm tắt cho bảng theo dõi ở Home: phiên bản, node, vấn đề, hạn chứng chỉ. */
   z.object({ op: z.literal('fleet') }),
+  /** Ghi event của cả cluster về máy (7 ngày, cho tab Timeline) — bật / tắt. */
+  z.object({ op: z.literal('events.record'), on: z.boolean() }),
+  /** Dòng thời gian của Deployment / StatefulSet / DaemonSet (tab Timeline). */
+  z.object({
+    op: z.literal('timeline'),
+    kind: z.enum(['deployments.apps', 'statefulsets.apps', 'daemonsets.apps']),
+    namespace: Namespace,
+    name: Name
+  }),
   /** Tài nguyên liên quan (kiểu Rancher): service, ConfigMap, Secret, PVC, HPA… / "Used by". */
   z.object({ op: z.literal('related'), kind: Kind, namespace: Namespace, name: Name }),
   /**

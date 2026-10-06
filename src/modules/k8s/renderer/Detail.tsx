@@ -32,6 +32,7 @@ import {
 import { HAS_PODS, keyLabel, toMenu, type K8sAction } from './actions'
 import { TOPOLOGY_KINDS, TopologyOf } from './Topology'
 import { TRAFFIC_KINDS, TrafficOf } from './TrafficTab'
+import { TIMELINE_KINDS, TimelineOf } from './Timeline'
 import { UsagePanel } from './Usage'
 import { ObjectEvents } from './Events'
 import type { EventBus } from './useResourceList'
@@ -54,7 +55,16 @@ const s = (v: unknown): string =>
 const TONE: Record<string, Tone> = { ok: 'ok', warn: 'warn', bad: 'bad', muted: 'muted' }
 
 export type DetailTab =
-  'overview' | 'topology' | 'related' | 'pods' | 'metrics' | 'traffic' | 'data' | 'events' | 'yaml'
+  | 'overview'
+  | 'topology'
+  | 'related'
+  | 'pods'
+  | 'metrics'
+  | 'traffic'
+  | 'timeline'
+  | 'data'
+  | 'events'
+  | 'yaml'
 
 const WIDE_KEY = 'shellhouse.k8s.detail.wide'
 const loadWide = (): boolean => {
@@ -238,6 +248,9 @@ export function Detail({
             : []),
           ...(hasMetrics ? [{ id: 'metrics' as const, label: t('Metrics') }] : []),
           ...(TRAFFIC_KINDS.has(kindId) ? [{ id: 'traffic' as const, label: t('Traffic') }] : []),
+          ...(TIMELINE_KINDS.has(kindId)
+            ? [{ id: 'timeline' as const, label: t('Timeline') }]
+            : []),
           ...(hasData
             ? [
                 {
@@ -286,6 +299,7 @@ export function Detail({
             {...(onNavigate ? { onNavigate } : {})}
           />
         )}
+        {tab === 'timeline' && <TimelineOf kindId={kindId} obj={obj} request={request} />}
         {tab === 'related' && (
           <RelatedOf
             kindId={kindId}

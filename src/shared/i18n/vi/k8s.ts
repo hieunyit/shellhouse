@@ -1242,5 +1242,31 @@ export const k8s: Readonly<Record<string, string>> = {
   'k8s|Apply': 'Apply',
   'k8s|Applying…': 'Đang apply…',
   'More resources': 'Tài nguyên khác',
-  'Updates live (Kubernetes watch)': 'Cập nhật trực tiếp (Kubernetes watch)'
+  'Updates live (Kubernetes watch)': 'Cập nhật trực tiếp (Kubernetes watch)',
+  Timeline: 'Dòng thời gian',
+  Rollouts: 'Rollout',
+  'Rollout · revision {revision}': 'Rollout · revision {revision}',
+  'Pod {name} created': 'Tạo pod {name}',
+  'Container {container} crashed — {reason}, exit code {code}':
+    'Container {container} chết — {reason}, mã thoát {code}',
+  'Container {container} stopped — {reason}': 'Container {container} dừng — {reason}',
+  '{kind} {name} changed': '{kind} {name} đã sửa',
+  'Node {name} became Ready': 'Node {name} chuyển sang Ready',
+  'Node {name} became NotReady': 'Node {name} chuyển sang NotReady',
+  Event: 'Event',
+  'Same images — pod template settings changed': 'Image giữ nguyên — đổi cấu hình pod template',
+  'From the history kept on this computer': 'Từ lịch sử lưu trên máy này',
+  'Could not build the timeline: {error}': 'Không dựng được dòng thời gian: {error}',
+  '30 min before {time}': '30 phút trước {time}',
+  '24 hours': '24 giờ',
+  'Last crash': 'Lần chết gần nhất',
+  'What changed before?': 'Trước đó có gì thay đổi?',
+  'Nothing happened in this period.': 'Không có gì xảy ra trong khoảng này.',
+  'Nothing in the lanes you picked.': 'Không có mục nào trong các làn đã chọn.',
+  'Events are kept on this computer for 7 days while this cluster is monitored on Home.':
+    'Event được lưu trên máy này 7 ngày khi cluster đang được theo dõi ở Home.',
+  'The cluster keeps events for about an hour. Monitor this cluster on Home to keep 7 days of history.':
+    'Cluster chỉ giữ event khoảng một giờ. Theo dõi cluster này ở Home để giữ lịch sử 7 ngày.',
+  '{n} older event from history.': '{n} event cũ hơn từ lịch sử.',
+  '{n} older events from history.': '{n} event cũ hơn từ lịch sử.'
 }
