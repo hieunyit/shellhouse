@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.19] - 2026-10-06
+
 ### Added
 
 - Home › **Needs attention**: problems from the Kubernetes clusters you have open — crash-looping /
