@@ -881,6 +881,25 @@ export async function pool<T, R>(
 }
 
 /**
+ * Vấn đề cần xem cả cluster (Home › Needs attention): như trang tổng quan nhưng chỉ đọc pod, node,
+ * PVC (không metrics, không event) — nhẹ để hỏi định kỳ khi tab đang mở. Thiếu quyền một loại → bỏ
+ * qua loại đó.
+ */
+export async function problems(
+  client: KubeClient,
+  signal?: AbortSignal
+): Promise<NonNullable<OverviewResult['problems']>> {
+  const opts = { signal, max: 5000 }
+  const none = { items: [] as K8sObject[], truncated: false }
+  const [nodes, pods, pvcs] = await Promise.all([
+    listPaged(client, '/api/v1/nodes', opts).catch(() => none),
+    listPaged(client, '/api/v1/pods', opts).catch(() => none),
+    listPaged(client, '/api/v1/persistentvolumeclaims', opts).catch(() => none)
+  ])
+  return findProblems(nodes.items, pods.items, pvcs.items)
+}
+
+/**
  * Pod / deployment lỗi theo namespace, cả cluster (Explorer hiện "2 failing" cạnh namespace, Pods,
  * Deployments). Pod lỗi = nhóm failing + imagePull của trang tổng quan; deployment chưa đủ =
  * còn replica chưa sẵn sàng. Không đọc được (thiếu quyền) → rỗng.

@@ -97,6 +97,11 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
 
   it('tổng quan: node sẵn sàng, pod theo trạng thái, requests / allocatable / mức dùng, cảnh báo', async () => {
     const { run } = await setup()
+    // Vấn đề cả cluster cho Home › Needs attention (không metrics / event).
+    const pr = await run<NonNullable<OverviewResult['problems']>>({ op: 'problems' })
+    expect(pr.failing.items.map((i) => `${i.namespace ?? ''}/${i.name}:${i.reason}`)).toContain(
+      'shop/web-2:CrashLoopBackOff'
+    )
     // Pod / deployment lỗi theo namespace cho Explorer ("N failing").
     const h = await run<HealthResult>({ op: 'health' })
     expect(h.pods['shop']).toBe(1)

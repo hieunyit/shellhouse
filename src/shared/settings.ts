@@ -80,6 +80,8 @@ const AppearanceSettings = z.object({
   /** Mục "Favorites" / "Recent" ở đầu thanh bên (host đã có trong cây nhóm — lặp lại cho nhanh). */
   showFavorites: z.boolean().catch(true),
   showRecent: z.boolean().catch(true),
+  /** Mục "Needs attention" trên Home (pod lỗi, container unhealthy… từ tab đang mở). */
+  homeAttention: z.boolean().catch(true),
   /** Mở app: trang Home hay một terminal local; chưa chọn = Home. */
   startup: z.enum(['home', 'terminal']).optional().catch(undefined),
   /** Mật độ hiển thị: hàng 32 px (comfortable, mặc định) hay 28 px (compact). */

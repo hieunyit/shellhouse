@@ -31,6 +31,8 @@ import type { FormKind } from '../shared/forms'
 import {
   ConnectionPrompt,
   ExplorerNav,
+  activateTab,
+  useHomeAttentionEnabled,
   setModuleTabParams,
   environmentFromColor,
   showCommands,
@@ -82,6 +84,7 @@ import { useResourceRows } from './useResourceRows'
 import { BULK_KEYS, BulkBar, bulkKinds, copyYaml, type BulkKind } from './Bulk'
 import { EventsView } from './Events'
 import { RefreshContext, useRefreshClock } from './refresh'
+import { useClusterAttention } from './attention'
 
 /** Đang xem loại nào → mở form của loại đó khi bấm Create. */
 const FORM_FOR_KIND: Record<string, FormKind> = {
@@ -445,6 +448,19 @@ export function ClusterTab({
     setDetailTab('overview')
     setDetailKey(key)
   }
+  // Home › Needs attention: pod lỗi / node / PVC của cluster này (khi tab còn mở).
+  const homeAttention = useHomeAttentionEnabled()
+  useClusterAttention({
+    tabId,
+    ready,
+    request,
+    cluster: params.label,
+    enabled: homeAttention,
+    open: (kind, ns, name) => {
+      activateTab(tabId)
+      openRef(kind, ns, name)
+    }
+  })
 
   /**
    * Bấm đúp / Enter: namespace → chuyển namespace; node → pod trên node; workload, service,

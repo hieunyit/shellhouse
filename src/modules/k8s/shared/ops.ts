@@ -170,6 +170,8 @@ export const K8sOp = z.discriminatedUnion('op', [
   }),
   /** Số pod / deployment lỗi theo namespace (Explorer: "2 failing"), cả cluster. */
   z.object({ op: z.literal('health') }),
+  /** Vấn đề cần xem cả cluster (Home › Needs attention): pod lỗi, node, PVC — không metrics. */
+  z.object({ op: z.literal('problems') }),
   /** Tài nguyên liên quan (kiểu Rancher): service, ConfigMap, Secret, PVC, HPA… / "Used by". */
   z.object({ op: z.literal('related'), kind: Kind, namespace: Namespace, name: Name }),
   /**

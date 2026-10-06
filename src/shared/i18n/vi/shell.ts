@@ -42,8 +42,6 @@ export const shell: Readonly<Record<string, string>> = {
   Active: 'Đang chạy',
   Completed: 'Đã xong',
   Clusters: 'Cluster',
-  'The connection dropped. Reconnect to pick up where you left off.':
-    'Kết nối đã rớt. Kết nối lại để tiếp tục từ chỗ cũ.',
   'user@host:port — e.g. deploy@10.10.1.11:22': 'user@host:port — ví dụ deploy@10.10.1.11:22',
   '{n} saved host in {groups}': '{n} host đã lưu trong {groups}',
   '{n} saved hosts in {groups}': '{n} host đã lưu trong {groups}',
@@ -97,5 +95,10 @@ export const shell: Readonly<Record<string, string>> = {
   'Clear all': 'Xoá hết',
   'No notifications yet.': 'Chưa có thông báo nào.',
   'Pause all': 'Tạm dừng tất cả',
-  'Resume all': 'Tiếp tục tất cả'
+  'Resume all': 'Tiếp tục tất cả',
+  '{n} item needs attention': '{n} mục cần chú ý',
+  '{n} items need attention': '{n} mục cần chú ý',
+  'Show “Needs attention”': 'Hiện “Cần chú ý”',
+  'Failing pods, unhealthy containers and dropped sessions from the tabs you have open. Off: nothing is checked in the background.':
+    'Pod lỗi, container không khoẻ và phiên bị rớt từ các tab đang mở. Tắt: không kiểm tra gì ở nền.'
 }

@@ -6,6 +6,20 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- Home › **Needs attention**: problems from the Kubernetes clusters you have open — crash-looping /
+  failing pods, image pull errors, NotReady nodes, long-pending pods, unbound volumes (checked
+  every minute only while the cluster tab is open, nothing runs in the background), sorted by
+  severity; click an item to open it. Dropped sessions are no longer listed there. Can be turned
+  off in Settings › Appearance › Home.
+
+### Fixed
+
+- Kubernetes: an open workload / resource tab now refreshes by itself — the pods of a workload
+  and related resources reload every 10 seconds, and the whole list reloads when you come back to
+  a tab that was hidden for a while (no more pressing Refresh).
+
 ## [1.2.0-beta.18] - 2026-10-06
 
 ### Added

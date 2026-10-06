@@ -65,6 +65,7 @@ export function whenHostRunning(timeoutMs = 15_000): Promise<void> {
 /** Thông báo nổi (toast) của app — module dùng để báo kết quả thao tác. */
 export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
 export { usePublishTransfers } from '../../renderer/src/stores/transfers'
+export { usePublishAttention, type AttentionItem } from '../../renderer/src/stores/attention'
 export {
   hostEnvironmentId,
   setSourceEnvironment,
@@ -349,6 +350,11 @@ export function openModuleTab(module: string, tab: string, params: unknown): str
 }
 
 /** Tab module đổi tham số (vị trí đang xem…) → cập nhật đích (nhân bản / workspace) và tiêu đề. */
+/** Cài đặt "Needs attention" trên Home đang bật (module chỉ báo vấn đề khi bật). */
+export function useHomeAttentionEnabled(): boolean {
+  return useSettings((s) => s.settings.appearance.homeAttention)
+}
+
 /** Chuyển tới tab (vd. từ trung tâm Transfers về đúng tab đang truyền). */
 export function activateTab(tabId: string): void {
   useTabs.getState().activate(tabId)

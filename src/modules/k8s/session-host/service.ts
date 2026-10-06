@@ -42,6 +42,7 @@ import {
   argoSync,
   counts,
   health,
+  problems,
   helmRelease,
   helmReleases,
   logTargets,
@@ -438,6 +439,8 @@ export class K8sService implements HostModuleSession {
         return debugNode(client, op.node, op.image, op.namespace, signal)
       case 'health':
         return health(client, signal)
+      case 'problems':
+        return problems(client, signal)
       case 'counts':
         return counts(
           client,

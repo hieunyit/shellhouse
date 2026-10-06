@@ -1,5 +1,15 @@
 import { useMemo, useRef, useState } from 'react'
-import { ArrowRight, FileInput, FolderOpen, House, Plus, RotateCw, Zap } from 'lucide-react'
+import {
+  ArrowRight,
+  CircleAlert,
+  FileInput,
+  FolderOpen,
+  House,
+  Info,
+  Plus,
+  TriangleAlert,
+  Zap
+} from 'lucide-react'
 import { t, tn } from '@shared/i18n'
 import { formatLongDay, formatRelative } from '@shared/i18n/format'
 import type { HostSummary } from '@shared/hosts'
@@ -11,8 +21,9 @@ import { hostAddress, useHosts } from '../stores/hosts'
 import { browseModules } from '../stores/module-ui'
 import { useTabStatus } from '../stores/tab-status'
 import { useTabs } from '../stores/tabs'
+import { useSettings } from '../stores/settings'
+import { attentionItems, useAttention, type AttentionSeverity } from '../stores/attention'
 import { openSidebarDialog } from '../stores/ui-requests'
-import { controllers } from '../terminal/registry'
 import { AreaHeader } from './AreaHeader'
 import { HostAvatar } from './HostAvatar'
 
@@ -177,41 +188,62 @@ function RecentRow({ host }: { host: HostSummary }): React.JSX.Element {
   )
 }
 
-/** Phiên bị rớt kết nối (cần chú ý): chip lý do + kết nối lại. */
+/** Số mục "Needs attention" (vấn đề cluster Kubernetes đang mở); 0 khi tắt trong cài đặt. */
+function useAttentionCount(): number {
+  const enabled = useSettings((s) => s.settings.appearance.homeAttention)
+  const sources = useAttention((s) => s.sources)
+  if (!enabled) return 0
+  return Object.values(sources).reduce((n, list) => n + list.length, 0)
+}
+
+const SEV_ICON: Record<AttentionSeverity, React.ReactNode> = {
+  danger: <CircleAlert {...ICON_SM} className="text-ds-danger" />,
+  warning: <TriangleAlert {...ICON_SM} className="text-ds-warning" />,
+  info: <Info {...ICON_SM} className="text-ds-info" />
+}
+const SEV_TONE: Record<AttentionSeverity, 'danger' | 'warning' | 'progress'> = {
+  danger: 'danger',
+  warning: 'warning',
+  info: 'progress'
+}
+
+/**
+ * Cần chú ý: vấn đề của các cluster Kubernetes đang mở (pod CrashLoop, lỗi kéo image, node
+ * NotReady…) — icon mức độ, chip lý do, mô tả, nguồn; bấm để mở đúng chỗ. Chỉ đọc khi tab cluster
+ * còn mở (không chạy nền); tắt được trong Settings › Appearance.
+ */
 function AttentionList(): React.JSX.Element | null {
-  const status = useTabStatus((s) => s.byTab)
-  const tabs = useTabs((s) => s.tabs)
-  const dropped = tabs.filter((tab) => status[tab.id] === 'disconnected')
-  if (dropped.length === 0) return null
+  const enabled = useSettings((s) => s.settings.appearance.homeAttention)
+  const sources = useAttention((s) => s.sources)
+  if (!enabled) return null
+  const items = attentionItems(sources)
+  if (items.length === 0) return null
   return (
-    <Section title={t('Needs attention')} count={dropped.length} testId="home-attention">
+    <Section title={t('Needs attention')} count={items.length} testId="home-attention">
       <div className="flex flex-col">
-        {dropped.map((tab) => (
-          <div
-            key={tab.id}
-            className="flex items-start gap-3 border-b border-ds-border-subtle py-2.5 last:border-b-0"
+        {items.map((it) => (
+          <button
+            key={`${it.source}:${it.id}`}
+            type="button"
+            data-testid="home-attention-item"
+            data-severity={it.severity}
+            className="group flex w-full items-start gap-3 border-b border-ds-border-subtle py-2.5 text-left outline-none last:border-b-0 focus-visible:shadow-ds-focus"
+            onClick={() => it.open?.()}
           >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="truncate text-[13px] font-medium text-fg">{tab.title}</span>
-                <StatusChip tone="danger">{t('Disconnected')}</StatusChip>
-              </div>
-              <div className="mt-0.5 text-xs text-muted">
-                {t('The connection dropped. Reconnect to pick up where you left off.')}
-              </div>
-            </div>
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<RotateCw {...ICON_SM} />}
-              onClick={() => {
-                useTabs.getState().activate(tab.id)
-                controllers.get(tab.id)?.reconnect()
-              }}
-            >
-              {t('Reconnect')}
-            </Button>
-          </div>
+            <span className="mt-0.5 shrink-0">{SEV_ICON[it.severity]}</span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2">
+                <span className="truncate text-[13px] font-medium text-fg group-hover:underline">
+                  {it.title}
+                </span>
+                {it.badge && <StatusChip tone={SEV_TONE[it.severity]}>{it.badge}</StatusChip>}
+              </span>
+              {it.description && (
+                <span className="mt-0.5 block truncate text-xs text-muted">{it.description}</span>
+              )}
+              <span className="mt-0.5 block truncate text-xs text-faint">{it.source}</span>
+            </span>
+          </button>
         ))}
       </div>
     </Section>
@@ -256,6 +288,7 @@ export function HomeView(): React.JSX.Element {
   const sessions = useTabStatus(
     (s) => Object.values(s.byTab).filter((x) => x === 'connected').length
   )
+  const attentionCount = useAttentionCount()
   const [value, setValue] = useState('')
   const quickRef = useRef<HTMLInputElement>(null)
   const [invalid, setInvalid] = useState(false)
@@ -306,7 +339,9 @@ export function HomeView(): React.JSX.Element {
                   ? [
                       today,
                       summary(hosts.length, groups),
-                      tn(sessions, '{n} session open', '{n} sessions open')
+                      tn(sessions, '{n} session open', '{n} sessions open'),
+                      attentionCount > 0 &&
+                        tn(attentionCount, '{n} item needs attention', '{n} items need attention')
                     ]
                       .filter(Boolean)
                       .join(' · ')
@@ -385,9 +420,11 @@ export function HomeView(): React.JSX.Element {
             </Section>
           )}
 
-          {(recent.length > 0 || saved.length > 0) && (
+          {(recent.length > 0 || saved.length > 0 || attentionCount > 0) && (
             <div className="grid grid-cols-1 gap-8 @4xl/home:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-              {recent.length > 0 ? (
+              {recent.length === 0 && saved.length === 0 ? (
+                <div />
+              ) : recent.length > 0 ? (
                 <Section title={t('Recent')} count={recent.length} testId="home-recent">
                   <div className="flex flex-col">
                     {recent.map((h) => (

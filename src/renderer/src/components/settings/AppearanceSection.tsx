@@ -92,6 +92,22 @@ export function AppearanceSection(): React.JSX.Element {
           }
         />
       </SettingGroup>
+      <SettingGroup title={t('Home')}>
+        <SettingRow
+          title={t('Show “Needs attention”')}
+          description={t(
+            'Failing pods, unhealthy containers and dropped sessions from the tabs you have open. Off: nothing is checked in the background.'
+          )}
+          control={
+            <Switch
+              label={t('Show “Needs attention”')}
+              checked={settings.appearance.homeAttention}
+              data-testid="setting-home-attention"
+              onChange={(e) => void update({ appearance: { homeAttention: e.target.checked } })}
+            />
+          }
+        />
+      </SettingGroup>
       <SettingGroup title={t('Startup')}>
         <SettingRow
           title={t('When Shellhouse starts')}

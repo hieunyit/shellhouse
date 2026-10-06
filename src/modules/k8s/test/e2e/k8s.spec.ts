@@ -928,6 +928,44 @@ test('Kubernetes: Metrics lấy lịch sử từ Prometheus trong cluster (chọ
   }
 })
 
+test('Home › Needs attention: pod lỗi của cluster đang mở; bấm mở đúng pod; tắt trong Settings', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await expect(view.getByTestId('k8s-row').first()).toBeVisible()
+    await page.getByTestId('open-home').click()
+    const attention = page.getByTestId('home-attention')
+    const item = attention
+      .getByTestId('home-attention-item')
+      .filter({ hasText: 'web-2' })
+      .filter({ hasText: 'CrashLoopBackOff' })
+    await expect(item).toBeVisible({ timeout: 15_000 })
+    await expect(item).toHaveAttribute('data-severity', 'danger')
+    await expect(item).toContainText('test / shop')
+    // Bấm → về tab cluster, mở chi tiết pod.
+    await item.click()
+    await expect(view.getByTestId('k8s-describe')).toContainText('web-2')
+    // Tắt trong Settings → mục biến mất.
+    await page.getByTestId('open-settings').click()
+    await page.getByTestId('settings-nav-appearance').click()
+    await page.getByTestId('setting-home-attention').click()
+    await page.getByTestId('open-home').click()
+    await expect(page.getByTestId('home-attention')).toHaveCount(0)
+  } finally {
+    await launched.close()
+    await server.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('Kubernetes: traffic từ Hubble (Cilium, không cần Caretta) — kết nối / giây, tên miền đích ngoài', async () => {
   test.setTimeout(60_000)
   const server = await startApiTestServer()
