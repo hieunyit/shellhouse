@@ -421,6 +421,17 @@ for (const theme of ['light', 'dark'] as const) {
           .getByTestId('docker-row-logs')
           .click()
         await page.getByTestId('docker-logs').waitFor()
+        // Vài dòng error / warn để thấy màu theo mức và chip lọc; tô chỗ khớp khi tìm.
+        const id = engine.containers.find((c) => c.Names[0] === '/web')?.Id ?? ''
+        engine.log(id, 1, '2026-10-06T10:00:00Z INFO GET /api/products 200 38ms\n')
+        engine.log(id, 1, '2026-10-06T10:00:01Z WARN slow query catalog.search 1.9s\n')
+        engine.log(id, 1, '2026-10-06T10:00:02Z ERROR db: connection refused (10.0.0.5:5432)\n')
+        engine.log(id, 1, '2026-10-06T10:00:03Z INFO GET /api/cart 200 12ms\n')
+        await page.getByTestId('docker-log-line').filter({ hasText: '/api/cart' }).waitFor()
+      })
+      await shot('docker-07b-logs-search', async () => {
+        await page.getByTestId('docker-logs-regex').click()
+        await page.getByTestId('docker-logs-search').fill('/api/\\w+|refused')
       })
     } finally {
       await launched.close()

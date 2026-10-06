@@ -888,5 +888,13 @@ export const core: Readonly<Record<string, string>> = {
     'Đọc các file kubeconfig bạn chọn để import (và các certificate mà chúng trỏ tới)',
   'Stores kubeconfigs you import encrypted in the vault':
     'Lưu kubeconfig đã import, mã hoá trong vault',
-  'The API servers in your kubeconfig': 'Các API server trong kubeconfig của bạn'
+  'The API servers in your kubeconfig': 'Các API server trong kubeconfig của bạn',
+  'Regex, e.g. status=5\\d\\d': 'Regex, ví dụ status=5\\d\\d',
+  'Invalid regular expression: {error}': 'Biểu thức chính quy không hợp lệ: {error}',
+  'No error lines.': 'Không có dòng lỗi nào.',
+  'No warning lines.': 'Không có dòng cảnh báo nào.',
+  'Show all lines': 'Hiện mọi dòng',
+  'Show only these lines': 'Chỉ hiện các dòng này',
+  '{n} error': '{n} lỗi',
+  '{n} errors': '{n} lỗi'
 }

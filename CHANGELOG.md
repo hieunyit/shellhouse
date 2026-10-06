@@ -6,6 +6,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- Log viewer (Kubernetes, Docker): regular-expression search (the `.*` button next to the search
+  box; an invalid pattern is reported instead of filtering), matches highlighted in each line,
+  error and warning lines colored (ERROR / WARN, `level=error`, JSON `"level":"warn"`, klog
+  `E1006`, `[error]`, stack traces…) with "N errors" / "N warnings" chips to show only those lines.
+
 ## [1.2.0-beta.17] - 2026-10-05
 
 ### Added

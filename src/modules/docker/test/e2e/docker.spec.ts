@@ -68,6 +68,35 @@ test('Docker trên máy này (Engine giả qua DOCKER_HOST): danh sách, stats, 
     await expect(logs).toContainText('dòng log mới')
     await page.getByTestId('docker-logs-search').fill('warning')
     await expect(page.getByTestId('docker-log-line')).toHaveCount(1)
+    // Chỗ khớp được tô sáng trong dòng.
+    await expect(page.getByTestId('docker-log-line').getByTestId('log-match')).toHaveText('warning')
+
+    // Mức log: dòng ERROR / WARN tô màu; chip "N errors" / "N warnings" lọc nhanh.
+    await page.getByTestId('docker-logs-search').fill('')
+    const id = engine.containers[0]?.Id ?? ''
+    engine.log(id, 1, '2026-10-06T10:00:00Z ERROR db: connection refused\n')
+    engine.log(id, 1, 'level=warn msg="slow query" ms=1200\n')
+    engine.log(id, 1, 'GET /health 200 status=503 no error\n')
+    const lines = page.getByTestId('docker-log-line')
+    await expect(lines.filter({ hasText: 'connection refused' })).toHaveAttribute(
+      'data-level',
+      'error'
+    )
+    await expect(lines.filter({ hasText: 'slow query' })).toHaveAttribute('data-level', 'warn')
+    await expect(lines.filter({ hasText: 'no error' })).not.toHaveAttribute('data-level', /.+/)
+    await page.getByTestId('docker-logs-level-error').click()
+    await expect(lines).toHaveCount(1)
+    await expect(lines).toContainText('connection refused')
+    await page.getByTestId('docker-logs-level-error').click()
+
+    // Regex: status=5xx; regex sai → báo lỗi, không lọc.
+    await page.getByTestId('docker-logs-regex').click()
+    await page.getByTestId('docker-logs-search').fill('status=5\\d\\d')
+    await expect(lines).toHaveCount(1)
+    await expect(lines.getByTestId('log-match')).toHaveText('status=503')
+    await page.getByTestId('docker-logs-search').fill('([')
+    await expect(page.getByTestId('docker-logs-regex-error')).toBeVisible()
+    await page.getByTestId('docker-logs-search').fill('')
 
     // Dọn image dangling: xem trước danh sách rồi mới xoá.
     await page.getByTestId('tab').filter({ hasText: 'Docker · This computer' }).click()

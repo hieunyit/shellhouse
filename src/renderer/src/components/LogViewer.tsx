@@ -1,7 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { ArrowDownToLine, Copy, Download, Search } from 'lucide-react'
+import {
+  ArrowDownToLine,
+  CircleAlert,
+  Copy,
+  Download,
+  Regex,
+  Search,
+  TriangleAlert
+} from 'lucide-react'
 import type { Line, LogFeed } from '@shared/log-buffer'
-import { t } from '@shared/i18n'
+import { t, tn } from '@shared/i18n'
+import { logLevel, logMatcher, splitMatches, type LogLevel } from '@shared/log-level'
 import { ToolButton } from './files/parts'
 import { cx } from './ui'
 
@@ -31,6 +40,17 @@ export function sourceColor(name: string): string {
   return SOURCE_COLORS[Math.abs(h) % SOURCE_COLORS.length] ?? '#2f7de1'
 }
 const sourceOf = (text: string): string | null => SOURCE.exec(text)?.[1] ?? null
+
+/** Mức log theo dòng (đối tượng dòng giữ nguyên giữa các lần vẽ → chỉ xét mỗi dòng một lần). */
+const levels = new WeakMap<Line, LogLevel | null>()
+function levelOf(line: Line): LogLevel | null {
+  let v = levels.get(line)
+  if (v === undefined) {
+    v = logLevel(line.text)
+    levels.set(line, v)
+  }
+  return v
+}
 
 /**
  * Trình xem log dùng chung (log container Docker, log pod Kubernetes…): tìm, theo dõi (cuộn lên =
@@ -64,6 +84,10 @@ export function LogViewer({
   const [snapshot, setSnapshot] = useState<Line[]>(() => [...feed.lines()])
   const [follow, setFollow] = useState(true)
   const [query, setQuery] = useState('')
+  /** Ô tìm là regex (không phân biệt hoa thường). */
+  const [regex, setRegex] = useState(false)
+  /** Chỉ xem dòng error / warn (bấm chip). */
+  const [level, setLevel] = useState<LogLevel | null>(null)
   const frame = useRef<number | null>(null)
 
   // Vẽ lại tối đa mỗi khung hình.
@@ -93,7 +117,18 @@ export function LogViewer({
     return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])).slice(0, 40)
   }, [snapshot, sources])
 
-  const q = query.trim().toLowerCase()
+  const q = query.trim()
+  const matcher = useMemo(() => logMatcher(query, regex), [query, regex])
+  const levelCounts = useMemo(() => {
+    let error = 0
+    let warn = 0
+    for (const l of snapshot) {
+      const v = levelOf(l)
+      if (v === 'error') error++
+      else if (v === 'warn') warn++
+    }
+    return { error, warn }
+  }, [snapshot])
   const lines = useMemo(() => {
     let out = snapshot
     if (sources && hidden.size)
@@ -101,8 +136,9 @@ export function LogViewer({
         const src = sourceOf(l.text)
         return !src || !hidden.has(src)
       })
-    return q ? out.filter((l) => l.text.toLowerCase().includes(q)) : out
-  }, [snapshot, q, sources, hidden])
+    if (level) out = out.filter((l) => levelOf(l) === level)
+    return matcher.highlight ? out.filter((l) => matcher.test(l.text)) : out
+  }, [snapshot, matcher, sources, hidden, level])
 
   const scroller = useRef<HTMLDivElement>(null)
   const [scroll, setScroll] = useState({ top: 0, height: 600 })
@@ -127,19 +163,67 @@ export function LogViewer({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="@container flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
-        <div className="flex h-7 w-48 items-center gap-1.5 rounded-md border border-line bg-subtle px-2">
-          <Search size={13} className="text-faint" />
+        <div
+          className={cx(
+            'flex h-7 w-56 items-center gap-1.5 rounded-md border bg-subtle pr-0.5 pl-2',
+            matcher.error ? 'border-ds-danger' : 'border-line'
+          )}
+          title={matcher.error ?? undefined}
+        >
+          <Search size={13} className="shrink-0 text-faint" />
           <input
             type="search"
-            placeholder={t('Find in logs…')}
+            placeholder={regex ? t('Regex, e.g. status=5\\d\\d') : t('Find in logs…')}
+            aria-invalid={matcher.error !== null}
             data-testid={`${testIdPrefix}-logs-search`}
-            className="min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint"
+            className={cx(
+              'min-w-0 flex-1 bg-transparent text-xs text-fg outline-none placeholder:text-faint',
+              regex && 'font-mono'
+            )}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value)
             }}
           />
+          <button
+            type="button"
+            aria-pressed={regex}
+            aria-label={t('Regular expression')}
+            title={t('Regular expression')}
+            data-testid={`${testIdPrefix}-logs-regex`}
+            className={cx(
+              'flex size-6 shrink-0 items-center justify-center rounded',
+              regex ? 'bg-ds-active text-fg' : 'text-faint hover:bg-hover hover:text-fg'
+            )}
+            onClick={() => {
+              setRegex(!regex)
+            }}
+          >
+            <Regex size={13} />
+          </button>
         </div>
+        {(levelCounts.error > 0 || level === 'error') && (
+          <LevelChip
+            tone="error"
+            on={level === 'error'}
+            count={levelCounts.error}
+            testId={`${testIdPrefix}-logs-level-error`}
+            onClick={() => {
+              setLevel(level === 'error' ? null : 'error')
+            }}
+          />
+        )}
+        {(levelCounts.warn > 0 || level === 'warn') && (
+          <LevelChip
+            tone="warn"
+            on={level === 'warn'}
+            count={levelCounts.warn}
+            testId={`${testIdPrefix}-logs-level-warn`}
+            onClick={() => {
+              setLevel(level === 'warn' ? null : 'warn')
+            }}
+          />
+        )}
         {controls}
         <ToolButton
           icon={<ArrowDownToLine size={13} />}
@@ -165,6 +249,15 @@ export function LogViewer({
           onClick={download}
         />
       </div>
+      {matcher.error && (
+        <div
+          role="alert"
+          className="shrink-0 border-b border-line px-3 py-1 text-xs text-ds-danger"
+          data-testid={`${testIdPrefix}-logs-regex-error`}
+        >
+          {t('Invalid regular expression: {error}', { error: matcher.error })}
+        </div>
+      )}
       {notice}
       {sources && sourceCounts.length > 1 && (
         <div
@@ -241,22 +334,43 @@ export function LogViewer({
             data-testid={`${testIdPrefix}-logs-empty`}
           >
             {q
-              ? t('No lines match “{query}”.', { query: query.trim() })
-              : t('All sources are hidden.')}
+              ? t('No lines match “{query}”.', { query: q })
+              : level === 'error'
+                ? t('No error lines.')
+                : level === 'warn'
+                  ? t('No warning lines.')
+                  : t('All sources are hidden.')}
           </div>
         )}
         <div style={{ height: lines.length * LINE_HEIGHT }} className="relative">
           <div style={{ transform: `translateY(${first * LINE_HEIGHT}px)` }}>
-            {lines.slice(first, last).map((l, i) => (
-              <div
-                key={first + i}
-                style={{ height: LINE_HEIGHT, lineHeight: `${LINE_HEIGHT}px` }}
-                className={cx('px-3 whitespace-pre', l.err ? 'text-danger' : 'text-fg')}
-                data-testid={`${testIdPrefix}-log-line`}
-              >
-                {sources ? <SourceLine text={l.text} /> : l.text || ' '}
-              </div>
-            ))}
+            {lines.slice(first, last).map((l, i) => {
+              const lv = levelOf(l)
+              return (
+                <div
+                  key={first + i}
+                  style={{ height: LINE_HEIGHT, lineHeight: `${LINE_HEIGHT}px` }}
+                  className={cx(
+                    'px-3 whitespace-pre',
+                    lv === 'error'
+                      ? 'bg-ds-danger-soft/40 text-ds-danger'
+                      : lv === 'warn'
+                        ? 'bg-ds-warning-soft/40 text-ds-warning'
+                        : l.err
+                          ? 'text-danger'
+                          : 'text-fg'
+                  )}
+                  data-testid={`${testIdPrefix}-log-line`}
+                  {...(lv ? { 'data-level': lv } : {})}
+                >
+                  {sources ? (
+                    <SourceLine text={l.text} highlight={matcher.highlight} />
+                  ) : (
+                    <Highlighted text={l.text} re={matcher.highlight} />
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       </div>
@@ -264,17 +378,83 @@ export function LogViewer({
   )
 }
 
-/** Dòng log gộp: tiền tố "[nguồn]" tô màu theo nguồn, phần còn lại như thường. */
-function SourceLine({ text }: { text: string }): React.JSX.Element {
+/** Dòng log gộp: tiền tố "[nguồn]" tô màu theo nguồn, phần còn lại như thường (tô chỗ khớp). */
+function SourceLine({
+  text,
+  highlight
+}: {
+  text: string
+  highlight: RegExp | null
+}): React.JSX.Element {
   const m = SOURCE.exec(text)
-  if (!m) return <>{text || ' '}</>
+  if (!m) return <Highlighted text={text} re={highlight} />
   const name = m[1] ?? ''
   return (
     <>
       <span style={{ color: sourceColor(name) }} className="font-medium">
         [{name}]
       </span>{' '}
-      {text.slice(m[0].length)}
+      <Highlighted text={text.slice(m[0].length)} re={highlight} />
     </>
+  )
+}
+
+/** Chữ của dòng, chỗ khớp với ô tìm được tô nền. */
+function Highlighted({ text, re }: { text: string; re: RegExp | null }): React.JSX.Element {
+  if (!text) return <> </>
+  if (!re) return <>{text}</>
+  return (
+    <>
+      {splitMatches(text, re).map((part, i) =>
+        part.match ? (
+          <mark key={i} className="rounded-[2px] bg-ds-warning/35 text-fg" data-testid="log-match">
+            {part.text}
+          </mark>
+        ) : (
+          part.text
+        )
+      )}
+    </>
+  )
+}
+
+/** Chip lọc nhanh theo mức: "3 errors" / "12 warnings"; bấm để chỉ xem các dòng đó. */
+function LevelChip({
+  tone,
+  on,
+  count,
+  testId,
+  onClick
+}: {
+  tone: LogLevel
+  on: boolean
+  count: number
+  testId: string
+  onClick: () => void
+}): React.JSX.Element {
+  const label =
+    tone === 'error'
+      ? tn(count, '{n} error', '{n} errors')
+      : tn(count, '{n} warning', '{n} warnings')
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      title={on ? t('Show all lines') : t('Show only these lines')}
+      data-testid={testId}
+      className={cx(
+        'flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] tabular-nums',
+        tone === 'error' ? 'text-ds-danger' : 'text-ds-warning',
+        on
+          ? tone === 'error'
+            ? 'border-ds-danger bg-ds-danger-soft'
+            : 'border-ds-warning bg-ds-warning-soft'
+          : 'border-line hover:bg-hover'
+      )}
+      onClick={onClick}
+    >
+      {tone === 'error' ? <CircleAlert size={12} /> : <TriangleAlert size={12} />}
+      {label}
+    </button>
   )
 }
