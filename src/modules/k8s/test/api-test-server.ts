@@ -1940,7 +1940,11 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       for (const sock of hubbleSockets) sock.destroy()
       if (hubble) {
         const h2 = hubble.server
-        await new Promise<void>((resolve) => h2.close(() => { resolve(); }))
+        await new Promise<void>((resolve) =>
+          h2.close(() => {
+            resolve()
+          })
+        )
       }
       for (const w of watchers) w.res.destroy()
       for (const c of wss.clients) c.terminate()
