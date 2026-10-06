@@ -390,6 +390,7 @@ export async function startTestSshServer(
             channel.exit(127)
             channel.end()
           })
+          child.stdin.on('error', () => undefined)
           channel.pipe(child.stdin)
           child.stdout.pipe(channel)
           child.stderr.pipe(channel.stderr)
@@ -417,6 +418,9 @@ export async function startTestSshServer(
               stdio: ['pipe', 'pipe', 'ignore']
             }
           )
+          // Kênh đóng → sftp-server bị kill khi còn dữ liệu đang ghi vào stdin: EPIPE là bình thường
+          // (như sshd), không để thành lỗi không ai bắt làm hỏng cả lượt test.
+          child.stdin.on('error', () => undefined)
           channel.pipe(child.stdin)
           child.stdout.pipe(channel)
           child.on('exit', (code) => {
