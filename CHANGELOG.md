@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.18] - 2026-10-06
+
 ### Added
 
 - Log viewer (Kubernetes, Docker): regular-expression search (the `.*` button next to the search
