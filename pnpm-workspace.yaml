@@ -29,3 +29,8 @@ auditConfig:
   ignoreGhsas:
     - GHSA-wm7h-9275-46v2
     - GHSA-ch52-4w7c-c8xp
+
+# Ép bản đã vá cho dependency gián tiếp (chỉ qua công cụ test — jsdom → css-tree):
+# - GHSA-68fv-2mgg-jv7q (source-map-js <1.2.2): DoS vòng lặp sự kiện qua offset của source map.
+overrides:
+  source-map-js: '>=1.2.2'
