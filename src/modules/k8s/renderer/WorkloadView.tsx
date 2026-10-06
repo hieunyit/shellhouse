@@ -18,6 +18,7 @@ import {
   selectorString,
   type K8sObject
 } from '../shared/resources'
+import { useRefreshTick } from './refresh'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 type Obj = Record<string, unknown>
@@ -60,6 +61,8 @@ function usePods(
   obj: K8sObject,
   request: Request
 ): { pods: K8sObject[] | null; error: string | null } {
+  // Pod đổi (restart, trạng thái) không làm Deployment đổi → đọc lại theo nhịp làm mới của tab.
+  const refresh = useRefreshTick()
   const [state, setState] = useState<{ pods: K8sObject[] | null; error: string | null }>({
     pods: null,
     error: null
@@ -92,7 +95,7 @@ function usePods(
       cancelled = true
     }
     // obj đổi (watch: replicas, status…) → tải lại pod.
-  }, [request, ns, selector, obj])
+  }, [request, ns, selector, obj, refresh])
   return state
 }
 

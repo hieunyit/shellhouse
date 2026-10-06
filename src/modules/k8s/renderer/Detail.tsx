@@ -41,6 +41,7 @@ import {
   WORKLOAD_VIEW_KINDS,
   WorkloadOverview
 } from './WorkloadView'
+import { useRefreshTick } from './refresh'
 
 type Request = <T>(op: K8sOp) => Promise<T>
 type Obj = Record<string, unknown>
@@ -966,6 +967,7 @@ function PodsOf({
   request: Request
   onOpenPod: (pod: K8sObject) => void
 }): React.JSX.Element {
+  const refresh = useRefreshTick()
   const [pods, setPods] = useState<K8sObject[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
@@ -1009,7 +1011,7 @@ function PodsOf({
     return () => {
       cancelled = true
     }
-  }, [kindId, obj, request])
+  }, [kindId, obj, request, refresh])
   if (error) return <p className="text-xs text-danger">{error}</p>
   if (!pods) return <p className="text-xs text-faint">{t('Loading…')}</p>
   if (pods.length === 0) return <p className="text-xs text-faint">{t('No pods.')}</p>
@@ -1179,6 +1181,7 @@ function RelatedOf({
   onNavigate?: (kind: string, name: string) => void
   onShowPods?: () => void
 }): React.JSX.Element {
+  const refresh = useRefreshTick()
   const [data, setData] = useState<RelatedResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
@@ -1199,7 +1202,7 @@ function RelatedOf({
     return () => {
       cancelled = true
     }
-  }, [request, kindId, ns, name, tick])
+  }, [request, kindId, ns, name, tick, refresh])
   if (error) return <p className="text-xs text-danger">{error}</p>
   if (!data) return <p className="text-xs text-faint">{t('Finding related resources…')}</p>
   const shown = data.groups.filter((g) => g.items.length > 0 || g.error || ALWAYS.has(g.id))

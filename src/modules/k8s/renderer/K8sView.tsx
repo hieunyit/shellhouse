@@ -81,6 +81,7 @@ import { notify, useK8sActions } from './useK8sActions'
 import { useResourceRows } from './useResourceRows'
 import { BULK_KEYS, BulkBar, bulkKinds, copyYaml, type BulkKind } from './Bulk'
 import { EventsView } from './Events'
+import { RefreshContext, useRefreshClock } from './refresh'
 
 /** Đang xem loại nào → mở form của loại đó khi bấm Create. */
 const FORM_FOR_KIND: Record<string, FormKind> = {
@@ -233,6 +234,9 @@ export function ClusterTab({
           fieldSelector: top?.fieldSelector
         }
   const list = useResourceList(ready, request, bus, listQuery, reloadKey, active)
+  // Phần đọc một lần (pod của workload, liên quan…) đọc lại theo nhịp; ẩn lâu rồi quay lại → đọc lại
+  // cả bảng (watch có thể đã rơi khi máy ngủ / proxy cắt kết nối).
+  const refreshTick = useRefreshClock(active, list.reload)
 
   const { metrics, metricScope } = useClusterMetrics({ ready, request, active, kindId, scopeNs })
 
@@ -694,810 +698,816 @@ export function ClusterTab({
   ]
 
   return (
-    <GuardProvider value={guardProvider.value}>
-      <div
-        ref={rootRef}
-        className="relative flex h-full flex-col bg-surface"
-        data-testid="k8s-view"
-        data-tab={tabId}
-        data-ready={ready && (loaded || onOverview || onMap)}
-      >
-        {/* Header (thiết kế v0.5): Kubernetes / context ⇅ / namespace / loại tài nguyên + nhãn môi
+    <RefreshContext.Provider value={refreshTick}>
+      <GuardProvider value={guardProvider.value}>
+        <div
+          ref={rootRef}
+          className="relative flex h-full flex-col bg-surface"
+          data-testid="k8s-view"
+          data-tab={tabId}
+          data-ready={ready && (loaded || onOverview || onMap)}
+        >
+          {/* Header (thiết kế v0.5): Kubernetes / context ⇅ / namespace / loại tài nguyên + nhãn môi
             trường; thao tác chung bên phải. z-40: menu thả xuống của header nằm trên thanh công cụ của
             Map (z-30) và bảng chi tiết. */}
-        <div className="relative z-40 flex h-ds-header shrink-0 items-center gap-1 border-b border-ds-border-subtle pr-2 pl-3">
-          {navPlacement === 'inline' && (
-            <IconButton
-              label={navHidden ? t('Show the resource list') : t('Hide the resource list')}
-              size="sm"
-              active={!navHidden}
-              data-testid="k8s-nav-toggle"
-              className="mr-1"
-              onClick={() => {
-                setNavHidden(!navHidden)
-                try {
-                  window.localStorage.setItem(NAV_HIDDEN_KEY, navHidden ? '0' : '1')
-                } catch {
-                  // Bỏ qua: không lưu được thì chỉ áp dụng cho lần này.
-                }
-              }}
-            >
-              <PanelLeft size={14} />
-            </IconButton>
-          )}
-          <span className="flex shrink-0 items-center gap-1.5 px-1 text-[13px] font-medium text-muted">
-            <KubernetesIcon size={14} strokeWidth={1.5} className="text-faint" aria-hidden />
-            Kubernetes
-          </span>
-          <span aria-hidden className="shrink-0 text-ds-fg-disabled">
-            /
-          </span>
-          <ContextPicker
-            current={contextKey(params.ref)}
-            label={params.label}
-            version={cluster?.version}
-            contexts={contexts
-              .filter((c) => !c.settings.hidden)
-              .map((c) => {
-                const ctxEnv = findEnvironment(
-                  environments,
-                  sourceEnvs[`k8s:${c.key}`] ?? environmentFromColor(c.settings.color ?? null)
-                )
-                return {
-                  key: c.key,
-                  name: c.name,
-                  source: c.sourceLabel,
-                  ...(ctxEnv ? { env: ctxEnv } : {})
-                }
-              })}
-            onPick={switchContext}
-          />
-          <span aria-hidden className="shrink-0 text-ds-fg-disabled">
-            /
-          </span>
-          <div
-            className="flex min-w-0 shrink items-center gap-1 px-1 text-[13px]"
-            data-testid="k8s-breadcrumb"
-          >
-            <button
-              type="button"
-              className={cx(
-                'shrink-0 truncate rounded-ds-sm font-semibold',
-                top ? 'text-muted hover:text-fg' : 'text-fg'
-              )}
-              onClick={() => {
-                setDrill([])
-              }}
-            >
-              {titleOf(view)}
-            </button>
-            {drill.map((d, i) => (
-              <span key={d.label} className="flex min-w-0 items-center gap-1">
-                <ChevronRight size={12} className="shrink-0 text-faint" />
-                <button
-                  type="button"
-                  className={cx(
-                    'truncate',
-                    i === drill.length - 1 ? 'font-semibold text-fg' : 'text-muted hover:text-fg'
-                  )}
-                  onClick={() => {
-                    setDrill((x) => x.slice(0, i + 1))
-                  }}
-                >
-                  {d.label}
-                </button>
-                <span className="shrink-0 text-faint">· pods</span>
-              </span>
-            ))}
-          </div>
-          <span className="ml-1 shrink-0">
-            <NamespacePicker
-              all={allNamespaces}
-              value={namespaces ?? []}
-              onChange={(v) => {
-                setNamespaces(v)
-                setSelected(new Set())
-              }}
-            />
-          </span>
-          {env && <EnvLabel env={env} size="md" className="ml-1.5" />}
-          <div className="min-w-2 flex-1" />
-          {readOnly && (
-            <span
-              className="flex items-center gap-1 rounded bg-warning-soft px-1.5 py-px text-xs font-medium text-warning"
-              data-testid="k8s-read-only"
-            >
-              <Eye size={12} /> {t('Read-only')}
-            </span>
-          )}
-          {!readOnly && (
-            <span className="flex items-center">
-              <Button
+          <div className="relative z-40 flex h-ds-header shrink-0 items-center gap-1 border-b border-ds-border-subtle pr-2 pl-3">
+            {navPlacement === 'inline' && (
+              <IconButton
+                label={navHidden ? t('Show the resource list') : t('Hide the resource list')}
                 size="sm"
-                variant="ghost"
-                icon={<Plus size={13} />}
-                data-testid="k8s-create"
-                title={t('Create a resource with a form')}
+                active={!navHidden}
+                data-testid="k8s-nav-toggle"
+                className="mr-1"
                 onClick={() => {
-                  setDialog({ kind: 'create', initial: FORM_FOR_KIND[kindId] ?? 'Deployment' })
+                  setNavHidden(!navHidden)
+                  try {
+                    window.localStorage.setItem(NAV_HIDDEN_KEY, navHidden ? '0' : '1')
+                  } catch {
+                    // Bỏ qua: không lưu được thì chỉ áp dụng cho lần này.
+                  }
                 }}
               >
-                {t('Create')}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                data-testid="k8s-create-yaml"
-                title={t('Create or update objects from YAML')}
-                onClick={() => {
-                  setDialog({
-                    kind: 'yaml',
-                    mode: 'create',
-                    title: t('Create from YAML'),
-                    text: ''
-                  })
-                }}
-              >
-                YAML
-              </Button>
+                <PanelLeft size={14} />
+              </IconButton>
+            )}
+            <span className="flex shrink-0 items-center gap-1.5 px-1 text-[13px] font-medium text-muted">
+              <KubernetesIcon size={14} strokeWidth={1.5} className="text-faint" aria-hidden />
+              Kubernetes
             </span>
-          )}
-          <Button
-            size="sm"
-            variant={showForwards ? 'secondary' : 'ghost'}
-            icon={<ArrowLeftRight size={13} />}
-            title={t('Port forwards')}
-            data-testid="k8s-forwards-toggle"
-            onClick={() => {
-              setShowForwards(!showForwards)
-            }}
-          >
-            {forwardCount ? String(forwardCount) : null}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-label={t('Reload')}
-            icon={<RefreshCw size={13} />}
-            onClick={() => {
-              setReloadKey((n) => n + 1)
-            }}
-          />
-        </div>
-
-        {/* Chi tiết phóng to (trang đầy đủ) → ẩn bảng. */}
-        <div className="flex min-h-0 flex-1 [&:has(>aside[data-expanded])>[data-main]]:hidden">
-          <ExplorerNav active={active}>
-            {(placement) =>
-              placement === 'explorer' || !navHidden ? (
-                <ResourceNav
-                  kinds={kinds}
-                  view={view}
-                  drilled={Boolean(top)}
-                  counts={navCounts}
-                  namespaces={namespaces}
-                  health={health}
-                  onGo={go}
-                  placement={placement}
-                />
-              ) : null
-            }
-          </ExplorerNav>
-
-          <div ref={tableRef} data-main className="@container flex min-w-0 flex-1 flex-col">
-            {/* Thanh công cụ: chọn tất cả · lọc / lệnh (:) · đếm. */}
-            <div className="relative z-30 flex h-ds-toolbar shrink-0 items-center gap-2 border-b border-ds-border-subtle px-3 text-xs">
-              {!onOverview && !onMap && !onHelm && kindId !== 'events' && rows.length > 0 && (
-                <input
-                  type="checkbox"
-                  className="mr-1 size-3.5 shrink-0 accent-[var(--ds-accent)]"
-                  aria-label={allChecked ? t('Clear the selection') : t('Select all rows')}
-                  title={allChecked ? t('Clear the selection') : t('Select all rows (Ctrl+A)')}
-                  data-testid="k8s-select-all"
-                  checked={allChecked}
-                  ref={(el) => {
-                    if (el) el.indeterminate = selectedRows.length > 0 && !allChecked
-                  }}
-                  onChange={() => {
-                    setSelected(allChecked ? new Set() : new Set(rows.map((r) => r.row.key)))
-                  }}
-                />
-              )}
-              <div className="relative w-72 max-w-[55%] min-w-40">
-                <div
-                  className={cx(
-                    'flex h-ds-ctl items-center gap-1.5 rounded-ds-md border bg-subtle px-2',
-                    commandMode
-                      ? 'border-ds-accent ring-3 ring-ds-accent-soft'
-                      : selector && !selector.ok
-                        ? 'border-ds-danger ring-3 ring-ds-danger-soft'
-                        : 'border-ds-border-control hover:border-faint'
-                  )}
-                  data-selector={selector ? (selector.ok ? 'ok' : 'error') : undefined}
-                >
-                  {commandMode ? (
-                    <Terminal size={13} className="text-accent" />
-                  ) : selector ? (
-                    <Tag size={13} className={selector.ok ? 'text-ds-info' : 'text-ds-danger'} />
-                  ) : (
-                    <Search size={13} className="text-faint" />
-                  )}
-                  <input
-                    ref={inputRef}
-                    type="search"
-                    spellCheck={false}
-                    placeholder={t('Filter…   ( : command · / filter )')}
-                    data-testid="k8s-filter"
-                    className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-faint"
-                    value={query}
-                    onChange={(e) => {
-                      setQuery(e.target.value)
-                      setSuggestAt(0)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') {
-                        e.preventDefault()
-                        setQuery('')
-                        focusGrid(rootRef.current)
-                      } else if (commandMode && e.key === 'ArrowDown') {
-                        e.preventDefault()
-                        setSuggestAt((i) => Math.min(i + 1, suggestions.length - 1))
-                      } else if (commandMode && e.key === 'ArrowUp') {
-                        e.preventDefault()
-                        setSuggestAt((i) => Math.max(i - 1, 0))
-                      } else if (commandMode && e.key === 'Tab') {
-                        e.preventDefault()
-                        const sg = suggestions[suggestAt]
-                        if (sg) setQuery(`:${sg.value}`)
-                      } else if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (commandMode) {
-                          const typed = query.slice(1).trim()
-                          const sg = suggestions[suggestAt]
-                          // Gõ đủ lệnh → chạy đúng lệnh đã gõ; không thì lấy gợi ý đang chọn.
-                          runCommand(parseCommand(typed, kinds ?? []) || !sg ? typed : sg.value)
-                        } else focusGrid(rootRef.current)
-                      }
-                    }}
-                  />
-                  {selector?.ok && (
-                    <span
-                      className="shrink-0 rounded-ds-xs bg-ds-info-soft px-1 font-mono text-[11px] text-ds-info"
-                      data-testid="k8s-selector-badge"
-                      title={t('Label selector (kubectl -l)')}
-                    >
-                      -l · {selector.requirements.length}
-                    </span>
-                  )}
-                </div>
-                {selector && !selector.ok && (
-                  <div
-                    role="alert"
-                    className="absolute top-9 right-0 left-0 z-30 rounded-ds-md bg-ds-popover px-2.5 py-1.5 text-xs text-ds-danger shadow-ds-popover"
-                    data-testid="k8s-selector-error"
-                  >
-                    {t(selector.error, selector.params)}
-                  </div>
-                )}
-                {commandMode && suggestions.length > 0 && (
-                  <div
-                    className="absolute top-9 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md bg-ds-popover p-1 shadow-ds-popover"
-                    data-testid="k8s-command-suggestions"
-                  >
-                    {suggestions.map((sg, i) => (
-                      <button
-                        key={`${sg.value}${sg.label}`}
-                        type="button"
-                        className={cx(
-                          'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs',
-                          i === suggestAt ? 'bg-accent-soft text-fg' : 'text-muted hover:bg-hover'
-                        )}
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          if (sg.value.endsWith(' ')) setQuery(`:${sg.value}`)
-                          else runCommand(sg.value)
-                        }}
-                      >
-                        <span className="flex-1 text-fg">{sg.label}</span>
-                        <span className="font-mono text-faint">:{sg.hint}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {/* Chip lọc kiểu thiết kế v0.5: Status / Node (Pods). */}
-              {kindId === 'pods' &&
-                !onOverview &&
-                !onMap &&
-                !onHelm &&
-                (
-                  [
-                    ['status', t('Status')],
-                    ['node', t('Node')]
-                  ] as const
-                ).map(([col, label]) => {
-                  const value = facets[col]
-                  return (
-                    <button
-                      key={col}
-                      type="button"
-                      data-testid={`k8s-chip-${col}`}
-                      aria-haspopup="menu"
-                      className={cx(
-                        'flex h-ds-ctl shrink-0 items-center gap-1 rounded-ds-md border px-2 text-xs outline-none focus-visible:shadow-ds-focus',
-                        value
-                          ? 'border-ds-accent bg-ds-accent-soft text-ds-fg'
-                          : 'border-ds-border-control text-ds-fg-2 hover:border-faint hover:text-ds-fg'
-                      )}
-                      onClick={(e) => {
-                        const r = e.currentTarget.getBoundingClientRect()
-                        openMenu(
-                          {
-                            clientX: r.left,
-                            clientY: r.bottom + 4,
-                            preventDefault: () => undefined
-                          },
-                          [
-                            {
-                              id: `chip-${col}-any`,
-                              label: t('Any'),
-                              onSelect: () => {
-                                setFacets((f) =>
-                                  Object.fromEntries(Object.entries(f).filter(([k]) => k !== col))
-                                )
-                              }
-                            },
-                            'separator',
-                            ...(facetValues[col] ?? []).map(([v, n]): MenuEntry => ({
-                              id: `chip-${col}-${v}`,
-                              label: v,
-                              hint: formatNumber(n),
-                              onSelect: () => {
-                                setFacets((f) => ({ ...f, [col]: v }))
-                              }
-                            }))
-                          ]
-                        )
-                      }}
-                    >
-                      <span className="text-ds-fg-3">{label}:</span>
-                      <span className="font-medium">{value ?? t('Any')}</span>
-                      <ChevronDown size={12} className="text-ds-fg-3" />
-                    </button>
+            <span aria-hidden className="shrink-0 text-ds-fg-disabled">
+              /
+            </span>
+            <ContextPicker
+              current={contextKey(params.ref)}
+              label={params.label}
+              version={cluster?.version}
+              contexts={contexts
+                .filter((c) => !c.settings.hidden)
+                .map((c) => {
+                  const ctxEnv = findEnvironment(
+                    environments,
+                    sourceEnvs[`k8s:${c.key}`] ?? environmentFromColor(c.settings.color ?? null)
                   )
+                  return {
+                    key: c.key,
+                    name: c.name,
+                    source: c.sourceLabel,
+                    ...(ctxEnv ? { env: ctxEnv } : {})
+                  }
                 })}
-              <div className="flex-1" />
-              {!onOverview && !onMap && !onHelm && (
-                <IconButton
-                  label={t('Copy as command')}
-                  size="sm"
-                  data-testid="k8s-copy-command"
-                  onClick={() => {
-                    showCommands(
-                      t('{kind} as kubectl', { kind: titleOf(view) }),
-                      listCommands({
-                        ref: params.ref,
-                        kindId,
-                        namespaces: namespaces && namespaces.length > 0 ? namespaces : null,
-                        selector: selector?.ok ? selector.text : undefined
-                      }).map((command) => ({ label: t('List'), command }))
-                    )
-                  }}
-                >
-                  <TerminalSquare size={14} />
-                </IconButton>
-              )}
-              {!onOverview && !onMap && (
-                <span className="text-faint tabular-nums" data-testid="k8s-count">
-                  {list.objects
-                    ? q
-                      ? t('{shown} of {total}', {
-                          shown: formatNumber(rows.length),
-                          total: formatNumber(list.objects.size)
-                        })
-                      : formatNumber(rows.length)
-                    : ''}
+              onPick={switchContext}
+            />
+            <span aria-hidden className="shrink-0 text-ds-fg-disabled">
+              /
+            </span>
+            <div
+              className="flex min-w-0 shrink items-center gap-1 px-1 text-[13px]"
+              data-testid="k8s-breadcrumb"
+            >
+              <button
+                type="button"
+                className={cx(
+                  'shrink-0 truncate rounded-ds-sm font-semibold',
+                  top ? 'text-muted hover:text-fg' : 'text-fg'
+                )}
+                onClick={() => {
+                  setDrill([])
+                }}
+              >
+                {titleOf(view)}
+              </button>
+              {drill.map((d, i) => (
+                <span key={d.label} className="flex min-w-0 items-center gap-1">
+                  <ChevronRight size={12} className="shrink-0 text-faint" />
+                  <button
+                    type="button"
+                    className={cx(
+                      'truncate',
+                      i === drill.length - 1 ? 'font-semibold text-fg' : 'text-muted hover:text-fg'
+                    )}
+                    onClick={() => {
+                      setDrill((x) => x.slice(0, i + 1))
+                    }}
+                  >
+                    {d.label}
+                  </button>
+                  <span className="shrink-0 text-faint">· pods</span>
                 </span>
-              )}
-              {!onOverview && !onMap && !onHelm && list.objects && !list.error && (
-                <span
-                  className="flex shrink-0 items-center gap-1 text-ds-fg-3"
-                  data-testid="k8s-live"
-                  title={t('Updates live (Kubernetes watch)')}
-                >
-                  <span className="size-1.5 rounded-full bg-ds-success" aria-hidden />
-                  {t('Live')}
-                </span>
-              )}
+              ))}
             </div>
-            {multi && !onOverview && !onMap && !onHelm && (
-              <BulkBar
-                count={selectedRows.length}
-                kinds={bulkAvailable}
-                onLogs={
-                  kindId === 'pods'
-                    ? () => {
-                        // Mỗi namespace một tab log (kubectl logs chỉ trong một namespace).
-                        const byNs = new Map<string, string[]>()
-                        for (const r of selectedRows) {
-                          const ns = r.obj.metadata.namespace ?? ''
-                          byNs.set(ns, [...(byNs.get(ns) ?? []), r.obj.metadata.name])
-                        }
-                        for (const [ns, pods] of byNs)
-                          openPodLogs({
-                            ref: params.ref,
-                            ...(params.bastionHostId
-                              ? { bastionHostId: params.bastionHostId }
-                              : {}),
-                            namespace: ns,
-                            pods: pods.slice(0, 20),
-                            title: tn(pods.length, '{n} pod', '{n} pods')
-                          })
-                      }
-                    : undefined
-                }
-                onRun={(k) => {
-                  runBulk(k)
-                }}
-                onCopyNames={() => {
-                  copyNames()
-                }}
-                onCopyYaml={() => {
-                  copyYamlOf()
-                }}
-                onClear={() => {
+            <span className="ml-1 shrink-0">
+              <NamespacePicker
+                all={allNamespaces}
+                value={namespaces ?? []}
+                onChange={(v) => {
+                  setNamespaces(v)
                   setSelected(new Set())
                 }}
               />
-            )}
-            {list.error && (
-              <div className="border-b border-line p-2">
-                <Notice tone="danger" testId="k8s-notice">
-                  {list.error}
-                </Notice>
-              </div>
-            )}
-            {list.truncated !== null && !onOverview && !onMap && !onHelm && (
-              <div className="border-b border-line p-2">
-                <Notice tone="warning" testId="k8s-truncated">
-                  {t(
-                    'Showing the first {count} objects. Pick a namespace or open a narrower view to see the rest.',
-                    { count: formatNumber(list.truncated) }
-                  )}
-                </Notice>
-              </div>
-            )}
-            {!ready ? (
-              <div
-                className="flex flex-1 items-center justify-center text-xs text-faint"
-                data-testid="k8s-status"
+            </span>
+            {env && <EnvLabel env={env} size="md" className="ml-1.5" />}
+            <div className="min-w-2 flex-1" />
+            {readOnly && (
+              <span
+                className="flex items-center gap-1 rounded bg-warning-soft px-1.5 py-px text-xs font-medium text-warning"
+                data-testid="k8s-read-only"
               >
-                {session.status}
-              </div>
-            ) : onHelm ? (
-              namespaces === null ? null : (
-                <HelmView
-                  request={request}
-                  namespaces={namespaces}
-                  active={active}
-                  filter={query}
-                  readOnly={readOnly}
-                />
-              )
-            ) : onMap ? (
-              namespaces === null ? null : (
-                <MapView
-                  tabId={tabId}
-                  request={request}
-                  namespaces={namespaces}
-                  active={active}
-                  onOpen={openFromMap}
-                  onLogs={(ref, labels) => {
-                    const base = {
-                      ref: params.ref,
-                      ...(params.bastionHostId ? { bastionHostId: params.bastionHostId } : {}),
-                      namespace: ref.ns ?? ''
-                    }
-                    if (ref.kind === 'pods') openPodLogs({ ...base, pod: ref.name })
-                    else {
-                      const selector = Object.entries(labels ?? {})
-                        .map(([k, v]) => `${k}=${v}`)
-                        .join(',')
-                      if (!selector)
-                        notify(t('{name} has no pod labels', { name: ref.name }), 'danger')
-                      else
-                        openPodLogs({
-                          ...base,
-                          selector,
-                          title: `${ref.kind.split('.')[0]?.replace(/s$/, '') ?? ''}/${ref.name}`
-                        })
-                    }
+                <Eye size={12} /> {t('Read-only')}
+              </span>
+            )}
+            {!readOnly && (
+              <span className="flex items-center">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<Plus size={13} />}
+                  data-testid="k8s-create"
+                  title={t('Create a resource with a form')}
+                  onClick={() => {
+                    setDialog({ kind: 'create', initial: FORM_FOR_KIND[kindId] ?? 'Deployment' })
                   }}
-                  onPortForward={
-                    readOnly
-                      ? undefined
-                      : (ref) => {
-                          // Topology chỉ có tham chiếu — lấy object để biết cổng (pod: containerPort,
-                          // service: port), rồi mở đúng hộp thoại forward như từ bảng.
-                          if (ref.kind !== 'pods' && ref.kind !== 'services') return
-                          request<K8sObject>({
-                            op: 'get',
-                            kind: ref.kind,
-                            ...(ref.ns ? { namespace: ref.ns } : {}),
-                            name: ref.name,
-                            format: 'json'
-                          }).then(
-                            (obj) => {
-                              const ports =
-                                ref.kind === 'pods'
-                                  ? (
-                                      (obj.spec?.['containers'] as
-                                        { ports?: { containerPort: number }[] }[] | undefined) ?? []
-                                    ).flatMap((c) => (c.ports ?? []).map((p) => p.containerPort))
-                                  : (
-                                      (obj.spec?.['ports'] as { port: number }[] | undefined) ?? []
-                                    ).map((p) => p.port)
-                              setDialog({ kind: 'forward', obj, ports })
-                            },
-                            (e: unknown) => {
-                              notify(cleanError(e), 'danger')
-                            }
-                          )
-                        }
-                  }
-                  onShell={
-                    readOnly
-                      ? undefined
-                      : (ref) => {
-                          openPodShell(
-                            { ref: params.ref, namespace: ref.ns ?? '', pod: ref.name },
-                            params.bastionHostId
-                          )
-                        }
-                  }
-                />
-              )
-            ) : onOverview ? (
-              namespaces === null ? null : (
-                <ClusterOverview
-                  request={request}
-                  namespaces={namespaces}
-                  active={active}
-                  onNavigate={go}
-                  onOpen={openRef}
-                />
-              )
-            ) : !loaded ? (
-              <div
-                className="flex flex-1 items-center justify-center text-xs text-faint"
-                data-testid="k8s-status"
-              >
-                {t('Loading…')}
-              </div>
-            ) : kindId === 'events' && !top ? (
-              <EventsView objects={objects} error={list.error} onOpen={openRef} />
-            ) : (
-              <FileTable
-                items={rows}
-                getKey={(r) => r.row.key}
-                getLabel={(r) => r.row.name}
-                icon={(r) => (
-                  <>
-                    <input
-                      type="checkbox"
-                      className="size-3.5 shrink-0 accent-[var(--sh-accent)]"
-                      aria-label={t('Select {name}', { name: r.row.name })}
-                      data-testid="k8s-row-check"
-                      tabIndex={-1}
-                      checked={selected.has(r.row.key)}
-                      onClick={(e) => {
-                        // Không để dòng nhận cú bấm (chọn một dòng) — ô chọn bật / tắt riêng dòng này.
-                        e.stopPropagation()
-                      }}
-                      onDoubleClick={(e) => {
-                        e.stopPropagation()
-                      }}
-                      onChange={() => {
-                        toggleRow(r.row.key)
-                      }}
-                    />
-                    <Box size={14} strokeWidth={1.6} className="shrink-0 text-faint" />
-                  </>
-                )}
-                columns={columns}
-                gridClass=""
-                gridStyle={{ gridTemplateColumns: fit.template }}
-                nameSort={{ key: 'name', label: t('Name'), kind: 'text' }}
-                sort={sort}
-                onSort={setSort}
-                selected={selected}
-                onSelect={(sel) => {
-                  setSelected(sel)
-                  // Chi tiết đang mở → đi theo dòng chọn.
-                  if (detailKey && sel.size === 1) setDetailKey([...sel][0] ?? null)
-                }}
-                onOpen={open}
-                onContextMenu={(e, items) => {
-                  const first = items[0]
-                  const copyNames: MenuEntry = {
-                    id: 'copy-name',
-                    label:
-                      items.length > 1
-                        ? tn(items.length, 'Copy {n} name', 'Copy {n} names')
-                        : t('Copy name'),
-                    icon: <Copy size={14} />,
-                    onSelect: () =>
-                      void window.shellhouse.writeClipboard(items.map((r) => r.row.name).join('\n'))
-                  }
-                  if (first && items.length === 1)
-                    openMenu(e, [
-                      {
-                        id: 'describe',
-                        label: t('Describe'),
-                        hint: 'd',
-                        onSelect: () => {
-                          setDetailKey(first.row.key)
-                        }
-                      },
-                      copyNames,
-                      ...toMenu(actionsFor(kindId, first.obj, readOnly, handlers))
-                    ])
-                  else if (items.length > 1)
-                    openMenu(e, [
-                      copyNames,
-                      {
-                        id: 'copy-yaml',
-                        label: tn(
-                          items.length,
-                          'Copy YAML of {n} object',
-                          'Copy YAML of {n} objects'
-                        ),
-                        icon: <FileCode size={14} />,
-                        onSelect: () => {
-                          copyYamlOf(items)
-                        }
-                      },
-                      ...(bulkAvailable.length ? (['separator'] as const) : []),
-                      ...bulkAvailable.map((k): MenuEntry => ({
-                        id: `bulk-${k}`,
-                        label:
-                          k === 'delete'
-                            ? tn(items.length, 'Delete {n} object…', 'Delete {n} objects…')
-                            : k === 'restart'
-                              ? tn(items.length, 'Restart {n} workload', 'Restart {n} workloads')
-                              : k === 'scale'
-                                ? tn(items.length, 'Scale {n} workload…', 'Scale {n} workloads…')
-                                : k === 'cordon'
-                                  ? tn(items.length, 'Cordon {n} node', 'Cordon {n} nodes')
-                                  : tn(items.length, 'Uncordon {n} node', 'Uncordon {n} nodes'),
-                        ...(k === 'delete' ? { danger: true } : {}),
-                        onSelect: () => {
-                          runBulk(k, items)
-                        }
-                      }))
-                    ])
-                }}
-                ariaLabel={kind?.kind ?? t('Resources')}
-                rowTestId="k8s-row"
-              >
-                {rows.length === 0 && (
-                  <EmptyList
-                    kindId={kindId}
-                    what={titleOf(kindId).toLowerCase()}
-                    kindName={kind?.kind ?? titleOf(kindId)}
-                    filter={q ? query.trim() : null}
-                    namespaces={scopeNs}
-                    onClearFilter={() => {
-                      setQuery('')
-                    }}
-                    onCreate={
-                      !readOnly && FORM_FOR_KIND[kindId]
-                        ? () => {
-                            setDialog({
-                              kind: 'create',
-                              initial: FORM_FOR_KIND[kindId] ?? 'Deployment'
-                            })
-                          }
-                        : undefined
-                    }
-                    onShowAll={
-                      kind?.namespaced && scopeNs.length > 0 && allNamespaces.length > 1
-                        ? () => {
-                            setNamespaces([])
-                          }
-                        : undefined
-                    }
-                  />
-                )}
-              </FileTable>
+                >
+                  {t('Create')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  data-testid="k8s-create-yaml"
+                  title={t('Create or update objects from YAML')}
+                  onClick={() => {
+                    setDialog({
+                      kind: 'yaml',
+                      mode: 'create',
+                      title: t('Create from YAML'),
+                      text: ''
+                    })
+                  }}
+                >
+                  YAML
+                </Button>
+              </span>
             )}
-            <ForwardsPanel
-              bus={bus}
-              request={request}
-              open={showForwards}
-              onCount={setForwardCount}
+            <Button
+              size="sm"
+              variant={showForwards ? 'secondary' : 'ghost'}
+              icon={<ArrowLeftRight size={13} />}
+              title={t('Port forwards')}
+              data-testid="k8s-forwards-toggle"
+              onClick={() => {
+                setShowForwards(!showForwards)
+              }}
+            >
+              {forwardCount ? String(forwardCount) : null}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={t('Reload')}
+              icon={<RefreshCw size={13} />}
+              onClick={() => {
+                setReloadKey((n) => n + 1)
+              }}
             />
           </div>
 
-          {detail && (
-            <Detail
-              key={detail.row.key}
-              kindId={kindId}
-              obj={detail.obj}
-              request={request}
-              actions={actionsFor(kindId, detail.obj, readOnly, handlers)}
-              nodeUsage={
-                kindId === 'nodes' ? (metrics?.items[objectKey(detail.obj)] ?? null) : null
+          {/* Chi tiết phóng to (trang đầy đủ) → ẩn bảng. */}
+          <div className="flex min-h-0 flex-1 [&:has(>aside[data-expanded])>[data-main]]:hidden">
+            <ExplorerNav active={active}>
+              {(placement) =>
+                placement === 'explorer' || !navHidden ? (
+                  <ResourceNav
+                    kinds={kinds}
+                    view={view}
+                    drilled={Boolean(top)}
+                    counts={navCounts}
+                    namespaces={namespaces}
+                    health={health}
+                    onGo={go}
+                    placement={placement}
+                  />
+                ) : null
               }
-              onClose={() => {
-                setDetailKey(null)
-              }}
-              onOpenPod={(pod) => {
-                setDrill([])
-                setView('pods')
-                setSelected(new Set([objectKey(pod)]))
-                setDetailTab('overview')
-                setDetailKey(objectKey(pod))
-              }}
-              initialTab={detailTab}
-              onNavigate={(kind, name, namespace) => {
-                const info =
-                  BUILTIN_KINDS.find((k) => k.id === kind) ??
-                  (kinds ?? []).find((k) => k.id === kind)
-                openRef(
-                  kind,
-                  namespace ??
-                    (info?.namespaced === false ? undefined : detail.obj.metadata.namespace),
-                  name
-                )
-              }}
-              readOnly={readOnly}
-              bus={bus}
-              onNotify={(text, tone) => {
-                notify(text, tone ?? 'success')
-              }}
-              {...(HAS_PODS.includes(kindId)
-                ? {
-                    onShowPods: () => {
-                      drillPods(detail.obj)
-                    }
+            </ExplorerNav>
+
+            <div ref={tableRef} data-main className="@container flex min-w-0 flex-1 flex-col">
+              {/* Thanh công cụ: chọn tất cả · lọc / lệnh (:) · đếm. */}
+              <div className="relative z-30 flex h-ds-toolbar shrink-0 items-center gap-2 border-b border-ds-border-subtle px-3 text-xs">
+                {!onOverview && !onMap && !onHelm && kindId !== 'events' && rows.length > 0 && (
+                  <input
+                    type="checkbox"
+                    className="mr-1 size-3.5 shrink-0 accent-[var(--ds-accent)]"
+                    aria-label={allChecked ? t('Clear the selection') : t('Select all rows')}
+                    title={allChecked ? t('Clear the selection') : t('Select all rows (Ctrl+A)')}
+                    data-testid="k8s-select-all"
+                    checked={allChecked}
+                    ref={(el) => {
+                      if (el) el.indeterminate = selectedRows.length > 0 && !allChecked
+                    }}
+                    onChange={() => {
+                      setSelected(allChecked ? new Set() : new Set(rows.map((r) => r.row.key)))
+                    }}
+                  />
+                )}
+                <div className="relative w-72 max-w-[55%] min-w-40">
+                  <div
+                    className={cx(
+                      'flex h-ds-ctl items-center gap-1.5 rounded-ds-md border bg-subtle px-2',
+                      commandMode
+                        ? 'border-ds-accent ring-3 ring-ds-accent-soft'
+                        : selector && !selector.ok
+                          ? 'border-ds-danger ring-3 ring-ds-danger-soft'
+                          : 'border-ds-border-control hover:border-faint'
+                    )}
+                    data-selector={selector ? (selector.ok ? 'ok' : 'error') : undefined}
+                  >
+                    {commandMode ? (
+                      <Terminal size={13} className="text-accent" />
+                    ) : selector ? (
+                      <Tag size={13} className={selector.ok ? 'text-ds-info' : 'text-ds-danger'} />
+                    ) : (
+                      <Search size={13} className="text-faint" />
+                    )}
+                    <input
+                      ref={inputRef}
+                      type="search"
+                      spellCheck={false}
+                      placeholder={t('Filter…   ( : command · / filter )')}
+                      data-testid="k8s-filter"
+                      className="min-w-0 flex-1 bg-transparent font-mono text-xs text-fg outline-none placeholder:font-sans placeholder:text-faint"
+                      value={query}
+                      onChange={(e) => {
+                        setQuery(e.target.value)
+                        setSuggestAt(0)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          e.preventDefault()
+                          setQuery('')
+                          focusGrid(rootRef.current)
+                        } else if (commandMode && e.key === 'ArrowDown') {
+                          e.preventDefault()
+                          setSuggestAt((i) => Math.min(i + 1, suggestions.length - 1))
+                        } else if (commandMode && e.key === 'ArrowUp') {
+                          e.preventDefault()
+                          setSuggestAt((i) => Math.max(i - 1, 0))
+                        } else if (commandMode && e.key === 'Tab') {
+                          e.preventDefault()
+                          const sg = suggestions[suggestAt]
+                          if (sg) setQuery(`:${sg.value}`)
+                        } else if (e.key === 'Enter') {
+                          e.preventDefault()
+                          if (commandMode) {
+                            const typed = query.slice(1).trim()
+                            const sg = suggestions[suggestAt]
+                            // Gõ đủ lệnh → chạy đúng lệnh đã gõ; không thì lấy gợi ý đang chọn.
+                            runCommand(parseCommand(typed, kinds ?? []) || !sg ? typed : sg.value)
+                          } else focusGrid(rootRef.current)
+                        }
+                      }}
+                    />
+                    {selector?.ok && (
+                      <span
+                        className="shrink-0 rounded-ds-xs bg-ds-info-soft px-1 font-mono text-[11px] text-ds-info"
+                        data-testid="k8s-selector-badge"
+                        title={t('Label selector (kubectl -l)')}
+                      >
+                        -l · {selector.requirements.length}
+                      </span>
+                    )}
+                  </div>
+                  {selector && !selector.ok && (
+                    <div
+                      role="alert"
+                      className="absolute top-9 right-0 left-0 z-30 rounded-ds-md bg-ds-popover px-2.5 py-1.5 text-xs text-ds-danger shadow-ds-popover"
+                      data-testid="k8s-selector-error"
+                    >
+                      {t(selector.error, selector.params)}
+                    </div>
+                  )}
+                  {commandMode && suggestions.length > 0 && (
+                    <div
+                      className="absolute top-9 right-0 left-0 z-30 max-h-72 overflow-auto rounded-md bg-ds-popover p-1 shadow-ds-popover"
+                      data-testid="k8s-command-suggestions"
+                    >
+                      {suggestions.map((sg, i) => (
+                        <button
+                          key={`${sg.value}${sg.label}`}
+                          type="button"
+                          className={cx(
+                            'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs',
+                            i === suggestAt ? 'bg-accent-soft text-fg' : 'text-muted hover:bg-hover'
+                          )}
+                          onMouseDown={(e) => {
+                            e.preventDefault()
+                            if (sg.value.endsWith(' ')) setQuery(`:${sg.value}`)
+                            else runCommand(sg.value)
+                          }}
+                        >
+                          <span className="flex-1 text-fg">{sg.label}</span>
+                          <span className="font-mono text-faint">:{sg.hint}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Chip lọc kiểu thiết kế v0.5: Status / Node (Pods). */}
+                {kindId === 'pods' &&
+                  !onOverview &&
+                  !onMap &&
+                  !onHelm &&
+                  (
+                    [
+                      ['status', t('Status')],
+                      ['node', t('Node')]
+                    ] as const
+                  ).map(([col, label]) => {
+                    const value = facets[col]
+                    return (
+                      <button
+                        key={col}
+                        type="button"
+                        data-testid={`k8s-chip-${col}`}
+                        aria-haspopup="menu"
+                        className={cx(
+                          'flex h-ds-ctl shrink-0 items-center gap-1 rounded-ds-md border px-2 text-xs outline-none focus-visible:shadow-ds-focus',
+                          value
+                            ? 'border-ds-accent bg-ds-accent-soft text-ds-fg'
+                            : 'border-ds-border-control text-ds-fg-2 hover:border-faint hover:text-ds-fg'
+                        )}
+                        onClick={(e) => {
+                          const r = e.currentTarget.getBoundingClientRect()
+                          openMenu(
+                            {
+                              clientX: r.left,
+                              clientY: r.bottom + 4,
+                              preventDefault: () => undefined
+                            },
+                            [
+                              {
+                                id: `chip-${col}-any`,
+                                label: t('Any'),
+                                onSelect: () => {
+                                  setFacets((f) =>
+                                    Object.fromEntries(Object.entries(f).filter(([k]) => k !== col))
+                                  )
+                                }
+                              },
+                              'separator',
+                              ...(facetValues[col] ?? []).map(([v, n]): MenuEntry => ({
+                                id: `chip-${col}-${v}`,
+                                label: v,
+                                hint: formatNumber(n),
+                                onSelect: () => {
+                                  setFacets((f) => ({ ...f, [col]: v }))
+                                }
+                              }))
+                            ]
+                          )
+                        }}
+                      >
+                        <span className="text-ds-fg-3">{label}:</span>
+                        <span className="font-medium">{value ?? t('Any')}</span>
+                        <ChevronDown size={12} className="text-ds-fg-3" />
+                      </button>
+                    )
+                  })}
+                <div className="flex-1" />
+                {!onOverview && !onMap && !onHelm && (
+                  <IconButton
+                    label={t('Copy as command')}
+                    size="sm"
+                    data-testid="k8s-copy-command"
+                    onClick={() => {
+                      showCommands(
+                        t('{kind} as kubectl', { kind: titleOf(view) }),
+                        listCommands({
+                          ref: params.ref,
+                          kindId,
+                          namespaces: namespaces && namespaces.length > 0 ? namespaces : null,
+                          selector: selector?.ok ? selector.text : undefined
+                        }).map((command) => ({ label: t('List'), command }))
+                      )
+                    }}
+                  >
+                    <TerminalSquare size={14} />
+                  </IconButton>
+                )}
+                {!onOverview && !onMap && (
+                  <span className="text-faint tabular-nums" data-testid="k8s-count">
+                    {list.objects
+                      ? q
+                        ? t('{shown} of {total}', {
+                            shown: formatNumber(rows.length),
+                            total: formatNumber(list.objects.size)
+                          })
+                        : formatNumber(rows.length)
+                      : ''}
+                  </span>
+                )}
+                {!onOverview && !onMap && !onHelm && list.objects && !list.error && (
+                  <span
+                    className="flex shrink-0 items-center gap-1 text-ds-fg-3"
+                    data-testid="k8s-live"
+                    title={t('Updates live (Kubernetes watch)')}
+                  >
+                    <span className="size-1.5 rounded-full bg-ds-success" aria-hidden />
+                    {t('Live')}
+                  </span>
+                )}
+              </div>
+              {multi && !onOverview && !onMap && !onHelm && (
+                <BulkBar
+                  count={selectedRows.length}
+                  kinds={bulkAvailable}
+                  onLogs={
+                    kindId === 'pods'
+                      ? () => {
+                          // Mỗi namespace một tab log (kubectl logs chỉ trong một namespace).
+                          const byNs = new Map<string, string[]>()
+                          for (const r of selectedRows) {
+                            const ns = r.obj.metadata.namespace ?? ''
+                            byNs.set(ns, [...(byNs.get(ns) ?? []), r.obj.metadata.name])
+                          }
+                          for (const [ns, pods] of byNs)
+                            openPodLogs({
+                              ref: params.ref,
+                              ...(params.bastionHostId
+                                ? { bastionHostId: params.bastionHostId }
+                                : {}),
+                              namespace: ns,
+                              pods: pods.slice(0, 20),
+                              title: tn(pods.length, '{n} pod', '{n} pods')
+                            })
+                        }
+                      : undefined
                   }
-                : {})}
-            />
-          )}
+                  onRun={(k) => {
+                    runBulk(k)
+                  }}
+                  onCopyNames={() => {
+                    copyNames()
+                  }}
+                  onCopyYaml={() => {
+                    copyYamlOf()
+                  }}
+                  onClear={() => {
+                    setSelected(new Set())
+                  }}
+                />
+              )}
+              {list.error && (
+                <div className="border-b border-line p-2">
+                  <Notice tone="danger" testId="k8s-notice">
+                    {list.error}
+                  </Notice>
+                </div>
+              )}
+              {list.truncated !== null && !onOverview && !onMap && !onHelm && (
+                <div className="border-b border-line p-2">
+                  <Notice tone="warning" testId="k8s-truncated">
+                    {t(
+                      'Showing the first {count} objects. Pick a namespace or open a narrower view to see the rest.',
+                      { count: formatNumber(list.truncated) }
+                    )}
+                  </Notice>
+                </div>
+              )}
+              {!ready ? (
+                <div
+                  className="flex flex-1 items-center justify-center text-xs text-faint"
+                  data-testid="k8s-status"
+                >
+                  {session.status}
+                </div>
+              ) : onHelm ? (
+                namespaces === null ? null : (
+                  <HelmView
+                    request={request}
+                    namespaces={namespaces}
+                    active={active}
+                    filter={query}
+                    readOnly={readOnly}
+                  />
+                )
+              ) : onMap ? (
+                namespaces === null ? null : (
+                  <MapView
+                    tabId={tabId}
+                    request={request}
+                    namespaces={namespaces}
+                    active={active}
+                    onOpen={openFromMap}
+                    onLogs={(ref, labels) => {
+                      const base = {
+                        ref: params.ref,
+                        ...(params.bastionHostId ? { bastionHostId: params.bastionHostId } : {}),
+                        namespace: ref.ns ?? ''
+                      }
+                      if (ref.kind === 'pods') openPodLogs({ ...base, pod: ref.name })
+                      else {
+                        const selector = Object.entries(labels ?? {})
+                          .map(([k, v]) => `${k}=${v}`)
+                          .join(',')
+                        if (!selector)
+                          notify(t('{name} has no pod labels', { name: ref.name }), 'danger')
+                        else
+                          openPodLogs({
+                            ...base,
+                            selector,
+                            title: `${ref.kind.split('.')[0]?.replace(/s$/, '') ?? ''}/${ref.name}`
+                          })
+                      }
+                    }}
+                    onPortForward={
+                      readOnly
+                        ? undefined
+                        : (ref) => {
+                            // Topology chỉ có tham chiếu — lấy object để biết cổng (pod: containerPort,
+                            // service: port), rồi mở đúng hộp thoại forward như từ bảng.
+                            if (ref.kind !== 'pods' && ref.kind !== 'services') return
+                            request<K8sObject>({
+                              op: 'get',
+                              kind: ref.kind,
+                              ...(ref.ns ? { namespace: ref.ns } : {}),
+                              name: ref.name,
+                              format: 'json'
+                            }).then(
+                              (obj) => {
+                                const ports =
+                                  ref.kind === 'pods'
+                                    ? (
+                                        (obj.spec?.['containers'] as
+                                          { ports?: { containerPort: number }[] }[] | undefined) ??
+                                        []
+                                      ).flatMap((c) => (c.ports ?? []).map((p) => p.containerPort))
+                                    : (
+                                        (obj.spec?.['ports'] as { port: number }[] | undefined) ??
+                                        []
+                                      ).map((p) => p.port)
+                                setDialog({ kind: 'forward', obj, ports })
+                              },
+                              (e: unknown) => {
+                                notify(cleanError(e), 'danger')
+                              }
+                            )
+                          }
+                    }
+                    onShell={
+                      readOnly
+                        ? undefined
+                        : (ref) => {
+                            openPodShell(
+                              { ref: params.ref, namespace: ref.ns ?? '', pod: ref.name },
+                              params.bastionHostId
+                            )
+                          }
+                    }
+                  />
+                )
+              ) : onOverview ? (
+                namespaces === null ? null : (
+                  <ClusterOverview
+                    request={request}
+                    namespaces={namespaces}
+                    active={active}
+                    onNavigate={go}
+                    onOpen={openRef}
+                  />
+                )
+              ) : !loaded ? (
+                <div
+                  className="flex flex-1 items-center justify-center text-xs text-faint"
+                  data-testid="k8s-status"
+                >
+                  {t('Loading…')}
+                </div>
+              ) : kindId === 'events' && !top ? (
+                <EventsView objects={objects} error={list.error} onOpen={openRef} />
+              ) : (
+                <FileTable
+                  items={rows}
+                  getKey={(r) => r.row.key}
+                  getLabel={(r) => r.row.name}
+                  icon={(r) => (
+                    <>
+                      <input
+                        type="checkbox"
+                        className="size-3.5 shrink-0 accent-[var(--sh-accent)]"
+                        aria-label={t('Select {name}', { name: r.row.name })}
+                        data-testid="k8s-row-check"
+                        tabIndex={-1}
+                        checked={selected.has(r.row.key)}
+                        onClick={(e) => {
+                          // Không để dòng nhận cú bấm (chọn một dòng) — ô chọn bật / tắt riêng dòng này.
+                          e.stopPropagation()
+                        }}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation()
+                        }}
+                        onChange={() => {
+                          toggleRow(r.row.key)
+                        }}
+                      />
+                      <Box size={14} strokeWidth={1.6} className="shrink-0 text-faint" />
+                    </>
+                  )}
+                  columns={columns}
+                  gridClass=""
+                  gridStyle={{ gridTemplateColumns: fit.template }}
+                  nameSort={{ key: 'name', label: t('Name'), kind: 'text' }}
+                  sort={sort}
+                  onSort={setSort}
+                  selected={selected}
+                  onSelect={(sel) => {
+                    setSelected(sel)
+                    // Chi tiết đang mở → đi theo dòng chọn.
+                    if (detailKey && sel.size === 1) setDetailKey([...sel][0] ?? null)
+                  }}
+                  onOpen={open}
+                  onContextMenu={(e, items) => {
+                    const first = items[0]
+                    const copyNames: MenuEntry = {
+                      id: 'copy-name',
+                      label:
+                        items.length > 1
+                          ? tn(items.length, 'Copy {n} name', 'Copy {n} names')
+                          : t('Copy name'),
+                      icon: <Copy size={14} />,
+                      onSelect: () =>
+                        void window.shellhouse.writeClipboard(
+                          items.map((r) => r.row.name).join('\n')
+                        )
+                    }
+                    if (first && items.length === 1)
+                      openMenu(e, [
+                        {
+                          id: 'describe',
+                          label: t('Describe'),
+                          hint: 'd',
+                          onSelect: () => {
+                            setDetailKey(first.row.key)
+                          }
+                        },
+                        copyNames,
+                        ...toMenu(actionsFor(kindId, first.obj, readOnly, handlers))
+                      ])
+                    else if (items.length > 1)
+                      openMenu(e, [
+                        copyNames,
+                        {
+                          id: 'copy-yaml',
+                          label: tn(
+                            items.length,
+                            'Copy YAML of {n} object',
+                            'Copy YAML of {n} objects'
+                          ),
+                          icon: <FileCode size={14} />,
+                          onSelect: () => {
+                            copyYamlOf(items)
+                          }
+                        },
+                        ...(bulkAvailable.length ? (['separator'] as const) : []),
+                        ...bulkAvailable.map((k): MenuEntry => ({
+                          id: `bulk-${k}`,
+                          label:
+                            k === 'delete'
+                              ? tn(items.length, 'Delete {n} object…', 'Delete {n} objects…')
+                              : k === 'restart'
+                                ? tn(items.length, 'Restart {n} workload', 'Restart {n} workloads')
+                                : k === 'scale'
+                                  ? tn(items.length, 'Scale {n} workload…', 'Scale {n} workloads…')
+                                  : k === 'cordon'
+                                    ? tn(items.length, 'Cordon {n} node', 'Cordon {n} nodes')
+                                    : tn(items.length, 'Uncordon {n} node', 'Uncordon {n} nodes'),
+                          ...(k === 'delete' ? { danger: true } : {}),
+                          onSelect: () => {
+                            runBulk(k, items)
+                          }
+                        }))
+                      ])
+                  }}
+                  ariaLabel={kind?.kind ?? t('Resources')}
+                  rowTestId="k8s-row"
+                >
+                  {rows.length === 0 && (
+                    <EmptyList
+                      kindId={kindId}
+                      what={titleOf(kindId).toLowerCase()}
+                      kindName={kind?.kind ?? titleOf(kindId)}
+                      filter={q ? query.trim() : null}
+                      namespaces={scopeNs}
+                      onClearFilter={() => {
+                        setQuery('')
+                      }}
+                      onCreate={
+                        !readOnly && FORM_FOR_KIND[kindId]
+                          ? () => {
+                              setDialog({
+                                kind: 'create',
+                                initial: FORM_FOR_KIND[kindId] ?? 'Deployment'
+                              })
+                            }
+                          : undefined
+                      }
+                      onShowAll={
+                        kind?.namespaced && scopeNs.length > 0 && allNamespaces.length > 1
+                          ? () => {
+                              setNamespaces([])
+                            }
+                          : undefined
+                      }
+                    />
+                  )}
+                </FileTable>
+              )}
+              <ForwardsPanel
+                bus={bus}
+                request={request}
+                open={showForwards}
+                onCount={setForwardCount}
+              />
+            </div>
+
+            {detail && (
+              <Detail
+                key={detail.row.key}
+                kindId={kindId}
+                obj={detail.obj}
+                request={request}
+                actions={actionsFor(kindId, detail.obj, readOnly, handlers)}
+                nodeUsage={
+                  kindId === 'nodes' ? (metrics?.items[objectKey(detail.obj)] ?? null) : null
+                }
+                onClose={() => {
+                  setDetailKey(null)
+                }}
+                onOpenPod={(pod) => {
+                  setDrill([])
+                  setView('pods')
+                  setSelected(new Set([objectKey(pod)]))
+                  setDetailTab('overview')
+                  setDetailKey(objectKey(pod))
+                }}
+                initialTab={detailTab}
+                onNavigate={(kind, name, namespace) => {
+                  const info =
+                    BUILTIN_KINDS.find((k) => k.id === kind) ??
+                    (kinds ?? []).find((k) => k.id === kind)
+                  openRef(
+                    kind,
+                    namespace ??
+                      (info?.namespaced === false ? undefined : detail.obj.metadata.namespace),
+                    name
+                  )
+                }}
+                readOnly={readOnly}
+                bus={bus}
+                onNotify={(text, tone) => {
+                  notify(text, tone ?? 'success')
+                }}
+                {...(HAS_PODS.includes(kindId)
+                  ? {
+                      onShowPods: () => {
+                        drillPods(detail.obj)
+                      }
+                    }
+                  : {})}
+              />
+            )}
+          </div>
+
+          <KeyHints items={hintItems} all={allKeys} open={helpOpen} onOpenChange={setHelpOpen} />
+
+          {session.prompt && <ConnectionPrompt prompt={session.prompt} onAnswer={session.answer} />}
+          <ClusterDialogs
+            dialog={dialog}
+            setDialog={setDialog}
+            request={request}
+            kindId={kindId}
+            kind={kind}
+            scopeNs={scopeNs}
+            allNamespaces={allNamespaces}
+            clusterNamespace={cluster?.namespace}
+            production={production}
+            readOnly={readOnly}
+            detailKey={detailKey}
+            setDetailKey={setDetailKey}
+            openRef={openRef}
+            onForwardStarted={openForwards}
+            contextRef={params.ref}
+            contextName={params.label}
+            bastionHostId={params.bastionHostId}
+            onBulkDeleted={(keys) => {
+              const gone = new Set(keys)
+              setSelected((s) => new Set([...s].filter((k) => !gone.has(k))))
+              if (detailKey && gone.has(detailKey)) setDetailKey(null)
+            }}
+          />
+          {menu}
+          {guardProvider.element}
         </div>
-
-        <KeyHints items={hintItems} all={allKeys} open={helpOpen} onOpenChange={setHelpOpen} />
-
-        {session.prompt && <ConnectionPrompt prompt={session.prompt} onAnswer={session.answer} />}
-        <ClusterDialogs
-          dialog={dialog}
-          setDialog={setDialog}
-          request={request}
-          kindId={kindId}
-          kind={kind}
-          scopeNs={scopeNs}
-          allNamespaces={allNamespaces}
-          clusterNamespace={cluster?.namespace}
-          production={production}
-          readOnly={readOnly}
-          detailKey={detailKey}
-          setDetailKey={setDetailKey}
-          openRef={openRef}
-          onForwardStarted={openForwards}
-          contextRef={params.ref}
-          contextName={params.label}
-          bastionHostId={params.bastionHostId}
-          onBulkDeleted={(keys) => {
-            const gone = new Set(keys)
-            setSelected((s) => new Set([...s].filter((k) => !gone.has(k))))
-            if (detailKey && gone.has(detailKey)) setDetailKey(null)
-          }}
-        />
-        {menu}
-        {guardProvider.element}
-      </div>
-    </GuardProvider>
+      </GuardProvider>
+    </RefreshContext.Provider>
   )
 }
 

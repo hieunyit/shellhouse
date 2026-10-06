@@ -775,6 +775,16 @@ test('Kubernetes: trang Deployment (Status / Resources / Pods / ReplicaSets), To
     const tiles = detail.getByTestId('k8s-pod-tile')
     await expect(tiles).toHaveCount(2)
     await expect(tiles.first()).toHaveAttribute('data-name', 'web-2')
+    // Pod mới của Deployment (Deployment không đổi) → lưới pod tự cập nhật (nhịp 10 giây), không
+    // cần bấm Refresh.
+    server.upsert('pods', {
+      apiVersion: 'v1',
+      kind: 'Pod',
+      metadata: { name: 'web-9', namespace: 'shop', labels: { app: 'web' } }
+    })
+    await expect(tiles).toHaveCount(3, { timeout: 15_000 })
+    server.remove('pods', 'shop', 'web-9')
+    await expect(tiles).toHaveCount(2, { timeout: 15_000 })
     await expect(detail.getByTestId('k8s-resources-table')).toContainText('nginx:1.27')
     await expect(detail.getByTestId('k8s-replicaset-row')).toHaveCount(2)
     await expect(detail.getByTestId('k8s-replicaset-rollback')).toHaveCount(1)
