@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.20] - 2026-10-06
+
 ### Added
 
 - Kubernetes: **Timeline** tab for Deployments, StatefulSets and DaemonSets — rollouts (with the
