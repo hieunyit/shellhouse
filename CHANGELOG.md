@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.23] - 2026-10-07
+
 ### Changed
 
 - Import hosts: a host whose IdentityFile (or key file) is not on this computer can still be
