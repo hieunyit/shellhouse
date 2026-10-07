@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.24] - 2026-10-07
+
 ### Added
 
 - **Proxy** for S3, the Kubernetes API and update checks (Settings › Network): _System_ uses
