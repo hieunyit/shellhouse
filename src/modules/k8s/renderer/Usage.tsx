@@ -18,7 +18,8 @@ const RANGES = [
   { m: 15, label: '15m' },
   { m: 60, label: '1h' },
   { m: 360, label: '6h' },
-  { m: 1440, label: '24h' }
+  { m: 1440, label: '24h' },
+  { m: 10_080, label: '7d' }
 ] as const
 const LIVE_MS = 10_000
 const LIVE_KEEP_MS = 60 * 60_000

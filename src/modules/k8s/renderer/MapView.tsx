@@ -2,11 +2,17 @@ import { useEffect, useMemo, useState } from 'react'
 import { RefreshCw, Tag, X } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
-import { formatTime, t } from '../../registry/renderer-kit'
+import { formatDateTime, formatTime, t } from '../../registry/renderer-kit'
 import { filterMapData, groupingKeys, parseLabelSelector, type MapData } from '../shared/map'
 import { NodesView } from './NodesView'
 import { TrafficMap } from './TrafficMap'
 import { useTraffic } from './useTraffic'
+import {
+  TrafficWindowPicker,
+  useHistoryProbe,
+  useTrafficRange,
+  type TrafficWindow
+} from './useTrafficHistory'
 import { type Request, type MapRef, OPTIONS_KEY, type Options, loadOptions } from './mapModel'
 import { ViewSwitch, useElementWidth } from './MapControls'
 import { panelOverlayStable, toolbarFitStable, type ToolbarFit } from '../shared/toolbarFit'
@@ -63,10 +69,15 @@ export function MapView({
   const nsKey = namespaces.join(',')
   const data = loaded && loaded.request === request && loaded.ns === nsKey ? loaded.data : null
   const view = options.view
+  /** Map › Traffic: xem trực tiếp hay trung bình một khoảng đã qua (Prometheus). */
+  const [trafficWindow, setTrafficWindow] = useState<TrafficWindow>('live')
+  const historic = view === 'traffic' && trafficWindow !== 'live'
   const traffic = useTraffic(
     request,
-    active && (view === 'traffic' || (options.traffic && view === 'topology'))
+    active && !historic && (view === 'traffic' || (options.traffic && view === 'topology'))
   )
+  const probe = useHistoryProbe(request)
+  const past = useTrafficRange(request, view === 'traffic' ? trafficWindow : 'live', active)
   /** Ô trên thanh công cụ để Topology đặt điều khiển của nó (một hàng). */
   const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null)
   // Độ rộng thật của thanh công cụ → mức gọn (cửa sổ hẹp / sidebar host rộng / bảng tài nguyên).
@@ -256,7 +267,16 @@ export function MapView({
               <div className="flex-1" />
             </>
           )}
-          {view !== 'topology' && view !== 'nodes' && <div className="flex-1" />}
+          {view === 'traffic' && (
+            <>
+              <TrafficWindowPicker
+                value={trafficWindow}
+                onChange={setTrafficWindow}
+                probe={probe}
+              />
+              <div className="flex-1" />
+            </>
+          )}
           <button
             type="button"
             aria-label={t('Refresh')}
@@ -289,11 +309,25 @@ export function MapView({
                 </p>
               )
             ))}
+          {view === 'traffic' && past?.status === 'live' && past.start && past.end && (
+            <p
+              className="border-b border-line bg-subtle px-3 py-1.5 text-xs text-muted"
+              data-testid="k8s-traffic-history-banner"
+            >
+              {t('Average traffic from {start} to {end}', {
+                start: formatDateTime(past.start),
+                end: formatTime(past.end)
+              })}{' '}
+              <span className="text-faint">
+                · {t('from Prometheus {via}', { via: past.via ?? '' })}
+              </span>
+            </p>
+          )}
           {view === 'traffic' && (
             <div
               className={cx('k8s-map flex min-h-0 flex-1', options.darkCanvas && 'k8s-map-dark')}
             >
-              <TrafficMap traffic={traffic} scope={namespaces} onOpen={onOpen} />
+              <TrafficMap traffic={past ?? traffic} scope={namespaces} onOpen={onOpen} />
             </div>
           )}
           {view === 'topology' && (

@@ -152,7 +152,7 @@ async function findAgents(
 }
 
 /** Service → workload phía sau (selector khớp pod template); chia đều nếu nhiều workload. */
-async function resolveServices(
+export async function resolveServices(
   client: KubeClient,
   links: TrafficLink[],
   cache: TrafficCache,

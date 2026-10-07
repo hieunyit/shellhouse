@@ -902,6 +902,63 @@ test('Kubernetes: Metrics lấy lịch sử từ Prometheus trong cluster (chọ
   }
 })
 
+test('Kubernetes: lịch sử traffic qua Prometheus — Map › Traffic và tab Traffic của Deployment', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  server.enablePrometheus({ history: true })
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    await setWindowSize(launched, 1366, 820)
+    await page.getByTestId('k8s-nav-map').click()
+    const map = view.getByTestId('k8s-map')
+    await map.getByTestId('k8s-map-view-traffic').click()
+    // Có Prometheus thu Caretta → chọn được khoảng đã qua; bản đồ là trung bình của khoảng đó.
+    const past = map.getByTestId('k8s-traffic-window-6h')
+    await expect(past).toBeEnabled()
+    await past.click()
+    await expect(map.getByTestId('k8s-traffic-history-banner')).toContainText(
+      'Average traffic from'
+    )
+    await expect(map.getByTestId('k8s-traffic-history-banner')).toContainText(
+      'monitoring/prometheus-operated'
+    )
+    // Chọn web → đường của nó hiện nhãn tốc độ + cổng; bảng bên: gọi tới api cổng 8080.
+    await map.locator('[data-testid="k8s-traffic-node"][data-name="web"]').click()
+    await expect(map.getByTestId('k8s-traffic-edge-label').first()).toContainText('KB/s')
+    await expect(map.getByTestId('k8s-traffic-edge-port').first()).toContainText(':8080')
+    await expect(
+      map.locator('[data-testid="k8s-traffic-panel-peer"][data-name="api"]')
+    ).toContainText(':8080')
+    await map.getByTestId('k8s-traffic-window-live').click()
+    await expect(map.getByTestId('k8s-traffic-history-banner')).toHaveCount(0)
+
+    // Tab Traffic của Deployment web: 24h từ Prometheus — đối tác + tổng vào / ra theo thời gian.
+    await page.getByTestId('k8s-nav-deployments.apps').click()
+    await view.locator('[data-testid="k8s-row"][data-name="shop/web"]').click()
+    await page.keyboard.press('d')
+    const detail = view.getByTestId('k8s-describe')
+    await detail.getByTestId('k8s-detail-tab-traffic').click()
+    const traffic = detail.getByTestId('k8s-traffic')
+    await traffic.getByTestId('k8s-traffic-window-24h').click()
+    await expect(traffic.getByTestId('k8s-traffic-status')).toHaveText('History')
+    await expect(traffic).toContainText('from Prometheus monitoring/prometheus-operated')
+    await expect(
+      traffic.locator('[data-testid="k8s-traffic-peer"][data-name="api"]')
+    ).toContainText(':8080')
+  } finally {
+    await launched.close()
+    await server.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('Home › Infrastructure: cluster Production tự theo dõi (không mở tab), vấn đề lên Needs attention, tắt theo dõi', async () => {
   test.setTimeout(60_000)
   const server = await startApiTestServer()

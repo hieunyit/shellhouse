@@ -100,6 +100,14 @@ export function entryDetail(e: TimelineEntry): string {
   }
   if (e.type === 'container-terminated')
     return [e.object.name, e.message].filter(Boolean).join(' — ')
+  if (e.type === 'event' && e.fromPrometheus)
+    return e.object.name
+      ? t('{object} — count from Prometheus (no message)', {
+          object: `${e.object.kind}/${e.object.name}`
+        })
+      : t('{kind} events in this namespace — count from Prometheus (no message)', {
+          kind: e.object.kind || t('Object')
+        })
   if (e.type === 'event')
     return [`${e.object.kind}/${e.object.name}`, e.message].filter(Boolean).join(' — ')
   return e.message ?? ''
@@ -177,6 +185,15 @@ function Row({ e, focus }: { e: TimelineEntry; focus: boolean }): React.JSX.Elem
           {e.recorded && (
             <span title={t('From the history kept on this computer')} className="text-faint">
               <History size={11} />
+            </span>
+          )}
+          {e.fromPrometheus && (
+            <span
+              title={t('From Prometheus (event exporter)')}
+              className="rounded bg-subtle px-1 text-[10px] text-faint"
+              data-testid="k8s-timeline-prometheus"
+            >
+              Prometheus
             </span>
           )}
         </span>
@@ -428,6 +445,8 @@ export function TimelineOf({
             '{n} older event from history.',
             '{n} older events from history.'
           )}`}
+        {data.entries.some((e) => e.fromPrometheus) &&
+          ` ${t('Earlier event counts come from Prometheus.')}`}
       </p>
     </div>
   )

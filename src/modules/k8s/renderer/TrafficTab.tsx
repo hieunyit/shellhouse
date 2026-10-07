@@ -1,12 +1,19 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { ArrowDownLeft, ArrowUpRight } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { Heading, Sparkline } from '../../../renderer/src/components/panels'
-import { t, tn } from '../../registry/renderer-kit'
+import { formatDateTime, formatTime, t, tn } from '../../registry/renderer-kit'
 import type { K8sOp } from '../shared/ops'
 import type { K8sObject } from '../shared/resources'
 import { WORKLOAD_KIND_ID, bandsFor, type TrafficPeer, type TrafficRate } from '../shared/traffic'
 import { useTraffic } from './useTraffic'
+import {
+  TrafficWindowPicker,
+  useHistoryProbe,
+  useTrafficRange,
+  useTrafficSeries,
+  type TrafficWindow
+} from './useTrafficHistory'
 import { TrafficFocusMap } from './TrafficMap'
 import {
   HUBBLE_ENABLE,
@@ -45,7 +52,16 @@ export function TrafficOf({
   request: Request
   onNavigate?: (kind: string, name: string, namespace?: string) => void
 }): React.JSX.Element {
-  const traffic = useTraffic(request, true)
+  const [window, setWindow] = useState<TrafficWindow>('live')
+  const probe = useHistoryProbe(request)
+  const live = useTraffic(request, window === 'live')
+  const past = useTrafficRange(request, window)
+  const series = useTrafficSeries(request, window, {
+    kind: kindId,
+    namespace: obj.metadata.namespace ?? '',
+    name: obj.metadata.name
+  })
+  const traffic = past ?? live
   const mine = useMemo(() => {
     const incoming = traffic.rates.filter((r) => isSelf(kindId, obj, r.server))
     const outgoing = traffic.rates.filter((r) => isSelf(kindId, obj, r.client))
@@ -54,10 +70,14 @@ export function TrafficOf({
       outgoing: outgoing.sort((a, b) => b.rate - a.rate)
     }
   }, [traffic.rates, kindId, obj])
-  const history = traffic.history.map((h) => ({
-    in: sum(h.rates.filter((r) => isSelf(kindId, obj, r.server))),
-    out: sum(h.rates.filter((r) => isSelf(kindId, obj, r.client)))
-  }))
+  // Trực tiếp: các mẫu gần nhất; lịch sử: chuỗi vào / ra từ Prometheus (cùng mốc thời gian).
+  const history =
+    series?.source === 'prometheus'
+      ? series.inbound.map(([, v], i) => ({ in: v, out: series.outbound[i]?.[1] ?? 0 }))
+      : traffic.history.map((h) => ({
+          in: sum(h.rates.filter((r) => isSelf(kindId, obj, r.server))),
+          out: sum(h.rates.filter((r) => isSelf(kindId, obj, r.client)))
+        }))
   // Workload này dưới dạng bên Caretta (Deployment…) — tâm của bản đồ nhỏ.
   const focus = useMemo<TrafficPeer>(
     () => ({
@@ -77,6 +97,7 @@ export function TrafficOf({
   return (
     <TrafficUnitContext.Provider value={traffic.unit ?? 'bytes'}>
       <div className="flex flex-col gap-4" data-testid="k8s-traffic" data-status={status}>
+        <TrafficWindowPicker value={window} onChange={setWindow} probe={probe} />
         <div className="flex items-center gap-2 text-xs">
           <span
             className={cx(
@@ -90,7 +111,9 @@ export function TrafficOf({
           />
           <span className="font-medium text-fg" data-testid="k8s-traffic-status">
             {status === 'live'
-              ? t('Live')
+              ? past
+                ? t('History')
+                : t('Live')
               : status === 'connecting'
                 ? t('Connecting…')
                 : status === 'empty'
@@ -99,11 +122,17 @@ export function TrafficOf({
           </span>
           <span className="text-faint">
             {status === 'live' &&
-              tn(
-                traffic.agents,
-                'from {n} Caretta agent · average over the last minute',
-                'from {n} Caretta agents · average over the last minute'
-              )}
+              (past?.start && past.end
+                ? t('average from {start} to {end} · from Prometheus {via}', {
+                    start: formatDateTime(past.start),
+                    end: formatTime(past.end),
+                    via: past.via ?? ''
+                  })
+                : tn(
+                    traffic.agents,
+                    'from {n} Caretta agent · average over the last minute',
+                    'from {n} Caretta agents · average over the last minute'
+                  ))}
             {status === 'connecting' && t('taking the first two samples to measure throughput')}
             {status === 'empty' &&
               t(

@@ -60,8 +60,11 @@ import { helmRevision, helmRollback, helmUninstall } from './helm'
 import { mapData } from './map'
 import { recordEvents } from './eventRecorder'
 import { workloadTimeline } from './timeline'
+import { eventCounts, probeHistory, trafficRange, trafficSeries } from './history'
+import type { HistoryProbe } from '../shared/history'
 import type { QueryEvents, RecordedEvent } from '../shared/timeline'
-import { related } from './related'
+import { podTemplate, related } from './related'
+import { selectorMatches } from '../shared/map'
 import { rbacReach, topology } from './topology'
 import { disposeTrafficCache, trafficSample, type TrafficCache } from './traffic'
 
@@ -229,6 +232,8 @@ export class K8sService implements HostModuleSession {
   private refKey: string | null = null
   /** Đang ghi event của cluster về máy (theo dõi ở Home). */
   private recorder: AbortController | null = null
+  /** Prometheus có metric gì (dò lại sau PROM_RETRY_MS). */
+  private probe: { value: HistoryProbe; at: number } | null = null
   private readOnly = false
   private kinds = new Map<string, ResourceKind>(BUILTIN_KINDS.map((k) => [k.id, k]))
   private readonly subscriptions = new Map<string, () => void>()
@@ -250,6 +255,7 @@ export class K8sService implements HostModuleSession {
     this.client?.close()
     this.cluster = cluster
     this.prom = null
+    this.probe = null
     this.client = new KubeClient(
       cluster,
       this.deps.rawConnect,
@@ -466,6 +472,8 @@ export class K8sService implements HostModuleSession {
       case 'timeline': {
         const cluster = this.refKey
         const deps = this.deps
+        const target = await this.prometheus(client, signal)
+        const probe = await this.historyProbe(client, signal)
         return workloadTimeline(
           client,
           op.kind,
@@ -475,6 +483,57 @@ export class K8sService implements HostModuleSession {
             cluster && deps.queryEvents
               ? deps.queryEvents({ ...q, cluster })
               : Promise.resolve({ events: [], recording: false }),
+          signal,
+          Date.now(),
+          probe.events
+            ? (pattern, start, end) =>
+                eventCounts(client, target, probe, op.namespace, pattern, start, end, signal)
+            : undefined
+        )
+      }
+      case 'history.probe':
+        return this.historyProbe(client, signal)
+      case 'traffic.range': {
+        const target = await this.prometheus(client, signal)
+        const probe = await this.historyProbe(client, signal)
+        return trafficRange(client, target, probe, this.trafficCache, op.start, op.end, signal)
+      }
+      case 'traffic.series': {
+        const target = await this.prometheus(client, signal)
+        const probe = await this.historyProbe(client, signal)
+        const kind = this.kind(op.kind)
+        const w = await client.json<K8sObject>('GET', resourcePath(kind, op.namespace, op.name), {
+          signal
+        })
+        // Service chọn pod của workload (Caretta ghi phía server là Service khi gọi qua ClusterIP).
+        const labels = podTemplate(op.kind, w)?.labels ?? {}
+        const services = await client
+          .json<{ items: K8sObject[] }>(
+            'GET',
+            `/api/v1/namespaces/${encodeURIComponent(op.namespace)}/services`,
+            { signal }
+          )
+          .then((r) =>
+            r.items
+              .filter((svc) => {
+                const sel = (svc.spec?.['selector'] ?? {}) as Record<string, string>
+                return Object.keys(sel).length > 0 && selectorMatches(sel, labels)
+              })
+              .map((svc) => svc.metadata.name)
+          )
+          .catch(() => [])
+        return trafficSeries(
+          client,
+          target,
+          probe,
+          {
+            ns: op.namespace,
+            name: op.name,
+            kind: kind.kind,
+            services
+          },
+          op.start,
+          op.end,
           signal
         )
       }
@@ -1413,6 +1472,13 @@ export class K8sService implements HostModuleSession {
       'forwards',
       [...this.forwards.values()].map((f) => f.info)
     )
+  }
+
+  private async historyProbe(client: KubeClient, signal?: AbortSignal): Promise<HistoryProbe> {
+    if (this.probe && Date.now() - this.probe.at < PROM_RETRY_MS) return this.probe.value
+    const value = await probeHistory(client, await this.prometheus(client, signal), signal)
+    this.probe = { value, at: Date.now() }
+    return value
   }
 
   private async prometheus(client: KubeClient, signal?: AbortSignal): Promise<PromTarget | null> {

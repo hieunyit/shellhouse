@@ -32,7 +32,7 @@ const PREFERRED = [
   /^prometheus$/
 ]
 
-const base = (t: PromTarget): string =>
+export const promBase = (t: PromTarget): string =>
   `/api/v1/namespaces/${encodeURIComponent(t.ns)}/services/${encodeURIComponent(t.name)}:${String(t.port)}/proxy`
 
 /** Ứng viên theo thứ tự ưu tiên (service có cổng 9090 hoặc cổng tên web / http-web). */
@@ -68,7 +68,7 @@ export async function findPrometheus(
   }
   for (const t of prometheusCandidates(list).slice(0, 3)) {
     try {
-      const r = await client.json<{ status?: string }>('GET', `${base(t)}/api/v1/query`, {
+      const r = await client.json<{ status?: string }>('GET', `${promBase(t)}/api/v1/query`, {
         query: { query: '1' },
         ...(signal ? { signal } : {})
       })
@@ -108,7 +108,7 @@ export async function podRange(
   const sel = `namespace="${namespace}",pod=~"${pods.map(escapeRe).join('|')}",container!="",container!="POD"`
   const window = `${String(Math.max(60, step * 2))}s`
   const run = async (query: string, scale: number): Promise<MetricsSeries[]> => {
-    const r = await client.json<Matrix>('GET', `${base(target)}/api/v1/query_range`, {
+    const r = await client.json<Matrix>('GET', `${promBase(target)}/api/v1/query_range`, {
       query: { query, start, end, step },
       ...(signal ? { signal } : {})
     })

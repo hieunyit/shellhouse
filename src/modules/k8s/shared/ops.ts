@@ -176,6 +176,23 @@ export const K8sOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('fleet') }),
   /** Ghi event của cả cluster về máy (7 ngày, cho tab Timeline) — bật / tắt. */
   z.object({ op: z.literal('events.record'), on: z.boolean() }),
+  /** Lịch sử qua Prometheus: Prometheus có metric traffic / event nào. */
+  z.object({ op: z.literal('history.probe') }),
+  /** Tốc độ trung bình từng cặp traffic trong [start, end] (ms) — từ Prometheus. */
+  z.object({
+    op: z.literal('traffic.range'),
+    start: z.number().int().min(0),
+    end: z.number().int().min(0)
+  }),
+  /** Vào / ra của một workload theo thời gian — từ Prometheus. */
+  z.object({
+    op: z.literal('traffic.series'),
+    kind: z.enum(['deployments.apps', 'statefulsets.apps', 'daemonsets.apps']),
+    namespace: Namespace,
+    name: Name,
+    start: z.number().int().min(0),
+    end: z.number().int().min(0)
+  }),
   /** Dòng thời gian của Deployment / StatefulSet / DaemonSet (tab Timeline). */
   z.object({
     op: z.literal('timeline'),

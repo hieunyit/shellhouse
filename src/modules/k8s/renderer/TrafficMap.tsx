@@ -912,7 +912,11 @@ function TrafficMapInner({
                 '{n} services'
               ),
               tn(graph.edges.length, '{n} connection', '{n} connections'),
-              tn(traffic.agents, '{n} Caretta agent', '{n} Caretta agents'),
+              traffic.historic
+                ? t('from Prometheus')
+                : traffic.source === 'hubble'
+                  ? 'Hubble'
+                  : tn(traffic.agents, '{n} Caretta agent', '{n} Caretta agents'),
               t('updated {when}', { when: formatRelative(traffic.updated) })
             ].join(' · ')}
           />

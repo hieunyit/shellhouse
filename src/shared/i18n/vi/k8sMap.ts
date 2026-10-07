@@ -441,5 +441,26 @@ export const k8sMap: Readonly<Record<string, string>> = {
     'Chỉ làm nổi pod có nhãn khớp — vd. tier=backend, app.kubernetes.io/part-of=shop, env in (prod,staging), !canary',
   'Open namespace {name}': 'Mở namespace {name}',
   '{n} failing pod': '{n} pod lỗi',
-  '{n} failing pods': '{n} pod lỗi'
+  '{n} failing pods': '{n} pod lỗi',
+  'Average traffic from {start} to {end}': 'Traffic trung bình từ {start} đến {end}',
+  'from Prometheus {via}': 'từ Prometheus {via}',
+  '{object} — count from Prometheus (no message)':
+    '{object} — số lần từ Prometheus (không có nội dung)',
+  '{kind} events in this namespace — count from Prometheus (no message)':
+    'Event của {kind} trong namespace này — số lần từ Prometheus (không có nội dung)',
+  'From Prometheus (event exporter)': 'Từ Prometheus (event exporter)',
+  'Earlier event counts come from Prometheus.': 'Số event trước đó lấy từ Prometheus.',
+  'average from {start} to {end} · from Prometheus {via}':
+    'trung bình từ {start} đến {end} · từ Prometheus {via}',
+  'Checking for Prometheus…': 'Đang tìm Prometheus…',
+  'History needs a Prometheus in the cluster.': 'Xem lịch sử cần Prometheus trong cluster.',
+  'Prometheus has Hubble metrics without workload labels — enable the "tcp" metric with labelsContext=source_namespace,source_workload,destination_namespace,destination_workload.':
+    'Prometheus có metric Hubble nhưng thiếu nhãn workload — bật metric "tcp" với labelsContext=source_namespace,source_workload,destination_namespace,destination_workload.',
+  'Prometheus does not collect Caretta or Hubble traffic metrics.':
+    'Prometheus chưa thu metric traffic của Caretta hay Hubble.',
+  'Live — read directly every 10 seconds': 'Trực tiếp — đọc mỗi 10 giây',
+  'Average over the last {range}, from Prometheus': 'Trung bình {range} gần nhất, từ Prometheus',
+  History: 'Lịch sử',
+  'Time range': 'Khoảng thời gian',
+  'from Prometheus': 'từ Prometheus'
 }

@@ -6,6 +6,19 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- Kubernetes history from the cluster's own **Prometheus** (found automatically, read through the
+  API server — nothing stored on this computer):
+  - **Traffic**: Map › Traffic and a workload's Traffic tab can show the last 1 h / 6 h / 24 h / 7
+    days instead of live data — the service map averaged over that period, and incoming / outgoing
+    over time. Works when Prometheus scrapes Caretta, or Hubble's `tcp` metric with workload labels;
+    otherwise the buttons are greyed out with the reason.
+  - **Events**: when Prometheus has an event exporter (`kube_events_total` / `kube_event_count`),
+    Timeline fills the period before the events still on the cluster with event counts by reason
+    (Prometheus keeps counts, not the event text).
+  - **Metrics**: the Metrics tab also offers 7 days.
+
 ### Changed
 
 - Docker container details: the health check is one line when healthy (last check, how many recent

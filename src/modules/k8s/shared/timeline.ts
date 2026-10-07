@@ -52,6 +52,11 @@ export interface TimelineEntry {
   recorded?: boolean
   /** uid của event (gộp bản sống với bản đã ghi). */
   uid?: string
+  /**
+   * Lấy từ Prometheus (event exporter): số lần theo lý do trong một bước thời gian — không có nội
+   * dung, có thể không có tên đối tượng.
+   */
+  fromPrometheus?: boolean
 }
 
 export interface TimelineResult {

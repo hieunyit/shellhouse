@@ -63,7 +63,11 @@ export interface ApiTestServer {
    */
   enableCaretta(options?: { forbidden?: boolean; realistic?: boolean; idle?: boolean }): void
   /** Cài Prometheus giả (monitoring/prometheus-operated:9090) trả lời query / query_range. */
-  enablePrometheus(): void
+  /**
+   * history: Prometheus còn có metric traffic của Caretta (web → api, cổng 8080) và số event của
+   * kube-events-exporter (BackOff của pod web-2, không có nhãn tên đối tượng).
+   */
+  enablePrometheus(options?: { history?: boolean }): void
   /**
    * Cài Hubble Relay giả (kube-system/hubble-relay, gRPC h2c cổng 4245): mỗi luồng GetFlows nhận
    * các flow đã có rồi theo dõi tiếp (`emitFlow`). Flow là message `flow.Flow` đã mã hoá.
@@ -452,6 +456,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
   let metricsDisabled = false
   let caretta: { forbidden: boolean; start: number; idle: boolean } | null = null
   let prometheus = false
+  let promHistory = false
   /** Kết nối giả (byte / giây): Internet → Service web; web → pod tool; web → DB bên ngoài. */
   const CARETTA_LINKS: { labels: string; rate: number; base?: number }[] = [
     {
@@ -630,12 +635,74 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
           '/api/v1/namespaces/monitoring/services/prometheus-operated:9090/proxy/api/v1/'
         )
       ) {
-        if (p.endsWith('/query'))
+        const q = url.searchParams.get('query') ?? ''
+        const vector = (result: { metric: Record<string, string>; value: number }[]) =>
+          json(res, 200, {
+            status: 'success',
+            data: {
+              resultType: 'vector',
+              result: result.map((r) => ({ metric: r.metric, value: [0, String(r.value)] }))
+            }
+          })
+        if (p.endsWith('/query')) {
+          // Dò metric: có lịch sử → Caretta + kube_events_total (không nhãn tên đối tượng).
+          if (q.startsWith('count('))
+            return vector([
+              {
+                metric: {},
+                value:
+                  promHistory &&
+                  (q === 'count(caretta_links_observed)' || q === 'count(kube_events_total)')
+                    ? 1
+                    : 0
+              }
+            ])
+          if (promHistory && q.includes('increase(caretta_links_observed[')) {
+            const seconds = Number(/\[(\d+)s\]/.exec(q)?.[1] ?? '60')
+            const link = (role: string, bytes: number) => ({
+              metric: {
+                role,
+                client_namespace: 'shop',
+                client_name: 'web',
+                client_kind: 'Deployment',
+                server_namespace: 'shop',
+                server_name: 'api',
+                server_kind: 'Deployment',
+                server_port: '8080'
+              },
+              value: bytes * seconds
+            })
+            // Cùng kết nối thấy từ hai phía: lấy phía lớn hơn (không cộng đôi).
+            return vector([link('client', 2048), link('server', 2000)])
+          }
           return json(res, 200, {
             status: 'success',
             data: { resultType: 'scalar', result: [0, '1'] }
           })
-        const q = url.searchParams.get('query') ?? ''
+        }
+        if (promHistory && /caretta_links_observed|kube_events_total/.test(q)) {
+          const start = Number(url.searchParams.get('start'))
+          const end = Number(url.searchParams.get('end'))
+          const step = Number(url.searchParams.get('step'))
+          const points = (value: (t: number) => number): [number, string][] => {
+            const out: [number, string][] = []
+            for (let t = start; t <= end; t += step) out.push([t, String(value(t))])
+            return out
+          }
+          const result = q.includes('kube_events_total')
+            ? [
+                {
+                  metric: { reason: 'BackOff', type: 'Warning', involved_object_kind: 'Pod' },
+                  // BackOff dồn dập ở đầu khoảng (trước khi cluster xoá event).
+                  values: points((t) => (t - start < step * 2 ? 6 : 0))
+                }
+              ]
+            : ['client', 'server'].map((role) => ({
+                metric: { role },
+                values: points((t) => (role === 'client' ? 2048 : 1024) + (t % 600))
+              }))
+          return json(res, 200, { status: 'success', data: { resultType: 'matrix', result } })
+        }
         const start = Number(url.searchParams.get('start'))
         const end = Number(url.searchParams.get('end'))
         const step = Number(url.searchParams.get('step'))
@@ -1849,8 +1916,9 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       notify(plural, 'DELETED', obj)
     },
     seedDemo,
-    enablePrometheus: () => {
+    enablePrometheus: (options = {}) => {
       prometheus = true
+      promHistory = options.history === true
       store
         .get('namespaces')
         ?.set(

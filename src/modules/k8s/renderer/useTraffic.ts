@@ -32,6 +32,8 @@ export interface TrafficState {
   source?: TrafficSource
   /** Đơn vị của `rates`: byte / giây (Caretta) hay kết nối mới / giây (Hubble). */
   unit?: TrafficUnit
+  /** Trung bình một khoảng đã qua (Prometheus), không phải số liệu trực tiếp. */
+  historic?: boolean
 }
 
 const HISTORY = 40

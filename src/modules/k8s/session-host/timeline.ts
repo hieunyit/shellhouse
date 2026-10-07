@@ -1,3 +1,4 @@
+import type { EventCount } from '../shared/history'
 import {
   EVENT_RETENTION_MS,
   ownedNamePattern,
@@ -10,6 +11,7 @@ import {
 import { selectorString, type K8sObject } from '../shared/resources'
 import { KubeError, type KubeClient } from './client'
 import { listPaged } from './operations'
+import { escapeRe } from './prometheus'
 import { templateRefs } from './map'
 
 type Obj = Record<string, unknown>
@@ -85,7 +87,9 @@ export async function workloadTimeline(
     q: Omit<QueryEvents, 'cluster'>
   ) => Promise<{ events: RecordedEvent[]; recording: boolean }>,
   signal?: AbortSignal,
-  now = Date.now()
+  now = Date.now(),
+  /** Số event theo lý do từ Prometheus (event exporter) — lấp phần cluster / máy không còn giữ. */
+  promEvents?: (namePattern: string, start: number, end: number) => Promise<EventCount[]>
 ): Promise<TimelineResult> {
   const plural = PLURAL[kindId]
   if (!plural) throw new Error(`No timeline for ${kindId}`)
@@ -326,6 +330,33 @@ export async function workloadTimeline(
       seen.add(e.uid)
       entries.push(eventEntry(e, true))
     }
+
+  // Prometheus (event exporter): chỉ có số lượng theo lý do — dùng cho khoảng TRƯỚC event cũ nhất
+  // còn đọc được (sống / đã ghi), không trùng với event có nội dung.
+  if (promEvents) {
+    const detailed = entries.filter((e) => e.lane === 'events').map((e) => e.at)
+    const until = detailed.length ? Math.min(...detailed) : now
+    // Workload + mọi tên con (ReplicaSet / pod, kể cả đã xoá) + ConfigMap / Secret nó dùng.
+    const pattern = [`${escapeRe(name)}(-.*)?`, ...configs.map((c) => escapeRe(c.name))].join('|')
+    const counts = await promEvents(pattern, since, until).catch(() => [])
+    for (const c of counts)
+      if (c.at < until)
+        entries.push({
+          at: c.at,
+          lane: 'events',
+          type: 'event',
+          severity:
+            c.type === 'Warning'
+              ? /BackOff|Failed|Unhealthy|OOM|Evicted|Killing/i.test(c.reason)
+                ? 'danger'
+                : 'warning'
+              : 'info',
+          object: { kind: c.kind, name: c.name ?? '', namespace },
+          reason: c.reason,
+          count: c.count,
+          fromPrometheus: true
+        })
+  }
 
   return {
     entries: entries
