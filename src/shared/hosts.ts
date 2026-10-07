@@ -343,12 +343,15 @@ export type ImportCandidate = z.infer<typeof ImportCandidate>
 
 /**
  * Tuỳ chọn khi nhập, áp cho mọi host đã chọn; thiếu trường = theo file. groupId: nhóm đích (nhóm
- * trong file tạo bên trong nó); keyId: SSH key trong vault; jumpHostId: host đã lưu làm jump host.
+ * trong file tạo bên trong nó); keyId: SSH key trong vault; jumpHostId: host đã lưu làm jump host;
+ * username: user SSH.
  */
 export const ImportOptions = z.object({
   groupId: z.string().max(64).optional(),
   keyId: z.string().max(64).optional(),
-  jumpHostId: z.string().max(64).optional()
+  jumpHostId: z.string().max(64).optional(),
+  /** User SSH cho mọi host đã chọn (thay user trong file; bắt buộc khi file không ghi user). */
+  username: Username.optional()
 })
 export type ImportOptions = z.infer<typeof ImportOptions>
 

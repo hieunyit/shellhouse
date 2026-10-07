@@ -45,7 +45,8 @@ const PIPE = '__PIPE__'
 export interface MobaScanOptions {
   home: string
   existingLabels: readonly string[]
-  defaultUser: string
+  /** null = không có user mặc định (người dùng nhập ở ô User lúc nhập). */
+  defaultUser: string | null
 }
 
 export interface MobaScan {
@@ -155,7 +156,7 @@ export function scanMobaXterm(text: string, options: MobaScanOptions): MobaScan 
       problem = t('Invalid hostname: {value}', { value: hostname })
     else if (!Number.isInteger(port) || port < 1 || port > 65535)
       problem = t('Invalid port: {value}', { value: portRaw })
-    else if (!Username.safeParse(username).success)
+    else if (username !== null && !Username.safeParse(username).success)
       problem = t('Invalid username: {value}', { value: username })
     else if (jump.problem) problem = jump.problem
     else if (keyFile && !existsSync(keyFile))

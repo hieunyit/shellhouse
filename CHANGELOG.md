@@ -6,6 +6,22 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- Command palette › **Terminal: command suggestion diagnostics** copies the suggestion state of
+  the current tab (what was read as the typed command, whether the host's history is loaded and
+  matches, where the suggestion is drawn) — for reporting a suggestion that does not appear. The
+  contents of the history are not included.
+
+### Fixed
+
+- Import hosts: when the file has no user (an Ansible inventory without `ansible_user`…), the user
+  signed in to this computer is no longer guessed for Ansible, nor used anywhere when it is not a
+  valid SSH user (Windows names with spaces or `DOMAIN\user`) — such hosts were blocked as
+  “Invalid username” with no way to fix them. The import options have a new **User** field that
+  applies to every selected host; hosts without a user are marked and Import waits until a user
+  is entered (or the host is unselected).
+
 ## [1.2.0-beta.25] - 2026-10-07
 
 ### Fixed

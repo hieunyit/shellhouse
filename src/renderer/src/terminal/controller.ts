@@ -24,7 +24,7 @@ import { SessionClient } from './session-client'
 import { broadcastInput } from './broadcast'
 import { tabTitle } from '@shared/tab-title'
 import { looksLikePrompt, MACRO_STEP_TIMEOUT_MS, type MacroStep } from '@shared/macro'
-import { loadHistory, recordCommand, suggestRest } from './suggestions'
+import { historyInfo, loadHistory, recordCommand, suggestRest } from './suggestions'
 import { windowsPty } from '../lib/platform'
 import { shouldProbe } from '../stores/module-ui'
 import { choose } from '../stores/confirm'
@@ -481,6 +481,51 @@ export class TerminalController {
       ghost: this.ghostRest,
       on: this.suggestionsOn()
     }
+  }
+
+  /**
+   * Chẩn đoán gợi ý lệnh cho người dùng (bảng lệnh › "Terminal: command suggestion diagnostics"):
+   * trạng thái dòng đang gõ, lịch sử đã nạp, vị trí / kích thước chữ gợi ý. Không gồm nội dung
+   * lịch sử.
+   */
+  suggestionReport(): string {
+    const b = this.term.buffer.active
+    const screen = this.term.element?.querySelector<HTMLElement>('.xterm-screen')
+    const typed = this.typedText(true)
+    const ghost = this.ghost?.getBoundingClientRect()
+    return JSON.stringify(
+      {
+        target: this.target.kind,
+        state: this.state,
+        setting: useSettings.getState().settings.terminal.commandSuggestions,
+        multiExec: this.inMultiExec,
+        buffer: b.type,
+        atBottom: b.viewportY === b.baseY,
+        renderer: this.rendererKind,
+        size: { cols: this.term.cols, rows: this.term.rows },
+        screen: screen ? { w: screen.clientWidth, h: screen.clientHeight } : null,
+        line: {
+          start: this.inputStart,
+          awaitingStart: this.awaitingStart,
+          dirty: this.lineDirty,
+          lineBuf: this.lineBuf,
+          typed,
+          cursor: { row: b.baseY + b.cursorY, col: b.cursorX },
+          beforeCursor: b.getLine(b.baseY + b.cursorY)?.translateToString(false, 0, b.cursorX),
+          afterCursor: b.getLine(b.baseY + b.cursorY)?.translateToString(true, b.cursorX)
+        },
+        history: historyInfo(this.historyTarget, typed),
+        ghost: this.ghostRest
+          ? {
+              rest: this.ghostRest,
+              rect: ghost && [ghost.left, ghost.top, ghost.width, ghost.height].map(Math.round),
+              letterSpacing: this.ghost?.style.letterSpacing
+            }
+          : null
+      },
+      null,
+      2
+    )
   }
 
   private suggestionsOn(): boolean {

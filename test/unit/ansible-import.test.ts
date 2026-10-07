@@ -129,4 +129,12 @@ all:
     expect(r.candidates[0]?.problem).toContain('Ansible template')
     expect(() => scan('# empty\n[web:vars]\nansible_user=x\n')).toThrow('No hosts found')
   })
+
+  it('không có ansible_user và không có user mặc định → user để trống (điền lúc nhập), không phải lỗi', () => {
+    const r = scanAnsibleInventory('[db]\ndb1 ansible_host=10.0.0.5\n', {
+      existingLabels: [],
+      defaultUser: null
+    })
+    expect(r.candidates[0]).toMatchObject({ hostname: '10.0.0.5', username: null, problem: null })
+  })
 })

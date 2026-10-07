@@ -49,6 +49,11 @@ export const COMMANDS: readonly CommandDef[] = [
   { id: 'modules.browse', title: 'Modules: Browse', keys: [null, null] },
   { id: 'diagnostics.toggle', title: 'Toggle diagnostics', keys: [null, null] },
   {
+    id: 'terminal.suggestionReport',
+    title: 'Terminal: command suggestion diagnostics',
+    keys: [null, null]
+  },
+  {
     id: 'view.focus',
     title: 'Focus mode: only the terminal',
     keys: ['Meta+Shift+Enter', 'Ctrl+Shift+Enter']

@@ -936,5 +936,12 @@ export const core: Readonly<Record<string, string>> = {
     'Cho proxy công ty kiểm tra TLS bằng chứng chỉ riêng. Bản cài tải về vẫn được kiểm tra chữ ký phát hành. Tài khoản S3 và context Kubernetes có tuỳ chọn “Bỏ qua kiểm tra chứng chỉ” riêng.',
   'Proxy and certificates for S3, Kubernetes and updates.':
     'Proxy và chứng chỉ cho S3, Kubernetes và cập nhật.',
-  'Skip certificate verification': 'Bỏ qua kiểm tra chứng chỉ'
+  'Skip certificate verification': 'Bỏ qua kiểm tra chứng chỉ',
+  'No user in the file — enter one under User': 'File không ghi user — điền ở ô User',
+  '{n} selected host has no user in the file.': '{n} host đã chọn không có user trong file.',
+  '{n} selected hosts have no user in the file.': '{n} host đã chọn không có user trong file.',
+  'Terminal: command suggestion diagnostics': 'Terminal: chẩn đoán gợi ý lệnh',
+  'Open a terminal tab first': 'Hãy mở một tab terminal trước',
+  'Command suggestion diagnostics copied': 'Đã chép chẩn đoán gợi ý lệnh',
+  'Paste it into your bug report.': 'Dán vào nội dung báo lỗi.'
 }

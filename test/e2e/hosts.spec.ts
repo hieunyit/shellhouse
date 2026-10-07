@@ -260,7 +260,7 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     const inventory = join(home, 'hosts.ini')
     writeFileSync(
       inventory,
-      '[web]\nweb[1:2].example.com\n\n[web:vars]\nansible_user=deploy\nansible_password=NOT-IMPORTED\n\n[shop:children]\nweb\n'
+      '[web]\nweb[1:2].example.com\n\n[web:vars]\nansible_user=deploy\nansible_password=NOT-IMPORTED\n\n[shop:children]\nweb\n\n[db]\ndb1.example.com\n'
     )
     await app.evaluate(({ dialog }, f) => {
       dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [f] })
@@ -278,10 +278,21 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     await dialog.getByTestId('import-option-group').selectOption(staging ?? '')
     await dialog.getByTestId('import-option-jump').selectOption(webId ?? '')
     await baseExpect(dialog.getByTestId('import-secrets-skipped')).toContainText('ansible_password')
-    await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toHaveCount(2)
+    await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toHaveCount(3)
     await baseExpect(dialog.locator('[data-testid^="import-row-"]').first()).toContainText(
       'deploy@web1.example.com'
     )
+    // Host không có ansible_user: không đoán bằng user của máy — phải điền ô User (hoặc bỏ chọn).
+    const db = dialog.getByTestId('import-row-db\\db1.example.com')
+    await baseExpect(db.getByTestId('import-no-user')).toBeVisible()
+    await baseExpect(dialog.getByTestId('import-user-needed')).toContainText('1 selected host')
+    await baseExpect(dialog.getByTestId('import-run')).toBeDisabled()
+    await dialog.getByTestId('import-option-user').fill('bad user')
+    await baseExpect(dialog.getByTestId('import-options')).toContainText('Invalid username')
+    await baseExpect(dialog.getByTestId('import-run')).toBeDisabled()
+    await dialog.getByTestId('import-option-user').fill('')
+    await db.getByRole('checkbox').uncheck()
+    await baseExpect(dialog.getByTestId('import-run')).toBeEnabled()
     await dialog.getByTestId('import-run').click()
     await baseExpect(dialog.getByTestId('import-result')).toContainText('Imported 2 hosts')
     await dialog.getByRole('button', { name: 'Done' }).click()

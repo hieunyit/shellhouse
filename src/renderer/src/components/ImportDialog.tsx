@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FolderOpen } from 'lucide-react'
-import type { ImportCandidate, ImportOptions } from '@shared/hosts'
+import { Username, type ImportCandidate, type ImportOptions } from '@shared/hosts'
 import { t, tn } from '@shared/i18n'
 import { formatNumber } from '@shared/i18n/format'
 import { useHosts } from '../stores/hosts'
 import { importKey } from './accounts/ImportKeyDialog'
-import { Button, Field, Modal, Notice, Segmented, Select } from './ui'
+import { Button, Field, Input, Modal, Notice, Segmented, Select } from './ui'
 
 type Source = 'ssh-config' | 'mobaxterm' | 'csv' | 'ansible' | 'rdp' | 'yaml'
 
@@ -66,6 +66,8 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
   const [groupId, setGroupId] = useState('')
   const [keyId, setKeyId] = useState('')
   const [jumpHostId, setJumpHostId] = useState('')
+  /** User SSH cho mọi host đã chọn ('' = theo file). */
+  const [username, setUsername] = useState('')
   const tree = useHosts((s) => s.tree)
   const groupTree = useHosts((s) => s.groupTree)
 
@@ -123,7 +125,8 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
     const options: ImportOptions = {
       ...(groupId ? { groupId } : {}),
       ...(keyId ? { keyId } : {}),
-      ...(jumpHostId ? { jumpHostId } : {})
+      ...(jumpHostId ? { jumpHostId } : {}),
+      ...(user ? { username: user } : {})
     }
     try {
       const { imported, skipped } =
@@ -149,6 +152,13 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
 
   const candidates = scan?.candidates ?? null
   const importable = (candidates ?? []).filter((c) => !c.problem)
+  const user = username.trim()
+  const userError = user && !Username.safeParse(user).success ? t('Invalid username') : null
+  // Host đã chọn mà file không ghi user — cần điền ô User (RDP: user không bắt buộc).
+  const missingUser =
+    source === 'rdp' || user
+      ? 0
+      : (candidates ?? []).filter((c) => selected.has(c.alias) && !c.username).length
   const ignored = Object.entries(scan?.ignored ?? {})
   const footer = result ? (
     <Button variant="primary" onClick={onClose}>
@@ -159,7 +169,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
       <Button onClick={onClose}>{t('Cancel')}</Button>
       <Button
         variant="primary"
-        disabled={!candidates?.length || selected.size === 0}
+        disabled={
+          !candidates?.length || selected.size === 0 || userError !== null || missingUser > 0
+        }
         data-testid="import-run"
         onClick={() => void run()}
       >
@@ -314,11 +326,19 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                     <span className="text-fg">{c.label ?? c.alias}</span>
                   </td>
                   <td className="px-3 py-2 font-mono text-xs text-muted">
-                    {source === 'rdp'
-                      ? c.username
-                        ? `${c.username}@`
-                        : ''
-                      : `${c.username ?? '?'}@`}
+                    {source === 'rdp' ? (
+                      c.username ? (
+                        `${c.username}@`
+                      ) : (
+                        ''
+                      )
+                    ) : user ? (
+                      <span className="text-fg">{user}@</span>
+                    ) : c.username ? (
+                      `${c.username}@`
+                    ) : (
+                      <span className="text-warning">?@</span>
+                    )}
                     {c.hostname}
                     {c.port === (source === 'rdp' ? 3389 : 22) ? '' : `:${c.port}`}
                   </td>
@@ -334,6 +354,11 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                     {!c.problem && !keyId && c.warning && (
                       <span className="block text-warning" data-testid="import-warning">
                         {c.warning} — {t('choose a key below or add one later')}
+                      </span>
+                    )}
+                    {!c.problem && !c.username && !user && source !== 'rdp' && (
+                      <span className="block text-warning" data-testid="import-no-user">
+                        {t('No user in the file — enter one under User')}
                       </span>
                     )}
                     {!c.problem && c.duplicate && (
@@ -352,7 +377,34 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
         </div>
       )}
       {candidates && candidates.length > 0 && !result && source !== 'rdp' && (
-        <div className="grid grid-cols-3 gap-3" data-testid="import-options">
+        <div className="grid grid-cols-2 gap-3" data-testid="import-options">
+          <Field
+            label={t('User')}
+            hint={
+              userError ? (
+                <span className="text-danger">{userError}</span>
+              ) : missingUser > 0 ? (
+                <span className="text-warning" data-testid="import-user-needed">
+                  {tn(
+                    missingUser,
+                    '{n} selected host has no user in the file.',
+                    '{n} selected hosts have no user in the file.'
+                  )}
+                </span>
+              ) : undefined
+            }
+          >
+            <Input
+              mono
+              data-testid="import-option-user"
+              placeholder={t('As in the file')}
+              aria-invalid={userError !== null}
+              value={username}
+              onChange={(e) => {
+                setUsername(e.target.value)
+              }}
+            />
+          </Field>
           <Field label={t('Into group')}>
             <Select
               data-testid="import-option-group"

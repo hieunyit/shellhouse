@@ -32,6 +32,21 @@ export function suggestRest(target: string, typed: string): string | null {
   return match ? match.slice(typed.length) : null
 }
 
+/** Chẩn đoán: lịch sử của đích đã nạp chưa, bao nhiêu lệnh, có lệnh khớp phần đang gõ không. */
+export function historyInfo(
+  target: string,
+  typed: string | null
+): { loaded: boolean; loading: boolean; size: number; matches: number } {
+  const list = cache.get(target)
+  return {
+    loaded: list !== undefined,
+    loading: loading.has(target),
+    size: list?.length ?? 0,
+    matches:
+      typed && list ? list.filter((c) => c.length > typed.length && c.startsWith(typed)).length : 0
+  }
+}
+
 export function recordCommand(target: string, command: string): void {
   const text = command.trim()
   // Lệnh bắt đầu bằng dấu cách: không lưu (như HISTCONTROL=ignorespace của bash).

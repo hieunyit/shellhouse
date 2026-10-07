@@ -84,6 +84,16 @@ test('gợi ý lệnh từ lịch sử: chữ mờ sau con trỏ, → để nh�
     .poll(shown)
     .toBe(first.command.slice(8))
     .catch(() => diagnose('no suggestion shown'))
+  // Chẩn đoán cho người dùng (bảng lệnh): chép trạng thái — lịch sử đã nạp, có lệnh khớp.
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+Shift+P')
+  await page.getByTestId('palette-input').fill('command suggestion diagnostics')
+  await page.keyboard.press('Enter')
+  await expect(page.getByTestId('toast-title').last()).toContainText('diagnostics copied')
+  const report = JSON.parse(await page.evaluate(() => window.shellhouse.readClipboard())) as {
+    history: { loaded: boolean; matches: number }
+  }
+  expect(report.history).toMatchObject({ loaded: true, matches: 1 })
+  await page.getByTestId(`terminal-${tab}`).click()
   await page.keyboard.press('ArrowRight')
   await expect(ghost).toHaveCount(0)
   await page.keyboard.press('Enter')

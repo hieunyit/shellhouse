@@ -209,6 +209,22 @@ export function App(): React.JSX.Element {
         shell.setFocus(!shell.focus)
         break
       }
+      case 'terminal.suggestionReport': {
+        const controller = tabs.activeId ? controllers.get(tabs.activeId) : undefined
+        if (!controller) {
+          toast.info(t('Open a terminal tab first'))
+          break
+        }
+        // Chụp ngay (đang gõ dở trong tab) và chép vào clipboard để dán khi báo lỗi.
+        const report = controller.suggestionReport()
+        void window.shellhouse.writeClipboard(report).then(() => {
+          toast.success(t('Command suggestion diagnostics copied'), {
+            description: t('Paste it into your bug report.'),
+            details: report
+          })
+        })
+        break
+      }
       case 'diagnostics.toggle': {
         const shell = useShell.getState()
         if (shell.area === 'settings' && shell.settingsSection === 'diagnostics') shell.back()

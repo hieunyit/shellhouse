@@ -4,7 +4,12 @@ import { basename, join } from 'node:path'
 import { app, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
 import { t } from '@shared/i18n'
-import type { ImportCandidate, ImportOptions, MutationResult } from '@shared/hosts'
+import {
+  Username,
+  type ImportCandidate,
+  type ImportOptions,
+  type MutationResult
+} from '@shared/hosts'
 import { showOpenDialog, showSaveDialog } from '../dialogs'
 import { writePrivateFile } from '../private-file'
 import { handle } from '../ipc/router'
@@ -101,7 +106,9 @@ function importCandidates(
     const ensureGroupPath = groupPathResolver(service)
     for (const c of candidates) {
       if (!wanted.has(c.alias)) continue
-      if (c.problem || !c.username) {
+      // User nhập lúc nhập thay user của file (và điền cho host file không ghi user).
+      const username = options.username ?? c.username
+      if (c.problem || !username) {
         skipped.push(c.alias)
         continue
       }
@@ -111,7 +118,7 @@ function importCandidates(
           label: c.label ?? c.alias,
           hostname: c.hostname,
           port: c.port,
-          username: c.username,
+          username,
           // Key chọn lúc nhập (trong vault) thay IdentityFile của file.
           ...(options.keyId
             ? { auth: 'key' as const, keyId: options.keyId, keyFile: null }
@@ -134,8 +141,13 @@ function importCandidates(
   })
 }
 
-function currentUser(): string {
-  return process.env['USER'] ?? process.env['USERNAME'] ?? 'root'
+/**
+ * User của máy này làm user mặc định khi file không ghi (như OpenSSH). Tên không dùng được cho SSH
+ * (Windows: có dấu cách, "DOMAIN\\user"…) → null: người dùng nhập ở ô User lúc nhập.
+ */
+function currentUser(): string | null {
+  const user = process.env['USER'] ?? process.env['USERNAME'] ?? null
+  return user !== null && Username.safeParse(user).success ? user : null
 }
 
 export function registerHostIpc(
@@ -444,7 +456,8 @@ export function registerHostIpc(
     if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error(t('The file is too large'))
     return scanAnsibleInventory(readFileSync(file, 'utf8'), {
       existingLabels: service.tree().hosts.map((h) => h.label),
-      defaultUser: currentUser()
+      // Inventory không ghi ansible_user: không đoán bằng user của máy này — hỏi ở ô User.
+      defaultUser: null
     })
   }
   handle('ansible:scan', isTrustedSender, async () => {

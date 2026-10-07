@@ -71,7 +71,8 @@ function hostAliases(config: SSHConfig): string[] {
 export interface ScanOptions {
   home: string
   existingLabels: readonly string[]
-  defaultUser: string
+  /** null = không có user mặc định (người dùng nhập ở ô User lúc nhập). */
+  defaultUser: string | null
 }
 
 /** Đọc cấu hình, trả về danh sách host để người dùng xem trước. Không chạy bất kỳ lệnh nào. */
@@ -127,7 +128,7 @@ export function scanSshConfig(text: string, options: ScanOptions): ImportCandida
       problem = t('Invalid hostname: {value}', { value: hostname })
     else if (!Number.isInteger(port) || port < 1 || port > 65535)
       problem = t('Invalid port: {value}', { value: portRaw ?? '' })
-    else if (!Username.safeParse(username).success)
+    else if (username !== null && !Username.safeParse(username).success)
       problem = t('Invalid username: {value}', { value: username })
     // IdentityFile không có trên máy này (cấu hình chép từ máy khác…): vẫn nhập được — chọn key
     // trong vault lúc nhập hoặc thêm sau.

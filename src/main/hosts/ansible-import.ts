@@ -31,7 +31,8 @@ interface Inventory {
 
 export interface AnsibleScanOptions {
   existingLabels: readonly string[]
-  defaultUser: string
+  /** null = không có user mặc định (người dùng nhập ở ô User lúc nhập). */
+  defaultUser: string | null
 }
 
 export interface AnsibleScan {
@@ -277,13 +278,13 @@ export function scanAnsibleInventory(text: string, options: AnsibleScanOptions):
     const keyFile = keyRaw ? expandHome(keyRaw) : null
 
     let problem: string | null = null
-    if ([hostname, username, portRaw, keyRaw].some((v) => v.includes('{{')))
+    if ([hostname, username ?? '', portRaw, keyRaw].some((v) => v.includes('{{')))
       problem = t('Uses an Ansible template ({{ … }}) — fill it in after importing')
     else if (!Hostname.safeParse(hostname).success)
       problem = t('Invalid hostname: {value}', { value: hostname })
     else if (!Number.isInteger(port) || port < 1 || port > 65535)
       problem = t('Invalid port: {value}', { value: portRaw })
-    else if (!Username.safeParse(username).success)
+    else if (username !== null && !Username.safeParse(username).success)
       problem = t('Invalid username: {value}', { value: username })
     // Key không có trên máy này: vẫn nhập — chọn key trong vault lúc nhập hoặc thêm sau.
     const missingKey = keyFile !== null && !existsSync(keyFile)

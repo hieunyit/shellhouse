@@ -66,7 +66,8 @@ export function parseCsv(text: string): string[][] {
 
 export interface CsvScanOptions {
   existingLabels: readonly string[]
-  defaultUser: string
+  /** null = không có user mặc định (người dùng nhập ở ô User lúc nhập). */
+  defaultUser: string | null
 }
 
 export interface CsvScan {
@@ -140,7 +141,7 @@ export function scanCsv(text: string, options: CsvScanOptions): CsvScan {
       problem = t('Invalid hostname: {value}', { value: hostname })
     else if (!Number.isInteger(port) || port < 1 || port > 65535)
       problem = t('Invalid port: {value}', { value: portRaw })
-    else if (!Username.safeParse(username).success)
+    else if (username !== null && !Username.safeParse(username).success)
       problem = t('Invalid username: {value}', { value: username })
     // Key không có trên máy này: vẫn nhập — chọn key trong vault lúc nhập hoặc thêm sau.
     const missingKey = keyFile !== null && !existsSync(keyFile)
