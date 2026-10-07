@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { app } from 'electron'
+import { app, session } from 'electron'
 import log from 'electron-log/main'
 import { autoUpdater } from 'electron-updater'
 import type { UpdateStatus } from '@shared/updates'
@@ -15,6 +15,14 @@ function chromiumProxy(url: string): string {
   const u = new URL(url)
   const scheme = u.protocol.replace(/:$/, '').replace('socks5h', 'socks5')
   return `${scheme}://${u.host}`
+}
+
+/** user:pass trong URL proxy (đã giải mã) — null nếu không có. */
+function proxyCredentials(url: string): { username: string; password: string } | null {
+  const u = new URL(url)
+  return u.username
+    ? { username: decodeURIComponent(u.username), password: decodeURIComponent(u.password) }
+    : null
 }
 
 /**
@@ -92,6 +100,13 @@ export class Updater {
     autoUpdater.on('update-downloaded', (info) => {
       this.set({ state: 'ready', version: info.version })
     })
+    // Proxy cần đăng nhập (407): trả user:pass từ URL proxy tự nhập; không có thì để lỗi hiện ra.
+    autoUpdater.on('login', (authInfo, callback) => {
+      if (authInfo.isProxy && this.proxyLogin)
+        callback(this.proxyLogin.username, this.proxyLogin.password)
+      // Gọi không tham số = huỷ đăng nhập (Electron) — kiểu của electron-updater đòi đủ hai.
+      else (callback as () => void)()
+    })
     autoUpdater.on('error', (error) => {
       this.fail(error)
     })
@@ -112,21 +127,29 @@ export class Updater {
 
   /** Cài đặt mạng đã áp (so sánh để chỉ áp khi đổi). */
   private networkKey = ''
+  /** Số phiên mạng đã tạo (mỗi lần đổi cài đặt một partition mới). */
+  private sessions = 0
+  /** Đăng nhập proxy (user:pass trong URL) — Chromium không nhận trong luật proxy, hỏi qua 'login'. */
+  private proxyLogin: { username: string; password: string } | null = null
 
   /**
    * Proxy + bỏ qua lỗi chứng chỉ cho phiên mạng RIÊNG của electron-updater (không ảnh hưởng phần
    * còn lại của app). Bỏ qua chứng chỉ vẫn an toàn tương đối: bản cài còn được kiểm chữ ký (Windows:
    * nhà phát hành, macOS: ký app, Linux: chữ ký ed25519 của file kênh).
+   *
+   * Mỗi lần đổi cài đặt dùng một session MỚI: Chromium nhớ kết quả kiểm tra chứng chỉ theo session
+   * (kể cả kết quả của setCertificateVerifyProc) — bật "bỏ qua" sau một lần kiểm tra lỗi sẽ không có
+   * tác dụng tới khi khởi động lại app nếu dùng lại session cũ.
    */
   setNetwork(network: NetworkSettings): void {
     const key = JSON.stringify(network)
     if (key === this.networkKey) return
     this.networkKey = key
-    const session = autoUpdater.netSession
+    const manual = network.proxyMode === 'manual' && network.proxyUrl !== ''
     const config: Electron.ProxyConfig =
       network.proxyMode === 'none'
         ? { mode: 'direct' }
-        : network.proxyMode === 'manual' && network.proxyUrl
+        : manual
           ? {
               mode: 'fixed_servers',
               // Chromium nhận "scheme://host:port" (không nhận user:pass trong URL).
@@ -134,16 +157,23 @@ export class Updater {
               proxyBypassRules: network.noProxy
             }
           : { mode: 'system' }
-    void session.setProxy(config).catch((error: unknown) => {
+    this.proxyLogin = manual ? proxyCredentials(network.proxyUrl) : null
+    const net = session.fromPartition(`electron-updater-${String(++this.sessions)}`, {
+      cache: false
+    })
+    void net.setProxy(config).catch((error: unknown) => {
       log.scope('updater').warn('Could not set the update proxy', error)
     })
-    session.setCertificateVerifyProc(
-      network.updatesInsecure
-        ? (_request, callback) => {
-            callback(0)
-          }
-        : null
-    )
+    if (network.updatesInsecure)
+      net.setCertificateVerifyProc((_request, callback) => {
+        callback(0)
+      })
+    // electron-updater giữ session trong httpExecutor.cachedSession (tạo lần đầu từ partition cố
+    // định "electron-updater") — thay bằng session mới.
+    const executor = (autoUpdater as unknown as { httpExecutor?: { cachedSession?: unknown } })
+      .httpExecutor
+    if (executor && 'cachedSession' in executor) executor.cachedSession = net
+    else log.scope('updater').warn('electron-updater changed: network settings not applied')
   }
 
   setChannel(channel: 'stable' | 'beta'): void {

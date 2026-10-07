@@ -6,6 +6,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Ignore certificate errors for updates** did nothing when it was turned on after a failed check
+  (Chromium remembered the failed certificate check until the app restarted) — it now applies to the
+  next check right away. A login in the manual proxy address (`user:password@`) is now used for
+  updates too.
+
 ## [1.2.0-beta.24] - 2026-10-07
 
 ### Added
