@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.26] - 2026-10-07
+
 ### Added
 
 - Command palette › **Terminal: command suggestion diagnostics** copies the suggestion state of
