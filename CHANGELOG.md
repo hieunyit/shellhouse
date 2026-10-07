@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.22] - 2026-10-07
+
 ### Added
 
 - Kubernetes history from the cluster's own **Prometheus** (found automatically, read through the
