@@ -43,6 +43,7 @@ describe('scanCsv', () => {
         proxyJump: null,
         duplicate: false,
         problem: null,
+        warning: null,
         tags: ['nginx', 'prod']
       },
       {
@@ -55,7 +56,8 @@ describe('scanCsv', () => {
         keyFile: null,
         proxyJump: null,
         duplicate: true,
-        problem: null
+        problem: null,
+        warning: null
       }
     ])
     expect(JSON.stringify(candidates)).not.toContain('SECRET')

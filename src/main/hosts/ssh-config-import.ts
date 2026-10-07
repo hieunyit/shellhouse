@@ -129,18 +129,20 @@ export function scanSshConfig(text: string, options: ScanOptions): ImportCandida
       problem = t('Invalid port: {value}', { value: portRaw ?? '' })
     else if (!Username.safeParse(username).success)
       problem = t('Invalid username: {value}', { value: username })
-    else if (keyFile && !existsSync(keyFile))
-      problem = t('IdentityFile not found: {path}', { path: keyFile })
+    // IdentityFile không có trên máy này (cấu hình chép từ máy khác…): vẫn nhập được — chọn key
+    // trong vault lúc nhập hoặc thêm sau.
+    const missingKey = keyFile !== null && !existsSync(keyFile)
 
     return {
       alias,
       hostname,
       port: Number.isInteger(port) ? port : 22,
       username,
-      keyFile,
+      keyFile: missingKey ? null : keyFile,
       proxyJump: proxyJump && proxyJump.toLowerCase() !== 'none' ? proxyJump : null,
       duplicate: existing.has(alias.toLowerCase()),
-      problem
+      problem,
+      warning: missingKey ? t('IdentityFile not found: {path}', { path: keyFile }) : null
     }
   })
 }

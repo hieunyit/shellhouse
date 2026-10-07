@@ -46,7 +46,8 @@ Host *
       keyFile: join(home, '.ssh', 'id_work'),
       proxyJump: 'bastion',
       duplicate: false,
-      problem: null
+      problem: null,
+      warning: null
     })
     expect(result[1]).toMatchObject({
       hostname: 'bastion.example.com',
@@ -72,7 +73,11 @@ Host nokey
     )
     expect(result.find((r) => r.alias === 'prod')?.duplicate).toBe(true)
     expect(result.find((r) => r.alias === 'evil')?.problem).toMatch(/Invalid hostname/)
-    expect(result.find((r) => r.alias === 'nokey')?.problem).toMatch(/IdentityFile/)
+    // IdentityFile không có trên máy này: vẫn nhập được (chọn key khác lúc nhập) — chỉ cảnh báo.
+    const nokey = result.find((r) => r.alias === 'nokey')
+    expect(nokey?.problem).toBeNull()
+    expect(nokey?.keyFile).toBeNull()
+    expect(nokey?.warning).toMatch(/IdentityFile/)
   })
 
   it('xử lý Include (glob, đường dẫn tương đối theo ~/.ssh)', () => {

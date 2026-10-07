@@ -142,8 +142,8 @@ export function scanCsv(text: string, options: CsvScanOptions): CsvScan {
       problem = t('Invalid port: {value}', { value: portRaw })
     else if (!Username.safeParse(username).success)
       problem = t('Invalid username: {value}', { value: username })
-    else if (keyFile && !existsSync(keyFile))
-      problem = t('Private key not found: {path}', { path: keyFile })
+    // Key không có trên máy này: vẫn nhập — chọn key trong vault lúc nhập hoặc thêm sau.
+    const missingKey = keyFile !== null && !existsSync(keyFile)
 
     candidates.push({
       alias,
@@ -152,10 +152,11 @@ export function scanCsv(text: string, options: CsvScanOptions): CsvScan {
       hostname,
       port: Number.isInteger(port) ? port : 22,
       username,
-      keyFile,
+      keyFile: missingKey ? null : keyFile,
       proxyJump: null,
       duplicate: existing.has(label.toLowerCase()),
       problem,
+      warning: missingKey ? t('Private key not found: {path}', { path: keyFile }) : null,
       ...(tags.length ? { tags } : {})
     })
   }

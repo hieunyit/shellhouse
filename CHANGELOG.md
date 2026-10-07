@@ -6,6 +6,21 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- Import hosts: a host whose IdentityFile (or key file) is not on this computer can still be
+  imported — the row shows a warning instead of being blocked. New options apply to every selected
+  host: **Into group** (the file's groups are created inside it), **SSH key** (a key in the vault,
+  or import one right there) and **Jump host** (a saved host). A header checkbox selects all.
+- Import SSH key now opens a dialog: rename the key, enter its passphrase (checked immediately —
+  a wrong one is reported) and optionally remember the passphrase in the vault so connecting does
+  not ask for it. A passphrase set on a host or account still takes precedence.
+
+### Fixed
+
+- Light terminal themes: colors that programs set directly (24-bit colors picked for dark
+  backgrounds, as in many TUIs) are darkened to a readable contrast instead of pale text on white.
+
 ### Added
 
 - Import hosts from an **Ansible inventory** (INI `hosts` file or `inventory.yml`): groups and

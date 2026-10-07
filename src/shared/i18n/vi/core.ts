@@ -902,5 +902,15 @@ export const core: Readonly<Record<string, string>> = {
   'Choose an Ansible inventory file — the hosts file (INI) or inventory.yml.':
     'Chọn file inventory Ansible — file hosts (INI) hoặc inventory.yml.',
   'Ignored variables with secrets: {names}. Add passwords or keys after importing.':
-    'Đã bỏ qua biến chứa bí mật: {names}. Thêm mật khẩu hoặc key sau khi nhập.'
+    'Đã bỏ qua biến chứa bí mật: {names}. Thêm mật khẩu hoặc key sau khi nhập.',
+  'choose a key below or add one later': 'chọn key bên dưới hoặc thêm sau',
+  'Into group': 'Vào nhóm',
+  'As in the file': 'Theo file',
+  'Import SSH key': 'Nhập SSH key',
+  'Import key': 'Nhập key',
+  'This key is protected. Leave empty to be asked when connecting.':
+    'Key này có passphrase. Để trống thì sẽ hỏi khi kết nối.',
+  'Remember the passphrase in the vault': 'Nhớ passphrase trong vault',
+  'Jump host': 'Jump host',
+  'Uses key {name}': 'Dùng key {name}'
 }

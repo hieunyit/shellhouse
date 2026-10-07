@@ -49,6 +49,7 @@ import {
   Segmented,
   Select
 } from './ui'
+import { importKey as importKeyFile } from './accounts/ImportKeyDialog'
 
 /** Port gõ tay: trống = mặc định / kế thừa; có giá trị thì phải là số nguyên 1–65535. */
 export function portProblem(raw: string): string | null {
@@ -209,14 +210,10 @@ export function HostForm({
   const jumpChoices = hosts.filter((h) => h.id !== host?.id && !jumpHostIds.includes(h.id))
 
   const importKey = async (): Promise<void> => {
-    const result = await window.shellhouse.importKeyFromFile()
-    if (!result) return
-    if (!result.ok) {
-      setError(result.message)
-      return
-    }
+    const id = await importKeyFile()
+    if (!id) return
     await useHosts.getState().reload()
-    setKeyId(result.id)
+    setKeyId(id)
   }
 
   const submit = async (event?: SyntheticEvent): Promise<void> => {

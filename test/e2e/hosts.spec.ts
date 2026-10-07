@@ -141,6 +141,10 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
       '  HostName web.example.com',
       '  User deploy',
       '  IdentityFile ~/.ssh/id_test',
+      'Host nokey',
+      '  HostName nokey.example.com',
+      '  User deploy',
+      '  IdentityFile ~/.ssh/id_from_other_machine',
       'Host bad',
       '  HostName -oProxyCommand=x',
       'Host *.corp',
@@ -194,9 +198,14 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     await baseExpect(dialog.getByTestId('import-row-web')).toContainText('deploy@web.example.com')
     await baseExpect(dialog.getByTestId('import-row-bad')).toContainText('Invalid hostname')
     await baseExpect(dialog.getByTestId('import-row-bad').getByRole('checkbox')).toBeDisabled()
-    await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toHaveCount(2) // không có *.corp, *
+    await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toHaveCount(3) // không có *.corp, *
+    // IdentityFile không có trên máy này: chỉ cảnh báo, vẫn chọn sẵn và nhập được.
+    const nokey = dialog.getByTestId('import-row-nokey')
+    await baseExpect(nokey.getByTestId('import-warning')).toContainText('IdentityFile not found')
+    await baseExpect(nokey.getByRole('checkbox')).toBeChecked()
+    await baseExpect(dialog.getByTestId('import-options')).toBeVisible()
     await dialog.getByTestId('import-run').click()
-    await baseExpect(dialog.getByTestId('import-result')).toContainText('Imported 1 host')
+    await baseExpect(dialog.getByTestId('import-result')).toContainText('Imported 2 hosts')
     await dialog.getByRole('button', { name: 'Done' }).click()
 
     const row = page.locator('[data-testid="host-row"][data-host-label="web"]')
@@ -259,6 +268,15 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     await page.getByTestId('import-ssh-config').click()
     await dialog.getByTestId('import-source-ansible').click()
     await dialog.getByTestId('import-choose-file').click()
+    // Tuỳ chọn áp cho mọi host đã chọn: vào nhóm Staging (nhóm của file tạo bên trong), jump qua web.
+    const staging = await page.evaluate(
+      async () => (await window.shellhouse.hostTree()).groups.find((g) => g.name === 'Staging')?.id
+    )
+    const webId = await page.evaluate(
+      async () => (await window.shellhouse.hostTree()).hosts.find((h) => h.label === 'web')?.id
+    )
+    await dialog.getByTestId('import-option-group').selectOption(staging ?? '')
+    await dialog.getByTestId('import-option-jump').selectOption(webId ?? '')
     await baseExpect(dialog.getByTestId('import-secrets-skipped')).toContainText('ansible_password')
     await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toHaveCount(2)
     await baseExpect(dialog.locator('[data-testid^="import-row-"]').first()).toContainText(
@@ -274,6 +292,18 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
       page.locator('[data-testid="host-row"][data-host-label="web2.example.com"]'),
       'deploy@web2.example.com'
     )
+    const imported = await page.evaluate(async () => {
+      const tree = await window.shellhouse.hostTree()
+      const h = tree.hosts.find((x) => x.label === 'web2.example.com')
+      const path: string[] = []
+      for (let id = h?.groupId ?? null; id;) {
+        const g = tree.groups.find((x) => x.id === id)
+        path.unshift(g?.name ?? '?')
+        id = g?.parentId ?? null
+      }
+      return { path, jumps: h?.jumpHostIds.length ?? 0 }
+    })
+    baseExpect(imported).toEqual({ path: ['Staging', 'shop', 'web'], jumps: 1 })
   } finally {
     await app.close()
     rmSync(home, { recursive: true, force: true })

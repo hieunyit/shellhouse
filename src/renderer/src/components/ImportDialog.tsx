@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FolderOpen } from 'lucide-react'
-import type { ImportCandidate } from '@shared/hosts'
+import type { ImportCandidate, ImportOptions } from '@shared/hosts'
 import { t, tn } from '@shared/i18n'
 import { formatNumber } from '@shared/i18n/format'
-import { Button, Modal, Notice, Segmented } from './ui'
+import { useHosts } from '../stores/hosts'
+import { importKey } from './accounts/ImportKeyDialog'
+import { Button, Field, Modal, Notice, Segmented, Select } from './ui'
 
 type Source = 'ssh-config' | 'mobaxterm' | 'csv' | 'ansible' | 'rdp' | 'yaml'
 
@@ -60,6 +62,12 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [result, setResult] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** Tuỳ chọn áp cho mọi host đã chọn ('' = theo file). */
+  const [groupId, setGroupId] = useState('')
+  const [keyId, setKeyId] = useState('')
+  const [jumpHostId, setJumpHostId] = useState('')
+  const tree = useHosts((s) => s.tree)
+  const groupTree = useHosts((s) => s.groupTree)
 
   const apply = useCallback((request: Promise<Scan>): void => {
     void request.then(
@@ -112,19 +120,24 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
 
   const run = async (): Promise<void> => {
     const aliases = [...selected]
+    const options: ImportOptions = {
+      ...(groupId ? { groupId } : {}),
+      ...(keyId ? { keyId } : {}),
+      ...(jumpHostId ? { jumpHostId } : {})
+    }
     try {
       const { imported, skipped } =
         source === 'ssh-config'
-          ? await window.shellhouse.importSshConfig(aliases)
+          ? await window.shellhouse.importSshConfig(aliases, options)
           : source === 'csv'
-            ? await window.shellhouse.importCsv(aliases)
+            ? await window.shellhouse.importCsv(aliases, options)
             : source === 'ansible'
-              ? await window.shellhouse.importAnsible(aliases)
+              ? await window.shellhouse.importAnsible(aliases, options)
               : source === 'yaml'
-                ? await window.shellhouse.importShellhouseYaml(aliases)
+                ? await window.shellhouse.importShellhouseYaml(aliases, options)
                 : source === 'rdp'
                   ? await window.shellhouse.importRdpFiles(aliases)
-                  : await window.shellhouse.importMobaXterm(aliases)
+                  : await window.shellhouse.importMobaXterm(aliases, options)
       setResult(
         tn(imported, 'Imported {n} host.', 'Imported {n} hosts.') +
           (skipped.length ? ' ' + t('Skipped: {names}.', { names: skipped.join(', ') }) : '')
@@ -135,6 +148,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
   }
 
   const candidates = scan?.candidates ?? null
+  const importable = (candidates ?? []).filter((c) => !c.problem)
   const ignored = Object.entries(scan?.ignored ?? {})
   const footer = result ? (
     <Button variant="primary" onClick={onClose}>
@@ -254,7 +268,22 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
           <table className="w-full text-left text-[13px]">
             <thead className="sticky top-0 bg-subtle text-xs text-muted">
               <tr>
-                <th className="w-9 px-3 py-2" />
+                <th className="w-9 px-3 py-2">
+                  <input
+                    type="checkbox"
+                    aria-label={t('Select all')}
+                    className="accent-[var(--sh-accent)]"
+                    data-testid="import-select-all"
+                    checked={
+                      importable.length > 0 && importable.every((c) => selected.has(c.alias))
+                    }
+                    onChange={(e) => {
+                      setSelected(
+                        e.target.checked ? new Set(importable.map((c) => c.alias)) : new Set()
+                      )
+                    }}
+                  />
+                </th>
                 <th className="px-3 py-2 font-medium">{t('Host')}</th>
                 <th className="px-3 py-2 font-medium">{t('Target')}</th>
                 <th className="px-3 py-2 font-medium">{t('Notes')}</th>
@@ -278,7 +307,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                       }}
                     />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-2 whitespace-nowrap">
                     {c.group && c.group.length > 0 && (
                       <span className="block text-xs text-faint">{c.group.join(' › ')}</span>
                     )}
@@ -295,6 +324,18 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                   </td>
                   <td className="px-3 py-2 text-xs">
                     {c.problem && <span className="text-danger">{c.problem}</span>}
+                    {!c.problem && keyId && (c.warning || c.keyFile) && (
+                      <span className="block text-muted" data-testid="import-key-note">
+                        {t('Uses key {name}', {
+                          name: tree.keys.find((k) => k.id === keyId)?.name ?? ''
+                        })}
+                      </span>
+                    )}
+                    {!c.problem && !keyId && c.warning && (
+                      <span className="block text-warning" data-testid="import-warning">
+                        {c.warning} — {t('choose a key below or add one later')}
+                      </span>
+                    )}
                     {!c.problem && c.duplicate && (
                       <span className="text-warning">
                         {t('A host with this name already exists')}
@@ -308,6 +349,80 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      {candidates && candidates.length > 0 && !result && source !== 'rdp' && (
+        <div className="grid grid-cols-3 gap-3" data-testid="import-options">
+          <Field label={t('Into group')}>
+            <Select
+              data-testid="import-option-group"
+              value={groupId}
+              onChange={(e) => {
+                setGroupId(e.target.value)
+              }}
+            >
+              <option value="">{t('As in the file')}</option>
+              {tree.groups
+                .map((g) => ({ id: g.id, path: groupTree.path(g.id).join(' › ') }))
+                .sort((a, b) => a.path.localeCompare(b.path))
+                .map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.path}
+                  </option>
+                ))}
+            </Select>
+          </Field>
+          <Field label={t('SSH key')}>
+            <div className="flex gap-1.5">
+              <Select
+                className="min-w-0 flex-1"
+                data-testid="import-option-key"
+                value={keyId}
+                onChange={(e) => {
+                  setKeyId(e.target.value)
+                }}
+              >
+                <option value="">{t('As in the file')}</option>
+                {tree.keys.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.name}
+                  </option>
+                ))}
+              </Select>
+              <Button
+                size="sm"
+                data-testid="import-option-key-import"
+                title={t('Import SSH key…')}
+                onClick={() => {
+                  void importKey().then(async (id) => {
+                    if (!id) return
+                    await useHosts.getState().reload()
+                    setKeyId(id)
+                  })
+                }}
+              >
+                {t('Import…')}
+              </Button>
+            </div>
+          </Field>
+          <Field label={t('Jump host')}>
+            <Select
+              data-testid="import-option-jump"
+              value={jumpHostId}
+              onChange={(e) => {
+                setJumpHostId(e.target.value)
+              }}
+            >
+              <option value="">{t('As in the file')}</option>
+              {tree.hosts
+                .filter((h) => h.protocol === 'ssh')
+                .map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.label}
+                  </option>
+                ))}
+            </Select>
+          </Field>
         </div>
       )}
       {result && (

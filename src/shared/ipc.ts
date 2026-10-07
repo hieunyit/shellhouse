@@ -11,7 +11,9 @@ import {
   HostTree,
   ImportCandidate,
   FileImportScan,
-  MutationResult
+  ImportOptions,
+  MutationResult,
+  PickedKey
 } from './hosts'
 import { SavedForward, SavedForwardInput } from './forwards'
 import { RdpCheckResult, RdpLaunchRequest, RdpLaunchResult, RdpStatusEvent } from './rdp'
@@ -172,8 +174,21 @@ export const invokeContract = {
     args: z.tuple([z.string().max(64), z.string().max(64).nullable()]),
     result: MutationResult
   },
-  /** Main mở hộp thoại chọn file (renderer không đọc được file). */
-  'keys:importFromFile': { args: z.tuple([]), result: MutationResult.nullable() },
+  /**
+   * Import key, bước 1: main mở hộp thoại chọn file, đọc và giữ nội dung (renderer không đọc được
+   * file) — trả thông tin để hỏi tên / passphrase. null = huỷ.
+   */
+  'keys:pick': { args: z.tuple([]), result: PickedKey.nullable() },
+  /** Bước 2: lưu key vừa chọn với tên, passphrase (kiểm tra đúng), có nhớ passphrase không. */
+  'keys:importPicked': {
+    args: z.tuple([
+      z.string().max(64),
+      z.string().trim().min(1).max(100),
+      z.string().max(1024).nullable(),
+      z.boolean()
+    ]),
+    result: MutationResult
+  },
   'keys:delete': { args: z.tuple([z.string().max(64)]), result: MutationResult },
   /** Tài khoản dùng chung (Settings → Accounts); danh sách nằm trong `hosts:tree`. */
   'accounts:save': { args: z.tuple([AccountInput]), result: MutationResult },
@@ -185,7 +200,7 @@ export const invokeContract = {
   },
   'sshConfig:scan': { args: z.tuple([]), result: z.array(ImportCandidate) },
   'sshConfig:import': {
-    args: z.tuple([z.array(z.string().max(255)).max(1000)]),
+    args: z.tuple([z.array(z.string().max(255)).max(1000), ImportOptions]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   /** true = cho người dùng chọn file; false = vị trí mặc định (%APPDATA%\MobaXterm). */
@@ -194,22 +209,22 @@ export const invokeContract = {
   /** CSV (Termius…): luôn cho người dùng chọn file. */
   'csv:scan': { args: z.tuple([]), result: FileImportScan },
   'csv:import': {
-    args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
+    args: z.tuple([z.array(z.string().max(1024)).max(5000), ImportOptions]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   /** File "Shellhouse YAML" (Export hosts): luôn cho người dùng chọn file. */
   'ansible:scan': { args: z.tuple([]), result: FileImportScan },
   'ansible:import': {
-    args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
+    args: z.tuple([z.array(z.string().max(1024)).max(5000), ImportOptions]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   'yaml:scan': { args: z.tuple([]), result: FileImportScan },
   'yaml:import': {
-    args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
+    args: z.tuple([z.array(z.string().max(1024)).max(5000), ImportOptions]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   'mobaxterm:import': {
-    args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
+    args: z.tuple([z.array(z.string().max(1024)).max(5000), ImportOptions]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   'forwards:list': { args: z.tuple([z.string().max(64)]), result: z.array(SavedForward) },
@@ -402,21 +417,42 @@ export interface ShellhouseApi {
   duplicateHost(id: string): Promise<MutationResult>
   setHostPassword(id: string, password: string): Promise<MutationResult>
   reorderGroups(parentId: string | null, orderedIds: string[]): Promise<MutationResult>
-  importKeyFromFile(): Promise<MutationResult | null>
+  pickKeyFile(): Promise<PickedKey | null>
+  importPickedKey(
+    token: string,
+    name: string,
+    passphrase: string | null,
+    remember: boolean
+  ): Promise<MutationResult>
   deleteKey(id: string): Promise<MutationResult>
   saveAccount(input: AccountInput): Promise<MutationResult>
   duplicateAccount(id: string): Promise<MutationResult>
   deleteAccount(id: string, resolution: AccountDeleteResolution | null): Promise<MutationResult>
   scanSshConfig(): Promise<ImportCandidate[]>
-  importSshConfig(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
+  importSshConfig(
+    aliases: string[],
+    options?: ImportOptions
+  ): Promise<{ imported: number; skipped: string[] }>
   scanMobaXterm(pick: boolean): Promise<FileImportScan>
   scanAnsible(): Promise<FileImportScan>
-  importAnsible(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
+  importAnsible(
+    aliases: string[],
+    options?: ImportOptions
+  ): Promise<{ imported: number; skipped: string[] }>
   scanCsv(): Promise<FileImportScan>
-  importCsv(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
+  importCsv(
+    aliases: string[],
+    options?: ImportOptions
+  ): Promise<{ imported: number; skipped: string[] }>
   scanShellhouseYaml(): Promise<FileImportScan>
-  importShellhouseYaml(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
-  importMobaXterm(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
+  importShellhouseYaml(
+    aliases: string[],
+    options?: ImportOptions
+  ): Promise<{ imported: number; skipped: string[] }>
+  importMobaXterm(
+    aliases: string[],
+    options?: ImportOptions
+  ): Promise<{ imported: number; skipped: string[] }>
   onHostsChanged(listener: () => void): () => void
   listForwards(hostId: string): Promise<SavedForward[]>
   saveForward(input: SavedForwardInput): Promise<MutationResult>

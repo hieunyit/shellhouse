@@ -38,6 +38,7 @@ import {
   type KeychainSelection,
   type KeyUsage
 } from './keychain-logic'
+import { importKey as importKeyFile } from './ImportKeyDialog'
 
 /** Dòng public key của từng key (đọc qua IPC — không cần mở khoá private key). */
 function usePublicKeys(keys: readonly KeySummary[]): ReadonlyMap<string, string | null> {
@@ -248,14 +249,13 @@ export function Keychain({
   }
 
   const importKey = async (): Promise<void> => {
-    const result = await window.shellhouse.importKeyFromFile()
-    if (!result) return
-    if (!result.ok) {
-      toast.error(result.message)
-      return
-    }
+    const id = await importKeyFile().catch((e: unknown) => {
+      toast.error(e instanceof Error ? e.message : String(e))
+      return null
+    })
+    if (!id) return
     toast.success(t('Imported the SSH key'))
-    reveal({ kind: 'key', id: result.id }, true)
+    reveal({ kind: 'key', id }, true)
   }
 
   const openNewMenu = (button: HTMLElement): void => {

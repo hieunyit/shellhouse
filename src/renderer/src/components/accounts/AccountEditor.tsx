@@ -7,6 +7,7 @@ import { useHosts } from '../../stores/hosts'
 import { toast } from '../../stores/toasts'
 import { PasswordInput } from '../PasswordInput'
 import { Button, Checkbox, Field, Input, Modal, Notice, Select, TextArea } from '../ui'
+import { importKey as importKeyFile } from './ImportKeyDialog'
 
 type KeyType = 'ed25519' | 'rsa' | 'ecdsa'
 
@@ -53,14 +54,10 @@ export function AccountEditor({
   const users = account ? hosts.filter((h) => account.hostIds.includes(h.id)) : []
 
   const importKey = async (): Promise<void> => {
-    const result = await window.shellhouse.importKeyFromFile()
-    if (!result) return
-    if (!result.ok) {
-      setError(result.message)
-      return
-    }
+    const id = await importKeyFile()
+    if (!id) return
     await useHosts.getState().reload()
-    setKeyId(result.id)
+    setKeyId(id)
   }
 
   const generate = async (): Promise<void> => {

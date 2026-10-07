@@ -215,6 +215,36 @@ describe('HostService', () => {
     expect(service.resolveForConnect(id).credentials.privateKey?.passphrase).toBe('pp')
   })
 
+  it('import key có passphrase: kiểm tra passphrase, nhớ trong vault, dùng khi host không có passphrase riêng', async () => {
+    const { db, service } = await setup()
+    const pair = generateTestKey('pp-secret')
+    expect(service.inspectKey(pair.private)).toMatchObject({ encrypted: true })
+    expect(() => service.importKey('wrong', pair.private, 'nope', true)).toThrow(/Wrong passphrase/)
+    expect(() => service.importKey('  ', pair.private)).toThrow(/Name is empty/)
+    const key = service.importKey('  deploy  ', pair.private, 'pp-secret', true)
+    expect(key).toMatchObject({ name: 'deploy', encrypted: true, hasPassphrase: true })
+    expect(service.tree().keys[0]?.hasPassphrase).toBe(true)
+    // Passphrase mã hoá trong DB (không có bản rõ).
+    const raw = db.prepare('SELECT passphrase_enc FROM keys WHERE id = ?').get(key.id) as {
+      passphrase_enc: Buffer
+    }
+    expect(raw.passphrase_enc.toString('utf8')).not.toContain('pp-secret')
+    // Host không có passphrase riêng → passphrase của key; có riêng → riêng thắng.
+    const plain = service.saveHost({ ...base, auth: 'key', keyId: key.id })
+    expect(service.resolveForConnect(plain).credentials.privateKey?.passphrase).toBe('pp-secret')
+    const own = service.saveHost({
+      ...base,
+      label: 'Own',
+      auth: 'key',
+      keyId: key.id,
+      passphrase: 'override'
+    })
+    expect(service.resolveForConnect(own).credentials.privateKey?.passphrase).toBe('override')
+    // Không chọn nhớ → không lưu, hỏi khi kết nối như trước.
+    const forget = service.importKey('forget', pair.private, 'pp-secret', false)
+    expect(forget.hasPassphrase).toBeUndefined()
+  })
+
   it('từ chối file không phải private key', async () => {
     const { service } = await setup()
     expect(() => service.importKey('x', 'không phải key')).toThrow(/Could not read the key/)

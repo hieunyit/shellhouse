@@ -88,6 +88,10 @@ export function terminalOptions(settings: AppSettings, dark: boolean): ITerminal
     // Lệnh xoá màn hình (ED2) đẩy nội dung đang hiện lên scrollback thay vì xoá mất — như Windows
     // Terminal / GNOME. Quan trọng trên Windows: ConPTY xoá màn hình mỗi khi phiên mới bắt đầu.
     scrollOnEraseInDisplay: true,
+    // Theme sáng: chương trình hay tô màu RGB chọn cho nền tối (TUI, vault, k9s…) — nâng tương phản
+    // tối thiểu lên mức đọc được (WCAG AA) thay vì chữ xanh nhạt trên nền trắng. Theme tối giữ
+    // nguyên màu gốc.
+    minimumContrastRatio: theme.dark ? 1 : 4.5,
     theme: theme.colors
   }
 }

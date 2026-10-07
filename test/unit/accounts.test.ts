@@ -333,7 +333,7 @@ describe('Migration 0011 (accounts)', () => {
     ).run()
 
     await migrate(db, MIGRATIONS)
-    expect(schemaVersion(db)).toBe(11)
+    expect(schemaVersion(db)).toBe(12)
     const service = new HostService(db, vault)
     const tree = service.tree()
     expect(tree.accounts).toEqual([])

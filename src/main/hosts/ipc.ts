@@ -1,9 +1,10 @@
+import { randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { app, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
 import { t } from '@shared/i18n'
-import type { ImportCandidate, MutationResult } from '@shared/hosts'
+import type { ImportCandidate, ImportOptions, MutationResult } from '@shared/hosts'
 import { showOpenDialog, showSaveDialog } from '../dialogs'
 import { writePrivateFile } from '../private-file'
 import { handle } from '../ipc/router'
@@ -56,15 +57,17 @@ function readMobaIni(file: string): string {
  * Nhóm theo đường dẫn tên (tạo nếu chưa có, so tên không phân biệt hoa thường như service). Đọc
  * danh sách nhóm MỘT lần cho cả lượt nhập (trước đây mỗi cấp của mỗi host đọc lại cả cây → O(n²)).
  */
-function groupPathResolver(service: HostService): (path: readonly string[]) => string | null {
+function groupPathResolver(
+  service: HostService
+): (path: readonly string[], base?: string | null) => string | null {
   const children = new Map<string | null, { id: string; name: string }[]>()
   for (const g of service.groups()) {
     const list = children.get(g.parentId) ?? []
     list.push({ id: g.id, name: g.name })
     children.set(g.parentId, list)
   }
-  return (path) => {
-    let parentId: string | null = null
+  return (path, base = null) => {
+    let parentId: string | null = base
     for (const name of path) {
       const siblings: { id: string; name: string }[] = children.get(parentId) ?? []
       const found = siblings.find(
@@ -87,7 +90,8 @@ function importCandidates(
   service: HostService,
   candidates: readonly ImportCandidate[],
   aliases: readonly string[],
-  tag: string
+  tag: string,
+  options: ImportOptions = {}
 ): { imported: number; skipped: string[] } {
   const wanted = new Set(aliases)
   let imported = 0
@@ -103,16 +107,19 @@ function importCandidates(
       }
       try {
         service.saveHost({
-          groupId: ensureGroupPath(c.group ?? []),
+          groupId: ensureGroupPath(c.group ?? [], options.groupId ?? null),
           label: c.label ?? c.alias,
           hostname: c.hostname,
           port: c.port,
           username: c.username,
-          auth: 'auto',
-          keyId: null,
-          keyFile: c.keyFile,
-          proxyJump: c.proxyJump,
-          jumpHostIds: [],
+          // Key chọn lúc nhập (trong vault) thay IdentityFile của file.
+          ...(options.keyId
+            ? { auth: 'key' as const, keyId: options.keyId, keyFile: null }
+            : { auth: 'auto' as const, keyId: null, keyFile: c.keyFile }),
+          // Jump host chọn lúc nhập thay ProxyJump của file.
+          ...(options.jumpHostId
+            ? { proxyJump: null, jumpHostIds: [options.jumpHostId] }
+            : { proxyJump: c.proxyJump, jumpHostIds: [] }),
           mode: 'builtin',
           tags: [...new Set([tag, ...(c.tags ?? [])])],
           color: null
@@ -234,26 +241,45 @@ export function registerHostIpc(
     service.deleteForward(id)
   })
 
-  handle('keys:importFromFile', isTrustedSender, async () => {
-    const window = getWindow()
-    const options = {
+  // Import key hai bước: main giữ nội dung file vừa chọn (theo token), renderer hỏi tên / passphrase.
+  const pickedKeys = new Map<string, { pem: string; file: string }>()
+  handle('keys:pick', isTrustedSender, async () => {
+    const picked = await showOpenDialog(getWindow(), {
       title: t('Choose a private key'),
       defaultPath: join(app.getPath('home'), '.ssh'),
-      properties: ['openFile', 'showHiddenFiles'] as ('openFile' | 'showHiddenFiles')[]
-    }
-    const picked = await showOpenDialog(window, options)
+      properties: ['openFile', 'showHiddenFiles']
+    })
     const file = picked.filePaths[0]
     if (picked.canceled || !file) return null
-    return changing(() =>
+    if (statSync(file).size > MAX_KEY_FILE_BYTES)
+      throw new Error(t('The file is too large to be a private key'))
+    const pem = readFileSync(file, 'utf8')
+    const info = service.inspectKey(pem)
+    const token = randomUUID()
+    // Chỉ giữ lần chọn gần nhất (không tích tụ private key trong bộ nhớ).
+    pickedKeys.clear()
+    pickedKeys.set(token, { pem, file })
+    return {
+      token,
+      file: basename(file),
+      suggestedName: info.comment.trim() || basename(file),
+      type: info.type,
+      fingerprint: info.fingerprint,
+      encrypted: info.encrypted
+    }
+  })
+  handle('keys:importPicked', isTrustedSender, (token, name, passphrase, remember) =>
+    changing(() =>
       mutation(() => {
-        if (statSync(file).size > MAX_KEY_FILE_BYTES)
-          throw new Error(t('The file is too large to be a private key'))
-        const key = service.importKey(basename(file), readFileSync(file, 'utf8'))
+        const picked = pickedKeys.get(token)
+        if (!picked) throw new Error(t('Choose the key file again'))
+        const key = service.importKey(name, picked.pem, passphrase ?? undefined, remember)
+        pickedKeys.delete(token)
         log.info(`Imported key ${key.name} (${key.fingerprint})`)
         return key.id
       })
     )
-  })
+  )
   handle('keys:generate', isTrustedSender, (options) =>
     changing(() =>
       mutation(
@@ -322,13 +348,13 @@ export function registerHostIpc(
       defaultUser: currentUser()
     })
   )
-  handle('sshConfig:import', isTrustedSender, (aliases) => {
+  handle('sshConfig:import', isTrustedSender, (aliases, options) => {
     const candidates = scanSshConfig(readSshConfig(), {
       home: app.getPath('home'),
       existingLabels: service.tree().hosts.map((h) => h.label),
       defaultUser: currentUser()
     })
-    const result = importCandidates(service, candidates, aliases, 'ssh-config')
+    const result = importCandidates(service, candidates, aliases, 'ssh-config', options)
     notifyChanged()
     return result
   })
@@ -363,9 +389,15 @@ export function registerHostIpc(
     if (!file) return { file: null, candidates: [], ignored: {} }
     return { file, ...scanMoba(file) }
   })
-  handle('mobaxterm:import', isTrustedSender, (aliases) => {
+  handle('mobaxterm:import', isTrustedSender, (aliases, options) => {
     if (!mobaFile) throw new Error(t('Choose a MobaXterm file first'))
-    const result = importCandidates(service, scanMoba(mobaFile).candidates, aliases, 'mobaxterm')
+    const result = importCandidates(
+      service,
+      scanMoba(mobaFile).candidates,
+      aliases,
+      'mobaxterm',
+      options
+    )
     notifyChanged()
     return result
   })
@@ -394,9 +426,15 @@ export function registerHostIpc(
     if (!csvFile) return { file: null, candidates: [], ignored: {} }
     return { file: csvFile, ...scanCsvFile(csvFile) }
   })
-  handle('csv:import', isTrustedSender, (aliases) => {
+  handle('csv:import', isTrustedSender, (aliases, options) => {
     if (!csvFile) throw new Error(t('Choose a CSV file first'))
-    const result = importCandidates(service, scanCsvFile(csvFile).candidates, aliases, 'csv')
+    const result = importCandidates(
+      service,
+      scanCsvFile(csvFile).candidates,
+      aliases,
+      'csv',
+      options
+    )
     notifyChanged()
     return result
   })
@@ -422,13 +460,14 @@ export function registerHostIpc(
     if (!ansibleFile) return { file: null, candidates: [], ignored: {} }
     return { file: ansibleFile, ...scanAnsibleFile(ansibleFile) }
   })
-  handle('ansible:import', isTrustedSender, (aliases) => {
+  handle('ansible:import', isTrustedSender, (aliases, options) => {
     if (!ansibleFile) throw new Error(t('Choose an Ansible inventory first'))
     const result = importCandidates(
       service,
       scanAnsibleFile(ansibleFile).candidates,
       aliases,
-      'ansible'
+      'ansible',
+      options
     )
     notifyChanged()
     return result
@@ -455,9 +494,15 @@ export function registerHostIpc(
     if (!yamlFile) return { file: null, candidates: [], ignored: {} }
     return { file: yamlFile, ...scanYamlFile(yamlFile) }
   })
-  handle('yaml:import', isTrustedSender, (aliases) => {
+  handle('yaml:import', isTrustedSender, (aliases, options) => {
     if (!yamlFile) throw new Error(t('Choose a file first'))
-    const result = importCandidates(service, scanYamlFile(yamlFile).candidates, aliases, 'imported')
+    const result = importCandidates(
+      service,
+      scanYamlFile(yamlFile).candidates,
+      aliases,
+      'imported',
+      options
+    )
     notifyChanged()
     return result
   })

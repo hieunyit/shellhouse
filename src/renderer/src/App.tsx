@@ -28,6 +28,7 @@ import { ActivityBar } from './shell/ActivityBar'
 import { Explorer } from './shell/Explorer'
 import { Main } from './shell/Main'
 import { QuickConnectDialog } from './shell/QuickConnect'
+import { KeyImportHost } from './components/accounts/ImportKeyDialog'
 import { StatusBar } from './shell/StatusBar'
 import { TitleBar } from './shell/TitleBar'
 import { useShell } from './shell/store'
@@ -317,6 +318,7 @@ export function App(): React.JSX.Element {
         {overlay?.kind === 'quickConnect' && <QuickConnectDialog onClose={closeOverlay} />}
         <EnableModuleDialog />
         <CommandSheet />
+        <KeyImportHost />
         {/* Sau cùng: hộp thoại xác nhận nằm trên mọi hộp thoại khác. */}
         <ConfirmHost />
       </div>

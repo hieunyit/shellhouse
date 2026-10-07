@@ -223,10 +223,17 @@ export class HostService {
       .all() as HostRow[]
     const keys = this.db
       .prepare(
-        `SELECT id, name, type, public_key, encrypted FROM keys
-         WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE`
+        `SELECT id, name, type, public_key, encrypted, (passphrase_enc IS NOT NULL) AS has_passphrase
+         FROM keys WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE`
       )
-      .all() as { id: string; name: string; type: string; public_key: string; encrypted: number }[]
+      .all() as {
+      id: string
+      name: string
+      type: string
+      public_key: string
+      encrypted: number
+      has_passphrase: number
+    }[]
 
     return {
       groups,
@@ -271,7 +278,8 @@ export class HostService {
         name: k.name,
         type: k.type,
         fingerprint: fingerprintSha256(Buffer.from(k.public_key.split(' ')[1] ?? '', 'base64')),
-        encrypted: k.encrypted === 1
+        encrypted: k.encrypted === 1,
+        ...(k.has_passphrase === 1 ? { hasPassphrase: true } : {})
       })),
       accounts: this.accounts()
     }
@@ -859,8 +867,39 @@ export class HostService {
     }
   }
 
-  /** Lưu private key vào vault. Key có passphrase: passphrase nhập ở host hoặc khi kết nối. */
-  importKey(name: string, pem: string): KeySummary {
+  /** Đọc key (không lưu): loại, fingerprint, có passphrase không, comment — cho hộp thoại import. */
+  inspectKey(pem: string): {
+    type: string
+    fingerprint: string
+    encrypted: boolean
+    comment: string
+  } {
+    const outcome = parsePrivateKey(pem)
+    if ('error' in outcome)
+      throw new Error(t('Could not read the key: {error}', { error: outcome.error }))
+    const publicKey =
+      'key' in outcome
+        ? { type: outcome.key.type, blob: outcome.key.getPublicSSH() }
+        : publicKeyFromOpenSshHeader(pem)
+    const comment = 'key' in outcome ? outcome.key.comment : ''
+    if (!publicKey)
+      throw new Error(t('Could not read the public key from the passphrase-protected file'))
+    return {
+      type: publicKey.type,
+      fingerprint: fingerprintSha256(publicKey.blob),
+      encrypted: !('key' in outcome),
+      comment
+    }
+  }
+
+  /**
+   * Lưu private key vào vault. Key có passphrase: `passphrase` (nếu có) được kiểm tra đúng; `remember`
+   * = lưu passphrase vào vault để không phải gõ khi kết nối (host / tài khoản có passphrase riêng thì
+   * dùng của chúng trước). Không đưa passphrase: hỏi khi kết nối như trước.
+   */
+  importKey(name: string, pem: string, passphrase?: string, remember = false): KeySummary {
+    const label = name.trim()
+    if (!label) throw new Error(t('Name is empty'))
     const outcome = parsePrivateKey(pem)
     let publicKey: { type: string; blob: Buffer } | null = null
     let encrypted = false
@@ -868,6 +907,11 @@ export class HostService {
     else if ('encrypted' in outcome) encrypted = true
     else throw new Error(t('Could not read the key: {error}', { error: outcome.error }))
 
+    if (encrypted && passphrase) {
+      const opened = parsePrivateKey(pem, passphrase)
+      if (!('key' in opened)) throw new Error(t('Wrong passphrase for this key'))
+      publicKey = { type: opened.key.type, blob: opened.key.getPublicSSH() }
+    }
     if (!publicKey) {
       // Key có passphrase: lấy public key từ phần header (OpenSSH lưu public key không mã hoá).
       publicKey = publicKeyFromOpenSshHeader(pem)
@@ -878,29 +922,36 @@ export class HostService {
     const id = uuidv7(this.now())
     const now = this.now()
     const sealed = this.vault.encryptString({ table: 'keys', id, field: 'private_key_enc' }, pem)
+    const sealedPassphrase =
+      encrypted && passphrase && remember
+        ? this.vault.encryptString({ table: 'keys', id, field: 'passphrase_enc' }, passphrase)
+        : null
     const shortType = publicKey.type.replace(/^ssh-/, '').replace(/^ecdsa-sha2-nistp\d+$/, 'ecdsa')
     const type = ['ed25519', 'rsa', 'ecdsa'].includes(shortType) ? shortType : 'ed25519'
     this.db
       .prepare(
-        `INSERT INTO keys (id, name, type, public_key, private_key_enc, encrypted, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO keys (id, name, type, public_key, private_key_enc, encrypted, passphrase_enc,
+                           created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
-        name,
+        label,
         type,
         `${publicKey.type} ${publicKey.blob.toString('base64')}`,
         sealed,
         encrypted ? 1 : 0,
+        sealedPassphrase,
         now,
         now
       )
     return {
       id,
-      name,
+      name: label,
       type,
       fingerprint: fingerprintSha256(publicKey.blob),
-      encrypted
+      encrypted,
+      ...(sealedPassphrase ? { hasPassphrase: true } : {})
     }
   }
 
@@ -1467,20 +1518,34 @@ export class HostService {
     }
   }
 
-  /** Private key trong vault (dạng gửi cho Session Host); null = key đã bị xoá. */
-  private loadKey(id: string): { data: string; label: string } | null {
+  /**
+   * Private key trong vault (dạng gửi cho Session Host) kèm passphrase đã lưu cùng key (nếu có);
+   * null = key đã bị xoá.
+   */
+  private loadKey(id: string): { data: string; label: string; passphrase?: string } | null {
     const key = this.db
-      .prepare('SELECT name, private_key_enc FROM keys WHERE id = ? AND deleted_at IS NULL')
-      .get(id) as { name: string; private_key_enc: Buffer } | undefined
+      .prepare(
+        'SELECT name, private_key_enc, passphrase_enc FROM keys WHERE id = ? AND deleted_at IS NULL'
+      )
+      .get(id) as
+      { name: string; private_key_enc: Buffer; passphrase_enc: Buffer | null } | undefined
     if (!key) return null
     const pem = this.vault.decrypt(
       { table: 'keys', id, field: 'private_key_enc' },
       key.private_key_enc
     )
+    const passphrase = key.passphrase_enc
+      ? this.vault.decrypt({ table: 'keys', id, field: 'passphrase_enc' }, key.passphrase_enc)
+      : null
     try {
-      return { data: pem.revealString(), label: key.name }
+      return {
+        data: pem.revealString(),
+        label: key.name,
+        ...(passphrase ? { passphrase: passphrase.revealString() } : {})
+      }
     } finally {
       pem.dispose()
+      passphrase?.dispose()
     }
   }
 
@@ -1613,6 +1678,7 @@ export class HostService {
       if (keyId) {
         const key = this.loadKey(keyId)
         if (!key) throw new Error(t('The key of this host has been deleted'))
+        // Passphrase của host / tài khoản trước; không có thì passphrase lưu cùng key.
         credentials.privateKey = {
           ...key,
           ...(secrets.passphrase ? { passphrase: secrets.passphrase.revealString() } : {})

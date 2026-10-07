@@ -238,9 +238,25 @@ export const KeySummary = z.object({
   name: z.string(),
   type: z.string(),
   fingerprint: z.string(),
-  encrypted: z.boolean()
+  encrypted: z.boolean(),
+  /** Có passphrase lưu trong vault (không phải gõ khi kết nối). */
+  hasPassphrase: z.boolean().optional()
 })
 export type KeySummary = z.infer<typeof KeySummary>
+
+/** Private key vừa chọn để import (main giữ nội dung; renderer chỉ thấy thông tin để hỏi). */
+export const PickedKey = z.object({
+  token: z.string(),
+  /** Tên file (không đường dẫn). */
+  file: z.string(),
+  /** Tên gợi ý: comment trong key, không có thì tên file. */
+  suggestedName: z.string(),
+  type: z.string(),
+  fingerprint: z.string(),
+  /** Có passphrase → hỏi passphrase. */
+  encrypted: z.boolean()
+})
+export type PickedKey = z.infer<typeof PickedKey>
 
 /**
  * Tài khoản dùng chung (Keychain kiểu Termius): username + mật khẩu + SSH key (+ passphrase) +
@@ -319,9 +335,22 @@ export const ImportCandidate = z.object({
   /** Đã có host cùng tên hiển thị → mặc định không chọn. */
   duplicate: z.boolean(),
   /** Lý do không nhập được (hostname không hợp lệ...). */
-  problem: z.string().nullable()
+  problem: z.string().nullable(),
+  /** Lưu ý nhưng vẫn nhập được (IdentityFile không có trên máy này → chọn key khác / thêm sau). */
+  warning: z.string().nullable().optional()
 })
 export type ImportCandidate = z.infer<typeof ImportCandidate>
+
+/**
+ * Tuỳ chọn khi nhập, áp cho mọi host đã chọn; thiếu trường = theo file. groupId: nhóm đích (nhóm
+ * trong file tạo bên trong nó); keyId: SSH key trong vault; jumpHostId: host đã lưu làm jump host.
+ */
+export const ImportOptions = z.object({
+  groupId: z.string().max(64).optional(),
+  keyId: z.string().max(64).optional(),
+  jumpHostId: z.string().max(64).optional()
+})
+export type ImportOptions = z.infer<typeof ImportOptions>
 
 /** Kết quả quét file nhập (MobaXterm.ini, CSV). */
 export const FileImportScan = z.object({

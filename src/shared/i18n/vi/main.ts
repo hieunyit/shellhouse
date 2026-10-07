@@ -143,5 +143,8 @@ export const main: Readonly<Record<string, string>> = {
     'Dùng template Ansible ({{ … }}) — điền lại sau khi nhập',
   'Choose an Ansible inventory': 'Chọn inventory Ansible',
   'Ansible inventory': 'Inventory Ansible',
-  'Choose an Ansible inventory first': 'Hãy chọn inventory Ansible trước'
+  'Choose an Ansible inventory first': 'Hãy chọn inventory Ansible trước',
+  'Choose the key file again': 'Hãy chọn lại file key',
+  'Name is empty': 'Chưa nhập tên',
+  'Wrong passphrase for this key': 'Sai passphrase của key này'
 }

@@ -67,9 +67,13 @@ describe('Ansible inventory', () => {
       group: ['prod', 'web'],
       username: 'deploy',
       proxyJump: 'jump@bastion.example.com',
-      keyFile: join(homedir(), '.ssh/nope_ansible_test')
+      // Key không có trên máy này: vẫn nhập được (chọn key lúc nhập) — chỉ cảnh báo.
+      keyFile: null,
+      problem: null
     })
-    expect(by.get('web02.example.com')?.problem).toContain('Private key not found')
+    expect(by.get('web02.example.com')?.warning).toContain(
+      join(homedir(), '.ssh/nope_ansible_test')
+    )
     // Biến của host thắng mọi nhóm.
     expect(by.get('web-canary.example.com')).toMatchObject({ hostname: '10.0.0.9', port: 2222 })
     expect(by.get('db1')).toMatchObject({

@@ -26,7 +26,7 @@ const api = vi.hoisted(() => {
     deleteKey: vi.fn(() => Promise.resolve({ ok: true, id: 'x' })),
     deleteAccount: vi.fn(() => Promise.resolve({ ok: true, id: 'x' })),
     writeClipboard: vi.fn(() => Promise.resolve()),
-    importKeyFromFile: vi.fn(() => Promise.resolve(null))
+    pickKeyFile: vi.fn(() => Promise.resolve(null))
   }
   ;(globalThis as unknown as { window: { shellhouse: unknown } }).window.shellhouse = mock
   return mock
