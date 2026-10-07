@@ -638,11 +638,47 @@ export async function startEngineTestServer(
     if ((m = /^\/containers\/([^/]+)\/json$/.exec(p))) {
       const c = find(decodeURIComponent(m[1] ?? ''))
       if (!c) return json(res, 404, { message: `No such container: ${m[1] ?? ''}` })
+      // Container "(healthy)": health check bằng curl (output thật có thanh tiến trình).
+      const healthy = /\(healthy\)/.test(c.Status)
+      const curl = (body: string): string =>
+        `  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n                                 Dload  Upload   Total   Spent    Left  Speed\n\r  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0\r100    15  100    15    0     0   7055      0 --:--:-- --:--:-- --:--:--  7666\n${body}`
+      const ago = (s: number): string => new Date(Date.now() - s * 1000).toISOString()
       return json(res, 200, {
         Id: c.Id,
         Name: c.Names[0],
-        State: { Status: c.State },
-        Config: { Tty: c.Tty, Env: c.Env, Image: c.Image }
+        State: {
+          Status: c.State,
+          ...(healthy
+            ? {
+                Health: {
+                  Status: 'healthy',
+                  FailingStreak: 0,
+                  Log: [90, 60, 30].map((s) => ({
+                    Start: ago(s),
+                    End: ago(s - 1),
+                    ExitCode: 0,
+                    Output: curl('{"status":"ok"}')
+                  }))
+                }
+              }
+            : {})
+        },
+        Config: {
+          Tty: c.Tty,
+          Env: c.Env,
+          Image: c.Image,
+          ...(healthy
+            ? {
+                Healthcheck: {
+                  Test: ['CMD-SHELL', 'curl -f http://localhost:8080/health'],
+                  Interval: 30_000_000_000,
+                  Timeout: 5_000_000_000,
+                  Retries: 3
+                }
+              }
+            : {})
+        },
+        HostConfig: { Memory: 0 }
       })
     }
     if (

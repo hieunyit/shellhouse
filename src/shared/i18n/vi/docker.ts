@@ -642,5 +642,19 @@ export const docker: Readonly<Record<string, string>> = {
   '{n} selected item is skipped — the action does not apply to it:':
     'Bỏ qua {n} mục đã chọn — thao tác không áp dụng được:',
   '{n} selected items are skipped — the action does not apply to them:':
-    'Bỏ qua {n} mục đã chọn — thao tác không áp dụng được:'
+    'Bỏ qua {n} mục đã chọn — thao tác không áp dụng được:',
+  'checked {time}': 'kiểm tra {time}',
+  '{passed}/{total} recent checks passed': '{passed}/{total} lần gần đây đạt',
+  'every {interval}': 'mỗi {interval}',
+  '{streak} checks failed in a row — it turns unhealthy at {retries}':
+    '{streak} lần kiểm tra lỗi liên tiếp — tới {retries} lần sẽ thành unhealthy',
+  'Check command and recent output': 'Lệnh kiểm tra và output gần đây',
+  Timing: 'Nhịp',
+  'every {interval}, timeout {timeout}, unhealthy after {retries} failures':
+    'mỗi {interval}, hết giờ sau {timeout}, unhealthy sau {retries} lần lỗi',
+  'No limit — the host has {total}': 'Không giới hạn — máy có {total}',
+  'No limit': 'Không giới hạn',
+  'Since start: {in} in · {out} out': 'Từ lúc chạy: nhận {in} · gửi {out}',
+  'Unhealthy — the last check failed': 'Unhealthy — lần kiểm tra gần nhất bị lỗi',
+  'Unhealthy — the last {n} checks failed': 'Unhealthy — {n} lần kiểm tra gần nhất bị lỗi'
 }

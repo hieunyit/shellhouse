@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Copy, ExternalLink, Eye, MoreHorizontal, Plug, RefreshCw, Unplug, X } from 'lucide-react'
 import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
+import { cx } from '../../../renderer/src/components/ui'
 import {
   DefList,
   Heading,
@@ -17,7 +18,9 @@ import {
   formatDate,
   formatDateTime,
   formatDateTimeSeconds,
+  formatDuration,
   formatPercent,
+  formatRate,
   formatRelative,
   t,
   tn
@@ -30,6 +33,7 @@ import type {
   ProcessList,
   StatsSample
 } from '../shared/ops'
+import { healthSummary, netRates, type HealthSummary } from '../shared/health'
 import { actionTitle, openMenuBelow, toMenu, type DetailAction } from './actions'
 import { FilesPanel } from './FilesPanel'
 
@@ -262,13 +266,12 @@ export function ContainerDetail({
               c={c}
               inspect={inspect}
               host={host}
-              stats={stats}
               readOnly={readOnly}
               onConnect={onConnect}
               onDisconnect={onDisconnect}
             />
           )}
-          {tab === 'stats' && <Stats running={running} stats={stats} />}
+          {tab === 'stats' && <Stats running={running} stats={stats} inspect={inspect} />}
           {tab === 'env' && <Env id={c.id} request={request} inspect={inspect} />}
           {tab === 'processes' && <Processes id={c.id} running={running} request={request} />}
           {tab === 'inspect' && (
@@ -289,7 +292,6 @@ function Overview({
   c,
   inspect,
   host,
-  stats,
   readOnly,
   onConnect,
   onDisconnect
@@ -297,7 +299,6 @@ function Overview({
   c: ContainerRow
   inspect: Obj | null
   host: string
-  stats: StatsSample[]
   readOnly: boolean
   onConnect: () => void
   onDisconnect: (network: string) => void
@@ -307,73 +308,15 @@ function Overview({
   const hostConfig = o(inspect?.['HostConfig'])
   const networks = o(o(inspect?.['NetworkSettings'])['Networks'])
   const mounts = (inspect?.['Mounts'] as Obj[] | undefined) ?? []
-  const last = stats.at(-1)
   const cmd = [
     ...((config['Entrypoint'] as string[] | null) ?? []),
     ...((config['Cmd'] as string[] | null) ?? [])
   ].join(' ')
   const published = c.ports.filter((p) => p.publicPort)
-  const health = o(state['Health'])
-  const healthLog = ((health['Log'] as Obj[] | null | undefined) ?? []).slice(-3).reverse()
+  const health = healthSummary(inspect)
   return (
     <div className="flex flex-col gap-4" data-testid="docker-detail-overview">
-      {c.health && (
-        <section data-testid="docker-detail-health">
-          <Heading>{t('Health check')}</Heading>
-          <DefList
-            items={[
-              [t('Status'), <HealthPill key="h" health={c.health} />],
-              Number(health['FailingStreak'] ?? 0) > 0 && [
-                t('Failing streak'),
-                tn(Number(health['FailingStreak']), '{n} check', '{n} checks')
-              ]
-            ]}
-          />
-          {healthLog.length > 0 && (
-            <div className="mt-2 flex flex-col gap-1">
-              {healthLog.map((l, i) => (
-                <div key={i} className="rounded-md bg-subtle px-2 py-1">
-                  <div className="flex justify-between gap-2 text-faint">
-                    <span>{formatDateTimeSeconds(s(l['Start']))}</span>
-                    <span className={Number(l['ExitCode']) === 0 ? 'text-success' : 'text-danger'}>
-                      {t('exit {code}', { code: s(l['ExitCode']) })}
-                    </span>
-                  </div>
-                  {s(l['Output']).trim() && (
-                    <pre className="mt-0.5 max-h-16 overflow-auto font-mono text-[11px] break-all whitespace-pre-wrap text-fg">
-                      {s(l['Output']).trim()}
-                    </pre>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-      {last && c.state === 'running' && (
-        <div className="grid grid-cols-2 gap-3" data-testid="docker-stats">
-          <div>
-            <div className="flex justify-between">
-              <span className="text-muted">{t('CPU')}</span>
-              <span className="text-fg tabular-nums">{cpuText(last.cpuPercent)}</span>
-            </div>
-            <Sparkline
-              values={stats.map((x) => Math.max(0, x.cpuPercent))}
-              max={Math.max(100, ...stats.map((x) => Math.max(0, x.cpuPercent)))}
-            />
-          </div>
-          <div>
-            <div className="flex justify-between">
-              <span className="text-muted">{t('Memory')}</span>
-              <span className="text-fg tabular-nums">{formatBytes(last.memUsage)}</span>
-            </div>
-            <Sparkline
-              values={stats.map((x) => x.memUsage)}
-              max={last.memLimit || Math.max(...stats.map((x) => x.memUsage), 1)}
-            />
-          </div>
-        </div>
-      )}
+      {c.health && health && <HealthSection c={c} health={health} />}
       <section>
         <Heading>{t('Container')}</Heading>
         <DefList
@@ -540,22 +483,172 @@ function Overview({
   )
 }
 
-function Stats({ running, stats }: { running: boolean; stats: StatsSample[] }): React.JSX.Element {
+/**
+ * Health check gọn: một dòng khi khoẻ (lần kiểm tra cuối, bao nhiêu lần gần đây đạt, nhịp); khi
+ * đang lỗi mới hiện lần lỗi gần nhất (output đã bỏ thanh tiến trình curl). Lệnh kiểm tra và output
+ * từng lần nằm trong phần thu gọn.
+ */
+function HealthSection({
+  c,
+  health
+}: {
+  c: ContainerRow
+  health: HealthSummary
+}): React.JSX.Element {
+  const last = health.runs[0]
+  const passed = health.runs.filter((r) => r.exitCode === 0).length
+  const failing = health.failingStreak > 0 || c.health === 'unhealthy'
+  const failure = failing ? health.lastFailure : null
+  return (
+    <section data-testid="docker-detail-health">
+      <Heading>{t('Health check')}</Heading>
+      <div
+        className="flex flex-wrap items-center gap-x-2 gap-y-1"
+        data-testid="docker-health-summary"
+      >
+        {c.health && <HealthPill health={c.health} />}
+        <span className="text-muted">
+          {[
+            last ? t('checked {time}', { time: formatRelative(last.at) }) : '',
+            health.runs.length
+              ? t('{passed}/{total} recent checks passed', {
+                  passed,
+                  total: health.runs.length
+                })
+              : '',
+            t('every {interval}', { interval: formatDuration(health.intervalMs) })
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </span>
+      </div>
+      {failing && (
+        <div
+          className="mt-2 rounded-md border border-danger/30 bg-danger-soft/40 px-2.5 py-2"
+          data-testid="docker-health-failure"
+        >
+          <div className="text-danger">
+            {c.health === 'unhealthy'
+              ? tn(
+                  health.failingStreak,
+                  'Unhealthy — the last check failed',
+                  'Unhealthy — the last {n} checks failed'
+                )
+              : t('{streak} checks failed in a row — it turns unhealthy at {retries}', {
+                  streak: health.failingStreak,
+                  retries: health.retries
+                })}
+          </div>
+          {failure && (
+            <>
+              <div className="mt-1 text-[11px] text-faint">
+                {formatDateTimeSeconds(failure.at)} · {t('exit {code}', { code: failure.exitCode })}
+              </div>
+              {failure.output && (
+                <pre className="mt-1 max-h-32 overflow-auto font-mono text-[11px] break-all whitespace-pre-wrap text-fg">
+                  {failure.output}
+                </pre>
+              )}
+            </>
+          )}
+        </div>
+      )}
+      {(health.command || health.runs.length > 0) && (
+        <details className="group mt-2" data-testid="docker-health-details">
+          <summary className="cursor-pointer text-[11px] text-faint select-none hover:text-fg">
+            {t('Check command and recent output')}
+          </summary>
+          <div className="mt-1.5 flex flex-col gap-1.5">
+            {health.command && (
+              <DefList
+                items={[
+                  [
+                    t('Command'),
+                    <span key="cmd" className="font-mono break-all">
+                      {health.command}
+                    </span>
+                  ],
+                  [
+                    t('Timing'),
+                    t('every {interval}, timeout {timeout}, unhealthy after {retries} failures', {
+                      interval: formatDuration(health.intervalMs),
+                      timeout: formatDuration(health.timeoutMs),
+                      retries: health.retries
+                    })
+                  ]
+                ]}
+              />
+            )}
+            {health.runs.map((r, i) => (
+              <div
+                key={i}
+                className="rounded-md bg-subtle px-2 py-1"
+                data-testid="docker-health-run"
+              >
+                <div className="flex justify-between gap-2 text-[11px] text-faint">
+                  <span>{formatDateTimeSeconds(r.at)}</span>
+                  <span className={r.exitCode === 0 ? 'text-success' : 'text-danger'}>
+                    {t('exit {code}', { code: r.exitCode })}
+                  </span>
+                </div>
+                {r.output && (
+                  <pre className="mt-0.5 max-h-16 overflow-auto font-mono text-[11px] break-all whitespace-pre-wrap text-fg">
+                    {r.output}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </section>
+  )
+}
+
+function Stats({
+  running,
+  stats,
+  inspect
+}: {
+  running: boolean
+  stats: StatsSample[]
+  inspect: Obj | null
+}): React.JSX.Element {
   const last = stats.at(-1)
   if (!running) return <p className="text-faint">{t('The container is not running.')}</p>
   if (!last) return <p className="text-faint">{t('Collecting…')}</p>
+  // Giới hạn RAM đặt cho container (0 = không đặt — Docker báo RAM của cả máy làm "limit").
+  const limit = Number(o(inspect?.['HostConfig'])['Memory'] ?? 0)
+  const memPeak = Math.max(...stats.map((x) => x.memUsage), 1)
+  const memRatio = limit > 0 ? last.memUsage / limit : 0
+  const rates = netRates(stats)
+  const rate = rates.at(-1) ?? { rx: 0, tx: 0 }
+  const netMax = Math.max(1, ...rates.map((r) => Math.max(r.rx, r.tx)))
   const chart = (
     label: string,
-    value: string,
-    values: number[],
-    max: number
+    value: React.ReactNode,
+    sub: React.ReactNode,
+    series: { values: number[]; className?: string; fill?: boolean }[],
+    max: number,
+    testId: string
   ): React.JSX.Element => (
-    <div className="rounded-md border border-line p-2">
-      <div className="flex justify-between">
+    <div className="rounded-md border border-line p-2" data-testid={testId}>
+      <div className="flex items-baseline justify-between gap-2">
         <span className="text-muted">{label}</span>
         <span className="text-fg tabular-nums">{value}</span>
       </div>
-      <Sparkline className="h-16" values={values} max={max} />
+      {sub && <div className="text-right text-[11px] text-faint tabular-nums">{sub}</div>}
+      <div className="relative h-16">
+        {series.map((x, i) => (
+          <Sparkline
+            key={i}
+            className={cx('absolute inset-0 h-16', x.className)}
+            values={x.values}
+            max={max}
+            fill={x.fill ?? true}
+          />
+        ))}
+      </div>
     </div>
   )
   return (
@@ -563,21 +656,51 @@ function Stats({ running, stats }: { running: boolean; stats: StatsSample[] }): 
       {chart(
         t('CPU'),
         cpuText(last.cpuPercent),
-        stats.map((x) => Math.max(0, x.cpuPercent)),
-        Math.max(100, ...stats.map((x) => Math.max(0, x.cpuPercent)))
+        null,
+        [{ values: stats.map((x) => Math.max(0, x.cpuPercent)) }],
+        Math.max(100, ...stats.map((x) => Math.max(0, x.cpuPercent))),
+        'docker-stats-cpu'
       )}
       {chart(
         t('Memory'),
-        `${formatBytes(last.memUsage)}${last.memLimit ? ` / ${formatBytes(last.memLimit)}` : ''}`,
-        stats.map((x) => x.memUsage),
-        last.memLimit || Math.max(...stats.map((x) => x.memUsage), 1)
+        limit > 0 ? (
+          <span
+            className={cx(memRatio >= 0.9 ? 'text-danger' : memRatio >= 0.75 && 'text-warning')}
+          >
+            {formatBytes(last.memUsage)} / {formatBytes(limit)} ({formatPercent(memRatio)})
+          </span>
+        ) : (
+          formatBytes(last.memUsage)
+        ),
+        limit > 0
+          ? null
+          : last.memLimit
+            ? t('No limit — the host has {total}', { total: formatBytes(last.memLimit) })
+            : t('No limit'),
+        [{ values: stats.map((x) => x.memUsage) }],
+        // Có giới hạn: thang theo giới hạn; không: theo đỉnh vừa thấy (đường không bị ép sát đáy).
+        limit > 0 ? limit : memPeak * 1.25,
+        'docker-stats-memory'
       )}
-      <DefList
-        items={[
-          [t('Network in'), formatBytes(last.netRx)],
-          [t('Network out'), formatBytes(last.netTx)]
-        ]}
-      />
+      {chart(
+        t('Network'),
+        <span>
+          <span title={t('Received')}>↓ {formatRate(rate.rx)}</span>{' '}
+          <span className="text-faint" title={t('Sent')}>
+            ↑ {formatRate(rate.tx)}
+          </span>
+        </span>,
+        t('Since start: {in} in · {out} out', {
+          in: formatBytes(last.netRx),
+          out: formatBytes(last.netTx)
+        }),
+        [
+          { values: rates.map((r) => r.rx) },
+          { values: rates.map((r) => r.tx), className: 'opacity-50', fill: false }
+        ],
+        netMax,
+        'docker-stats-network'
+      )}
     </div>
   )
 }

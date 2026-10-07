@@ -47,11 +47,32 @@ test('Docker trên máy này (Engine giả qua DOCKER_HOST): danh sách, stats, 
     await expect(rows).toHaveCount(3)
     await expect(page.getByTestId('docker-engine-info')).toContainText('Docker Engine 27.1.1')
 
-    // Chọn container đang chạy → bảng chi tiết có CPU / RAM sống.
+    // Chọn container đang chạy → Overview: health check một dòng (không đổ output curl thô);
+    // lệnh kiểm tra + output đã làm sạch trong phần thu gọn.
     const web = view.locator('[data-testid="docker-container"][data-name="web"]')
     await web.click()
-    await expect(view.getByTestId('docker-stats')).toContainText('%')
-    await expect(view.getByTestId('docker-stats')).toContainText('MB')
+    const health = view.getByTestId('docker-detail-health')
+    await expect(health.getByTestId('docker-health-summary')).toContainText(
+      '3/3 recent checks passed'
+    )
+    await expect(health.getByTestId('docker-health-summary')).toContainText('every 30s')
+    await expect(health.getByTestId('docker-health-failure')).toHaveCount(0)
+    await expect(health.getByTestId('docker-health-run').first()).toBeHidden()
+    await health.getByTestId('docker-health-details').locator('summary').click()
+    await expect(health.getByTestId('docker-health-details')).toContainText(
+      'curl -f http://localhost:8080/health'
+    )
+    await expect(health.getByTestId('docker-health-run').first()).toHaveText(/\{"status":"ok"\}/)
+    await expect(health).not.toContainText('% Total')
+    // CPU / RAM chỉ ở tab Stats (danh sách đã có cột CPU / Memory) — RAM không đặt giới hạn ghi rõ.
+    await expect(view.getByTestId('docker-detail-overview')).not.toContainText('Memory')
+    await view.getByTestId('docker-detail-tab-stats').click()
+    await expect(view.getByTestId('docker-stats-cpu')).toContainText('%')
+    await expect(view.getByTestId('docker-stats-memory')).toContainText('MB')
+    await expect(view.getByTestId('docker-stats-memory')).toContainText('No limit')
+    await expect(view.getByTestId('docker-stats-network')).toContainText('/s')
+    await expect(view.getByTestId('docker-stats-network')).toContainText('Since start')
+    await view.getByTestId('docker-detail-tab-overview').click()
 
     // Restart nhanh trên dòng → Engine nhận lệnh.
     await web.getByTestId('docker-row-restart').click()

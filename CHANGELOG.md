@@ -6,6 +6,17 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- Docker container details: the health check is one line when healthy (last check, how many recent
+  checks passed, how often it runs); when it is failing, the last failure is shown with its output.
+  Output is cleaned of curl / wget progress meters, and the check command, timing and every recent
+  output are in a collapsed section. CPU / memory are no longer repeated on Overview (they are in
+  the list and the Stats tab).
+- Docker Stats tab: network shows the current rate (in / out per second, with a chart) instead of a
+  running total; memory says “No limit” when the container has no limit instead of showing the
+  host's RAM as if it were the limit, and shows the percentage of the limit when there is one.
+
 ## [1.2.0-beta.21] - 2026-10-07
 
 ### Changed
