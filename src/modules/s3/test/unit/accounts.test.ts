@@ -8,10 +8,13 @@ import { MIGRATIONS } from '../../../../main/store/migrations'
 import { TEST_KDF } from '../../../../main/vault/crypto'
 import { Vault } from '../../../../main/vault/vault'
 import { createModuleDb } from '../../../registry/main-db'
+import m0003 from '../../migrations/0003_network.sql?raw'
 
 async function setup() {
   const db = openDatabase(':memory:')
   await migrate(db, MIGRATIONS)
+  // Bảng từ migration lõi 0006 / 0007; migration riêng của module (v3+) chạy tay ở đây.
+  db.exec(m0003)
   const vault = new Vault(db, TEST_KDF)
   await vault.create(Secret.fromString('master-password'))
   let clock = 1_000

@@ -13,6 +13,8 @@ interface Row {
   secret_enc: Buffer | null
   path_style: number
   pins: string
+  insecure_tls: number
+  direct: number
 }
 
 function parsePins(json: string): S3Pin[] {
@@ -35,7 +37,8 @@ export class S3Accounts {
   list(): S3AccountSummary[] {
     const rows = this.db
       .prepare(
-        `SELECT id, name, endpoint, region, access_key_id, secret_enc, path_style, pins
+        `SELECT id, name, endpoint, region, access_key_id, secret_enc, path_style, pins,
+                insecure_tls, direct
          FROM s3_accounts WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE`
       )
       .all() as Row[]
@@ -46,6 +49,8 @@ export class S3Accounts {
       region: r.region,
       accessKeyId: r.access_key_id,
       forcePathStyle: r.path_style === 1,
+      insecureTls: r.insecure_tls === 1,
+      direct: r.direct === 1,
       hasSecret: r.secret_enc !== null,
       pins: parsePins(r.pins)
     }))
@@ -84,13 +89,15 @@ export class S3Accounts {
       input.region,
       input.accessKeyId,
       input.forcePathStyle ? 1 : 0,
+      input.insecureTls ? 1 : 0,
+      input.direct ? 1 : 0,
       now
     ]
     if (input.id) {
       const result = this.db
         .prepare(
           `UPDATE s3_accounts SET name = ?, endpoint = ?, region = ?, access_key_id = ?,
-             path_style = ?, updated_at = ?${secret === undefined ? '' : ', secret_enc = ?'}
+             path_style = ?, insecure_tls = ?, direct = ?, updated_at = ?${secret === undefined ? '' : ', secret_enc = ?'}
            WHERE id = ? AND deleted_at IS NULL`
         )
         .run(...values, ...(secret === undefined ? [] : [secret]), id)
@@ -100,8 +107,8 @@ export class S3Accounts {
     if (!secret) throw new Error(t('Enter the secret access key'))
     this.db
       .prepare(
-        `INSERT INTO s3_accounts (name, endpoint, region, access_key_id, path_style, updated_at,
-           secret_enc, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO s3_accounts (name, endpoint, region, access_key_id, path_style, insecure_tls,
+           direct, updated_at, secret_enc, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(...values, secret, id)
     return id
@@ -124,11 +131,13 @@ export class S3Accounts {
     accessKeyId: string
     secretAccessKey: string
     forcePathStyle: boolean
+    insecureTls: boolean
+    direct: boolean
   } {
     const row = this.db
       .prepare(
-        `SELECT id, name, endpoint, region, access_key_id, secret_enc, path_style FROM s3_accounts
-         WHERE id = ? AND deleted_at IS NULL`
+        `SELECT id, name, endpoint, region, access_key_id, secret_enc, path_style, insecure_tls,
+                direct FROM s3_accounts WHERE id = ? AND deleted_at IS NULL`
       )
       .get(id) as Row | undefined
     if (!row) throw new Error(t('The S3 account no longer exists'))
@@ -140,7 +149,9 @@ export class S3Accounts {
       region: row.region,
       accessKeyId: row.access_key_id,
       secretAccessKey: this.secrets.open('s3_accounts', id, 'secret_enc', row.secret_enc),
-      forcePathStyle: row.path_style === 1
+      forcePathStyle: row.path_style === 1,
+      insecureTls: row.insecure_tls === 1,
+      direct: row.direct === 1
     }
   }
 }

@@ -31,6 +31,8 @@ import {
   type ResourceKind
 } from '../shared/resources'
 import { KubeClient, KubeError, KubeTimeoutError, type RawConnect } from './client'
+import { openTunnel } from '../../../node-shared/proxy-tunnel'
+import { isCertificateError, isProxyUrl } from '@shared/proxy'
 import { credentialProvider, type AuthConfig, type OidcTokens } from './auth'
 import {
   cordon,
@@ -75,6 +77,8 @@ export interface ResolvedClusterConfig {
   ca?: string
   insecure: boolean
   tlsServerName?: string
+  /** Proxy tới API server (proxy-url của kubeconfig hoặc Settings › Network). */
+  proxyUrl?: string
   namespace: string
   /** Chế độ chỉ đọc lưu trong main (renderer không tắt được). */
   readOnly?: boolean
@@ -93,6 +97,12 @@ export const ResolvedClusterSchema = z.object({
   ca: Pem.optional(),
   insecure: z.boolean(),
   tlsServerName: z.string().max(253).optional(),
+  /** Proxy tới API server (proxy-url của kubeconfig hoặc Settings › Network). */
+  proxyUrl: z
+    .string()
+    .max(500)
+    .refine((v) => isProxyUrl(v), 'Invalid proxy URL')
+    .optional(),
   namespace: z.string().max(63),
   readOnly: z.boolean().optional(),
   auth: z.object({
@@ -256,9 +266,12 @@ export class K8sService implements HostModuleSession {
     this.cluster = cluster
     this.prom = null
     this.probe = null
+    // Có proxy: mọi kết nối tới API server mở đường hầm qua proxy (proxy đi thẳng, hoặc qua bastion).
+    const raw = this.deps.rawConnect
+    const proxyUrl = cluster.proxyUrl
     this.client = new KubeClient(
       cluster,
-      this.deps.rawConnect,
+      proxyUrl ? (host, port) => openTunnel(proxyUrl, host, port, raw) : raw,
       credentialProvider(cluster.auth, this.deps.spawn, cluster.server, Date.now, {
         log: (message) => {
           this.deps.log('warn', message)
@@ -308,7 +321,20 @@ export class K8sService implements HostModuleSession {
       if (this.refKey !== contextKey(op.ref)) this.stopRecorder()
       const client = await this.connect(op.ref)
       this.refKey = contextKey(op.ref)
-      const version = await client.json<{ gitVersion?: string }>('GET', '/version', { signal })
+      const version = await client
+        .json<{ gitVersion?: string }>('GET', '/version', { signal })
+        .catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : String(error)
+          // Chứng chỉ tự ký / proxy công ty chặn TLS: chỉ chỗ bật bỏ qua kiểm tra.
+          if (isCertificateError(message))
+            throw new Error(
+              t(
+                '{error} — if you trust this API server, turn on “Skip certificate verification” in the context settings',
+                { error: message }
+              )
+            )
+          throw error
+        })
       return {
         version: version.gitVersion ?? '',
         namespace: this.cluster?.namespace ?? 'default',

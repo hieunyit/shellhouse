@@ -410,6 +410,7 @@ function ContextDialog({
   const [bastion, setBastion] = useState(c.settings.bastionHostId ?? '')
   const [namespace, setNamespace] = useState(c.settings.namespace ?? '')
   const [readOnly, setReadOnly] = useState(c.settings.readOnly)
+  const [insecure, setInsecure] = useState(c.settings.insecure)
   // Môi trường (Settings › Environments) thay cho màu cũ; context cũ màu đỏ → Production.
   const environments = useEnvironments()
   const legacy = useContextEnvironment(c.key, c.settings.color)
@@ -421,6 +422,7 @@ function ContextDialog({
         bastionHostId: bastion || null,
         namespace: namespace.trim() || null,
         readOnly,
+        insecure,
         color: null
       }),
       setSourceEnvironment('k8s', c.key, environment)
@@ -498,6 +500,17 @@ function ContextDialog({
           data-testid="k8s-context-read-only"
           onChange={(e) => {
             setReadOnly(e.target.checked)
+          }}
+        />
+        <Checkbox
+          label={t('Skip certificate verification')}
+          description={t(
+            'For an API server with a self-signed certificate, or behind a proxy that inspects TLS. The proxy comes from proxy-url in the kubeconfig, otherwise from Settings › Network.'
+          )}
+          checked={insecure}
+          data-testid="k8s-context-insecure"
+          onChange={(e) => {
+            setInsecure(e.target.checked)
           }}
         />
       </div>

@@ -12,7 +12,9 @@ export const ContextSettings = z.object({
   /** Đỏ = production: thao tác phá huỷ phải gõ tên tài nguyên. */
   color: ContextColor,
   /** Ẩn khỏi thanh bên. */
-  hidden: z.boolean()
+  hidden: z.boolean(),
+  /** Bỏ qua kiểm tra chứng chỉ TLS của API server (ngoài insecure-skip-tls-verify của file). */
+  insecure: z.boolean().default(false)
 })
 export type ContextSettings = z.infer<typeof ContextSettings>
 

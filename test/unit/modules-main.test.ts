@@ -216,7 +216,7 @@ describe('MainModuleRegistry', () => {
 
   it('S3: DB cũ (bảng từ migration 0006/0007) được ghi sẵn là đã chạy; Remove data rồi bật lại tạo lại bảng', async () => {
     const { db, registry } = await setup([s3Main])
-    expect(moduleSchemaVersion(db, 's3')).toBe(2)
+    expect(moduleSchemaVersion(db, 's3')).toBe(3)
     // S3 bật mặc định.
     expect(registry.isEnabled('s3')).toBe(true)
     expect(registry.invoke('s3', 'accounts', [])).toEqual([])
@@ -226,7 +226,7 @@ describe('MainModuleRegistry', () => {
       db.prepare("SELECT name FROM sqlite_master WHERE name = 's3_accounts'").get()
     ).toBeUndefined()
     registry.setEnabled('s3', true)
-    expect(moduleSchemaVersion(db, 's3')).toBe(2)
+    expect(moduleSchemaVersion(db, 's3')).toBe(3)
     expect(registry.invoke('s3', 'accounts', [])).toEqual([])
   })
 

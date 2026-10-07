@@ -19,6 +19,7 @@ import { SecuritySection } from './SecuritySection'
 import { ShortcutsSection } from './ShortcutsSection'
 import { TerminalSection } from './TerminalSection'
 import { UpdatesSection } from './UpdatesSection'
+import { NetworkSection } from './NetworkSection'
 import { AboutSection } from './AboutSection'
 import { ModulesSection } from './ModulesSection'
 
@@ -93,6 +94,7 @@ export function SettingsPage({
             <KeychainSection key={requested} filter={resolved.keychainFilter} />
           )}
           {section === 'shortcuts' && <ShortcutsSection />}
+          {section === 'network' && <NetworkSection />}
           {section === 'updates' && <UpdatesSection />}
           {section === 'diagnostics' && <Diagnostics />}
           {section === 'about' && (

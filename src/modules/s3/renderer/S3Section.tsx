@@ -290,6 +290,8 @@ function S3AccountForm({
   const [accessKeyId, setAccessKeyId] = useState(account?.accessKeyId ?? '')
   const [secret, setSecret] = useState('')
   const [pathStyle, setPathStyle] = useState(account?.forcePathStyle ?? false)
+  const [insecureTls, setInsecureTls] = useState(account?.insecureTls ?? false)
+  const [direct, setDirect] = useState(account?.direct ?? false)
   const [error, setError] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [tested, setTested] = useState<{ ok: boolean; message: string } | null>(null)
@@ -306,7 +308,9 @@ function S3AccountForm({
       region,
       accessKeyId,
       ...(secret || !account ? { secretAccessKey: secret } : {}),
-      forcePathStyle: pathStyle
+      forcePathStyle: pathStyle,
+      insecureTls,
+      direct
     })
 
   const save = async (): Promise<void> => {
@@ -447,6 +451,33 @@ function S3AccountForm({
             setPathStyle(e.target.checked)
           }}
         />
+        <details className="group text-[13px]" open={insecureTls || direct}>
+          <summary className="cursor-pointer text-xs text-muted select-none hover:text-fg">
+            {t('Network')}
+          </summary>
+          <div className="mt-2 flex flex-col gap-3">
+            <Checkbox
+              label={t('Skip certificate verification')}
+              description={t(
+                'For servers with a self-signed or internal certificate. Only turn this on for a server you trust.'
+              )}
+              checked={insecureTls}
+              data-testid="s3-account-insecure"
+              onChange={(e) => {
+                setInsecureTls(e.target.checked)
+              }}
+            />
+            <Checkbox
+              label={t('Connect directly (no proxy)')}
+              description={t('Ignore the proxy set in Settings › Network for this account.')}
+              checked={direct}
+              data-testid="s3-account-direct"
+              onChange={(e) => {
+                setDirect(e.target.checked)
+              }}
+            />
+          </div>
+        </details>
         {error && (
           <Notice tone="danger" testId="s3-account-error">
             {error}

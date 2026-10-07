@@ -8,6 +8,14 @@ import { describeUpdateError } from '../node-shared/update-errors'
 import { verifyUpdateSignature } from '../node-shared/update-signature'
 import { UPDATE_PUBLIC_KEYS } from './update-keys'
 import { t } from '@shared/i18n'
+import type { NetworkSettings } from '@shared/proxy'
+
+/** URL proxy → luật của Chromium: bỏ thông tin đăng nhập, socks5h → socks5. */
+function chromiumProxy(url: string): string {
+  const u = new URL(url)
+  const scheme = u.protocol.replace(/:$/, '').replace('socks5h', 'socks5')
+  return `${scheme}://${u.host}`
+}
 
 /**
  * Cập nhật tự động qua electron-updater.
@@ -100,6 +108,42 @@ export class Updater {
   onStatus(listener: (s: UpdateStatus) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)
+  }
+
+  /** Cài đặt mạng đã áp (so sánh để chỉ áp khi đổi). */
+  private networkKey = ''
+
+  /**
+   * Proxy + bỏ qua lỗi chứng chỉ cho phiên mạng RIÊNG của electron-updater (không ảnh hưởng phần
+   * còn lại của app). Bỏ qua chứng chỉ vẫn an toàn tương đối: bản cài còn được kiểm chữ ký (Windows:
+   * nhà phát hành, macOS: ký app, Linux: chữ ký ed25519 của file kênh).
+   */
+  setNetwork(network: NetworkSettings): void {
+    const key = JSON.stringify(network)
+    if (key === this.networkKey) return
+    this.networkKey = key
+    const session = autoUpdater.netSession
+    const config: Electron.ProxyConfig =
+      network.proxyMode === 'none'
+        ? { mode: 'direct' }
+        : network.proxyMode === 'manual' && network.proxyUrl
+          ? {
+              mode: 'fixed_servers',
+              // Chromium nhận "scheme://host:port" (không nhận user:pass trong URL).
+              proxyRules: chromiumProxy(network.proxyUrl),
+              proxyBypassRules: network.noProxy
+            }
+          : { mode: 'system' }
+    void session.setProxy(config).catch((error: unknown) => {
+      log.scope('updater').warn('Could not set the update proxy', error)
+    })
+    session.setCertificateVerifyProc(
+      network.updatesInsecure
+        ? (_request, callback) => {
+            callback(0)
+          }
+        : null
+    )
   }
 
   setChannel(channel: 'stable' | 'beta'): void {

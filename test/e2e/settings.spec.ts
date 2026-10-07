@@ -215,3 +215,26 @@ test('xuất bản sao lưu', async ({ app, page }) => {
   await expect(page.getByTestId('security-message')).toContainText('Saved to')
   expect(statSync(target).size).toBeGreaterThan(0)
 })
+
+test('Network: proxy tự nhập — URL sai không lưu, URL đúng + danh sách bỏ qua được lưu', async ({
+  page
+}) => {
+  await openSettings(page, 'network')
+  await page.getByTestId('setting-proxy-mode-manual').click()
+  const url = page.getByTestId('setting-proxy-url')
+  await url.fill('proxy.corp:3128')
+  await url.blur()
+  await expect(page.getByTestId('settings-network')).toContainText('socks5://host:port')
+  await url.fill('http://proxy.corp:3128')
+  await page.getByTestId('setting-no-proxy').fill('.corp.local, 10.0.0.0/8')
+  await page.getByTestId('setting-updates-insecure').check()
+  await url.focus()
+  await expect
+    .poll(() => page.evaluate(() => window.shellhouse.getSettings().then((s) => s.network)))
+    .toEqual({
+      proxyMode: 'manual',
+      proxyUrl: 'http://proxy.corp:3128',
+      noProxy: '.corp.local, 10.0.0.0/8',
+      updatesInsecure: true
+    })
+})

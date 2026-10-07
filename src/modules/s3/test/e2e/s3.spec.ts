@@ -37,10 +37,12 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
     // Renderer chỉ biết "đã có secret", không bao giờ nhận secret.
     expect(Object.keys(accounts[0] ?? {}).sort()).toEqual([
       'accessKeyId',
+      'direct',
       'endpoint',
       'forcePathStyle',
       'hasSecret',
       'id',
+      'insecureTls',
       'name',
       'pins',
       'region'

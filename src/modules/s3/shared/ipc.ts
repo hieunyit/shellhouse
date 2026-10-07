@@ -26,7 +26,10 @@ export const S3SessionConfig = z.object({
     region: z.string().max(64),
     accessKeyId: z.string().max(256),
     secretAccessKey: z.string().max(1024),
-    forcePathStyle: z.boolean()
+    forcePathStyle: z.boolean(),
+    /** Proxy đã chọn cho endpoint (null = thẳng). */
+    proxy: z.string().max(500).nullable(),
+    insecureTls: z.boolean()
   }),
   limits: z.object({
     requests: z.number().int().min(1).max(64),

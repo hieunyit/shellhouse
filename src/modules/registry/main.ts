@@ -5,6 +5,7 @@ import type { Vault } from '../../main/vault/vault'
 import { readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
+import { proxyFor, type NetworkSettings } from '@shared/proxy'
 import { createModuleDb, migrateModule, removeModuleData } from './main-db'
 import { expandHome, localPathAllowed, sensitiveTarget } from './local-paths'
 import type { MainModule, MainModuleApi, MainModuleContext, ModuleLog } from './main-types'
@@ -39,6 +40,8 @@ export interface MainRegistryDeps {
   listWslDistros?(): Promise<{ name: string; running: boolean; version: number }[]>
   /** File tạm "sửa trong editor" do main cấp (files:prepareEdit) — module chỉ ghi được vào đó. */
   ownsEditFile?(path: string): boolean
+  /** Cài đặt mạng của app (proxy…) — đọc tại thời điểm gọi. */
+  network?(): NetworkSettings
   /** Cho test: home / biến môi trường khi kiểm quyền đọc file. */
   home?: string
   env?: NodeJS.ProcessEnv
@@ -328,6 +331,10 @@ export class MainModuleRegistry {
       },
       home: this.deps.home ?? homedir(),
       ownsEditFile: (path) => this.deps.ownsEditFile?.(path) ?? false,
+      proxyFor: (host, port, secure) =>
+        this.deps.network
+          ? proxyFor(this.deps.network(), host, port, secure, this.deps.env ?? process.env)
+          : null,
       readFile: async (path) => {
         const ctx = {
           home: this.deps.home ?? homedir(),

@@ -1,6 +1,7 @@
 import {
   Activity,
   Download,
+  Globe,
   FolderOpen,
   Info,
   Keyboard,
@@ -24,6 +25,7 @@ export const SETTINGS_SECTIONS = [
   'security',
   'keychain',
   'shortcuts',
+  'network',
   'updates',
   'diagnostics',
   'about'
@@ -78,6 +80,7 @@ export const SETTINGS_NAV: readonly {
     group: () => t('App'),
     items: [
       { id: 'modules', title: () => t('Modules'), icon: Puzzle },
+      { id: 'network', title: () => t('Network'), icon: Globe },
       { id: 'updates', title: () => t('Updates'), icon: Download },
       { id: 'diagnostics', title: () => t('Diagnostics'), icon: Activity },
       { id: 'about', title: () => t('About'), icon: Info }
@@ -109,6 +112,8 @@ export function settingsDescription(section: SettingsSection): string {
       return t('Vault, auto-lock and how secrets are stored.')
     case 'modules':
       return t('Turn on Kubernetes, Docker, S3 and other tools.')
+    case 'network':
+      return t('Proxy and certificates for S3, Kubernetes and updates.')
     case 'updates':
       return t('Release channel and automatic updates.')
     case 'diagnostics':

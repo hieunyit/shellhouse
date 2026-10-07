@@ -86,6 +86,11 @@ export interface MainModuleContext {
    * Session Host chỉ ghi / theo dõi đúng file đó, không phải đường dẫn bất kỳ renderer gửi.
    */
   ownsEditFile?(path: string): boolean
+  /**
+   * Proxy cho một đích theo Settings › Network (null = kết nối thẳng) — S3, Kubernetes API… `secure`
+   * = đích https (chọn đúng biến môi trường ở chế độ System).
+   */
+  proxyFor(host: string, port: number, secure: boolean): string | null
   /** Hộp thoại chọn file (cần quyền `pick-file`); huỷ → []. */
   pickFiles(options: {
     title: string

@@ -1268,5 +1268,11 @@ export const k8s: Readonly<Record<string, string>> = {
   'The cluster keeps events for about an hour. Monitor this cluster on Home to keep 7 days of history.':
     'Cluster chỉ giữ event khoảng một giờ. Theo dõi cluster này ở Home để giữ lịch sử 7 ngày.',
   '{n} older event from history.': '{n} event cũ hơn từ lịch sử.',
-  '{n} older events from history.': '{n} event cũ hơn từ lịch sử.'
+  '{n} older events from history.': '{n} event cũ hơn từ lịch sử.',
+  'Unsupported proxy-url in the kubeconfig: {url}':
+    'proxy-url trong kubeconfig không được hỗ trợ: {url}',
+  'For an API server with a self-signed certificate, or behind a proxy that inspects TLS. The proxy comes from proxy-url in the kubeconfig, otherwise from Settings › Network.':
+    'Cho API server dùng chứng chỉ tự ký, hoặc đi qua proxy có kiểm tra TLS. Proxy lấy từ proxy-url trong kubeconfig, nếu không có thì theo Cài đặt › Network.',
+  '{error} — if you trust this API server, turn on “Skip certificate verification” in the context settings':
+    '{error} — nếu tin API server này, bật “Bỏ qua kiểm tra chứng chỉ” trong cài đặt của context'
 }

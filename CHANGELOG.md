@@ -6,6 +6,24 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- **Proxy** for S3, the Kubernetes API and update checks (Settings › Network): _System_ uses
+  `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` / `NO_PROXY` (and the system proxy for updates),
+  _Manual_ takes an `http://`, `https://` or `socks5://` address (with `user:password@` if
+  needed), plus a bypass list (host names, `.domain` suffixes, IPs, CIDR ranges, `host:port`).
+  Kubernetes honors `proxy-url` from the kubeconfig first; for a bastion context the proxy is
+  reached through the bastion. An S3 account can opt out with **Connect directly**.
+- **Skip certificate verification** per S3 account and per Kubernetes context (self-signed
+  certificates, internal CAs, proxies that inspect TLS), and **Ignore certificate errors for
+  updates** in Settings › Network — installers are still checked against the release signature.
+  A certificate error now says which option to turn on.
+
+### Fixed
+
+- Linux (Ubuntu): the app had no icon in the launcher and dock — the deb / rpm packages now
+  install icons in the standard sizes (16–512 px), and the window sets its own icon (AppImage).
+
 ## [1.2.0-beta.23] - 2026-10-07
 
 ### Changed

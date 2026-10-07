@@ -15,6 +15,7 @@ import { ContextRef, contextKey, type ContextInfo } from '../shared/ops'
 import m0001 from '../migrations/0001_contexts.sql?raw'
 import m0002 from '../migrations/0002_hidden.sql?raw'
 import m0003 from '../migrations/0003_events.sql?raw'
+import m0004 from '../migrations/0004_insecure.sql?raw'
 import { QueryEvents, RecordEvents } from '../shared/timeline'
 import { EventStore } from './events'
 import {
@@ -35,6 +36,7 @@ interface SettingsRow {
   read_only: number
   color: string | null
   hidden: number
+  insecure: number
 }
 
 const DEFAULTS: ContextSettings = {
@@ -42,7 +44,8 @@ const DEFAULTS: ContextSettings = {
   namespace: null,
   readOnly: false,
   color: null,
-  hidden: false
+  hidden: false,
+  insecure: false
 }
 
 /** Token OIDC vừa làm mới (Session Host → main, lưu vào kubeconfig / bản import). */
@@ -123,7 +126,9 @@ class Kubeconfigs {
 
   private settings(): Map<string, ContextSettings> {
     const rows = this.ctx.db
-      .prepare('SELECT key, bastion_host_id, namespace, read_only, color, hidden FROM k8s_contexts')
+      .prepare(
+        'SELECT key, bastion_host_id, namespace, read_only, color, hidden, insecure FROM k8s_contexts'
+      )
       .all() as SettingsRow[]
     return new Map(
       rows.map((r) => [
@@ -133,7 +138,8 @@ class Kubeconfigs {
           namespace: r.namespace,
           readOnly: r.read_only === 1,
           color: (['red', 'orange', 'green', 'blue'] as const).find((c) => c === r.color) ?? null,
-          hidden: r.hidden === 1
+          hidden: r.hidden === 1,
+          insecure: r.insecure === 1
         }
       ])
     )
@@ -194,11 +200,12 @@ class Kubeconfigs {
     const next = { ...(this.settings().get(key) ?? DEFAULTS), ...patch }
     this.ctx.db
       .prepare(
-        `INSERT INTO k8s_contexts (key, bastion_host_id, namespace, read_only, color, hidden, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO k8s_contexts (key, bastion_host_id, namespace, read_only, color, hidden,
+           insecure, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(key) DO UPDATE SET bastion_host_id = excluded.bastion_host_id,
            namespace = excluded.namespace, read_only = excluded.read_only, color = excluded.color,
-           hidden = excluded.hidden, updated_at = excluded.updated_at`
+           hidden = excluded.hidden, insecure = excluded.insecure, updated_at = excluded.updated_at`
       )
       .run(
         key,
@@ -207,6 +214,7 @@ class Kubeconfigs {
         next.readOnly ? 1 : 0,
         next.color,
         next.hidden ? 1 : 0,
+        next.insecure ? 1 : 0,
         Date.now()
       )
   }
@@ -302,7 +310,20 @@ class Kubeconfigs {
    */
   async resolve(ref: ContextRef): Promise<ResolvedCluster> {
     const resolved = await this.resolveConfig(ref)
-    return { ...resolved, readOnly: this.settings().get(contextKey(ref))?.readOnly ?? false }
+    const own = this.settings().get(contextKey(ref))
+    // Proxy: proxy-url trong kubeconfig trước; không có thì theo Settings › Network.
+    const url = new URL(resolved.server)
+    const secure = url.protocol === 'https:'
+    const proxyUrl =
+      resolved.proxyUrl ??
+      this.ctx.proxyFor(url.hostname, Number(url.port) || (secure ? 443 : 80), secure) ??
+      undefined
+    return {
+      ...resolved,
+      readOnly: own?.readOnly ?? false,
+      insecure: resolved.insecure || own?.insecure === true,
+      ...(proxyUrl ? { proxyUrl } : {})
+    }
   }
 
   private writes = Promise.resolve()
@@ -364,7 +385,8 @@ export const k8sMain: MainModule = {
   migrations: [
     { version: 1, name: 'contexts', sql: m0001 },
     { version: 2, name: 'hidden', sql: m0002 },
-    { version: 3, name: 'events', sql: m0003 }
+    { version: 3, name: 'events', sql: m0003 },
+    { version: 4, name: 'insecure', sql: m0004 }
   ],
   activate(ctx) {
     const configs = new Kubeconfigs(ctx)

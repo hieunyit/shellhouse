@@ -5,6 +5,7 @@ import { S3BrowserParams, S3Ipc, type S3SessionConfig } from '../shared/ipc'
 import { S3Settings } from '../shared/settings'
 import m0001 from '../migrations/0001_accounts.sql?raw'
 import m0002 from '../migrations/0002_pins.sql?raw'
+import m0003 from '../migrations/0003_network.sql?raw'
 import { S3Accounts } from './accounts'
 
 /**
@@ -17,7 +18,8 @@ export const s3Main: MainModule = {
   // chỉ chạy thật khi bật lại sau "Remove data".
   migrations: [
     { version: 1, name: 'accounts', sql: m0001 },
-    { version: 2, name: 'pins', sql: m0002 }
+    { version: 2, name: 'pins', sql: m0002 },
+    { version: 3, name: 'network', sql: m0003 }
   ],
   settings: S3Settings,
   activate(ctx) {
@@ -48,7 +50,9 @@ export const s3Main: MainModule = {
           region: input.region,
           accessKeyId: input.accessKeyId,
           secretAccessKey,
-          forcePathStyle: input.forcePathStyle
+          forcePathStyle: input.forcePathStyle,
+          proxy: proxyOf(input.endpoint, input.region, input.direct),
+          insecureTls: input.insecureTls
         })
       } catch (error) {
         return { ok: false, message: error instanceof Error ? error.message : String(error) }
@@ -62,6 +66,14 @@ export const s3Main: MainModule = {
       accounts.setPin(id, pin, pinned)
       changed()
     })
+    /** Proxy cho endpoint của tài khoản (Settings › Network); `direct` = luôn kết nối thẳng. */
+    const proxyOf = (endpoint: string, region: string, direct: boolean): string | null => {
+      if (direct) return null
+      const url = endpoint ? new URL(endpoint) : null
+      const host = url ? url.hostname : `s3.${region || 'us-east-1'}.amazonaws.com`
+      const secure = !url || url.protocol === 'https:'
+      return ctx.proxyFor(host, Number(url?.port) || (secure ? 443 : 80), secure)
+    }
     const connection = (accountId: string): S3SessionConfig['connection'] => {
       const account = accounts.resolve(accountId)
       return {
@@ -69,7 +81,9 @@ export const s3Main: MainModule = {
         region: account.region,
         accessKeyId: account.accessKeyId,
         secretAccessKey: account.secretAccessKey,
-        forcePathStyle: account.forcePathStyle
+        forcePathStyle: account.forcePathStyle,
+        proxy: proxyOf(account.endpoint, account.region, account.direct),
+        insecureTls: account.insecureTls
       }
     }
     return {

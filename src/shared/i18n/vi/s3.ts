@@ -620,5 +620,12 @@ export const s3: Readonly<Record<string, string>> = {
   'Hide buckets': 'Ẩn bucket',
   'Show buckets': 'Hiện bucket',
   'Could not list buckets': 'Không đọc được danh sách bucket',
-  'No buckets': 'Chưa có bucket nào'
+  'No buckets': 'Chưa có bucket nào',
+  'For servers with a self-signed or internal certificate. Only turn this on for a server you trust.':
+    'Cho server dùng chứng chỉ tự ký hoặc nội bộ. Chỉ bật với server bạn tin cậy.',
+  'Connect directly (no proxy)': 'Kết nối thẳng (không qua proxy)',
+  'Ignore the proxy set in Settings › Network for this account.':
+    'Không dùng proxy trong Cài đặt › Network cho tài khoản này.',
+  '{error} — if you trust this server, turn on “Skip certificate verification” in the account settings':
+    '{error} — nếu tin server này, bật “Bỏ qua kiểm tra chứng chỉ” trong cài đặt tài khoản'
 }

@@ -912,5 +912,29 @@ export const core: Readonly<Record<string, string>> = {
     'Key này có passphrase. Để trống thì sẽ hỏi khi kết nối.',
   'Remember the passphrase in the vault': 'Nhớ passphrase trong vault',
   'Jump host': 'Jump host',
-  'Uses key {name}': 'Dùng key {name}'
+  'Uses key {name}': 'Dùng key {name}',
+  'The update server certificate was not trusted. Behind a company proxy that inspects TLS, turn on “Ignore certificate errors for updates” in Settings › Network.':
+    'Không tin được chứng chỉ của máy chủ cập nhật. Nếu đi qua proxy công ty có kiểm tra TLS, bật “Bỏ qua lỗi chứng chỉ khi cập nhật” trong Cài đặt › Network.',
+  'Used for S3, the Kubernetes API and update checks. SSH and Telnet use jump hosts instead. A proxy-url in a kubeconfig always wins for that cluster.':
+    'Dùng cho S3, Kubernetes API và kiểm tra cập nhật. SSH và Telnet dùng jump host thay vào đó. proxy-url trong kubeconfig luôn được ưu tiên cho cluster đó.',
+  Proxy: 'Proxy',
+  'HTTPS_PROXY / HTTP_PROXY / NO_PROXY variables; the system proxy for updates':
+    'Biến HTTPS_PROXY / HTTP_PROXY / NO_PROXY; proxy của hệ thống khi cập nhật',
+  Manual: 'Tự nhập',
+  'No proxy': 'Không dùng proxy',
+  'Proxy address': 'Địa chỉ proxy',
+  'Use http://host:port, https://host:port or socks5://host:port':
+    'Dùng http://host:port, https://host:port hoặc socks5://host:port',
+  'http://, https:// or socks5:// — with user:password@ if the proxy needs a login. Empty = connect directly.':
+    'http://, https:// hoặc socks5:// — thêm user:password@ nếu proxy cần đăng nhập. Để trống = kết nối thẳng.',
+  'Bypass the proxy for': 'Không qua proxy với',
+  'Comma-separated: host names, domain suffixes (.corp.local), IP addresses, CIDR ranges (10.0.0.0/8), host:port.':
+    'Cách nhau bằng dấu phẩy: tên máy, hậu tố tên miền (.corp.local), địa chỉ IP, dải CIDR (10.0.0.0/8), host:port.',
+  Certificates: 'Chứng chỉ',
+  'Ignore certificate errors for updates': 'Bỏ qua lỗi chứng chỉ khi cập nhật',
+  'For company proxies that inspect TLS with their own certificate. Downloaded installers are still checked against the release signature. S3 accounts and Kubernetes contexts have their own “Skip certificate verification” option.':
+    'Cho proxy công ty kiểm tra TLS bằng chứng chỉ riêng. Bản cài tải về vẫn được kiểm tra chữ ký phát hành. Tài khoản S3 và context Kubernetes có tuỳ chọn “Bỏ qua kiểm tra chứng chỉ” riêng.',
+  'Proxy and certificates for S3, Kubernetes and updates.':
+    'Proxy và chứng chỉ cho S3, Kubernetes và cập nhật.',
+  'Skip certificate verification': 'Bỏ qua kiểm tra chứng chỉ'
 }

@@ -69,6 +69,10 @@ export const S3AccountSummary = z.object({
   accessKeyId: z.string(),
   /** Bucket dạng https://endpoint/bucket thay vì https://bucket.endpoint (MinIO, Ceph). */
   forcePathStyle: z.boolean(),
+  /** Bỏ qua kiểm tra chứng chỉ TLS (máy chủ tự ký / CA nội bộ). */
+  insecureTls: z.boolean(),
+  /** Luôn kết nối thẳng, không qua proxy của app. */
+  direct: z.boolean(),
   hasSecret: z.boolean(),
   pins: z.array(S3Pin)
 })
@@ -86,9 +90,12 @@ export const S3AccountInput = z.object({
   accessKeyId: z.string().trim().min(1, 'Enter the access key ID').max(256),
   /** undefined = giữ secret đã lưu. */
   secretAccessKey: z.string().max(1024).optional(),
-  forcePathStyle: z.boolean()
+  forcePathStyle: z.boolean(),
+  insecureTls: z.boolean().default(false),
+  direct: z.boolean().default(false)
 })
-export type S3AccountInput = z.infer<typeof S3AccountInput>
+/** Dạng nhận vào (trường mạng có mặc định — tài khoản cũ / test không cần ghi). */
+export type S3AccountInput = z.input<typeof S3AccountInput>
 
 const Bucket = z.string().min(1).max(255)
 const Key = z.string().max(1024)

@@ -34,6 +34,7 @@ import { ShellService } from './shells'
 import { installGlobalGuards, secureWebPreferences } from './security'
 import { resolveLanguage, resolveLocale, setLanguage, t, type Language } from '@shared/i18n'
 import { formatDateTime } from '@shared/i18n/format'
+import { DEFAULT_SETTINGS } from '@shared/settings'
 import { isAppUrl } from './security-policy'
 import { spawnElectronHost } from './session-host/electron-spawn'
 import { SessionHostSupervisor } from './session-host/supervisor'
@@ -59,6 +60,7 @@ import { Updater } from './updater'
 import { listWslDistros, wslFileExists, type WslDistro } from './wsl'
 import { TmuxSlots } from './tmux-slots'
 import { applyWindowTheme, windowBackground, windowChromeOptions } from './window-chrome'
+import linuxIcon from '../../build/icons/256x256.png?asset'
 
 log.initialize()
 log.transports.file.level = 'info'
@@ -734,6 +736,8 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     title: 'Shellhouse',
+    // Linux: AppImage chưa tích hợp vào menu thì dock không có .desktop để lấy icon — gắn trực tiếp.
+    ...(process.platform === 'linux' ? { icon: linuxIcon } : {}),
     backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     // Không có thanh tiêu đề của hệ điều hành: thanh trên cùng của app là vùng kéo (window-chrome.ts).
     ...windowChromeOptions(process.platform, nativeTheme.shouldUseDarkColors),
@@ -840,6 +844,7 @@ if (!app.requestSingleInstanceLock()) {
       },
       listWslDistros: wslDistros,
       ownsEditFile: (path) => remoteEdits.owns(path),
+      network: () => settings?.get().network ?? DEFAULT_SETTINGS.network,
       // Cùng thư mục nhà với phần còn lại của app (E2E đổi bằng SHELLHOUSE_HOME).
       home: app.getPath('home'),
       showOpenDialog: async (options) => {
@@ -950,11 +955,13 @@ if (!app.requestSingleInstanceLock()) {
     updater = new Updater()
     const updaterRef = updater
     updaterRef.setChannel(settings.get().updates.channel)
+    updaterRef.setNetwork(settings.get().network)
     updaterRef.onStatus((s) => {
       send('updates:status', s)
     })
     settings.onChange((s) => {
       updaterRef.setChannel(s.updates.channel)
+      updaterRef.setNetwork(s.network)
     })
     handle('updates:status', isTrustedSender, () => updaterRef.getStatus())
     handle('updates:check', isTrustedSender, () => updaterRef.check())

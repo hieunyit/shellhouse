@@ -1,3 +1,4 @@
+import { isProxyUrl } from '@shared/proxy'
 import { dirname, isAbsolute, join } from 'node:path'
 import { parse, parseDocument } from 'yaml'
 import { t } from '@shared/i18n'
@@ -39,6 +40,8 @@ export interface ResolvedCluster {
   ca?: string
   insecure: boolean
   tlsServerName?: string
+  /** proxy-url của cluster trong kubeconfig (http / https / socks5). */
+  proxyUrl?: string
   namespace: string
   /** Chế độ chỉ đọc (cài đặt của context trong main — Session Host chặn thao tác thay đổi). */
   readOnly?: boolean
@@ -208,12 +211,16 @@ export async function resolveContext(
   }
   const ca = await load(cluster['certificate-authority-data'], cluster['certificate-authority'])
   const tlsServerName = str(cluster['tls-server-name'])
+  const proxyUrl = str(cluster['proxy-url'])
+  if (proxyUrl && !isProxyUrl(proxyUrl))
+    throw new Error(t('Unsupported proxy-url in the kubeconfig: {url}', { url: proxyUrl }))
   return {
     name: ctx.name,
     server,
     ...(ca ? { ca } : {}),
     insecure: cluster['insecure-skip-tls-verify'] === true,
     ...(tlsServerName ? { tlsServerName } : {}),
+    ...(proxyUrl ? { proxyUrl } : {}),
     namespace: ctx.namespace ?? 'default',
     auth
   }

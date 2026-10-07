@@ -1,6 +1,4 @@
 import { createHash } from 'node:crypto'
-import { Agent as HttpAgent } from 'node:http'
-import { Agent as HttpsAgent } from 'node:https'
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
@@ -18,6 +16,8 @@ import {
 import type { _Object } from '@aws-sdk/client-s3'
 import { t, tn } from '@shared/i18n'
 import { runQueue } from '../../../node-shared/pool'
+import { proxiedAgents } from '../../../node-shared/proxy-tunnel'
+import { isCertificateError } from '@shared/proxy'
 
 /** Thông tin kết nối một tài khoản S3 (đã giải mã secret — chỉ có ở main / Session Host). */
 export interface S3Connection {
@@ -26,6 +26,10 @@ export interface S3Connection {
   accessKeyId: string
   secretAccessKey: string
   forcePathStyle: boolean
+  /** Proxy (Settings › Network) — thiếu / null = kết nối thẳng. */
+  proxy?: string | null
+  /** Bỏ qua kiểm tra chứng chỉ TLS. */
+  insecureTls?: boolean
 }
 
 /** Hai cấp đầu liệt kê theo "thư mục" để chia việc; sâu hơn liệt kê phẳng (ít request nhất). */
@@ -60,7 +64,11 @@ export function createS3Client(
   const client = new S3Client({
     maxAttempts: 5,
     retryMode: 'adaptive',
-    requestHandler: { httpAgent: new HttpAgent(agent), httpsAgent: new HttpsAgent(agent) },
+    requestHandler: proxiedAgents(
+      connection.proxy ?? null,
+      agent,
+      connection.insecureTls ? { rejectUnauthorized: false } : {}
+    ),
     region,
     followRegionRedirects: true,
     ...(custom
@@ -264,7 +272,13 @@ export function errorText(error: unknown): string {
   if (code === 'InvalidObjectState')
     return t('The object is archived (Glacier) — restore it before reading or copying it')
   if (isUnsupported(error)) return t('Not supported by this provider')
-  return e?.message ?? String(error)
+  const message = e?.message ?? String(error)
+  if (isCertificateError(message))
+    return t(
+      '{error} — if you trust this server, turn on “Skip certificate verification” in the account settings',
+      { error: message }
+    )
+  return message
 }
 
 /**

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ProxyUrl } from './proxy'
 import { DEFAULT_ENVIRONMENTS, EnvironmentDef, Environments } from './environments'
 import { Workspace } from './workspaces'
 
@@ -120,6 +121,17 @@ const UpdateSettings = z.object({
   autoCheck: z.boolean().catch(true)
 })
 
+/** Mạng (Settings › Network): proxy cho S3, Kubernetes API, kiểm tra cập nhật. */
+const NetworkSettings = z.object({
+  /** system = biến môi trường HTTPS_PROXY… (và proxy hệ thống cho cập nhật); none = thẳng. */
+  proxyMode: z.enum(['system', 'none', 'manual']).catch('system'),
+  proxyUrl: ProxyUrl.catch(''),
+  /** Không đi qua proxy: localhost, .corp.local, 10.0.0.0/8… (cách nhau bằng dấu phẩy). */
+  noProxy: z.string().max(2000).catch('localhost,127.0.0.1,::1'),
+  /** Bỏ qua lỗi chứng chỉ khi kiểm tra / tải bản cập nhật. */
+  updatesInsecure: z.boolean().catch(false)
+})
+
 /**
  * Trạng thái + cấu hình riêng của một module (ADR-014 mục 3.9). Trường cấu hình do schema của
  * module đọc (`looseObject` giữ nguyên các trường lõi không biết).
@@ -150,6 +162,7 @@ export const AppSettings = z.object({
   terminal: TerminalSettings.catch(TerminalSettings.parse({})),
   security: SecuritySettings.catch(SecuritySettings.parse({})),
   updates: UpdateSettings.catch(UpdateSettings.parse({})),
+  network: NetworkSettings.catch(NetworkSettings.parse({})),
   files: FileSettings.catch(FileSettings.parse({})),
   logging: LoggingSettings.catch(LoggingSettings.parse({})),
   /** Ghi đè phím tắt: commandId → tổ hợp phím ('' = bỏ phím tắt). */
@@ -224,6 +237,7 @@ export const SettingsPatch = z.object({
   terminal: TerminalSettings.partial().optional(),
   security: SecuritySettings.omit({ rememberOnDevice: true }).partial().optional(),
   updates: UpdateSettings.partial().optional(),
+  network: NetworkSettings.partial().optional(),
   files: FileSettings.omit({ editor: true }).partial().optional(),
   logging: LoggingSettings.partial().optional(),
   keybindings: z.record(z.string().max(64), z.string().max(64)).optional(),
@@ -254,6 +268,7 @@ export function applyPatch(current: AppSettings, patch: MainSettingsPatch): AppS
     terminal: { ...current.terminal, ...patch.terminal },
     security: { ...current.security, ...patch.security },
     updates: { ...current.updates, ...patch.updates },
+    network: { ...current.network, ...patch.network },
     files: { ...current.files, ...patch.files },
     logging: { ...current.logging, ...patch.logging },
     keybindings: patch.keybindings ?? current.keybindings,

@@ -1,4 +1,5 @@
 import { t } from '@shared/i18n'
+import { isCertificateError } from '@shared/proxy'
 
 /**
  * Lỗi của electron-updater → trạng thái cho người dùng. Tag mới đã có nhưng release chưa publish
@@ -17,6 +18,14 @@ export function describeUpdateError(
     /No published versions/i.test(text)
   )
     return { kind: 'none' }
+  // Lỗi chứng chỉ (proxy công ty chặn TLS…) — chỉ chỗ bật bỏ qua.
+  if (isCertificateError(text))
+    return {
+      kind: 'error',
+      message: t(
+        'The update server certificate was not trusted. Behind a company proxy that inspects TLS, turn on “Ignore certificate errors for updates” in Settings › Network.'
+      )
+    }
   if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|net::ERR_/.test(text))
     return {
       kind: 'error',

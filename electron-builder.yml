@@ -91,7 +91,9 @@ linux:
   maintainer: hieuny
   executableName: shellhouse
   syncDesktopName: true
-  icon: build/icon.png
+  # Thư mục nhiều cỡ (16–512): theme hicolor của Ubuntu không có 1024x1024 — chỉ một file 1024 thì
+  # gói deb / rpm cài icon vào chỗ launcher không tìm, app hiện không có icon.
+  icon: build/icons
 rpm:
   # Cần rpmbuild — chỉ build trên CI (xem .github/workflows/release.yml).
   fpm: ['--rpm-rpmbuild-define=_build_id_links none']
