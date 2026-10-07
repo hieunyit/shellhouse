@@ -198,6 +198,11 @@ export const invokeContract = {
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   /** File "Shellhouse YAML" (Export hosts): luôn cho người dùng chọn file. */
+  'ansible:scan': { args: z.tuple([]), result: FileImportScan },
+  'ansible:import': {
+    args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
+    result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
+  },
   'yaml:scan': { args: z.tuple([]), result: FileImportScan },
   'yaml:import': {
     args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
@@ -405,6 +410,8 @@ export interface ShellhouseApi {
   scanSshConfig(): Promise<ImportCandidate[]>
   importSshConfig(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
   scanMobaXterm(pick: boolean): Promise<FileImportScan>
+  scanAnsible(): Promise<FileImportScan>
+  importAnsible(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
   scanCsv(): Promise<FileImportScan>
   importCsv(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
   scanShellhouseYaml(): Promise<FileImportScan>

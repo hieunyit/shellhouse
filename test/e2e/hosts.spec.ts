@@ -246,6 +246,34 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
       page.locator('[data-testid="host-row"][data-host-label="api-stg"]'),
       'ubuntu@api.stg.example.com'
     )
+
+    // Inventory Ansible (INI): nhóm lồng theo children, biến nhóm, mật khẩu bỏ qua.
+    const inventory = join(home, 'hosts.ini')
+    writeFileSync(
+      inventory,
+      '[web]\nweb[1:2].example.com\n\n[web:vars]\nansible_user=deploy\nansible_password=NOT-IMPORTED\n\n[shop:children]\nweb\n'
+    )
+    await app.evaluate(({ dialog }, f) => {
+      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [f] })
+    }, inventory)
+    await page.getByTestId('import-ssh-config').click()
+    await dialog.getByTestId('import-source-ansible').click()
+    await dialog.getByTestId('import-choose-file').click()
+    await baseExpect(dialog.getByTestId('import-secrets-skipped')).toContainText('ansible_password')
+    await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toHaveCount(2)
+    await baseExpect(dialog.locator('[data-testid^="import-row-"]').first()).toContainText(
+      'deploy@web1.example.com'
+    )
+    await dialog.getByTestId('import-run').click()
+    await baseExpect(dialog.getByTestId('import-result')).toContainText('Imported 2 hosts')
+    await dialog.getByRole('button', { name: 'Done' }).click()
+    await baseExpect(
+      page.locator('[data-testid="group-row"][data-group-name="shop"]')
+    ).toBeVisible()
+    await expectHostAddress(
+      page.locator('[data-testid="host-row"][data-host-label="web2.example.com"]'),
+      'deploy@web2.example.com'
+    )
   } finally {
     await app.close()
     rmSync(home, { recursive: true, force: true })

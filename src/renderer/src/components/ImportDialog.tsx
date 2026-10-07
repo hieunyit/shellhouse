@@ -5,7 +5,7 @@ import { t, tn } from '@shared/i18n'
 import { formatNumber } from '@shared/i18n/format'
 import { Button, Modal, Notice, Segmented } from './ui'
 
-type Source = 'ssh-config' | 'mobaxterm' | 'csv' | 'rdp' | 'yaml'
+type Source = 'ssh-config' | 'mobaxterm' | 'csv' | 'ansible' | 'rdp' | 'yaml'
 
 interface Scan {
   candidates: ImportCandidate[]
@@ -28,6 +28,10 @@ function description(source: Source): string {
     case 'csv':
       return t(
         'Termius or spreadsheet export. Columns are matched by name; passwords are never imported.'
+      )
+    case 'ansible':
+      return t(
+        'An Ansible inventory (INI or YAML). Groups and children become nested groups; ansible_host, ansible_port, ansible_user and the key file are used. Passwords and vault values are never read.'
       )
     case 'yaml':
       return t(
@@ -75,7 +79,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
   const load = (next: Source, pick: boolean): void => {
     setError(null)
     // CSV / .rdp: không có vị trí mặc định — chờ người dùng chọn file.
-    if ((next === 'csv' || next === 'rdp' || next === 'yaml') && !pick) {
+    if ((next === 'csv' || next === 'ansible' || next === 'rdp' || next === 'yaml') && !pick) {
       setScan({ candidates: [], file: null })
       return
     }
@@ -85,11 +89,13 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
         ? scanSshConfig()
         : next === 'csv'
           ? window.shellhouse.scanCsv()
-          : next === 'yaml'
-            ? window.shellhouse.scanShellhouseYaml()
-            : next === 'rdp'
-              ? window.shellhouse.scanRdpFiles()
-              : window.shellhouse.scanMobaXterm(pick)
+          : next === 'ansible'
+            ? window.shellhouse.scanAnsible()
+            : next === 'yaml'
+              ? window.shellhouse.scanShellhouseYaml()
+              : next === 'rdp'
+                ? window.shellhouse.scanRdpFiles()
+                : window.shellhouse.scanMobaXterm(pick)
     )
   }
 
@@ -112,11 +118,13 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
           ? await window.shellhouse.importSshConfig(aliases)
           : source === 'csv'
             ? await window.shellhouse.importCsv(aliases)
-            : source === 'yaml'
-              ? await window.shellhouse.importShellhouseYaml(aliases)
-              : source === 'rdp'
-                ? await window.shellhouse.importRdpFiles(aliases)
-                : await window.shellhouse.importMobaXterm(aliases)
+            : source === 'ansible'
+              ? await window.shellhouse.importAnsible(aliases)
+              : source === 'yaml'
+                ? await window.shellhouse.importShellhouseYaml(aliases)
+                : source === 'rdp'
+                  ? await window.shellhouse.importRdpFiles(aliases)
+                  : await window.shellhouse.importMobaXterm(aliases)
       setResult(
         tn(imported, 'Imported {n} host.', 'Imported {n} hosts.') +
           (skipped.length ? ' ' + t('Skipped: {names}.', { names: skipped.join(', ') }) : '')
@@ -164,6 +172,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
               { value: 'ssh-config', label: '~/.ssh/config' },
               { value: 'mobaxterm', label: 'MobaXterm' },
               { value: 'csv', label: 'CSV / Termius' },
+              { value: 'ansible', label: 'Ansible' },
               { value: 'rdp', label: 'Remote Desktop (.rdp)' },
               { value: 'yaml', label: 'Shellhouse YAML' }
             ]}
@@ -211,13 +220,15 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
                 ? t('Choose one or more .rdp files.')
                 : source === 'yaml'
                   ? t('Choose a file saved with Export hosts.')
-                  : source === 'csv'
-                    ? t(
-                        'Choose a CSV file. In Termius: export your hosts as CSV. A header row with Hostname (or Host / IP) is required; Label, Port, Username, Group and Tags are used when present.'
-                      )
-                    : t(
-                        'MobaXterm.ini was not found in the usual place. Choose the file — portable MobaXterm keeps it next to MobaXterm.exe.'
-                      )}
+                  : source === 'ansible'
+                    ? t('Choose an Ansible inventory file — the hosts file (INI) or inventory.yml.')
+                    : source === 'csv'
+                      ? t(
+                          'Choose a CSV file. In Termius: export your hosts as CSV. A header row with Hostname (or Host / IP) is required; Label, Port, Username, Group and Tags are used when present.'
+                        )
+                      : t(
+                          'MobaXterm.ini was not found in the usual place. Choose the file — portable MobaXterm keeps it next to MobaXterm.exe.'
+                        )}
         </p>
       )}
       {!result && ignored.length > 0 && (
@@ -229,9 +240,13 @@ export function ImportDialog({ onClose }: { onClose: () => void }): React.JSX.El
       )}
       {!result && (scan?.secretColumns?.length ?? 0) > 0 && (
         <p className="text-xs text-faint" data-testid="import-secrets-skipped">
-          {t('Ignored columns with secrets: {columns}. Add passwords or keys after importing.', {
-            columns: scan?.secretColumns?.join(', ') ?? ''
-          })}
+          {source === 'ansible'
+            ? t('Ignored variables with secrets: {names}. Add passwords or keys after importing.', {
+                names: scan?.secretColumns?.join(', ') ?? ''
+              })
+            : t('Ignored columns with secrets: {columns}. Add passwords or keys after importing.', {
+                columns: scan?.secretColumns?.join(', ') ?? ''
+              })}
         </p>
       )}
       {candidates && candidates.length > 0 && !result && (

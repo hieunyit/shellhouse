@@ -896,5 +896,11 @@ export const core: Readonly<Record<string, string>> = {
   'Show all lines': 'Hiện mọi dòng',
   'Show only these lines': 'Chỉ hiện các dòng này',
   '{n} error': '{n} lỗi',
-  '{n} errors': '{n} lỗi'
+  '{n} errors': '{n} lỗi',
+  'An Ansible inventory (INI or YAML). Groups and children become nested groups; ansible_host, ansible_port, ansible_user and the key file are used. Passwords and vault values are never read.':
+    'Inventory Ansible (INI hoặc YAML). Nhóm và children thành nhóm lồng nhau; dùng ansible_host, ansible_port, ansible_user và file key. Mật khẩu và giá trị vault không bao giờ được đọc.',
+  'Choose an Ansible inventory file — the hosts file (INI) or inventory.yml.':
+    'Chọn file inventory Ansible — file hosts (INI) hoặc inventory.yml.',
+  'Ignored variables with secrets: {names}. Add passwords or keys after importing.':
+    'Đã bỏ qua biến chứa bí mật: {names}. Thêm mật khẩu hoặc key sau khi nhập.'
 }

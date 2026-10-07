@@ -8,6 +8,7 @@ import { showOpenDialog, showSaveDialog } from '../dialogs'
 import { writePrivateFile } from '../private-file'
 import { handle } from '../ipc/router'
 import { scanCsv } from './csv-import'
+import { scanAnsibleInventory } from './ansible-import'
 import { scanShellhouseYaml } from './yaml-import'
 import { decodeMobaIni, scanMobaXterm } from './mobaxterm-import'
 import type { HostService } from './service'
@@ -396,6 +397,39 @@ export function registerHostIpc(
   handle('csv:import', isTrustedSender, (aliases) => {
     if (!csvFile) throw new Error(t('Choose a CSV file first'))
     const result = importCandidates(service, scanCsvFile(csvFile).candidates, aliases, 'csv')
+    notifyChanged()
+    return result
+  })
+  // Inventory Ansible (INI / YAML): main giữ đường dẫn file đã chọn, như CSV.
+  let ansibleFile: string | null = null
+  const scanAnsibleFile = (file: string) => {
+    if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error(t('The file is too large'))
+    return scanAnsibleInventory(readFileSync(file, 'utf8'), {
+      existingLabels: service.tree().hosts.map((h) => h.label),
+      defaultUser: currentUser()
+    })
+  }
+  handle('ansible:scan', isTrustedSender, async () => {
+    const picked = await showOpenDialog(getWindow(), {
+      title: t('Choose an Ansible inventory'),
+      filters: [
+        { name: t('Ansible inventory'), extensions: ['ini', 'yml', 'yaml', 'cfg', 'txt'] },
+        { name: t('All files'), extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    })
+    ansibleFile = picked.canceled ? null : (picked.filePaths[0] ?? null)
+    if (!ansibleFile) return { file: null, candidates: [], ignored: {} }
+    return { file: ansibleFile, ...scanAnsibleFile(ansibleFile) }
+  })
+  handle('ansible:import', isTrustedSender, (aliases) => {
+    if (!ansibleFile) throw new Error(t('Choose an Ansible inventory first'))
+    const result = importCandidates(
+      service,
+      scanAnsibleFile(ansibleFile).candidates,
+      aliases,
+      'ansible'
+    )
     notifyChanged()
     return result
   })

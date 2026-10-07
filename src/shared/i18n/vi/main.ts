@@ -136,5 +136,12 @@ export const main: Readonly<Record<string, string>> = {
   'The key is used by {n} hosts': 'Key đang được {n} host dùng',
   'Could not reach the update server. Check your connection.':
     'Không kết nối được server cập nhật. Hãy kiểm tra mạng.',
-  'Update check failed.': 'Kiểm tra cập nhật thất bại.'
+  'Update check failed.': 'Kiểm tra cập nhật thất bại.',
+  'This is not an Ansible inventory.': 'Đây không phải inventory của Ansible.',
+  'No hosts found in this inventory.': 'Không có host nào trong inventory này.',
+  'Uses an Ansible template ({{ … }}) — fill it in after importing':
+    'Dùng template Ansible ({{ … }}) — điền lại sau khi nhập',
+  'Choose an Ansible inventory': 'Chọn inventory Ansible',
+  'Ansible inventory': 'Inventory Ansible',
+  'Choose an Ansible inventory first': 'Hãy chọn inventory Ansible trước'
 }

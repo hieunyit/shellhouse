@@ -6,6 +6,15 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- Import hosts from an **Ansible inventory** (INI `hosts` file or `inventory.yml`): groups and
+  `children` become nested groups, a host in several groups goes into the deepest one with the
+  others as tags, host ranges like `web[01:03]` are expanded, and `ansible_host`, `ansible_port`,
+  `ansible_user`, the private key file and a ProxyJump in `ansible_ssh_common_args` are used — with
+  Ansible's precedence (host > child group > parent group > all). Passwords and vault values are
+  never read; non-SSH hosts (WinRM, local…) and values that use a Jinja template are flagged.
+
 ## [1.2.0-beta.22] - 2026-10-07
 
 ### Added
