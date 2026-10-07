@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.21] - 2026-10-07
+
 ### Changed
 
 - Kubernetes Map has three views, each answering one question: **Topology** (how requests reach
