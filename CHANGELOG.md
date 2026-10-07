@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.25] - 2026-10-07
+
 ### Fixed
 
 - **Ignore certificate errors for updates** did nothing when it was turned on after a failed check
