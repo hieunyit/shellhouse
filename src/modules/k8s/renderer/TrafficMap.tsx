@@ -42,7 +42,6 @@ import {
   type TrafficRate,
   type TrafficUnit
 } from '../shared/traffic'
-import { sides } from './MapFlow'
 import type { MapRef } from './mapModel'
 import { KindIcon } from './icons'
 import { formatRelative, t, tn } from '../../registry/renderer-kit'
@@ -56,6 +55,22 @@ import { bandFor, idleBelow, rateText, sourceName, useTrafficUnit } from './traf
  * chỉ giữ các đường lớn nhất. Trái → phải theo hướng gọi; bấm node → làm nổi đường vào / ra và bảng
  * tốc độ theo từng bên. Cùng thành phần đồ thị dùng cho bản đồ nhỏ trong tab Traffic của workload.
  */
+
+/** Cạnh nối theo vị trí tương đối (ngang khi lệch ngang nhiều hơn lệch dọc). */
+function sides(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number }
+): { sourceHandle: string; targetHandle: string } {
+  const dx = b.x + b.w / 2 - (a.x + a.w / 2)
+  const dy = b.y + b.h / 2 - (a.y + a.h / 2)
+  if (Math.abs(dx) > Math.abs(dy))
+    return dx > 0
+      ? { sourceHandle: 'sr', targetHandle: 'tl' }
+      : { sourceHandle: 'sl', targetHandle: 'tr' }
+  return dy > 0
+    ? { sourceHandle: 'sb', targetHandle: 'tt' }
+    : { sourceHandle: 'st', targetHandle: 'tb' }
+}
 
 /** Kind Caretta → id loại (icon, mở chi tiết). */
 const PEER_KIND_ID: Record<string, string> = {
@@ -281,7 +296,7 @@ function Handles(): React.JSX.Element {
   )
 }
 
-/** Độ dày theo băng (mảnh hơn bản đồ workload: nhiều đường song song vẫn tách bạch). */
+/** Độ dày theo băng (mảnh: nhiều đường song song vẫn tách bạch). */
 const WIDTHS = [1.4, 2.2, 3.2, 4.4, 5.8, 7.4]
 
 /** Điểm trên đường cong bậc ba ngang (điều khiển ở giữa như getBezierPath) tại hoành độ x. */
@@ -378,10 +393,11 @@ const FlowEdgeView = memo(function FlowEdgeView(props: EdgeProps<FEdge>): React.
             data-testid="k8s-traffic-edge-label"
           >
             {rateText(unit)(d.rate)}
-            {hovered && d.ports.length > 0 && (
-              <span className="ml-1 font-normal text-faint">
-                :{d.ports.slice(0, 3).join(', :')}
-                {d.ports.length > 3 ? '…' : ''}
+            {/* Cổng đích: luôn ghi cổng đầu; rê chuột → tới 3 cổng. */}
+            {d.ports.length > 0 && (
+              <span className="ml-1 font-normal text-faint" data-testid="k8s-traffic-edge-port">
+                :{(hovered ? d.ports.slice(0, 3) : d.ports.slice(0, 1)).join(', :')}
+                {d.ports.length > (hovered ? 3 : 1) ? '…' : ''}
               </span>
             )}
           </div>
@@ -1127,6 +1143,16 @@ function Panel({
                       {other.peer?.ns ? `${other.peer.ns}/` : ''}
                       {flowTitle(other)}
                     </span>
+                    {e.ports.length > 0 && (
+                      <span
+                        className="max-w-20 shrink-0 truncate font-mono text-[11px] text-faint"
+                        title={e.ports.map((p) => `:${p}`).join(', ')}
+                        data-testid="k8s-traffic-panel-port"
+                      >
+                        :{e.ports.slice(0, 2).join(', :')}
+                        {e.ports.length > 2 ? '…' : ''}
+                      </span>
+                    )}
                     <span
                       className={cx(
                         'shrink-0 tabular-nums',

@@ -248,7 +248,8 @@ export function Segmented<T extends string>({
   testIdPrefix
 }: {
   value: T
-  options: readonly { value: T; label: string }[]
+  /** hint: chú thích khi rê chuột (giải thích lựa chọn). */
+  options: readonly { value: T; label: string; hint?: string }[]
   onChange: (value: T) => void
   testIdPrefix?: string
 }): React.JSX.Element {
@@ -274,6 +275,7 @@ export function Segmented<T extends string>({
           // Roving tabindex: Tab vào nhóm dừng ở mục đang chọn, ←/→ để đổi.
           tabIndex={value === o.value || !options.some((x) => x.value === value) ? 0 : -1}
           data-testid={testIdPrefix ? `${testIdPrefix}-${o.value}` : undefined}
+          title={o.hint}
           className={cx(
             'h-6 rounded-ds-sm px-2.5 text-xs font-medium transition-colors focus-visible:shadow-ds-focus focus-visible:outline-none',
             value === o.value ? 'bg-ds-surface-3 text-fg' : 'text-muted hover:text-fg'

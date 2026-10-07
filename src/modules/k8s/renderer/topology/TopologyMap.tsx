@@ -38,7 +38,15 @@ import {
   type TopoLayout,
   type TopoNode
 } from '../../shared/appTopology'
-import { parseLabelSelector, selectorMatches, type MapData, type MapPod } from '../../shared/map'
+import {
+  groupNamespaces,
+  groupOrder,
+  parseLabelSelector,
+  selectorMatches,
+  type MapData,
+  type MapGrouping,
+  type MapPod
+} from '../../shared/map'
 import { WORKLOAD_KIND_ID, byPair, type TrafficPeer } from '../../shared/traffic'
 import { KindIcon } from '../icons'
 import {
@@ -48,10 +56,11 @@ import {
   MenuHeading,
   MenuItem,
   MenuToggle,
+  NamespaceGrouping,
   TrafficMenu,
   ZoomLabel
 } from '../MapControls'
-import type { MapRef, Request } from '../mapModel'
+import { regionTitle, type MapRef, type Request } from '../mapModel'
 import type { ToolbarFit } from '../../shared/toolbarFit'
 import type { TrafficState } from '../useTraffic'
 import { laneHint, laneTitle } from './text'
@@ -71,8 +80,10 @@ import { idleBelow, useTrafficUnit } from '../trafficUnit'
 
 const OPTIONS_KEY = 'shellhouse.k8s.topology'
 /** Từ chừng này namespace / workload trở lên: mặc định gập hết, mở cái cần xem. */
-const AUTO_FOLD_NAMESPACES = 12
+const AUTO_FOLD_NAMESPACES = 6
 const AUTO_FOLD_WORKLOADS = 200
+/** Đánh dấu "đã có chỗ xem lưu theo tab" (chưa biết phạm vi namespace). */
+const SAVED_VIEW = '\u0000saved'
 /**
  * Zoom nhỏ nhất khi tự vừa khung (mở bản đồ, tập trung, bay tới mục) — dưới mức này chữ khó đọc:
  * cuộn để xem thêm. "Vừa tất cả" (phím 0) thì không giới hạn (thẻ rút gọn khi thu nhỏ xa).
@@ -127,6 +138,11 @@ export interface TopologyMapProps {
   onTrafficOn: (on: boolean) => void
   darkCanvas: boolean
   onDarkCanvas: (on: boolean) => void
+  /** Cách gom namespace của lưới tổng quan (lưu chung với tuỳ chọn Map). */
+  grouping: MapGrouping
+  /** Khoá nhãn hay dùng để gom (gợi ý trong menu). */
+  groupKeys: readonly string[]
+  onGrouping: (grouping: MapGrouping) => void
   /** Ô trên thanh công cụ của Map để đặt điều khiển (một hàng). */
   toolbar: HTMLElement | null
   /** Mức gọn của thanh công cụ (theo độ rộng thật) — mặc định đầy đủ. */
@@ -162,6 +178,9 @@ function TopologyInner({
   onTrafficOn,
   darkCanvas,
   onDarkCanvas,
+  grouping,
+  groupKeys,
+  onGrouping,
   toolbar,
   barFit = 'full',
   overlayPanel = false,
@@ -234,6 +253,12 @@ function TopologyInner({
     },
     [setTab, autoFold]
   )
+  // Nhóm của namespace cho lưới tổng quan (mục đích / tiền tố / nhãn).
+  const groups = useMemo(() => {
+    if (!data) return null
+    const of = groupNamespaces(data, grouping)
+    return { of, order: groupOrder(of.values(), grouping) }
+  }, [data, grouping])
   const graph = useMemo<TopoGraph | null>(() => {
     if (!data) return null
     const base = {
@@ -241,13 +266,26 @@ function TopologyInner({
       showDeps: options.showDeps,
       expanded: tab.expanded,
       collapsed: isFolded,
-      showAll: tab.showAll
+      showAll: tab.showAll,
+      ...(groups ? { groupOf: (ns: string) => groups.of.get(ns) ?? '' } : {})
     }
     const g = buildTopology(data, { ...base, focus: tab.focus })
     // Mục đang tập trung đã không còn (bị xoá) → hiện tất cả.
     return tab.focus && !g.nodes.length ? buildTopology(data, base) : g
-  }, [data, options.hideSystem, options.showDeps, tab.expanded, isFolded, tab.showAll, tab.focus])
-  const layout = useMemo<TopoLayout | null>(() => (graph ? layoutTopology(graph) : null), [graph])
+  }, [
+    data,
+    groups,
+    options.hideSystem,
+    options.showDeps,
+    tab.expanded,
+    isFolded,
+    tab.showAll,
+    tab.focus
+  ])
+  const layout = useMemo<TopoLayout | null>(
+    () => (graph ? layoutTopology(graph, groups?.order ?? []) : null),
+    [graph, groups]
+  )
   const byId = useMemo(() => new Map((layout?.nodes ?? []).map((n) => [n.id, n])), [layout])
   // Mục chọn biến mất sau khi làm mới / đổi bộ lọc → coi như không chọn.
   const selected = selectedRaw && byId.has(selectedRaw) ? selectedRaw : null
@@ -295,7 +333,8 @@ function TopologyInner({
   }, [pairs, peerWorkload, traffic.updated])
 
   // ——— Làm nổi / tìm ———
-  const focusId = selectedPod?.group ?? selected ?? hover
+  // Mục đang trỏ có thể vừa biến mất (bấm ô namespace → ô thành dải) — không làm mờ cả bản đồ.
+  const focusId = selectedPod?.group ?? selected ?? (hover && byId.has(hover) ? hover : null)
   const lit = useMemo(
     () => (focusId && layout ? pathThrough(layout.edges, focusId) : null),
     [focusId, layout]
@@ -383,11 +422,19 @@ function TopologyInner({
     },
     [rf]
   )
-  const fittedRef = useRef(tab.viewport !== null)
+  // Vừa khung một lần cho mỗi phạm vi namespace (đổi phạm vi — vd. một namespace → tất cả — bản đồ
+  // khác hẳn: vừa khung lại); làm mới cùng phạm vi giữ nguyên chỗ đang xem.
+  const scopeKey = useMemo(() => (data ? data.namespaces.map((n) => n.name).join(',') : ''), [data])
+  // Quay lại tab đã có chỗ xem: giữ nguyên cho phạm vi đầu tiên nạp được.
+  const fittedRef = useRef<string | null>(tab.viewport !== null ? SAVED_VIEW : null)
   useEffect(() => {
-    if (!layout || fittedRef.current) return
-    if (fitWidth(layout, false)) fittedRef.current = true
-  }, [layout, fitWidth])
+    if (!layout || !scopeKey || fittedRef.current === scopeKey) return
+    if (fittedRef.current === SAVED_VIEW) {
+      fittedRef.current = scopeKey
+      return
+    }
+    if (fitWidth(layout, false)) fittedRef.current = scopeKey
+  }, [layout, scopeKey, fitWidth])
   const centerOn = useCallback(
     (id: string) => {
       const n = byId.get(id)
@@ -509,6 +556,30 @@ function TopologyInner({
     const out: TopoFlowNode[] = []
     const nsInfo = new Map(graph.namespaces.map((n) => [n.name, n]))
     for (const b of layout.bands) {
+      if (b.group !== undefined) {
+        // Dải của lưới tổng quan: tên nhóm, số namespace, tổng pod lỗi của nhóm.
+        const members = graph.namespaces.filter((n) => n.collapsed && (n.group ?? '') === b.group)
+        out.push({
+          id: `band:${b.ns}`,
+          type: 'band',
+          position: { x: b.x, y: b.y },
+          width: b.w,
+          height: b.h,
+          zIndex: -1,
+          draggable: false,
+          selectable: false,
+          connectable: false,
+          focusable: false,
+          data: {
+            band: b,
+            label: b.group ? regionTitle(b.group) : t('Namespaces'),
+            stats: tn(b.count ?? members.length, '{n} namespace', '{n} namespaces'),
+            bad: members.reduce((sum, n) => sum + n.stats.failingPods, 0),
+            warn: 0
+          }
+        })
+        continue
+      }
       const info = nsInfo.get(b.ns)
       const st = info?.stats
       out.push({
@@ -930,7 +1001,7 @@ function TopologyInner({
         label={t('View')}
         title={t('View options')}
         iconOnly={barFit !== 'full'}
-        active={!options.showDeps || !options.hideSystem || darkCanvas}
+        active={!options.showDeps || !options.hideSystem || darkCanvas || grouping !== 'purpose'}
       >
         {(close) => (
           <>
@@ -960,6 +1031,7 @@ function TopologyInner({
               onChange={onDarkCanvas}
             />
             <MenuHeading>{t('Namespaces')}</MenuHeading>
+            <NamespaceGrouping value={grouping} keys={groupKeys} onChange={onGrouping} />
             <MenuItem
               label={anyFolded ? t('Expand all') : t('Collapse all')}
               icon={anyFolded ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}

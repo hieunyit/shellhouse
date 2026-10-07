@@ -335,6 +335,47 @@ describe('Topology tĩnh (Entry → Routes → Services → Workloads → Pods �
     expect(codes(plain.get('ing:shop/shop'))).not.toContain('ing-class-missing')
   })
 
+  it('lưới tổng quan: namespace gập thành ô gom theo nhóm (đứng đầu), namespace mở xếp làn bên dưới', () => {
+    const d = data()
+    d.namespaces.push({ name: 'monitoring', active: true }, { name: 'payments', active: true })
+    d.workloads.push(workload({ ns: 'monitoring', name: 'grafana' }))
+    const groupOf = (ns: string): string =>
+      ns === 'monitoring' ? 'Monitoring' : ns === 'kube-system' ? 'System' : 'Applications'
+    const g = buildTopology(d, {
+      ...OPTS,
+      hideSystem: false,
+      collapsed: (ns) => ns !== 'shop',
+      groupOf
+    })
+    const l = layoutTopology(g, ['Applications', 'Monitoring', 'System'])
+    const groups = l.bands.filter((b) => b.group !== undefined)
+    expect(groups.map((b) => [b.group, b.count])).toEqual([
+      ['Applications', 1],
+      ['Monitoring', 1],
+      ['System', 1]
+    ])
+    // Namespace mở (shop) nằm dưới mọi nhóm của lưới tổng quan.
+    const shop = l.bands.find((b) => b.ns === 'shop')
+    expect(shop?.collapsed).toBe(false)
+    expect(Math.min(...groups.map((b) => b.y))).toBeLessThan(shop?.y ?? 0)
+    expect(Math.max(...groups.map((b) => b.y + b.h))).toBeLessThan(shop?.y ?? 0)
+    // Ô namespace: trong dải nhóm của nó, không đè nhau; số pod lỗi của shop đếm đúng.
+    const tiles = l.nodes.filter((n) => n.kind === 'namespace')
+    expect(tiles.map((n) => n.name).sort()).toEqual(['kube-system', 'monitoring', 'payments'])
+    for (const tile of tiles) {
+      const band = groups.find((b) => b.group === groupOf(tile.name))
+      expect(band && tile.y >= band.y && tile.y + tile.h <= band.y + band.h).toBe(true)
+    }
+    expect(g.namespaces.find((n) => n.name === 'shop')?.stats.failingPods).toBe(1)
+    // Gập hết: không làn nào, vẫn đủ rộng cho 4 ô một hàng.
+    const all = layoutTopology(
+      buildTopology(d, { ...OPTS, hideSystem: false, collapsed: () => true, groupOf }),
+      ['Applications', 'Monitoring', 'System']
+    )
+    expect(all.columns).toEqual([])
+    expect(all.width).toBeGreaterThanOrEqual(4 * 236)
+  })
+
   it('chỉ ra lỗi cấu hình bằng lời', () => {
     const g = buildTopology(data(), OPTS)
     const n = byId(g)

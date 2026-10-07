@@ -346,6 +346,7 @@ function NodeCard({
                 aria-label={`${p.ns}/${p.name}`}
                 title={`${p.ns}/${p.name} · ${p.status}${p.restarts ? ` · ${tn(p.restarts, '{n} restart', '{n} restarts')}` : ''}`}
                 data-testid="k8s-node-pod"
+                data-match={isVisible(p) ? 'true' : 'false'}
                 className={cx(
                   'size-2.5 rounded-[3px] transition-transform hover:scale-150',
                   DOT[p.tone],

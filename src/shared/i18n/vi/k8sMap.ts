@@ -432,5 +432,14 @@ export const k8sMap: Readonly<Record<string, string>> = {
   'Open the pod events — usually not enough CPU / memory, or a volume / node selector.':
     'Mở event của pod — thường do thiếu CPU / RAM, hoặc volume / node selector.',
   'Check the readiness probe — path, port and how long the app takes to start.':
-    'Kiểm tra readiness probe — path, cổng và thời gian app cần để khởi động.'
+    'Kiểm tra readiness probe — path, cổng và thời gian app cần để khởi động.',
+  'How requests reach your apps': 'Request đi vào app theo đường nào',
+  'Which machine runs which pods, and which machines are full':
+    'Pod nằm trên máy nào, máy nào đang quá tải',
+  'Who calls whom, and how much': 'Ai gọi ai, tốc độ bao nhiêu',
+  'Show only pods whose labels match — e.g. tier=backend, app.kubernetes.io/part-of=shop, env in (prod,staging), !canary':
+    'Chỉ làm nổi pod có nhãn khớp — vd. tier=backend, app.kubernetes.io/part-of=shop, env in (prod,staging), !canary',
+  'Open namespace {name}': 'Mở namespace {name}',
+  '{n} failing pod': '{n} pod lỗi',
+  '{n} failing pods': '{n} pod lỗi'
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { detectTech, impactOf, layoutMap, type MapData } from '../../shared/map'
+import { detectTech } from '../../shared/map'
 import type { TopologyResult } from '../../shared/ops'
 import { rbacRisk, securityFindings } from '../../shared/security'
 import {
@@ -240,80 +240,6 @@ describe('Map — công nghệ, gateway, policy, blast radius', () => {
     expect(detectTech(['node:20-alpine'], {}, 'api')).toBe('nodejs')
     expect(detectTech(['registry.k8s.io/node-problem-detector:v0.8'], {}, 'npd')).toBeUndefined()
     expect(detectTech(['eclipse-temurin:21'], {}, 'api')).toBe('java')
-  })
-
-  it('gateway → route (khác namespace), policy → workload, blast radius của PVC / gateway', () => {
-    const data: MapData = {
-      namespaces: [
-        { name: 'shop', active: true },
-        { name: 'gw', active: true }
-      ],
-      workloads: [
-        {
-          kind: 'deployments.apps',
-          ns: 'shop',
-          name: 'api',
-          labels: { app: 'api' },
-          ready: 1,
-          desired: 1,
-          status: '1/1 ready',
-          tone: 'ok',
-          pvcs: ['data'],
-          tech: 'postgres',
-          helm: true
-        }
-      ],
-      pods: [
-        {
-          ns: 'shop',
-          name: 'api-1',
-          owner: { kind: 'Deployment', name: 'api' },
-          status: 'Running',
-          tone: 'ok',
-          restarts: 0,
-          node: 'n1'
-        }
-      ],
-      services: [
-        { ns: 'shop', name: 'api', type: 'ClusterIP', selector: { app: 'api' }, ports: '' }
-      ],
-      routes: [
-        {
-          kind: 'httproutes.gateway.networking.k8s.io',
-          ns: 'shop',
-          name: 'api',
-          hosts: [],
-          backends: ['api'],
-          parents: [{ ns: 'gw', name: 'public' }]
-        }
-      ],
-      pvcs: [{ ns: 'shop', name: 'data', status: 'Bound', capacity: '1Gi', tone: 'ok' }],
-      hpas: [],
-      policies: [{ ns: 'shop', name: 'deny', selector: {} }],
-      gateways: [{ ns: 'gw', name: 'public', className: 'nginx', listeners: 'HTTP:80' }],
-      nodes: { total: 1, ready: 1 },
-      truncated: false
-    }
-    const l = layoutMap(data, { hideSystem: false })
-    const e = l.edges.map((x) => `${x.kind}:${x.from}>${x.to}`)
-    expect(e).toContain('attach:gw:gw/public>r:httproutes.gateway.networking.k8s.io:shop/api')
-    expect(e).toContain('policy:w:deployments.apps:shop/api>np:shop/deny')
-    const card = l.nodes.find((x) => x.id === 'w:deployments.apps:shop/api')
-    expect(card).toMatchObject({ tech: 'postgres', badges: ['Helm', '1 policy'] })
-    expect(l.nodes.find((x) => x.id === 'n:shop')?.techs).toEqual(['postgres'])
-    // PVC hỏng → workload, pod, service, route (gateway không phụ thuộc route).
-    expect([...impactOf(l, 'v:shop/data')].sort()).toEqual(
-      [
-        'w:deployments.apps:shop/api',
-        'p:shop/api-1',
-        's:shop/api',
-        'r:httproutes.gateway.networking.k8s.io:shop/api'
-      ].sort()
-    )
-    // Gateway đổi → route gắn vào nó.
-    expect([...impactOf(l, 'gw:gw/public')]).toEqual([
-      'r:httproutes.gateway.networking.k8s.io:shop/api'
-    ])
   })
 
   it('traffic thật quanh workload: bên gọi tới / được gọi (namespace khác, ngoài cluster) thành cạnh calls', () => {

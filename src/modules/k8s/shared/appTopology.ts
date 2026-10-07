@@ -134,6 +134,8 @@ export interface TopoEdge {
 export interface TopoNsStats {
   workloads: number
   pods: number
+  /** Pod đang lỗi (CrashLoop, kéo image hỏng, Failed…). */
+  failingPods: number
   ok: number
   warn: number
   bad: number
@@ -145,6 +147,8 @@ export interface TopoNsStats {
 export interface TopoNamespace {
   name: string
   collapsed: boolean
+  /** Nhóm của namespace (theo mục đích / tiền tố / nhãn) — lưới tổng quan gom theo nhóm. */
+  group?: string
   /** Workload không hiện vì cắt bớt. */
   hidden: number
   stats: TopoNsStats
@@ -180,6 +184,10 @@ export interface TopoOptions {
   focus?: string | null
   /** Thời điểm tính hạn chứng chỉ (test); mặc định bây giờ. */
   now?: number
+  /** Nhóm của namespace (lưới tổng quan của namespace đang gập); thiếu → một nhóm chung. */
+  groupOf?: (ns: string) => string
+  /** Thứ tự nhóm (nhóm không có trong danh sách xếp sau, theo tên). */
+  groupOrder?: readonly string[]
 }
 
 /** Workload tối đa mỗi namespace trước khi gộp "+N". */
@@ -1173,6 +1181,9 @@ function namespaceGraph(
 
   const entries = nodes.filter((n) => n.lane === 'entry').length
   const problems = nodes.flatMap((n) => n.problems)
+  const failingPods = [...workloads.flatMap(podsOf), ...standalone].filter(
+    (p) => p.tone === 'bad'
+  ).length
   return {
     nodes,
     edges,
@@ -1180,6 +1191,7 @@ function namespaceGraph(
     stats: {
       workloads: workloads.length,
       pods: podCount,
+      failingPods,
       ok: toneCount.ok,
       warn: toneCount.warn,
       bad: toneCount.bad,
@@ -1361,7 +1373,14 @@ export function buildTopology(data: MapData, options: TopoOptions): TopoGraph {
         stats: g.stats,
         row: 0
       })
-      namespaces.push({ name: ns, collapsed: true, hidden: 0, stats: g.stats })
+      const group = options.groupOf?.(ns)
+      namespaces.push({
+        name: ns,
+        collapsed: true,
+        hidden: 0,
+        stats: g.stats,
+        ...(group ? { group } : {})
+      })
       continue
     }
     // Cắt bớt: chỉ MAX_ROWS_PER_NS hàng workload đầu (công khai trước) — phần còn lại "+N".
@@ -1423,6 +1442,10 @@ export interface TopoBand {
   w: number
   h: number
   collapsed: boolean
+  /** Dải của lưới tổng quan (namespace đang gập) — tên nhóm ('' = không gom). */
+  group?: string
+  /** Số namespace trong nhóm (dải tổng quan). */
+  count?: number
 }
 
 export interface TopoLayout {
@@ -1464,7 +1487,13 @@ export const CARD_FOOT = 26
 const WORKLOAD_H = 92
 const DEP_H = 52
 const MORE_H = 40
-const NS_SUMMARY_H = 66
+/** Ô namespace của lưới tổng quan: rộng tối thiểu / cao / khoảng cách; tiêu đề nhóm. */
+const TILE_MIN_W = 236
+export const TILE_H = 64
+const TILE_GAP = 12
+const GROUP_HEAD = 36
+/** Lưới tổng quan rộng ít nhất chừng này (đủ 4 ô) kể cả khi chưa mở namespace nào. */
+const OVERVIEW_MIN_W = 4 * TILE_MIN_W + 3 * TILE_GAP
 /** Chấm pod: 16 mỗi hàng, tối đa 2 hàng (cố định — số pod đổi không làm bản đồ nhảy). */
 export const POD_DOTS_PER_ROW = 16
 export const POD_DOT_ROWS = 2
@@ -1499,7 +1528,7 @@ export function topoNodeHeight(n: TopoNode): number {
     case 'more':
       return MORE_H
     case 'namespace':
-      return NS_SUMMARY_H
+      return TILE_H
     default:
       return DEP_H
   }
@@ -1515,15 +1544,12 @@ function rowAnchor(n: { h: number }, i: number): number {
  * hàng workload — thẻ đầu của mỗi làn canh tâm với thẻ workload để đường đi thẳng.
  */
 export function layoutTopology(
-  graph: Pick<TopoGraph, 'nodes' | 'edges' | 'namespaces'>
+  graph: Pick<TopoGraph, 'nodes' | 'edges' | 'namespaces'>,
+  groupOrder: readonly string[] = []
 ): TopoLayout {
   const present = new Set(
     graph.nodes.filter((n) => n.kind !== 'namespace').map((n) => columnLane(n.lane))
   )
-  if (graph.nodes.some((n) => n.kind === 'namespace')) {
-    present.add('entry')
-    present.add('workload')
-  }
   const lanes = TOPO_LANES.filter((l) => present.has(l))
   const columns: { lane: TopoLane; x: number; w: number }[] = []
   let cx = PAD
@@ -1533,7 +1559,9 @@ export function layoutTopology(
   }
   const last = columns.at(-1)
   const contentRight = last ? last.x + last.w : PAD
-  const width = contentRight + PAD
+  const folded = graph.namespaces.filter((n) => n.collapsed)
+  const overviewW = folded.length ? Math.max(contentRight - PAD, OVERVIEW_MIN_W) : 0
+  const width = Math.max(contentRight, PAD + overviewW) + PAD
   const colOf = new Map(columns.map((c) => [c.lane, c]))
   // Route → Gateway đầu tiên gắn vào (để xếp route ngay dưới Gateway).
   const parentOf = new Map<string, string>()
@@ -1543,81 +1571,109 @@ export function layoutTopology(
   const placed: PlacedTopoNode[] = []
   const bands: TopoBand[] = []
   let y = PAD
+
+  // ——— Lưới tổng quan: namespace đang gập thành ô, gom theo nhóm, đứng đầu bản đồ ———
+  if (folded.length) {
+    const cols = Math.max(1, Math.floor((overviewW + TILE_GAP) / (TILE_MIN_W + TILE_GAP)))
+    const tileW = (overviewW - (cols - 1) * TILE_GAP) / cols
+    const rank = (g: string): number => {
+      const i = groupOrder.indexOf(g)
+      return i < 0 ? groupOrder.length : i
+    }
+    const groups = [...groupBy(folded, (n) => n.group ?? '').entries()].sort(
+      (a, b) => rank(a[0]) - rank(b[0]) || compare(a[0], b[0])
+    )
+    for (const [group, list] of groups) {
+      const top = y
+      list.sort((a, b) => compare(a.name, b.name))
+      list.forEach((ns, i) => {
+        const n = byNs.get(ns.name)?.find((x) => x.kind === 'namespace')
+        if (!n) return
+        placed.push({
+          ...n,
+          x: PAD + (i % cols) * (tileW + TILE_GAP),
+          y: top + GROUP_HEAD + Math.floor(i / cols) * (TILE_H + TILE_GAP),
+          w: tileW,
+          h: TILE_H
+        })
+      })
+      const rows = Math.ceil(list.length / cols)
+      const bottom = top + GROUP_HEAD + rows * TILE_H + (rows - 1) * TILE_GAP + BAND_PAD
+      bands.push({
+        ns: `group:${group}`,
+        x: PAD / 2,
+        y: top,
+        w: width - PAD,
+        h: bottom - top,
+        collapsed: true,
+        group,
+        count: list.length
+      })
+      y = bottom + BAND_GAP
+    }
+  }
+
+  // ——— Namespace đang mở: dải theo làn ———
   for (const ns of graph.namespaces) {
+    if (ns.collapsed) continue
     const list = byNs.get(ns.name) ?? []
     const top = y
     let bottom = top + BAND_HEAD
-    if (ns.collapsed) {
-      const n = list[0]
-      if (n) {
-        const first = columns[0]
-        placed.push({
-          ...n,
-          x: first?.x ?? PAD,
-          y: top + BAND_HEAD,
-          w: Math.min(contentRight - (first?.x ?? PAD), 1100),
-          h: NS_SUMMARY_H
-        })
-        bottom = top + BAND_HEAD + NS_SUMMARY_H
+    const rows = groupBy(list, (n) => String(n.row))
+    const order = [...rows.keys()].map(Number).sort((a, b) => a - b)
+    let ry = top + BAND_HEAD
+    for (const r of order) {
+      const items = rows.get(String(r)) ?? []
+      const byLane = groupBy(items, (n) => columnLane(n.lane))
+      // Đường tâm của hàng: mỗi làn có một điểm "dẫn" (tâm thẻ đầu, hoặc dòng đầu của thẻ có
+      // luật Ingress / Route) — canh mọi điểm dẫn về cùng một độ cao để đường đi thẳng.
+      const stacks = lanes
+        .map((lane) => ({ lane, col: colOf.get(lane), stack: byLane.get(lane) ?? [] }))
+        .filter((x) => x.col && x.stack.length)
+      for (const x of stacks) {
+        x.stack.sort((a, b) => compare(a.title, b.title) || compare(a.name, b.name))
+        if (x.lane === 'entry') x.stack = nestRoutes(x.stack, parentOf)
       }
-    } else {
-      const rows = groupBy(list, (n) => String(n.row))
-      const order = [...rows.keys()].map(Number).sort((a, b) => a - b)
-      let ry = top + BAND_HEAD
-      for (const r of order) {
-        const items = rows.get(String(r)) ?? []
-        const byLane = groupBy(items, (n) => columnLane(n.lane))
-        // Đường tâm của hàng: mỗi làn có một điểm "dẫn" (tâm thẻ đầu, hoặc dòng đầu của thẻ có
-        // luật Ingress / Route) — canh mọi điểm dẫn về cùng một độ cao để đường đi thẳng.
-        const stacks = lanes
-          .map((lane) => ({ lane, col: colOf.get(lane), stack: byLane.get(lane) ?? [] }))
-          .filter((x) => x.col && x.stack.length)
-        for (const x of stacks) {
-          x.stack.sort((a, b) => compare(a.title, b.title) || compare(a.name, b.name))
-          if (x.lane === 'entry') x.stack = nestRoutes(x.stack, parentOf)
+      const leadOf = (lane: TopoLane, head: TopoNode | undefined): number =>
+        !head
+          ? 0
+          : lane === 'entry' && head.rows?.length
+            ? CARD_HEAD + CARD_ROW / 2
+            : topoNodeHeight(head) / 2
+      const center = Math.max(0, ...stacks.map((x) => leadOf(x.lane, x.stack[0])))
+      let rowBottom = ry
+      for (const { lane, col, stack } of stacks) {
+        if (!col) continue
+        let sy = ry + center - leadOf(lane, stack[0])
+        let prevGateway: string | null = null
+        for (const n of stack) {
+          const h = topoNodeHeight(n)
+          // Route ngay dưới Gateway của nó (hoặc dưới route anh em): thụt vào như cây.
+          const nested =
+            n.kind === 'route' && prevGateway !== null && parentOf.get(n.id) === prevGateway
+          if (n.kind === 'gateway') prevGateway = n.id
+          else if (!nested) prevGateway = null
+          placed.push({
+            ...n,
+            x: nested ? col.x + ROUTE_INDENT : col.x,
+            y: sy,
+            w: n.kind === 'more' ? Math.min(col.w, 220) : nested ? col.w - ROUTE_INDENT : col.w,
+            h
+          })
+          sy += h + ITEM_GAP
         }
-        const leadOf = (lane: TopoLane, head: TopoNode | undefined): number =>
-          !head
-            ? 0
-            : lane === 'entry' && head.rows?.length
-              ? CARD_HEAD + CARD_ROW / 2
-              : topoNodeHeight(head) / 2
-        const center = Math.max(0, ...stacks.map((x) => leadOf(x.lane, x.stack[0])))
-        let rowBottom = ry
-        for (const { lane, col, stack } of stacks) {
-          if (!col) continue
-          let sy = ry + center - leadOf(lane, stack[0])
-          let prevGateway: string | null = null
-          for (const n of stack) {
-            const h = topoNodeHeight(n)
-            // Route ngay dưới Gateway của nó (hoặc dưới route anh em): thụt vào như cây.
-            const nested =
-              n.kind === 'route' && prevGateway !== null && parentOf.get(n.id) === prevGateway
-            if (n.kind === 'gateway') prevGateway = n.id
-            else if (!nested) prevGateway = null
-            placed.push({
-              ...n,
-              x: nested ? col.x + ROUTE_INDENT : col.x,
-              y: sy,
-              w: n.kind === 'more' ? Math.min(col.w, 220) : nested ? col.w - ROUTE_INDENT : col.w,
-              h
-            })
-            sy += h + ITEM_GAP
-          }
-          rowBottom = Math.max(rowBottom, sy - ITEM_GAP)
-        }
-        ry = rowBottom + ROW_GAP
+        rowBottom = Math.max(rowBottom, sy - ITEM_GAP)
       }
-      bottom = Math.max(bottom, ry - ROW_GAP)
+      ry = rowBottom + ROW_GAP
     }
-    bottom += BAND_PAD
+    bottom = Math.max(bottom, ry - ROW_GAP) + BAND_PAD
     bands.push({
       ns: ns.name,
       x: PAD / 2,
       y: top,
       w: width - PAD,
       h: bottom - top,
-      collapsed: ns.collapsed
+      collapsed: false
     })
     y = bottom + BAND_GAP
   }

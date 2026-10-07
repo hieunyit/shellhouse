@@ -6,6 +6,7 @@ import { cx, Segmented } from '../../../renderer/src/components/ui'
 import { formatRelative, t } from '../../registry/renderer-kit'
 import { type TrafficState } from './useTraffic'
 import { HUBBLE_ENABLE } from './trafficUnit'
+import type { MapGrouping } from '../shared/map'
 
 /**
  * Độ rộng hiện tại của một phần tử (ResizeObserver) — gắn `ref` trả về vào phần tử cần đo. Đo
@@ -68,7 +69,7 @@ export function ZoomLabel(): React.JSX.Element {
   )
 }
 
-export function TrafficDot({ status }: { status: TrafficState['status'] }): React.JSX.Element {
+function TrafficDot({ status }: { status: TrafficState['status'] }): React.JSX.Element {
   return (
     <span
       className={cx(
@@ -82,36 +83,6 @@ export function TrafficDot({ status }: { status: TrafficState['status'] }): Reac
       data-testid="k8s-map-traffic-status"
       data-status={status}
     />
-  )
-}
-
-export function Chip({
-  on,
-  onClick,
-  testId,
-  title,
-  children
-}: {
-  on: boolean
-  onClick: () => void
-  testId?: string
-  title?: string
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      title={title}
-      data-testid={testId}
-      className={cx(
-        'h-7 rounded-md border px-2 font-medium whitespace-nowrap',
-        on ? 'border-accent/40 bg-accent-soft text-fg' : 'border-line text-muted hover:text-fg'
-      )}
-      onClick={onClick}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -137,15 +108,6 @@ export function MapButton({
     >
       {children}
     </button>
-  )
-}
-
-export function Legend({ color, label }: { color: string; label: string }): React.JSX.Element {
-  return (
-    <span className="flex items-center gap-1">
-      <span className={cx('size-2 rounded-full', color)} />
-      {label}
-    </span>
   )
 }
 
@@ -342,7 +304,8 @@ export function ViewSwitch<T extends string>({
   onChange
 }: {
   value: T
-  options: readonly { value: T; label: string }[]
+  /** hint: một câu giải thích chế độ (chú thích khi rê chuột / dòng phụ trong menu). */
+  options: readonly { value: T; label: string; hint?: string }[]
   compact: boolean
   testIdPrefix: string
   onChange: (value: T) => void
@@ -365,7 +328,7 @@ export function ViewSwitch<T extends string>({
       label={current?.label ?? value}
       title={t('Change view')}
       align="left"
-      width="w-44"
+      width="w-64"
     >
       {(close) =>
         options.map((o) => (
@@ -381,10 +344,13 @@ export function ViewSwitch<T extends string>({
               close()
             }}
           >
-            <span className="flex size-3.5 shrink-0 items-center justify-center text-accent">
+            <span className="flex size-3.5 shrink-0 items-center justify-center self-start pt-0.5 text-accent">
               {o.value === value && <Check size={12} strokeWidth={3} />}
             </span>
-            {o.label}
+            <span className="min-w-0">
+              <span className="block">{o.label}</span>
+              {o.hint && <span className="block text-[11px] text-faint">{o.hint}</span>}
+            </span>
           </button>
         ))
       }
@@ -483,5 +449,76 @@ export function TrafficMenu({
         )}
       </div>
     </MenuButton>
+  )
+}
+
+/**
+ * Cách gom namespace của lưới tổng quan: theo mục đích (mặc định), tiền tố tên, hay một nhãn (gợi ý
+ * nhãn hay gặp; "theo nhãn…" để gõ khoá tuỳ ý).
+ */
+export function NamespaceGrouping({
+  value,
+  keys,
+  onChange
+}: {
+  value: MapGrouping
+  keys: readonly string[]
+  onChange: (grouping: MapGrouping) => void
+}): React.JSX.Element {
+  const [custom, setCustom] = useState<string | null>(null)
+  const labelKeys = [
+    ...keys,
+    ...(value.startsWith('label:') && !keys.includes(value.slice(6)) ? [value.slice(6)] : [])
+  ]
+  if (custom !== null)
+    return (
+      <input
+        autoFocus
+        type="text"
+        spellCheck={false}
+        placeholder={t('Label key, e.g. team')}
+        aria-label={t('Group by label key')}
+        data-testid="k8s-topo-grouping-custom"
+        className="mx-2 mb-1 h-7 rounded-md border border-accent bg-subtle px-2 font-mono text-xs text-fg outline-none"
+        value={custom}
+        onChange={(e) => {
+          setCustom(e.target.value)
+        }}
+        onBlur={() => {
+          setCustom(null)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            const key = custom.trim()
+            if (key) onChange(`label:${key}`)
+            setCustom(null)
+          } else if (e.key === 'Escape') {
+            e.stopPropagation()
+            setCustom(null)
+          }
+        }}
+      />
+    )
+  return (
+    <select
+      data-testid="k8s-topo-grouping"
+      aria-label={t('Group namespaces')}
+      className="mx-2 mb-1 h-7 cursor-pointer rounded-md border border-line bg-subtle px-1.5 text-xs text-fg outline-none"
+      value={value}
+      onChange={(e) => {
+        const v = e.target.value
+        if (v === '__custom') setCustom('')
+        else onChange(v as MapGrouping)
+      }}
+    >
+      <option value="purpose">{t('by purpose')}</option>
+      <option value="prefix">{t('by name prefix')}</option>
+      {labelKeys.map((k) => (
+        <option key={k} value={`label:${k}`}>
+          {t('by {key}', { key: k })}
+        </option>
+      ))}
+      <option value="__custom">{t('by label…')}</option>
+    </select>
   )
 }

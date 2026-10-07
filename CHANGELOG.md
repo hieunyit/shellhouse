@@ -6,6 +6,17 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- Kubernetes Map has three views, each answering one question: **Topology** (how requests reach
+  your apps), **Nodes** (which machine runs which pods, which machines are full) and **Traffic** (who
+  calls whom, how much, on which port). The separate Workloads view is gone — its overview is now
+  part of Topology: collapsed namespaces show as a compact grid of tiles grouped by purpose, name
+  prefix or a label, each with its workload / pod count and failing pods; click a tile to open that
+  namespace's request path below the grid. Clusters with 6 or more namespaces open collapsed.
+- Traffic map: the destination port is shown next to the rate on each connection and in the side
+  panel.
+
 ## [1.2.0-beta.20] - 2026-10-06
 
 ### Added

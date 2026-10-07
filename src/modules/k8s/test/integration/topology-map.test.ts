@@ -2,7 +2,7 @@ import { connect, type Socket } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { LimitedSpawn } from '../../../registry/host-types'
 import { buildTopology, layoutTopology, type TopoNode } from '../../shared/appTopology'
-import { layoutMap, type MapData } from '../../shared/map'
+import type { MapData } from '../../shared/map'
 import { K8sService, type ResolvedClusterConfig } from '../../session-host/service'
 import { startApiTestServer, TEST_CA, TOKEN, type ApiTestServer } from '../api-test-server'
 
@@ -189,11 +189,5 @@ describe('Topology tĩnh — từ API server tới bố cục', () => {
     expect(lanes('svc:shop/stripe')).toBe('service')
     expect(lanes('pods:wl:deployments.apps:shop/api')).toBe('pods')
     expect(lanes('cm:shop/api-config')).toBe('deps')
-
-    // Bản đồ workload: pod của ReplicaSet lẻ / owner lạ không còn bị mất.
-    const map = layoutMap(d, { hideSystem: true })
-    expect(map.nodes.filter((x) => x.kind === 'pod').length).toBe(
-      d.pods.filter((p) => p.ns !== 'kube-system').length
-    )
   })
 })

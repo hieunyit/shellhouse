@@ -1,7 +1,7 @@
 import { connect, type Socket } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { LimitedSpawn } from '../../../registry/host-types'
-import { layoutMap, type MapData } from '../../shared/map'
+import type { MapData } from '../../shared/map'
 import { K8sService, type ResolvedClusterConfig } from '../../session-host/service'
 import type {
   MetricsRange,
@@ -584,20 +584,6 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     expect(d.hpas[0]).toMatchObject({ target: { kind: 'Deployment', name: 'api' }, min: 2, max: 5 })
     expect(d.nodes.total).toBeGreaterThan(0)
     expect(d.truncated).toBe(false)
-    // Đưa thẳng vào bố cục: ingress → service → deployment → PVC.
-    const layout = layoutMap(d, { hideSystem: false })
-    expect(layout.edges.map((e) => `${e.kind}:${e.from}>${e.to}`)).toEqual(
-      expect.arrayContaining([
-        'route:r:ingresses.networking.k8s.io:shop/api>s:shop/api',
-        'select:s:shop/api>w:deployments.apps:shop/api',
-        'storage:w:deployments.apps:shop/api>v:shop/api-data',
-        // Gateway → HTTPRoute → Service; NetworkPolicy (podSelector rỗng) áp lên mọi workload.
-        'attach:gw:shop/public>r:httproutes.gateway.networking.k8s.io:shop/web',
-        'route:r:httproutes.gateway.networking.k8s.io:shop/web>s:shop/web',
-        'policy:w:deployments.apps:shop/web>np:shop/default-deny',
-        'policy:w:deployments.apps:shop/api>np:shop/default-deny'
-      ])
-    )
   })
 
   it('topology: Deployment → ReplicaSet → Pod → Node, traffic, ConfigMap, ServiceAccount → RBAC; mở rộng / người dùng', async () => {

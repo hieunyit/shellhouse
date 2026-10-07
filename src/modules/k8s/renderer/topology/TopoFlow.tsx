@@ -641,57 +641,66 @@ export const NamespaceCard = memo(function NamespaceCard({
         className={focusClass(ctx, n)}
       />
     )
+  const failing = st?.failingPods ?? 0
+  const warnings = st?.problems.warn ?? 0
+  const other = st ? Math.max(0, st.problems.bad - failing) : 0
   return (
-    <div
+    <button
+      type="button"
       className={cx(
-        'k8s-card flex size-full items-center gap-4 rounded-[10px] px-4',
+        'k8s-card nodrag nopan group flex size-full items-center gap-3 rounded-[10px] px-3 text-left outline-none focus-visible:shadow-ds-focus',
         focusClass(ctx, n)
       )}
       data-tone={n.tone}
       data-testid="k8s-topo-node"
       data-kind="namespace"
       data-name={n.name}
+      title={t('Open namespace {name}', { name: n.name })}
+      onClick={(e) => {
+        e.stopPropagation()
+        ctx.onToggleNs(n.ns)
+      }}
     >
-      <KindIcon kind="namespaces" size={24} />
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-semibold text-fg">{n.name}</div>
+      <span className="relative shrink-0">
+        <KindIcon kind="namespaces" size={20} />
+        <span
+          className={cx(
+            'absolute -right-0.5 -bottom-0.5 size-2 rounded-full ring-2 ring-[var(--map-card)]',
+            n.tone === 'bad' ? 'bg-danger-solid' : n.tone === 'warn' ? 'bg-warning' : 'bg-success'
+          )}
+        />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-semibold text-fg group-hover:underline">
+          {n.name}
+        </span>
         {st && (
-          <div className="truncate text-[12px] text-faint tabular-nums">
-            {[
-              tn(st.entries, '{n} entry point', '{n} entry points'),
-              tn(st.services, '{n} service', '{n} services'),
-              tn(st.workloads, '{n} workload', '{n} workloads'),
-              tn(st.pods, '{n} pod', '{n} pods')
-            ].join(' · ')}
-          </div>
+          <span className="block truncate text-[11.5px] text-faint tabular-nums">
+            {tn(st.workloads, '{n} workload', '{n} workloads')} ·{' '}
+            {tn(st.pods, '{n} pod', '{n} pods')}
+          </span>
         )}
-      </div>
-      {st && (st.problems.bad > 0 || st.problems.warn > 0) && (
-        <span className="flex shrink-0 gap-1 text-[11px] font-medium tabular-nums">
-          {st.problems.bad > 0 && (
+      </span>
+      {(failing > 0 || other > 0 || warnings > 0) && (
+        <span className="flex shrink-0 flex-col items-end gap-0.5 text-[11px] font-medium tabular-nums">
+          {failing > 0 && (
             <span className="rounded-full bg-danger-soft px-1.5 py-px text-danger">
-              {tn(st.problems.bad, '{n} failing', '{n} failing')}
+              {tn(failing, '{n} failing pod', '{n} failing pods')}
             </span>
           )}
-          {st.problems.warn > 0 && (
+          {failing === 0 && other > 0 && (
+            <span className="rounded-full bg-danger-soft px-1.5 py-px text-danger">
+              {tn(other, '{n} problem', '{n} problems')}
+            </span>
+          )}
+          {warnings > 0 && (
             <span className="rounded-full bg-warning-soft px-1.5 py-px text-warning">
-              {tn(st.problems.warn, '{n} warning', '{n} warnings')}
+              {tn(warnings, '{n} warning', '{n} warnings')}
             </span>
           )}
         </span>
       )}
-      <button
-        type="button"
-        className="nodrag nopan flex h-7 shrink-0 items-center gap-1 rounded-md border border-line px-2 text-[12px] font-medium text-muted hover:text-fg"
-        data-testid="k8s-topo-ns-expand"
-        onClick={(e) => {
-          e.stopPropagation()
-          ctx.onToggleNs(n.ns)
-        }}
-      >
-        <ChevronRight size={13} /> {t('Show')}
-      </button>
-    </div>
+    </button>
   )
 })
 
@@ -725,6 +734,35 @@ export const BandNode = memo(function BandNode({
   const ctx = useTopo()
   if (!('band' in data)) return <></>
   const { band, label, stats, bad, warn } = data
+  if (band.group !== undefined)
+    return (
+      <div
+        className="size-full rounded-[18px]"
+        style={{
+          background: 'var(--map-region)',
+          border: '1px solid color-mix(in srgb, var(--map-island-border) 70%, transparent)'
+        }}
+        data-testid="k8s-topo-group"
+        data-group={band.group}
+      >
+        <div
+          className="flex h-9 origin-bottom-left items-center gap-2 px-4"
+          style={
+            ctx.far ? { transform: 'scale(min(calc(0.8 / var(--topo-zoom, 1)), 3.1))' } : undefined
+          }
+        >
+          <span className="truncate text-[11px] font-semibold tracking-[0.08em] text-muted uppercase">
+            {label}
+          </span>
+          <span className="shrink-0 text-[11px] text-faint tabular-nums">{stats}</span>
+          {bad > 0 && (
+            <span className="shrink-0 rounded-full bg-danger-soft px-1.5 py-px text-[11px] font-medium text-danger tabular-nums">
+              {tn(bad, '{n} failing pod', '{n} failing pods')}
+            </span>
+          )}
+        </div>
+      </div>
+    )
   return (
     <div
       className="size-full rounded-[18px]"

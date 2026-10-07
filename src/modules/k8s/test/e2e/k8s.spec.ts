@@ -470,7 +470,7 @@ ${names.map((n) => `- name: ${n}\n  context: { cluster: ${n}-c, user: u }`).join
   }
 })
 
-test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi tiếp theo, zoom, mở chi tiết', async () => {
+test('Kubernetes: Map — ba chế độ, lưới tổng quan namespace (gom theo mục đích / nhãn), mở namespace', async () => {
   test.setTimeout(60_000)
   const server = await startApiTestServer()
   const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
@@ -483,68 +483,53 @@ test('Kubernetes: bản đồ cluster — tìm và bay tới, quan hệ, lỗi t
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
     await setWindowSize(launched, 1366, 820)
+    await view.getByTestId('k8s-namespace').click()
+    await page.getByRole('menuitemradio', { name: 'All namespaces' }).click()
+    await page.keyboard.press('Escape')
     await page.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
-    // Mặc định là Topology — chuyển sang bản đồ workload.
+    // Ba chế độ, mỗi chế độ một câu hỏi (giải thích khi rê chuột); Workloads đã gộp vào Topology.
     await expect(map.getByTestId('k8s-map-view-topology')).toHaveAttribute('aria-checked', 'true')
-    await map.getByTestId('k8s-map-view-workloads').click()
-    await expect(map.getByTestId('k8s-map-summary')).toContainText('workloads')
-    await expect(map.getByTestId('k8s-map-summary')).toContainText('pods')
+    await expect(map.getByTestId('k8s-map-view-topology')).toHaveAttribute('title', /requests/)
+    await expect(map.getByTestId('k8s-map-view-nodes')).toHaveCount(1)
+    await expect(map.getByTestId('k8s-map-view-traffic')).toHaveCount(1)
+    await expect(map.getByTestId('k8s-map-view-workloads')).toHaveCount(0)
 
-    // Tìm → bay tới + chọn; bảng bên phải: pod của deployment, service gửi traffic tới.
-    await map.getByTestId('k8s-map-search').fill('web')
-    const result = map
-      .getByTestId('k8s-map-result')
-      .filter({ hasText: 'Workload' })
-      .filter({ hasText: 'web' })
-      .first()
-    await result.click()
-    const panel = view.getByTestId('k8s-map-panel')
-    await expect(panel).toContainText('web')
-    await expect(panel).toContainText('Deployment · shop')
-    await expect(panel.getByTestId('k8s-map-details')).toContainText('Pods 2')
-    await expect(panel.locator('[data-testid="k8s-map-link"][data-name="web"]')).toContainText(
-      'Service'
-    )
-    // Icon công nghệ (image nginx) + blast radius của workload.
-    await expect(panel.getByTestId('k8s-map-tech')).toContainText('NGINX')
-    await expect(panel.getByTestId('k8s-map-impact-summary')).toContainText('2 pods')
-    await expect(panel.getByTestId('k8s-map-impact-summary')).toContainText('1 service')
-    await panel.getByTestId('k8s-map-impact-toggle').click()
-    await expect(panel.getByTestId('k8s-map-impact-toggle')).toHaveAttribute('aria-pressed', 'true')
+    // Gập hết → lưới tổng quan: mỗi namespace một ô (số workload / pod, pod lỗi), gom theo mục đích.
+    await map.getByTestId('k8s-topo-view').click()
+    await page.getByTestId('k8s-topo-fold-all').click()
+    await page.keyboard.press('Escape')
+    const tile = (ns: string) =>
+      map.locator(`[data-testid="k8s-topo-node"][data-kind="namespace"][data-name="${ns}"]`)
+    await expect(tile('shop')).toContainText('failing pod')
+    await expect(tile('shop')).toContainText('workload')
+    await expect(
+      map.locator('[data-testid="k8s-topo-group"][data-group="Applications"]')
+    ).toContainText('namespaces')
+    await expect(map.locator('[data-testid="k8s-topo-node"][data-kind="workload"]')).toHaveCount(0)
 
-    // Bấm service trong bảng → chọn service; quay lại.
-    await panel.locator('[data-testid="k8s-map-link"][data-name="web"]').click()
-    await expect(panel).toContainText('Service · shop')
+    // Gom theo nhãn team của namespace (gợi ý có sẵn), theo nhãn gõ tay, rồi về mục đích.
+    await map.getByTestId('k8s-topo-view').click()
+    await page.getByTestId('k8s-topo-grouping').selectOption('label:team')
+    await expect(map.locator('[data-testid="k8s-topo-group"][data-group="commerce"]')).toBeVisible()
+    await page.getByTestId('k8s-topo-grouping').selectOption('__custom')
+    await page.getByTestId('k8s-topo-grouping-custom').fill('tier')
+    await page.getByTestId('k8s-topo-grouping-custom').press('Enter')
+    await expect(page.getByTestId('k8s-topo-grouping')).toHaveValue('label:tier')
+    await expect(map.locator('[data-testid="k8s-topo-group"][data-group="Other"]')).toBeVisible()
+    await page.getByTestId('k8s-topo-grouping').selectOption('purpose')
+    await page.keyboard.press('Escape')
 
-    // Gateway API: Gateway → HTTPRoute (đổi gateway → route gắn vào bị ảnh hưởng).
-    await map.getByTestId('k8s-map-search').fill('public')
-    await map.getByTestId('k8s-map-result').filter({ hasText: 'Gateway' }).first().click()
-    await expect(panel).toContainText('Gateway · shop')
-    await expect(panel.locator('[data-testid="k8s-map-link"][data-name="web"]')).toContainText(
-      'HTTPRoute'
-    )
-    await expect(panel.getByTestId('k8s-map-impact-summary')).toContainText('1 route')
-
-    // Lỗi tiếp theo: deployment web (1/2 ready) + pod CrashLoopBackOff.
-    await map.getByTestId('k8s-map-next-problem').click()
-    await expect(panel).toContainText('Deployment · shop')
-
-    // Zoom: phím + và nút Fit đổi tỉ lệ.
-    const zoom = map.getByTestId('k8s-map-zoom')
-    const before = await zoom.textContent()
-    await map.getByTestId('k8s-map-canvas').focus()
-    await page.keyboard.press('+')
-    await expect(zoom).not.toHaveText(before ?? '')
-    await map.getByTestId('k8s-map-fit').click()
-
-    // Mở chi tiết → bảng Deployments, chi tiết của web.
-    await panel.getByTestId('k8s-map-open').click()
-    await expect(page.getByTestId('k8s-nav-deployments.apps')).toHaveAttribute(
-      'aria-current',
-      'true'
-    )
-    await expect(view.getByTestId('k8s-describe')).toContainText('web')
+    // Bấm ô → namespace mở thành luồng chi tiết bên dưới lưới; gập lại → về lưới.
+    await tile('shop').click()
+    const toggle = map.locator('[data-testid="k8s-topo-ns-toggle"][data-ns="shop"]')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(tile('shop')).toHaveCount(0)
+    await expect(
+      map.locator('[data-testid="k8s-topo-node"][data-kind="workload"][data-name="web"]')
+    ).toHaveCount(1)
+    await toggle.click()
+    await expect(tile('shop')).toHaveCount(1)
   } finally {
     await launched.close()
     await server.close()
@@ -662,7 +647,7 @@ test('Kubernetes: Topology tĩnh — vấn đề giải thích bằng lời, tì
   }
 })
 
-test('Kubernetes: bản đồ cluster lớn — gom vùng theo nhãn, lọc nhãn, gập namespace, xem theo node', async () => {
+test('Kubernetes: Map › Nodes — lọc nhãn, cấp phát / dùng thật, node hỏng lên đầu, mở pod', async () => {
   test.setTimeout(60_000)
   const server = await startApiTestServer()
   const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
@@ -677,56 +662,21 @@ test('Kubernetes: bản đồ cluster lớn — gom vùng theo nhãn, lọc nhã
     await setWindowSize(launched, 1366, 820)
     await page.getByTestId('k8s-nav-map').click()
     const map = view.getByTestId('k8s-map')
-    await map.getByTestId('k8s-map-view-workloads').click()
-    const summary = map.getByTestId('k8s-map-summary')
-    await expect(summary).toContainText('2 workloads')
-
-    // Gom vùng theo nhãn team của namespace (gợi ý tự có trong danh sách) — trong menu View.
-    await map.getByTestId('k8s-map-options').click()
-    await map.getByTestId('k8s-map-grouping').selectOption('label:team')
-    await expect(map.locator('[data-testid="k8s-map-region"][data-name="commerce"]')).toBeVisible()
-    await map.getByTestId('k8s-map-grouping').selectOption('__custom')
-    await map.getByTestId('k8s-map-grouping-custom').fill('tier')
-    await map.getByTestId('k8s-map-grouping-custom').press('Enter')
-    await expect(map.getByTestId('k8s-map-grouping')).toHaveValue('label:tier')
-    await expect(map.locator('[data-testid="k8s-map-region"][data-name="Other"]')).toBeVisible()
-    await map.getByTestId('k8s-map-grouping').selectOption('purpose')
-
-    // Lọc theo nhãn kiểu kubectl.
+    // Xem theo node: lọc theo nhãn kiểu kubectl làm mờ pod không khớp.
+    await map.getByTestId('k8s-map-view-nodes').click()
     const filter = map.getByTestId('k8s-map-label-filter')
-    await filter.fill('app=nothing')
-    await expect(summary).toContainText('0 workloads')
     await filter.fill('a=b=c')
     await expect(filter).toHaveAttribute('aria-invalid', 'true')
-    await filter.fill('app in (web, api)')
+    const web1 = map.locator('[data-testid="k8s-node-pod"][aria-label="shop/web-1"]')
+    await filter.fill('app=nothing')
     await expect(filter).toHaveAttribute('aria-invalid', 'false')
-    await expect(summary).toContainText('1 workload ·')
+    await expect(web1).toHaveAttribute('data-match', 'false')
+    await filter.fill('app in (web, api)')
+    await expect(web1).toHaveAttribute('data-match', 'true')
     await filter.press('Escape')
     await expect(filter).toHaveValue('')
-    await expect(summary).toContainText('2 workloads')
 
-    // Gập namespace shop (bảng bên) → workload không còn trên bản đồ; tìm vẫn thấy và mở lại.
-    await map.getByTestId('k8s-map-search').fill('shop')
-    await map.getByTestId('k8s-map-result').filter({ hasText: 'Namespace' }).first().click()
-    const panel = view.getByTestId('k8s-map-panel')
-    await panel.getByTestId('k8s-map-panel-fold').click()
-    await expect(summary).toContainText('0 workloads')
-    await expect(panel.getByTestId('k8s-map-panel-fold')).toContainText('Expand')
-    await map.getByTestId('k8s-map-search').fill('web')
-    await map.getByTestId('k8s-map-result').filter({ hasText: '(collapsed)' }).first().click()
-    await expect(summary).toContainText('2 workloads')
-    await expect(panel).toContainText('Deployment')
-    // Gập hết / mở hết (menu View).
-    await map.getByTestId('k8s-map-options').click()
-    await map.getByTestId('k8s-map-fold-all').click()
-    await expect(summary).toContainText('0 workloads')
-    await map.getByTestId('k8s-map-options').click()
-    await expect(map.getByTestId('k8s-map-fold-all')).toContainText('Expand all')
-    await map.getByTestId('k8s-map-fold-all').click()
-    await expect(summary).toContainText('2 workloads')
-
-    // Xem theo node: cấp phát / dùng thật, node hỏng nổi lên đầu, bấm pod mở chi tiết.
-    await map.getByTestId('k8s-map-view-nodes').click()
+    // Cấp phát / dùng thật, node hỏng nổi lên đầu, bấm pod mở chi tiết.
     const nodes = map.getByTestId('k8s-nodes')
     await expect(nodes.getByTestId('k8s-nodes-summary')).toContainText('2 nodes · 1 ready')
     await expect(nodes.getByTestId('k8s-node-card').first()).toHaveAttribute('data-name', 'node-2')
@@ -1134,20 +1084,13 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
         .locator('[data-testid="k8s-topo-node"][data-kind="workload"][data-name="web"]')
         .getByTestId('k8s-topo-rate')
     ).toContainText('MB/s')
-    await map.getByTestId('k8s-map-view-workloads').click()
-    await map.getByTestId('k8s-map-search').fill('web')
-    await map.getByTestId('k8s-map-result').filter({ hasText: 'Workload' }).first().click()
-    await expect(
-      map.locator(
-        '[data-testid="k8s-map-traffic-edge"][data-source="w:deployments.apps:shop/web"][data-target="w:pods:default/standalone"]'
-      )
-    ).toHaveCount(1)
-    const panel = view.getByTestId('k8s-map-panel')
-    await expect(panel.getByTestId('k8s-map-node-traffic')).toContainText('db.example.com')
-    await expect(panel.getByTestId('k8s-map-node-traffic')).toContainText('MB/s')
+    // Bảng chi tiết của thẻ vừa chọn: ai gọi tới / gọi tới ai (kèm tốc độ) — rồi mở chi tiết.
+    const panel = view.getByTestId('k8s-topo-panel')
+    await expect(panel.getByTestId('k8s-topo-traffic')).toContainText('db.example.com')
+    await expect(panel.getByTestId('k8s-topo-traffic')).toContainText('MB/s')
 
     // Tab Traffic của Deployment: vào (Internet → Service web, quy về Deployment), ra (DB, tool).
-    await panel.getByTestId('k8s-map-open').click()
+    await panel.getByTestId('k8s-topo-open').click()
     const detail = view.getByTestId('k8s-describe')
     await detail.getByTestId('k8s-detail-tab-traffic').click()
     const traffic = detail.getByTestId('k8s-traffic')

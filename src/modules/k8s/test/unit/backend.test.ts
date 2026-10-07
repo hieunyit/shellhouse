@@ -5,7 +5,7 @@ import { escapeRe } from '../../session-host/prometheus'
 import { accumulate, type TrafficCounters } from '../../session-host/traffic'
 import { setOidcTokens } from '../../main/kubeconfig'
 import { isMutating, K8sOp } from '../../shared/ops'
-import { impactOf, selectorMatches, type MapLayout } from '../../shared/map'
+import { selectorMatches } from '../../shared/map'
 import { parseCaretta, trafficRates, type TrafficSample } from '../../shared/traffic'
 import type { LimitedSpawn } from '../../../registry/host-types'
 
@@ -216,22 +216,6 @@ describe('bản đồ: selector, phạm vi ảnh hưởng', () => {
     expect(
       selectorMatches({ matchExpressions: [{ key: 'toString', operator: 'DoesNotExist' }] }, {})
     ).toBe(true)
-  })
-
-  it('impactOf: lan theo cạnh (BFS) — chuỗi dài vẫn nhanh', () => {
-    const n = 20_000
-    const layout: Pick<MapLayout, 'nodes' | 'edges'> = {
-      nodes: [],
-      edges: Array.from({ length: n }, (_, i) => ({
-        from: `s${i + 1}`,
-        to: `s${i}`,
-        kind: 'select' as const
-      }))
-    }
-    const t = performance.now()
-    const hit = impactOf(layout, 's0')
-    expect(hit.size).toBe(n)
-    expect(performance.now() - t).toBeLessThan(500)
   })
 })
 
