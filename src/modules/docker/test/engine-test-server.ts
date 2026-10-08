@@ -351,7 +351,10 @@ export async function startEngineTestServer(
         Volumes: volumes.map((v) => ({
           Name: v.Name,
           Labels: v.Labels,
-          UsageData: { Size: 2000, RefCount: usedVolumes.has(v.Name) ? 1 : 0 }
+          UsageData: {
+            Size: v.Name === 'shop_data' ? 123_456 : 2000,
+            RefCount: usedVolumes.has(v.Name) ? 1 : 0
+          }
         })),
         BuildCache: buildCache
       })
@@ -627,6 +630,8 @@ export async function startEngineTestServer(
             Names: c.Names,
             Image: c.Image,
             ImageID: c.ImageID,
+            // Volume `shop_data` do container `web` gắn.
+            Mounts: c.Names.includes('/web') ? [{ Type: 'volume', Name: 'shop_data' }] : [],
             State: c.State,
             Status: c.Status,
             Created: c.Created,

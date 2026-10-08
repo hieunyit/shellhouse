@@ -447,6 +447,8 @@ export class DockerService implements HostModuleSession {
         return this.upload(backend, op.id, op.dir, op.localPaths, signal)
       case 'volumes':
         return backend.volumes(signal)
+      case 'volumes.sizes':
+        return backend.volumeSizes(signal)
       case 'volume.remove':
         await backend.volumeRemove(op.name)
         return null

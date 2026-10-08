@@ -454,7 +454,18 @@ export class CliBackend implements DockerBackend {
   }
 
   async volumes(signal: AbortSignal): Promise<VolumeRow[]> {
-    const out = await this.sh(['volume', 'ls', '--format', '{{json .}}'], signal)
+    const [out, ps] = await Promise.all([
+      this.sh(['volume', 'ls', '--format', '{{json .}}'], signal),
+      this.sh(['ps', '-a', '--no-trunc', '--format', '{{json .}}'], signal).catch(() => '')
+    ])
+    // Cột Mounts của `docker ps`: tên volume (hoặc đường dẫn bind), cách nhau bằng dấu phẩy.
+    const usedBy = new Map<string, string[]>()
+    for (const c of jsonLines<{ Names?: string; Mounts?: string }>(ps))
+      for (const m of (c.Mounts ?? '').split(',')) {
+        const name = m.trim()
+        if (!name || name.includes('/')) continue
+        usedBy.set(name, [...(usedBy.get(name) ?? []), (c.Names ?? '').split(',')[0] ?? ''])
+      }
     return jsonLines<{
       Name: string
       Driver: string
@@ -465,8 +476,14 @@ export class CliBackend implements DockerBackend {
       driver: v.Driver,
       mountpoint: v.Mountpoint,
       created: null,
-      project: parseLabels(v.Labels)['com.docker.compose.project'] ?? null
+      project: parseLabels(v.Labels)['com.docker.compose.project'] ?? null,
+      usedBy: (usedBy.get(v.Name) ?? []).sort()
     }))
+  }
+
+  /** `docker system df -v` không có định dạng ổn định giữa các bản — CLI không báo dung lượng. */
+  volumeSizes(): Promise<Record<string, number>> {
+    return Promise.resolve({})
   }
 
   async volumeRemove(name: string): Promise<void> {

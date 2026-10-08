@@ -38,6 +38,7 @@ interface ApiContainer {
   Created: number
   Ports?: { IP?: string; PrivatePort: number; PublicPort?: number; Type: string }[] | null
   Labels?: Record<string, string> | null
+  Mounts?: { Type?: string; Name?: string }[] | null
 }
 
 interface ApiImage {
@@ -54,6 +55,8 @@ interface ApiVolume {
   Mountpoint: string
   CreatedAt?: string
   Labels?: Record<string, string> | null
+  /** Chỉ có trong `/system/df`: -1 = chưa tính được. */
+  UsageData?: { Size?: number; RefCount?: number } | null
 }
 
 interface ApiNetwork {
@@ -420,16 +423,42 @@ export class ApiBackend implements DockerBackend {
   }
 
   async volumes(signal: AbortSignal): Promise<VolumeRow[]> {
-    const res = await this.engine.json<{ Volumes?: ApiVolume[] | null }>('GET', '/volumes', {
-      signal
-    })
+    const [res, containers] = await Promise.all([
+      this.engine.json<{ Volumes?: ApiVolume[] | null }>('GET', '/volumes', { signal }),
+      // Container nào gắn volume nào: lấy từ danh sách container (nhanh; không có thì chỉ thiếu "used by").
+      this.engine
+        .json<ApiContainer[] | null>('GET', '/containers/json', { query: { all: true }, signal })
+        .catch((): null => null)
+    ])
+    const usedBy = new Map<string, string[]>()
+    for (const c of containers ?? [])
+      for (const m of c.Mounts ?? []) {
+        if (m.Type !== 'volume' || !m.Name) continue
+        const list = usedBy.get(m.Name) ?? []
+        list.push((c.Names?.[0] ?? c.Id).replace(/^\//, ''))
+        usedBy.set(m.Name, list)
+      }
     return (res.Volumes ?? []).map((v) => ({
       name: v.Name,
       driver: v.Driver,
       mountpoint: v.Mountpoint,
       created: v.CreatedAt ? Date.parse(v.CreatedAt) || null : null,
-      project: v.Labels?.['com.docker.compose.project'] ?? null
+      project: v.Labels?.['com.docker.compose.project'] ?? null,
+      usedBy: (usedBy.get(v.Name) ?? []).sort()
     }))
+  }
+
+  async volumeSizes(signal: AbortSignal): Promise<Record<string, number>> {
+    const res = await this.engine.json<{ Volumes?: ApiVolume[] | null }>('GET', '/system/df', {
+      query: { type: 'volume' },
+      signal
+    })
+    const out: Record<string, number> = {}
+    for (const v of res.Volumes ?? []) {
+      const size = v.UsageData?.Size
+      if (typeof size === 'number' && size >= 0) out[v.Name] = size
+    }
+    return out
   }
 
   async volumeRemove(name: string): Promise<void> {

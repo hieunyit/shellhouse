@@ -265,6 +265,8 @@ export const DockerOp = z.discriminatedUnion('op', [
   /** Build image (CLI `docker build`, BuildKit) → luồng sự kiện 'build'. */
   z.object({ op: z.literal('build'), spec: BuildSpec }),
   z.object({ op: z.literal('volumes') }),
+  /** Dung lượng từng volume (`/system/df`, có thể chậm trên máy lớn) — hỏi riêng sau khi có danh sách. */
+  z.object({ op: z.literal('volumes.sizes') }),
   z.object({ op: z.literal('volume.remove'), name: Id }),
   z.object({ op: z.literal('volume.create'), spec: VolumeSpec }),
   z.object({ op: z.literal('networks') }),
@@ -418,6 +420,8 @@ export interface VolumeRow {
   mountpoint: string
   created: number | null
   project: string | null
+  /** Tên container đang gắn volume này (đang chạy hay đã dừng); [] = không container nào dùng. */
+  usedBy: string[]
 }
 
 export interface NetworkRow {

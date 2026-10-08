@@ -65,6 +65,8 @@ export interface DockerBackend {
   /** Thử đăng nhập; trả câu trạng thái của registry ("Login Succeeded"). */
   registryLogin(auth: RegistryAuth, signal: AbortSignal): Promise<string>
   volumes(signal: AbortSignal): Promise<VolumeRow[]>
+  /** Tên volume → byte đã dùng (không biết → không có trong kết quả). */
+  volumeSizes(signal: AbortSignal): Promise<Record<string, number>>
   volumeRemove(name: string): Promise<void>
   /** Trả tên volume (Docker tự đặt nếu để trống). */
   volumeCreate(spec: VolumeSpec): Promise<string>

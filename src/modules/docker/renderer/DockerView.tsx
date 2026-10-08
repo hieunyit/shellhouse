@@ -259,6 +259,8 @@ export function DockerTab({
   const [containers, setContainers] = useState<ContainerRow[] | null>(null)
   const [images, setImages] = useState<ImageRow[] | null>(null)
   const [volumes, setVolumes] = useState<VolumeRow[] | null>(null)
+  // Dung lượng volume (`/system/df`, chậm với nhiều volume) — tải nền sau khi danh sách đã hiện.
+  const [volumeSizes, setVolumeSizes] = useState<Record<string, number> | null>(null)
   const [networks, setNetworks] = useState<NetworkRow[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -362,13 +364,20 @@ export function DockerTab({
     )
   }, [])
 
-  const apply = useCallback((result: SectionData) => {
-    if (result.section === 'images') setImages(result.data)
-    else if (result.section === 'volumes') setVolumes(result.data)
-    else if (result.section === 'networks') setNetworks(result.data)
-    else setContainers(result.data)
-    setLoadError(null)
-  }, [])
+  const apply = useCallback(
+    (result: SectionData) => {
+      if (result.section === 'images') setImages(result.data)
+      else if (result.section === 'volumes') {
+        setVolumes(result.data)
+        void request<Record<string, number>>({ op: 'volumes.sizes' }).then(setVolumeSizes, () => {
+          setVolumeSizes({})
+        })
+      } else if (result.section === 'networks') setNetworks(result.data)
+      else setContainers(result.data)
+      setLoadError(null)
+    },
+    [request]
+  )
   const load = useCallback(
     (which: Section): Promise<void> =>
       fetchSection(request, which).then(apply, (e: unknown) => {
@@ -1138,9 +1147,10 @@ export function DockerTab({
         (volumes ?? []).filter((v) => matches(q, v.name, v.project, v.driver)),
         sort,
         (v) => v.name,
-        (v) => v.created ?? 0
+        (v) => v.created ?? 0,
+        { size: (v) => volumeSizes?.[v.name] ?? -1 }
       ),
-    [volumes, q, sort]
+    [volumes, q, sort, volumeSizes]
   )
   const networkRows = useMemo(
     () =>
@@ -2160,7 +2170,32 @@ export function DockerTab({
                   </>
                 )}
                 columns={[
-                  { id: 'driver', label: t('Driver'), render: (v) => v.driver },
+                  {
+                    id: 'usedBy',
+                    label: t('Used by'),
+                    render: (v) =>
+                      v.usedBy.length === 0 ? (
+                        <span className="text-muted">{t('Not used')}</span>
+                      ) : (
+                        <span title={v.usedBy.join(', ')}>{v.usedBy.join(', ')}</span>
+                      )
+                  },
+                  {
+                    id: 'size',
+                    label: t('Size'),
+                    align: 'right',
+                    sort: { key: 'size', label: t('Size'), kind: 'number' },
+                    render: (v) => {
+                      const n = volumeSizes?.[v.name]
+                      return n === undefined || n < 0 ? '…' : formatBytes(n)
+                    }
+                  },
+                  {
+                    id: 'driver',
+                    label: t('Driver'),
+                    className: 'hidden @lg:block',
+                    render: (v) => v.driver
+                  },
                   {
                     id: 'project',
                     label: t('Project'),
@@ -2195,7 +2230,7 @@ export function DockerTab({
                     }
                   }
                 ]}
-                gridClass="grid-cols-[minmax(10rem,2fr)_6rem_4rem] @lg:grid-cols-[minmax(10rem,2fr)_6rem_8rem_4rem] @2xl:grid-cols-[minmax(10rem,2fr)_6rem_8rem_minmax(10rem,2fr)_4rem]"
+                gridClass="grid-cols-[minmax(10rem,2fr)_minmax(6rem,1.2fr)_5rem_4rem] @lg:grid-cols-[minmax(10rem,2fr)_minmax(6rem,1.2fr)_5rem_6rem_8rem_4rem] @2xl:grid-cols-[minmax(10rem,2fr)_minmax(6rem,1.2fr)_5rem_6rem_8rem_minmax(10rem,2fr)_4rem]"
                 nameSort={{ key: 'name', label: t('Name'), kind: 'text' }}
                 sort={sort}
                 onSort={setSort}

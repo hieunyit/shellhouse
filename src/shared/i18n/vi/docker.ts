@@ -470,6 +470,7 @@ export const docker: Readonly<Record<string, string>> = {
   'Use an IP address, like 172.28.0.1': 'Nhập địa chỉ IP, ví dụ 172.28.0.1',
   'Use one key=value per line': 'Hãy ghi mỗi dòng một key=value',
   'Used by': 'Được dùng bởi',
+  'Not used': 'Không dùng',
   User: 'User',
   Username: 'Tên đăng nhập',
   'Volume or host path': 'Volume hoặc đường dẫn trên host',

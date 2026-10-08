@@ -190,6 +190,17 @@ describe('thao tác hàng loạt — image, volume, network', () => {
     expect(server.requests).toContain('POST /v1.45/images/create?fromImage=redis&tag=latest')
   })
 
+  it('volume: biết container nào đang gắn, dung lượng lấy riêng (không làm chậm danh sách)', async () => {
+    const { run } = await setup()
+    const volumes = await run<VolumeRow[]>({ op: 'volumes' })
+    expect(volumes.find((v) => v.name === 'shop_data')?.usedBy).toEqual(['web'])
+    expect(volumes.filter((v) => v.name !== 'shop_data').every((v) => v.usedBy.length === 0)).toBe(
+      true
+    )
+    const sizes = await run<Record<string, number>>({ op: 'volumes.sizes' })
+    expect(sizes['shop_data']).toBe(123_456)
+  })
+
   it('xoá volume đang dùng → lỗi riêng; network built-in bị bỏ qua', async () => {
     const { server, run } = await setup()
     const volumes = await run<VolumeRow[]>({ op: 'volumes' })

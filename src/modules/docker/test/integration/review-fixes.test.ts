@@ -270,6 +270,7 @@ function fakeBackend(over: Partial<DockerBackend>): DockerBackend {
     imageRemove: fail,
     imagePull: fail,
     volumes: fail,
+    volumeSizes: () => Promise.resolve({}),
     volumeRemove: fail,
     networks: fail,
     networkRemove: fail,
