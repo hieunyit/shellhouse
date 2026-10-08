@@ -64,7 +64,9 @@ export function SettingsPage({
         className={cx(
           'min-h-0 flex-1',
           // Keychain tự chia hai khung, tự cuộn từng khung.
-          section === 'keychain' ? 'flex flex-col overflow-hidden' : 'overflow-auto'
+          section === 'keychain'
+            ? 'flex flex-col overflow-hidden'
+            : 'overflow-auto [scrollbar-gutter:stable]'
         )}
       >
         <div

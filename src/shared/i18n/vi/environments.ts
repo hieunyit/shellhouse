@@ -31,6 +31,11 @@ export const environments: Readonly<Record<string, string>> = {
   'Set an environment on a host group, cluster, Docker endpoint or S3 account. Everything inside inherits its label, the line at the top and how deleting is confirmed.':
     'Đặt môi trường cho nhóm host, cluster, Docker endpoint hoặc tài khoản S3. Mọi thứ bên trong kế thừa nhãn, vạch trên cùng và cách xác nhận khi xoá.',
   Environments: 'Môi trường',
+  'Live systems your users depend on.':
+    'Hệ thống đang chạy thật mà người dùng của bạn phụ thuộc vào.',
+  'Pre-release copy of production.': 'Bản sao của production dùng để thử trước khi phát hành.',
+  'Shared development machines and clusters.': 'Máy và cluster dùng chung cho phát triển.',
+  'Throw-away and CI environments.': 'Môi trường dùng một lần và môi trường CI.',
   'Top line': 'Vạch trên',
   'Actions for {name}': 'Thao tác cho {name}',
   '{name} copy': '{name} (bản sao)',

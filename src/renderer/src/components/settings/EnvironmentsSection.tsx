@@ -16,6 +16,22 @@ import { toast } from '../../stores/toasts'
 import { useContextMenu } from '../ContextMenu'
 import { Button, cx, Field, IconButton, Input, Modal, Notice, Segmented, Switch } from '../ui'
 
+/** Mô tả của 4 môi trường dựng sẵn được dịch khi chưa bị sửa; mô tả người dùng tự viết giữ nguyên. */
+function describeEnvironment(env: EnvironmentDef): string {
+  switch (env.description) {
+    case 'Live systems your users depend on.':
+      return t('Live systems your users depend on.')
+    case 'Pre-release copy of production.':
+      return t('Pre-release copy of production.')
+    case 'Shared development machines and clusters.':
+      return t('Shared development machines and clusters.')
+    case 'Throw-away and CI environments.':
+      return t('Throw-away and CI environments.')
+    default:
+      return env.description
+  }
+}
+
 export function confirmLabel(level: ConfirmLevel): string {
   return level === 'type' ? t('Type name') : level === 'confirm' ? t('Confirm') : t('Undo toast')
 }
@@ -428,7 +444,7 @@ export function EnvironmentsSection(): React.JSX.Element {
                   {env.readOnly && <span className="text-xs text-faint">{t('Read-only')}</span>}
                 </div>
                 {env.description && (
-                  <div className="truncate text-xs text-muted">{env.description}</div>
+                  <div className="truncate text-xs text-muted">{describeEnvironment(env)}</div>
                 )}
               </div>
               <span role="cell" className="text-muted">
