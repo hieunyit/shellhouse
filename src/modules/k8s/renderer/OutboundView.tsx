@@ -46,14 +46,6 @@ const inFilter = (kind: EgressKind, f: Filter): boolean =>
         ? kind === 'private'
         : kind === 'service' || kind === 'pod' || kind === 'unresolved'
 
-const WORKLOAD_KIND_ID: Record<string, string> = {
-  'deployments.apps': 'deployments.apps',
-  'statefulsets.apps': 'statefulsets.apps',
-  'daemonsets.apps': 'daemonsets.apps',
-  'cronjobs.batch': 'cronjobs.batch',
-  'jobs.batch': 'jobs.batch'
-}
-
 export function OutboundView({
   rows,
   result,
@@ -188,6 +180,13 @@ export function OutboundView({
               : ''}
           </span>
         )}
+        {(result?.listDenied ?? 0) > 0 && (
+          <span className="ml-1 text-warning" data-testid="k8s-outbound-list-denied">
+            {t(
+              'Some workload kinds could not be listed (no permission) — the list may be incomplete.'
+            )}
+          </span>
+        )}
         {result?.truncated && (
           <span className="ml-1 text-warning">
             {t('Large cluster — only part of it was scanned. Pick fewer namespaces.')}
@@ -232,8 +231,7 @@ export function OutboundView({
                       className="max-w-64 truncate text-left hover:text-accent"
                       title={`${r.workload.ns}/${r.workload.name}`}
                       onClick={() => {
-                        const kind = WORKLOAD_KIND_ID[r.workload.kind]
-                        if (kind) onOpen({ kind, ns: r.workload.ns, name: r.workload.name })
+                        onOpen({ kind: r.workload.kind, ns: r.workload.ns, name: r.workload.name })
                       }}
                     >
                       <span className="font-medium text-fg">{r.workload.name}</span>

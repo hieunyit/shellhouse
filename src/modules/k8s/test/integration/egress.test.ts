@@ -220,4 +220,62 @@ describe('Điểm đến khai báo (egress)', () => {
     expect(r.services?.length).toBeGreaterThan(0)
     expect(r.scanned).toBe(1)
   })
+
+  it('mật khẩu trong Secret giống host:port không lộ ra; chuỗi kết nối rõ ràng vẫn nhận', async () => {
+    const { server, run } = await setup()
+    server.upsert('secrets', {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: { name: 'creds', namespace: 'shop' },
+      data: {
+        password: b64('abc.def:1234'),
+        token: b64('10.9.8.7'),
+        url: b64('https://vault.corp:8200')
+      }
+    })
+    server.upsert('deployments', {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: { name: 'cred-user', namespace: 'shop' },
+      spec: {
+        selector: { matchLabels: { app: 'cred-user' } },
+        template: {
+          metadata: { labels: { app: 'cred-user' } },
+          spec: {
+            containers: [{ name: 'a', image: 'x', envFrom: [{ secretRef: { name: 'creds' } }] }]
+          }
+        }
+      }
+    })
+    const r = await run<EgressResult>({ op: 'egress', namespaces: ['shop'], secrets: true })
+    const mine = r.items.filter((i) => i.workload.name === 'cred-user')
+    expect(mine.map((i) => `${i.host}:${String(i.port)}`)).toEqual(['vault.corp:8200'])
+    expect(JSON.stringify(r)).not.toMatch(/abc\.def|10\.9\.8\.7/)
+  })
+
+  it('một ConfigMap lỗi (API 500 / hết quyền) không làm hỏng cả lượt quét', async () => {
+    const { server, run } = await setup()
+    seed(server)
+    server.forbid(/\/configmaps\/app-config$/)
+    const r = await run<EgressResult>({ op: 'egress', namespaces: ['shop'], secrets: true })
+    expect(r.skipped.denied).toBeGreaterThanOrEqual(1)
+    expect(r.items.some((i) => i.host === 'mysql.prod.corp')).toBe(true)
+    expect(r.items.some((i) => i.host === 'cache.corp')).toBe(false)
+  })
+
+  it('không list được workload (403) → báo listDenied, không giả vờ là "không có gì"', async () => {
+    const { server, run } = await setup()
+    seed(server)
+    server.forbid(/\/deployments/)
+    const r = await run<EgressResult>({ op: 'egress', namespaces: ['shop'], secrets: true })
+    expect(r.listDenied).toBeGreaterThanOrEqual(1)
+    expect(r.items).toEqual([])
+    const one = await run<EgressResult>({
+      op: 'egress',
+      namespaces: ['shop'],
+      secrets: true,
+      workload: { kind: 'deployments.apps', name: 'egress-web' }
+    })
+    expect(one.listDenied).toBe(1)
+  })
 })

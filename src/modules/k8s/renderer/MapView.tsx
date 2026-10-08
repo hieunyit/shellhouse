@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { RefreshCw, Tag, X } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
@@ -22,7 +22,10 @@ import { TopologyMap } from './topology/TopologyMap'
 import { TrafficUnitContext } from './trafficUnit'
 
 const REFRESH_MS = 20_000
-const EGRESS_REFRESH_MS = 60_000
+/** Cấu hình ít đổi và mỗi lần đọc là nhiều request (kể cả đọc Secret → audit log): đọc thưa. */
+const EGRESS_REFRESH_MS = 5 * 60_000
+/** Chuyển Topology ↔ Outbound trong chừng này thì dùng lại kết quả vừa đọc. */
+const EGRESS_FRESH_MS = 60_000
 
 const savedSelectors = new Map<string, string>()
 
@@ -142,14 +145,18 @@ export function MapView({
     ns: string
     secrets: boolean
     result: EgressResult
+    at: number
   } | null>(null)
   const [egressError, setEgressError] = useState<string | null>(null)
   const [egressLoading, setEgressLoading] = useState(false)
+  /** Nút Refresh (tick đổi) phải đọc lại ngay, kể cả khi kết quả còn mới. */
+  const egressTick = useRef(tick)
   const wantEgress = active && ((view === 'topology' && options.egress) || view === 'outbound')
   useEffect(() => {
     if (!wantEgress) return
     let cancelled = false
     let inFlight = false
+    let lastJson = ''
     const load = (): void => {
       if (inFlight) return
       inFlight = true
@@ -162,7 +169,18 @@ export function MapView({
         (result) => {
           inFlight = false
           if (cancelled) return
-          setEgressLoaded({ request, ns: nsKey, secrets: options.egressSecrets, result })
+          // Không đổi gì → giữ nguyên đối tượng cũ (bản đồ không dựng / bố trí lại).
+          const json = JSON.stringify(result)
+          if (json !== lastJson) {
+            lastJson = json
+            setEgressLoaded({
+              request,
+              ns: nsKey,
+              secrets: options.egressSecrets,
+              result,
+              at: Date.now()
+            })
+          } else setEgressLoaded((cur) => (cur ? { ...cur, at: Date.now() } : cur))
           setEgressError(null)
           setEgressLoading(false)
         },
@@ -174,13 +192,24 @@ export function MapView({
         }
       )
     }
-    load()
-    // Cấu hình ít đổi: đọc thưa hơn bản đồ (mỗi lần là nhiều request tới API server).
+    // Vừa đọc xong cho đúng phạm vi này (chuyển qua lại Topology ↔ Outbound) → khỏi đọc lại.
+    const fresh =
+      egressLoaded &&
+      egressLoaded.request === request &&
+      egressLoaded.ns === nsKey &&
+      egressLoaded.secrets === options.egressSecrets &&
+      Date.now() - egressLoaded.at < EGRESS_FRESH_MS
+    const forced = egressTick.current !== tick
+    egressTick.current = tick
+    if (fresh && !forced) lastJson = JSON.stringify(egressLoaded.result)
+    else load()
     const timer = setInterval(load, EGRESS_REFRESH_MS)
     return () => {
       cancelled = true
       clearInterval(timer)
     }
+    // `egressLoaded` chỉ để biết "còn mới không" lúc bật lại — đổi nó không được đọc lại.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request, nsKey, wantEgress, options.egressSecrets, tick])
   const egressResult =
     egressLoaded &&

@@ -146,7 +146,9 @@ function objectItems(
       ...(ep.portImplied ? { portImplied: true } : {})
     })
   }
-  const all = endpointsInEntries(entries)
+  // Secret: chỉ nhận dạng rõ ràng (scheme://, host=…, khoá là địa chỉ) — mật khẩu không được lộ ra.
+  const strict = { strict: want.kind === 'secret' }
+  const all = endpointsInEntries(entries, strict)
   const byKey = new Map(entries.map((e) => [e.key, e.value]))
   for (const c of want.consumers) {
     if (c.key === undefined) {
@@ -155,7 +157,7 @@ function objectItems(
     }
     const value = byKey.get(c.key)
     if (value === undefined) continue
-    for (const ep of endpointsIn(value, c.hint ?? c.key)) emit(c.workload, c.key, ep)
+    for (const ep of endpointsIn(value, c.hint ?? c.key, strict)) emit(c.workload, c.key, ep)
   }
   return out
 }
@@ -180,9 +182,11 @@ async function readObject(
     }
     return { entries }
   } catch (error) {
-    if (error instanceof KubeError && error.status === 403) return 'denied'
     if (error instanceof KubeError && error.status === 404) return 'missing'
-    throw error
+    // Hết quyền, API server chập chờn, hết thời gian chờ… ở MỘT object không làm hỏng cả lượt quét —
+    // chỉ đếm là không đọc được. Huỷ (đóng tab / đổi namespace) thì dừng hẳn.
+    if (signal?.aborted) throw error
+    return 'denied'
   }
 }
 
@@ -209,17 +213,19 @@ async function oneWorkload(
   namespace: string,
   only: { kind: string; name: string },
   signal?: AbortSignal
-): Promise<K8sObject | null> {
+): Promise<{ obj: K8sObject | null; denied: boolean }> {
   const k = WORKLOAD_KINDS.find((x) => x.id === only.kind)
-  if (!k) return null
+  if (!k) return { obj: null, denied: false }
   try {
-    return await client.json<K8sObject>(
+    const obj = await client.json<K8sObject>(
       'GET',
       `${k.path}/namespaces/${encodeURIComponent(namespace)}/${k.plural}/${encodeURIComponent(only.name)}`,
       signal ? { signal } : {}
     )
+    return { obj, denied: false }
   } catch (error) {
-    if (error instanceof KubeError && (error.status === 404 || error.status === 403)) return null
+    if (error instanceof KubeError && error.status === 404) return { obj: null, denied: false }
+    if (error instanceof KubeError && error.status === 403) return { obj: null, denied: true }
     throw error
   }
 }
@@ -234,15 +240,18 @@ export async function egressData(
   const single =
     only && namespaces.length === 1
       ? await oneWorkload(client, namespaces[0] ?? '', only, signal)
-      : null
+      : { obj: null, denied: false }
   const lists = only
     ? WORKLOAD_KINDS.map((k) => ({
-        items: single && k.id === only.kind ? [single] : [],
-        truncated: false
+        items: single.obj && k.id === only.kind ? [single.obj] : [],
+        truncated: false,
+        denied: single.denied && k.id === only.kind
       }))
     : await Promise.all(
         WORKLOAD_KINDS.map((k) => listAll(client, k.path, k.plural, namespaces, signal))
       )
+  // Loại workload mà tài khoản không list được: nói rõ thay vì để trông như "không có workload".
+  const listDenied = lists.filter((l) => 'denied' in l && l.denied).length
   const items: EgressItem[] = []
   const wants = new Map<string, ObjectWant>()
   let scanned = 0
@@ -302,10 +311,25 @@ export async function egressData(
     seen.add(k)
     return true
   })
-  const result: EgressResult = { items: unique, skipped, scanned, truncated, readSecrets }
+  const result: EgressResult = {
+    items: unique,
+    skipped,
+    scanned,
+    truncated,
+    readSecrets,
+    listDenied
+  }
   if (only) {
-    // Phân loại điểm đến cần Service của cluster (cả namespace khác: name.ns.svc).
-    const svcs = await listAll(client, '/api/v1', 'services', [], signal)
+    // Phân loại điểm đến cần Service: namespace của workload + namespace xuất hiện trong tên DNS
+    // (name.ns.svc) — không list Service của cả cluster.
+    const need = new Set(namespaces)
+    for (const it of unique) {
+      const m = /^(?:[a-z0-9-]+\.)?[a-z0-9-]+\.([a-z0-9-]+)\.svc(?:\.|$)/.exec(it.host)
+      const two = /^[a-z0-9-]+\.([a-z0-9-]+)$/.exec(it.host)
+      if (m?.[1]) need.add(m[1])
+      else if (two?.[1] && !it.host.includes(':')) need.add(two[1])
+    }
+    const svcs = await listAll(client, '/api/v1', 'services', [...need].slice(0, 16), signal)
     result.services = svcs.items.map((x) => {
       const spec = o((x as unknown as Obj)['spec'])
       return {

@@ -468,6 +468,9 @@ export const k8sMap: Readonly<Record<string, string>> = {
   'Time range': 'Khoảng thời gian',
   'from Prometheus': 'từ Prometheus',
   Outbound: 'Đi ra ngoài',
+  'Some workload kinds could not be listed (no permission) — the list may be incomplete.':
+    'Có loại workload không list được (thiếu quyền) — danh sách có thể chưa đầy đủ.',
+  'This workload could not be read (no permission).': 'Không đọc được workload này (thiếu quyền).',
   'Where this workload is configured to connect — read from its environment variables, arguments, ConfigMaps and Secrets. Not observed traffic.':
     'Nơi workload này được cấu hình để kết nối tới — đọc từ biến môi trường, tham số, ConfigMap và Secret của nó. Không phải traffic quan sát được.',
   'No connection targets found in the configuration of this workload.':

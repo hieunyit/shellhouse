@@ -8,7 +8,6 @@ import { egressSourceText } from '../shared/appTopology'
 import type { MapService } from '../shared/map'
 import type { K8sObject } from '../shared/resources'
 import { loadOptions, type Request } from './mapModel'
-import { useRefreshTick } from './refresh'
 
 /**
  * Tab "Outbound" trong chi tiết workload: nơi workload này được cấu hình để kết nối tới (host:port
@@ -40,6 +39,9 @@ const KIND_STYLE: Record<EgressKind, string> = {
 }
 
 /** Loại workload có pod template riêng để quét (ReplicaSet do Deployment quản lý nên không có tab). */
+type Obj = Record<string, unknown>
+const o = (v: unknown): Obj => (v && typeof v === 'object' ? (v as Obj) : {})
+
 export const OUTBOUND_KINDS = new Set([
   'deployments.apps',
   'statefulsets.apps',
@@ -57,9 +59,10 @@ export function OutboundOf({
   obj: K8sObject
   request: Request
 }): React.JSX.Element {
-  const refresh = useRefreshTick()
   const ns = obj.metadata.namespace ?? ''
   const name = obj.metadata.name
+  const gen = o(obj.metadata)['generation']
+  const generation = typeof gen === 'number' ? gen : 0
   const [result, setResult] = useState<EgressResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Cùng lựa chọn đọc Secret với Map (Topology › View).
@@ -84,7 +87,9 @@ export function OutboundOf({
     return () => {
       cancelled = true
     }
-  }, [request, kindId, ns, name, secrets, refresh])
+    // Đọc lại khi cấu hình đổi (generation tăng), không theo nhịp 10 giây: mỗi lần đọc là GET ConfigMap
+    // / Secret (ghi vào audit log).
+  }, [request, kindId, ns, name, secrets, generation])
 
   const rows = useMemo(() => {
     if (!result) return null
@@ -111,6 +116,11 @@ export function OutboundOf({
           'Where this workload is configured to connect — read from its environment variables, arguments, ConfigMaps and Secrets. Not observed traffic.'
         )}
       </p>
+      {(result.listDenied ?? 0) > 0 && (
+        <p className="rounded-md bg-warning-soft px-2 py-1.5 text-xs text-warning">
+          {t('This workload could not be read (no permission).')}
+        </p>
+      )}
       {(result.skipped.denied > 0 || result.skipped.secrets > 0) && (
         <p className="rounded-md bg-warning-soft px-2 py-1.5 text-xs text-warning">
           {result.skipped.denied > 0 &&

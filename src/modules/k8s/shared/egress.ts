@@ -35,13 +35,15 @@ export interface EgressItem {
 
 export interface EgressResult {
   items: EgressItem[]
-  /** Số ConfigMap / Secret không đọc được (thiếu quyền) hoặc bị bỏ vì quá nhiều. */
+  /** ConfigMap / Secret không đọc được (thiếu quyền, lỗi API) hoặc bị bỏ vì quá nhiều. */
   skipped: { configMaps: number; secrets: number; denied: number }
   /** Số workload đã quét / tổng (bị cắt khi quá lớn). */
   scanned: number
   truncated: boolean
   /** Đã thử đọc Secret không. */
   readSecrets: boolean
+  /** Số loại workload không list được (thiếu quyền) — danh sách có thể thiếu. */
+  listDenied?: number
   /** Chế độ một workload: Service của cluster (để phân loại điểm đến). */
   services?: { ns: string; name: string; type: string; clusterIP?: string; externalName?: string }[]
 }
@@ -95,10 +97,23 @@ const BARE_RE = new RegExp(
   `(?<![\\w.@/:%$-])(${IPV4}|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+):(\\d{1,5})(?![\\w.])`,
   'g'
 )
+/** `host=db port=5432`, `Server=tcp:db.example.com,1433;…` (libpq, ADO.NET, MySQL…). */
+const KV_HOST_RE =
+  /(?:^|[;\s,&])(?:host|hostname|server|data source|address|addr|endpoint|hosts)\s*=\s*(?:tcp:|np:)?\s*(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9][A-Za-z0-9._-]*)(?:\s*[,:]\s*(\d{1,5}))?/gi
+const KV_PORT_RE = /(?:^|[;\s,&])port\s*=\s*(\d{1,5})/i
 const SKIP_HOST = /^(localhost(\.localdomain)?|0\.0\.0\.0|127(\.\d{1,3}){3}|\[?::1?\]?)$/i
-/** Tên khoá gợi ý "đây là địa chỉ" — cho phép nhận cả giá trị chỉ có host. */
+/** Scheme của kho object / tệp / ảnh: phần "host" là tên bucket hay đường dẫn, không phải máy chủ. */
+const NON_NETWORK_SCHEME =
+  /^(s3[an]?|gs|gcs|abfss?|wasbs?|az|oss|cos|file|unix|docker|oci|data|mailto|tel|git\+file)$/i
+/** Giá trị cấu hình không phải tên máy ("true", "default"…). */
+const KEYWORD =
+  /^(true|false|yes|no|on|off|none|null|nil|nan|default|enabled?|disabled?|auto|any|all|local|internal|external|public|private|primary|secondary|master|replica|slave|main|prod|production|stage|staging|dev|development|test)$/i
+/** Khoá gợi ý "đây là địa chỉ" — cho phép nhận giá trị chỉ có host có dấu chấm ("db.internal"). */
 const HOSTY_KEY =
   /(^|[_.\-/])(host|hostname|hosts|addr|address|addrs|server|servers|endpoint|endpoints|broker|brokers|url|urls|uri|dsn|connection|connstr|conn|target|upstream|backend|registry|proxy|api|remote|master|primary|replica)([_.\-/]|$)/i
+/** Khoá chặt hơn: đủ chắc để nhận cả tên chỉ một nhãn ("redis", "mysql"). */
+const STRICT_HOSTY_KEY =
+  /(^|[_.\-/])(host|hostname|hosts|addr|address|addrs|server|servers|endpoint|endpoints|broker|brokers|url|urls|uri|dsn)([_.\-/]|$)/i
 
 const validPort = (n: number): boolean => Number.isInteger(n) && n >= 1 && n <= 65535
 
@@ -119,18 +134,98 @@ function parseHostPort(text: string): { host: string; port?: number } | null {
   return { host: host.toLowerCase(), ...(port !== undefined ? { port } : {}) }
 }
 
-/** jdbc:postgresql://… → postgresql://… */
-const unJdbc = (v: string): string => v.replace(/\bjdbc:([a-z0-9]+):(?=\/\/)/gi, '$1:')
+/** jdbc:postgresql://… → postgresql://… ; jdbc:oracle:thin:@//h:1521/s → oracle://h:1521/s */
+const unJdbc = (v: string): string =>
+  v
+    .replace(/\bjdbc:oracle:thin:@\/{0,2}/gi, 'oracle://')
+    .replace(/\bjdbc:([a-z0-9]+):(?=\/\/)/gi, '$1:')
 
 /** Đuôi file / tài liệu: "config.yaml" không phải tên máy. */
 const FILE_LIKE =
   /\.(?:js|mjs|cjs|ts|py|rb|json|ya?ml|sh|conf|cfg|ini|txt|log|so|jar|md|xml|html?|crt|pem|key)$/i
 
+export interface EndpointOptions {
+  /**
+   * Giá trị từ Secret: chỉ nhận dạng có dấu hiệu rõ ràng (scheme://, host=…, khoá là địa chỉ). Không
+   * nhận "host:port" trần nằm trong văn bản — một mật khẩu trông như "abc.def:1234" không được lộ
+   * thành điểm đến.
+   */
+  strict?: boolean
+}
+
+/** Dòng "khoá: giá trị" / "khoá=giá trị" / `"khoá": "giá trị"` của tệp cấu hình (YAML, .properties, JSON). */
+const LINE_RE = /^\s*(?:-\s*)?["']?([A-Za-z0-9_.-]{1,64})["']?\s*[:=]\s*(.*?)\s*,?\s*$/
+const unquote = (v: string): string => v.replace(/^(["'])(.*)\1$/s, '$2')
+const PORT_KEY = /(^|[_.-])port$/i
+
+/** Tệp cấu hình nhiều dòng: từng dòng là một cặp khoá / giá trị; host ghép với `port` cùng khối. */
+function textEndpoints(value: string, opts: EndpointOptions): RawEndpoint[] {
+  const lines = value.split('\n').slice(0, 400)
+  const parsed = lines.map((raw) => {
+    const m = LINE_RE.exec(raw)
+    const indent = raw.length - raw.trimStart().length
+    return m
+      ? { key: m[1] ?? '', value: unquote(m[2] ?? ''), indent }
+      : { key: '', value: raw.trim(), indent }
+  })
+  const portOf = (v: string): number | undefined => {
+    const n = Number(v)
+    return /^\d{1,5}$/.test(v) && validPort(n) ? n : undefined
+  }
+  const out: RawEndpoint[] = []
+  parsed.forEach((line, i) => {
+    for (const ep of endpointsIn(line.value, line.key, opts)) {
+      if (ep.port === undefined && !ep.scheme && line.key) {
+        // 1) cùng tiền tố khoá: db.host ↔ db.port, DB_HOST ↔ DB_PORT (khoá chỉ là "host" thì không
+        //    đủ để biết cổng nào — xem 2 và 3).
+        const word = /(host(name)?|addr(ess)?|server|endpoint)$/i.exec(line.key)
+        const prefixed = Boolean(word && word.index > 0)
+        const portKey = line.key.replace(/(host(name)?|addr(ess)?|server|endpoint)$/i, (m) =>
+          m === m.toUpperCase() ? 'PORT' : m[0] === m[0]?.toUpperCase() ? 'Port' : 'port'
+        )
+        const portLine = prefixed ? parsed.find((x) => x.key === portKey) : undefined
+        let found = portLine ? portOf(portLine.value) : undefined
+        // 2) YAML lồng nhau: dòng `port` cùng mức thụt lề trong cùng khối (dừng khi hết khối).
+        if (found === undefined && line.indent > 0) {
+          for (const dir of [1, -1]) {
+            for (let j = i + dir; parsed[j]; j += dir) {
+              const near = parsed[j]
+              if (!near || near.indent < line.indent) break
+              if (near.indent > line.indent) continue
+              if (PORT_KEY.test(near.key)) {
+                found = portOf(near.value)
+                break
+              }
+              if (near.key && endpointsIn(near.value, near.key, opts).length > 0) break
+            }
+            if (found !== undefined) break
+          }
+        }
+        // 3) tệp phẳng chỉ có một host và một port → ghép với nhau.
+        if (found === undefined && line.indent === 0) {
+          const ports = parsed.filter((x) => PORT_KEY.test(x.key) && portOf(x.value) !== undefined)
+          const hosts = parsed.filter(
+            (x) => x.key && endpointsIn(x.value, x.key, opts).some((e) => e.port === undefined)
+          )
+          if (ports.length === 1 && hosts.length === 1) found = portOf(ports[0]?.value ?? '')
+        }
+        if (found !== undefined) ep.port = found
+      }
+      out.push(ep)
+    }
+  })
+  return out
+}
+
 /**
  * Điểm đến trong một giá trị chuỗi. `keyHint` = tên biến / khoá: cho phép nhận giá trị chỉ có host
  * ("db.internal") hoặc "name:port" không có dấu chấm ("redis:6379") khi tên gợi ý là địa chỉ.
  */
-export function endpointsIn(value: string, keyHint = ''): RawEndpoint[] {
+export function endpointsIn(
+  value: string,
+  keyHint = '',
+  opts: EndpointOptions = {}
+): RawEndpoint[] {
   const out: RawEndpoint[] = []
   const seen = new Set<string>()
   const add = (e: RawEndpoint): void => {
@@ -139,12 +234,16 @@ export function endpointsIn(value: string, keyHint = ''): RawEndpoint[] {
     seen.add(k)
     out.push(e)
   }
-  const text = unJdbc(value.length > 4096 ? value.slice(0, 4096) : value)
+  if (value.length > 4096) value = value.slice(0, 4096)
+  if (value.includes('\n')) return textEndpoints(value, opts)
+  const text = unJdbc(value)
 
   // 1) scheme://[user:pass@]host[:port][,host2[:port]]/…
   let rest = text
   for (const m of text.matchAll(URL_RE)) {
     const scheme = (m[1] ?? '').toLowerCase()
+    rest = rest.replace(m[0], ' ')
+    if (NON_NETWORK_SCHEME.test(scheme)) continue
     let authority = m[2] ?? ''
     const at = authority.lastIndexOf('@')
     if (at >= 0) authority = authority.slice(at + 1)
@@ -164,26 +263,40 @@ export function endpointsIn(value: string, keyHint = ''): RawEndpoint[] {
             : {})
       })
     }
-    rest = rest.replace(m[0], ' ')
   }
 
-  // 2) host:port (IP, hoặc tên có dấu chấm) nằm trong văn bản
-  for (const m of rest.matchAll(BARE_RE)) {
-    const hp = parseHostPort(`${m[1] ?? ''}:${m[2] ?? ''}`)
-    if (hp && !FILE_LIKE.test(hp.host))
-      add({ host: hp.host, ...(hp.port !== undefined ? { port: hp.port } : {}) })
+  // 2) host=…; port=… (libpq, ADO.NET, MySQL)
+  if (out.length === 0) {
+    const kvPort = KV_PORT_RE.exec(rest)?.[1]
+    for (const m of rest.matchAll(KV_HOST_RE)) {
+      const hp = parseHostPort(`${m[1] ?? ''}${m[2] ? `:${m[2]}` : kvPort ? `:${kvPort}` : ''}`)
+      if (hp && !FILE_LIKE.test(hp.host) && !KEYWORD.test(hp.host))
+        add({ host: hp.host, ...(hp.port !== undefined ? { port: hp.port } : {}) })
+    }
+    if (seen.size > 0) return out
   }
 
-  // 3) cả giá trị là một địa chỉ ("db.internal", "redis:6379", "10.0.0.5")
+  // 3) host:port (IP, hoặc tên có dấu chấm) nằm trong văn bản — không áp cho Secret
+  if (!opts.strict)
+    for (const m of rest.matchAll(BARE_RE)) {
+      const hp = parseHostPort(`${m[1] ?? ''}:${m[2] ?? ''}`)
+      if (hp && !FILE_LIKE.test(hp.host))
+        add({ host: hp.host, ...(hp.port !== undefined ? { port: hp.port } : {}) })
+    }
+
+  // 4) cả giá trị là một địa chỉ ("db.internal", "redis:6379", "10.0.0.5")
   const whole = rest.trim().replace(/^["']|["']$/g, '')
   if (out.length === 0 && whole && !/\s/.test(whole)) {
     const hp = parseHostPort(whole)
-    if (hp && !FILE_LIKE.test(hp.host)) {
+    if (hp && !FILE_LIKE.test(hp.host) && !KEYWORD.test(hp.host)) {
       const dotted = hp.host.includes('.')
-      const hosty = HOSTY_KEY.test(keyHint)
-      // Không gợi ý + không dấu chấm + không cổng ("production", "web") → không phải địa chỉ.
-      if (hosty ? true : dotted && (hp.port !== undefined || ipv4Valid(hp.host)))
-        add({ host: hp.host, ...(hp.port !== undefined ? { port: hp.port } : {}) })
+      // Tên chỉ một nhãn ("redis") cần khoá chặt; có dấu chấm nhận khoá lỏng hơn; không gợi ý thì
+      // phải là IP / host.có.chấm:cổng (không áp cho Secret).
+      const ok = dotted
+        ? (opts.strict ? STRICT_HOSTY_KEY : HOSTY_KEY).test(keyHint) ||
+          (!opts.strict && (hp.port !== undefined || ipv4Valid(hp.host)))
+        : STRICT_HOSTY_KEY.test(keyHint) && hp.host.length >= 2
+      if (ok) add({ host: hp.host, ...(hp.port !== undefined ? { port: hp.port } : {}) })
     }
   }
   return out
@@ -194,12 +307,13 @@ export function endpointsIn(value: string, keyHint = ''): RawEndpoint[] {
  * `X_HOST` với `X_PORT` khi giá trị chỉ có host.
  */
 export function endpointsInEntries(
-  entries: readonly { key: string; value: string }[]
+  entries: readonly { key: string; value: string }[],
+  opts: EndpointOptions = {}
 ): { key: string; endpoint: RawEndpoint }[] {
   const byKey = new Map(entries.map((e) => [e.key, e.value]))
   const out: { key: string; endpoint: RawEndpoint }[] = []
   for (const { key, value } of entries) {
-    for (const ep of endpointsIn(value, key)) {
+    for (const ep of endpointsIn(value, key, opts)) {
       if (ep.port === undefined && !ep.scheme) {
         const portKey = key.replace(/(host(name)?|addr(ess)?|server|endpoint)/i, (m) =>
           m === m.toUpperCase() ? 'PORT' : m[0] === m[0]?.toUpperCase() ? 'Port' : 'port'
@@ -310,12 +424,20 @@ export function classifyEndpoint(
       : { ...base, kind: 'service', service: { ns: s.ns, name: s.name } }
   const host = ep.host.replace(/\.$/, '')
   const labels = host.split('.')
-  // name.ns.svc[.cluster.local]
-  const svc = /^([a-z0-9-]+)\.([a-z0-9-]+)\.svc(?:\.[a-z0-9.-]+)?$/.exec(host)
+  // IPv6: fc00::/7 (ULA) và fe80::/10 (link-local) là mạng riêng; còn lại coi là ngoài.
+  if (host.includes(':'))
+    return {
+      ...base,
+      kind: /^(f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):/i.test(host) ? 'private' : 'external'
+    }
+  // [pod.]service.ns.svc[.cluster.local] — gồm cả pod của StatefulSet qua headless Service.
+  const svc = /^(?:([a-z0-9-]+)\.)?([a-z0-9-]+)\.([a-z0-9-]+)\.svc(?:\.[a-z0-9.-]+)?$/.exec(host)
   if (svc) {
-    const s = ix.services.get(`${svc[2]}/${svc[1]}`)
+    const s = ix.services.get(`${svc[3]}/${svc[2]}`)
     return s ? svcDest(s) : { ...base, kind: 'unresolved' }
   }
+  // 10-42-0-5.ns.pod.cluster.local
+  if (/^[a-z0-9-]+\.[a-z0-9-]+\.pod(?:\.[a-z0-9.-]+)?$/.test(host)) return { ...base, kind: 'pod' }
   if (labels.length === 1 && !/^\d+$/.test(host)) {
     const s = ix.services.get(`${ns}/${host}`)
     return s ? svcDest(s) : { ...base, kind: 'unresolved' }

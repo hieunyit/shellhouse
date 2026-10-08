@@ -554,6 +554,8 @@ function namespaceGraph(
   const toneCount = { ok: 0, warn: 0, bad: 0 }
   let egressNodes = 0
   const egressHidden = new Set<string>()
+  const egressNode = new Map<string, TopoNode>()
+  const egressMore = new Map<string, number>()
   for (const item of rowItems) {
     const w = item.w
     const row = rowOfWorkload.get(w) ?? LOOSE_ROW
@@ -834,7 +836,7 @@ function namespaceGraph(
           .slice(0, 2)
           .map((x) => egressSourceText(x.source, x.via, x.key))
           .join(' · ')
-        let node = nodeIds.has(eid) ? nodes.find((n) => n.id === eid) : undefined
+        let node = egressNode.get(eid)
         if (!node) {
           if (egressNodes >= MAX_EGRESS_NODES) {
             egressHidden.add(r.dest.key)
@@ -842,16 +844,25 @@ function namespaceGraph(
           }
           egressNodes++
           node = externalNode(eid, ns, r.dest, row)
+          egressNode.set(eid, node)
           addNode(node)
         }
-        // Mỗi workload gọi tới đây là một dòng trong thẻ (nguồn khai báo ở bên phải).
+        // Mỗi workload gọi tới đây là một dòng trong thẻ (nguồn khai báo ở bên phải); quá nhiều thì
+        // chỉ đếm — thẻ giữ chiều cao cố định, không dựng hàng trăm dòng.
         const rows = (node.rows ??= [])
-        if (!rows.some((x) => x.text === w.name)) rows.push({ text: w.name, hint })
+        if (!rows.some((x) => x.text === w.name)) {
+          if (rows.length < MAX_CARD_ROWS - 1) rows.push({ text: w.name, hint })
+          else egressMore.set(eid, (egressMore.get(eid) ?? 0) + 1)
+        }
         node.row = Math.min(node.row, row)
         addEdge({ id: `${from}>${eid}`, from, to: eid, kind: 'calls' })
       }
     }
   }
+  for (const [eid, n] of egressMore)
+    egressNode
+      .get(eid)
+      ?.rows?.push({ text: tn(n, '+{n} more workload', '+{n} more workloads'), hint: '' })
   if (egressHidden.size)
     addNode({
       id: `more-egress:${ns}`,

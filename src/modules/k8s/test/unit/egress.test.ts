@@ -176,3 +176,124 @@ describe('egressRows', () => {
     expect(pg?.sources.map((s) => s.source)).toEqual(['env', 'secret'])
   })
 })
+
+describe('endpointsIn — các ca dễ nhầm', () => {
+  it('giá trị cấu hình thông thường không phải địa chỉ ("true", "default"…)', () => {
+    expect(hp('true', 'ENABLE_PROXY')).toEqual([])
+    expect(hp('false', 'DB_PRIMARY')).toEqual([])
+    expect(hp('default', 'API_SERVER')).toEqual([])
+    expect(hp('production', 'DB_HOST')).toEqual([])
+    expect(hp('x', 'DB_HOST')).toEqual([])
+  })
+
+  it('kho object / tệp / ảnh: phần "host" không phải máy chủ', () => {
+    expect(hp('s3://my-bucket/path/key')).toEqual([])
+    expect(hp('gs://my-bucket')).toEqual([])
+    expect(hp('abfss://container@acct.dfs.core.windows.net/p')).toEqual([])
+    expect(hp('docker://nginx:1.27')).toEqual([])
+    expect(hp('hdfs://namenode.corp:8020/data')).toEqual(['namenode.corp:8020'])
+    expect(hp('git+ssh://git@github.com/org/repo.git')).toEqual(['github.com'])
+  })
+
+  it('chuỗi kết nối kiểu libpq / ADO.NET / Oracle', () => {
+    expect(hp('host=db.corp port=5432 dbname=shop user=app password=x')).toEqual(['db.corp:5432'])
+    expect(
+      hp('Server=tcp:myserver.database.windows.net,1433;Database=x;User Id=u;Password=p')
+    ).toEqual(['myserver.database.windows.net:1433'])
+    expect(hp('jdbc:oracle:thin:@//ora.corp:1521/svc')).toEqual(['ora.corp:1521'])
+    expect(hp('Data Source=sql.corp;Initial Catalog=x')).toEqual(['sql.corp'])
+  })
+
+  it('tệp cấu hình trong ConfigMap: ghép host với port cùng khối, không lấy nhầm khối khác', () => {
+    const yaml = 'db:\n  host: pg.corp\n  port: 5433\nredis:\n  host: cache.corp\n'
+    expect(hp(yaml)).toEqual(['pg.corp:5433', 'cache.corp'])
+    const props = 'db.host=pg.corp\ndb.port=5433\ncache.host=cache.corp\nlog.level=debug'
+    expect(hp(props)).toEqual(['pg.corp:5433', 'cache.corp'])
+    const json = '{\n  "host": "api.corp",\n  "port": 8443\n}'
+    expect(hp(json)).toEqual(['api.corp:8443'])
+  })
+
+  it('Secret (strict): mật khẩu giống host:port không bị lộ; địa chỉ rõ ràng vẫn nhận', () => {
+    const strict = { strict: true }
+    expect(endpointsIn('abc.def:1234', 'DB_PASSWORD', strict)).toEqual([])
+    expect(endpointsIn('10.0.0.5', 'API_TOKEN', strict)).toEqual([])
+    expect(endpointsIn('see pg.corp:5432 for details', 'NOTE', strict)).toEqual([])
+    expect(endpointsIn('postgres://u:p@pg.corp:5432/x', 'DSN', strict)).toHaveLength(1)
+    expect(endpointsIn('host=pg.corp port=5432', 'conn', strict)).toHaveLength(1)
+    expect(endpointsIn('pg.corp', 'DB_HOST', strict)[0]?.host).toBe('pg.corp')
+  })
+
+  it('không văng lỗi và không bao giờ trả lại thông tin đăng nhập (chuỗi ngẫu nhiên)', () => {
+    let seed = 1234567
+    const rnd = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff
+      return seed % n
+    }
+    const pieces = [
+      'postgres://',
+      'user:',
+      'S3cr3tPW',
+      '@',
+      'host.example.com',
+      ':5432',
+      '/db',
+      '?x=1',
+      ',',
+      ';',
+      'jdbc:mysql:',
+      '[::1]',
+      '[fd00::5]',
+      '\n',
+      ' ',
+      'host=',
+      'port=',
+      '=',
+      '10.0.0.1',
+      '"',
+      "'",
+      '\\',
+      '$(X)'
+    ]
+    for (let i = 0; i < 3000; i++) {
+      const n = 1 + rnd(9)
+      let v = ''
+      for (let k = 0; k < n; k++) v += pieces[rnd(pieces.length)] ?? ''
+      for (const strict of [false, true]) {
+        const eps = endpointsIn(v, ['', 'DB_HOST', 'DSN'][rnd(3)] ?? '', { strict })
+        for (const e of eps) {
+          expect(e.host).not.toMatch(/S3cr3tPW|@|\s|\/|\?/)
+          if (e.port !== undefined) expect(e.port).toBeGreaterThan(0)
+        }
+      }
+    }
+  })
+})
+
+describe('classifyEndpoint — tên DNS trong cluster', () => {
+  const ix = indexEgress({
+    services: [
+      svc('shop', 'db-headless', { clusterIP: 'None' }),
+      svc('data', 'pg', { clusterIP: '10.43.0.20' })
+    ],
+    pods: []
+  })
+  it('pod của StatefulSet qua Service headless → Service đó (không phải External)', () => {
+    const d = classifyEndpoint(
+      { host: 'db-0.db-headless.shop.svc.cluster.local', port: 5432 },
+      'x',
+      ix
+    )
+    expect(d).toMatchObject({ kind: 'service', service: { ns: 'shop', name: 'db-headless' } })
+  })
+  it('DNS của pod, IPv6 riêng / công khai', () => {
+    expect(classifyEndpoint({ host: '10-42-0-5.shop.pod.cluster.local' }, 'x', ix).kind).toBe('pod')
+    expect(classifyEndpoint({ host: 'fd00::1' }, 'x', ix).kind).toBe('private')
+    expect(classifyEndpoint({ host: 'fe80::1' }, 'x', ix).kind).toBe('private')
+    expect(classifyEndpoint({ host: '2001:4860:4860::8888' }, 'x', ix).kind).toBe('external')
+  })
+  it('tên .svc không có Service như vậy → chưa xác định (không phải External)', () => {
+    expect(classifyEndpoint({ host: 'nope.shop.svc.cluster.local' }, 'x', ix).kind).toBe(
+      'unresolved'
+    )
+  })
+})
