@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.29] - 2026-10-09
+
 ### Added
 
 - **Kubernetes › Map › Outbound:** where each workload is configured to connect, without needing any
@@ -17,6 +19,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   Services, ExternalName Services, private IPs and external hosts are told apart. Each workload
   (Deployment, StatefulSet, DaemonSet, Job, CronJob) also has its own **Outbound** tab in its
   details. Turn the lane or the reading of Secrets off in Topology › View.
+- **Terminal:** each local terminal logs how long its shell took to print its first output, and
+  warns when that is over 1.5 s — to tell a slow `~/.bashrc` (nvm, conda…) from a problem in the app.
 
 ### Changed
 
