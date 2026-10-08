@@ -44,6 +44,8 @@ export const K8sOp = z.discriminatedUnion('op', [
     namespace: Namespace.optional(),
     refresh: z.boolean().optional()
   }),
+  /** Cột `additionalPrinterColumns` của CRD (kubectl get <crd>) cho một loại; [] nếu không có / không đọc được. */
+  z.object({ op: z.literal('crd.columns'), kind: Kind }),
   z.object({
     op: z.literal('list'),
     kind: Kind,

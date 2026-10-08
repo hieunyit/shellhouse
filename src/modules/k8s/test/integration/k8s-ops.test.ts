@@ -890,6 +890,28 @@ kind: Broken
     await run({ op: 'delete', kind: 'pods', namespace: 'shop', name: 'web-1', force: true })
   })
 
+  it('crd.columns: cột in của CRD (bỏ Name / Age / ưu tiên > 0); loại có sẵn, CRD không đọc được → []', async () => {
+    const { run, server } = await setup()
+    await run({ op: 'discover' })
+    const cols = await run<{ id: string; label: string; type: string; jsonPath: string }[]>({
+      op: 'crd.columns',
+      kind: 'widgets.example.com'
+    })
+    expect(cols).toEqual([
+      { id: 'pc0', label: 'Size', type: 'integer', jsonPath: '.spec.size' },
+      {
+        id: 'pc1',
+        label: 'Ready',
+        type: 'string',
+        jsonPath: '.status.conditions[?(@.type=="Ready")].status'
+      }
+    ])
+    expect(await run({ op: 'crd.columns', kind: 'pods' })).toEqual([])
+    // Thiếu quyền đọc CRD → bảng vẫn dùng được (chỉ Name / Namespace / Age).
+    server.forbid(/customresourcedefinitions/)
+    expect(await run({ op: 'crd.columns', kind: 'widgets.example.com' })).toEqual([])
+  })
+
   it('delete: luôn gửi propagationPolicy=Background (không thì Job để lại pod mồ côi)', async () => {
     const { run, server } = await setup()
     await run({ op: 'delete', kind: 'pods', namespace: 'shop', name: 'web-1' })

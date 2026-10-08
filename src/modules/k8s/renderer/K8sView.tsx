@@ -81,6 +81,8 @@ import { useClusterCatalog, useClusterMetrics } from './useClusterData'
 import { focusGrid, useClusterKeys } from './useClusterKeys'
 import { notify, useK8sActions } from './useK8sActions'
 import { useResourceRows } from './useResourceRows'
+import { useCrdColumns } from './useCrdColumns'
+import { printerTone } from '../shared/printer'
 import { BULK_KEYS, BulkBar, bulkKinds, copyYaml, type BulkKind } from './Bulk'
 import { EventsView } from './Events'
 import { RefreshContext, useRefreshClock } from './refresh'
@@ -282,6 +284,15 @@ export function ClusterTab({
   })
 
   // ——— Dòng của bảng ———
+  // Loại tuỳ chỉnh (CRD) chưa có cột riêng: lấy cột in của chính CRD (như `kubectl get`).
+  const printer = useCrdColumns({
+    ready,
+    request,
+    refKey,
+    kindId,
+    enabled: Boolean(kind) && !COLUMNS[kindId] && !BUILTIN_KINDS.some((b) => b.id === kindId),
+    reloadKey
+  })
   const commandMode = query.startsWith(':')
   const objects = list.objects
   const { rows, q, selector, single, detail, facetValues } = useResourceRows({
@@ -293,7 +304,8 @@ export function ClusterTab({
     selected,
     detailKey,
     active,
-    facets
+    facets,
+    printer
   })
   // Loại đang xem: số sống theo bảng (watch), không đợi lần đếm sau. Nhớ lại → thanh điều hướng
   // (memo) không vẽ lại theo mỗi lô watch khi số không đổi.
@@ -326,10 +338,10 @@ export function ClusterTab({
     }
     return [
       ...(multiNs ? [{ id: 'ns', label: 'Namespace', render: (r: Row) => r.row.namespace }] : []),
-      ...(COLUMNS[kindId] ?? []).map((c) => ({
+      ...(COLUMNS[kindId] ?? printer ?? []).map((c) => ({
         id: c.id,
-        // Nhãn cột là hằng tiếng Anh (shared/resources) → dịch lúc vẽ.
-        label: tk(c.label),
+        // Nhãn cột có sẵn là hằng tiếng Anh (shared/resources) → dịch lúc vẽ; nhãn của CRD giữ nguyên.
+        label: COLUMNS[kindId] ? tk(c.label) : c.label,
         render: (r: Row) => {
           const text = r.row.cells[c.id] ?? ''
           const tone =
@@ -337,7 +349,9 @@ export function ClusterTab({
               ? TONE[r.row.tone]
               : c.id === 'health' || c.id === 'sync'
                 ? argoTone(text)
-                : null
+                : !COLUMNS[kindId]
+                  ? printerTone(c.label, text)
+                  : null
           if (tone && text)
             return (
               <span className="min-w-0" title={text}>
@@ -374,7 +388,7 @@ export function ClusterTab({
         render: (r) => r.row.cells['age'] ?? ''
       }
     ]
-  }, [multiNs, kindId, showMetrics, metrics])
+  }, [multiNs, kindId, showMetrics, metrics, printer])
   const fit = useMemo(
     () =>
       fitColumns(

@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import type { MetricsResult } from '../shared/ops'
+import { printerCell, type PrinterColumn } from '../shared/printer'
 import { toRow, type K8sObject, type ResourceRow } from '../shared/resources'
 import { filterRows, sortRows, type Row, type RowSortKey } from '../shared/rows'
 import {
@@ -16,12 +17,19 @@ import { objectKey } from './useResourceList'
  * cột tuổi.
  */
 const rowCache = new WeakMap<K8sObject, { kind: string; bucket: number; row: ResourceRow }>()
-export function cachedRow(kindId: string, obj: K8sObject): ResourceRow {
+export function cachedRow(
+  kindId: string,
+  obj: K8sObject,
+  printer?: readonly PrinterColumn[] | null
+): ResourceRow {
   const bucket = Math.floor(Date.now() / 30_000)
+  // Cột in của CRD đổi (Reload sau khi sửa CRD) → khoá khác → tính lại.
+  const kind = printer ? `${kindId}#${printer.map((c) => c.jsonPath).join('|')}` : kindId
   const hit = rowCache.get(obj)
-  if (hit && hit.kind === kindId && hit.bucket === bucket) return hit.row
+  if (hit && hit.kind === kind && hit.bucket === bucket) return hit.row
   const row = toRow(kindId, obj)
-  rowCache.set(obj, { kind: kindId, bucket, row })
+  if (printer) for (const c of printer) row.cells[c.id] = printerCell(obj, c)
+  rowCache.set(obj, { kind, bucket, row })
   return row
 }
 
@@ -41,7 +49,8 @@ export function useResourceRows({
   selected,
   detailKey,
   active,
-  facets = {}
+  facets = {},
+  printer = null
 }: {
   objects: Map<string, K8sObject> | null
   kindId: string
@@ -53,6 +62,8 @@ export function useResourceRows({
   active: boolean
   /** Chip lọc theo cột (Status, Node…): cột → giá trị phải khớp; thiếu = không lọc. */
   facets?: Readonly<Record<string, string>>
+  /** Cột in của CRD (kubectl get): thêm vào ô của dòng. */
+  printer?: readonly PrinterColumn[] | null
 }): {
   rows: Row[]
   /** Chữ lọc đang áp dụng (chữ thường, '' = không lọc / đang gõ lệnh / đang lọc theo nhãn). */
@@ -87,10 +98,12 @@ export function useResourceRows({
   const q = deferredQuery.startsWith(':') || selector ? '' : deferredQuery.trim().toLowerCase()
   const allRows = useMemo<Row[]>(
     () =>
-      objects ? [...objects.values()].map((obj) => ({ obj, row: cachedRow(kindId, obj) })) : [],
+      objects
+        ? [...objects.values()].map((obj) => ({ obj, row: cachedRow(kindId, obj, printer) }))
+        : [],
     // ageTick: cột tuổi làm mới mỗi 30 giây.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [objects, kindId, ageTick]
+    [objects, kindId, printer, ageTick]
   )
   const facetKey = JSON.stringify(facets)
   const filteredRows = useMemo(() => {
@@ -127,6 +140,8 @@ export function useResourceRows({
   }, [rows, selected])
   // Chi tiết lấy từ dữ liệu, không từ dòng đang lọc: gõ lọc không đóng mất chi tiết đang xem.
   const detailObj = detailKey ? objects?.get(detailKey) : undefined
-  const detail = detailObj ? { obj: detailObj, row: cachedRow(kindId, detailObj) } : undefined
+  const detail = detailObj
+    ? { obj: detailObj, row: cachedRow(kindId, detailObj, printer) }
+    : undefined
   return { rows, q, selector, single, detail, facetValues }
 }

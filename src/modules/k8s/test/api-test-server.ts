@@ -98,6 +98,8 @@ export interface ApiTestServer {
   connections(): number
   /** Request tới đường dẫn khớp → không bao giờ trả lời (API server / proxy treo). */
   stall(path: RegExp | null): void
+  /** Request tới đường dẫn khớp → 403 Forbidden (tài khoản thiếu quyền RBAC). */
+  forbid(path: RegExp | null): void
   /** `n` lần evict tiếp theo bị PodDisruptionBudget chặn (429). */
   blockEvictions(n: number): void
   /** Header Accept của các request (kiểm list chỉ metadata). */
@@ -448,6 +450,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
   const requests: string[] = []
   const accepts: string[] = []
   let stalled: RegExp | null = null
+  let forbidden: RegExp | null = null
   let blockedEvictions = 0
   let failingWatches = 0
   const logStreams = new Set<ServerResponse>()
@@ -581,7 +584,33 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
         return true
       }
       const p = url.pathname
+      if (forbidden?.test(p))
+        return json(res, 403, statusBody(403, 'Forbidden', `${p} is forbidden for user "dev"`))
       if (p === '/version') return json(res, 200, { gitVersion: 'v1.31.2' })
+      if (p === '/apis/apiextensions.k8s.io/v1/customresourcedefinitions/widgets.example.com')
+        return json(res, 200, {
+          apiVersion: 'apiextensions.k8s.io/v1',
+          kind: 'CustomResourceDefinition',
+          metadata: { name: 'widgets.example.com' },
+          spec: {
+            group: 'example.com',
+            versions: [
+              {
+                name: 'v1',
+                additionalPrinterColumns: [
+                  { name: 'Size', type: 'integer', jsonPath: '.spec.size' },
+                  {
+                    name: 'Ready',
+                    type: 'string',
+                    jsonPath: '.status.conditions[?(@.type=="Ready")].status'
+                  },
+                  { name: 'Debug', type: 'string', jsonPath: '.spec.debug', priority: 1 },
+                  { name: 'Age', type: 'date', jsonPath: '.metadata.creationTimestamp' }
+                ]
+              }
+            ]
+          }
+        })
       if (p === '/apis')
         return json(res, 200, {
           groups: [
@@ -1881,6 +1910,9 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     connections: () => connections,
     stall: (path) => {
       stalled = path
+    },
+    forbid: (path) => {
+      forbidden = path
     },
     blockEvictions: (n) => {
       blockedEvictions = n

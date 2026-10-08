@@ -1,3 +1,4 @@
+import { usablePrinterColumns, type PrinterColumn } from '../shared/printer'
 import { findPrometheus, podRange, type PromTarget } from './prometheus'
 import { randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
@@ -302,6 +303,35 @@ export class K8sService implements HostModuleSession {
     return this.client
   }
 
+  /**
+   * Cột in của CRD đúng phiên bản đang dùng. Không phải CRD (API gộp như metrics.k8s.io), không đọc
+   * được CRD (thiếu quyền) hay CRD không khai báo cột → [] (bảng chỉ có Name / Namespace / Age).
+   */
+  private async crdColumns(
+    client: KubeClient,
+    kindId: string,
+    signal: AbortSignal
+  ): Promise<PrinterColumn[]> {
+    const kind = this.kinds.get(kindId)
+    if (!kind?.group || BUILTIN_GROUPS.has(kind.group)) return []
+    try {
+      const crd = await client.json<{
+        spec?: {
+          versions?: { name?: string; additionalPrinterColumns?: Record<string, unknown>[] }[]
+        }
+      }>(
+        'GET',
+        `/apis/apiextensions.k8s.io/v1/customresourcedefinitions/${encodeURIComponent(`${kind.plural}.${kind.group}`)}`,
+        { signal }
+      )
+      const version = crd.spec?.versions?.find((v) => v.name === kind.version)
+      return usablePrinterColumns(version?.additionalPrinterColumns ?? [])
+    } catch (error) {
+      if (signal.aborted) throw error
+      return []
+    }
+  }
+
   private kind(id: string): ResourceKind {
     const k = this.kinds.get(id)
     if (!k) throw new Error(`Unknown resource type ${id}`)
@@ -363,6 +393,8 @@ export class K8sService implements HostModuleSession {
           this.access.clear()
         }
         return this.discover(client, op.namespace, signal)
+      case 'crd.columns':
+        return this.crdColumns(client, op.kind, signal)
       case 'list': {
         const kind = this.kind(op.kind)
         const res = await client.json<{
