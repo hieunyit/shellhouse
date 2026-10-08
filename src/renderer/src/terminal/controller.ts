@@ -748,8 +748,13 @@ export class TerminalController {
     g.textContent = rest.slice(0, Math.max(0, room))
     // Khối rộng bằng cả dòng terminal, thụt đầu dòng tới con trỏ: chữ tự xuống dòng đúng cột như
     // chữ gõ trong terminal (font đơn cách).
-    g.style.left = `${screen.offsetLeft}px`
-    g.style.top = `${screen.offsetTop + b.cursorY * cellH}px`
+    // Toạ độ theo hộp padding của .xterm (nơi chữ gợi ý được đặt tuyệt đối): lề của .xterm không
+    // nằm trong offsetLeft / offsetTop của màn hình (lớp bọc ở giữa), nên đo bằng hình học thật.
+    const origin = this.term.element.getBoundingClientRect()
+    const area = screen.getBoundingClientRect()
+    const border = this.term.element.clientLeft
+    g.style.left = `${area.left - origin.left - border}px`
+    g.style.top = `${area.top - origin.top - this.term.element.clientTop + b.cursorY * cellH}px`
     g.style.width = `${this.term.cols * cellW}px`
     g.style.textIndent = `${b.cursorX * cellW}px`
     g.style.maxHeight = `${(this.term.rows - b.cursorY) * cellH}px`
