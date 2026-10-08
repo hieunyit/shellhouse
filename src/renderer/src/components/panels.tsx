@@ -90,10 +90,38 @@ export function TabStrip<T extends string>({
   onChange: (id: T) => void
   testIdPrefix?: string
 }): React.JSX.Element {
+  const strip = useRef<HTMLDivElement>(null)
+  /** Còn tab bị cắt ở mép phải (thanh cuộn ẩn) → mờ dần mép đó để người dùng biết còn tab. */
+  const [more, setMore] = useState(false)
+  useEffect(() => {
+    const el = strip.current
+    if (!el) return
+    const measure = (): void => {
+      setMore(el.scrollLeft + el.clientWidth < el.scrollWidth - 1)
+    }
+    measure()
+    el.addEventListener('scroll', measure, { passive: true })
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => {
+      el.removeEventListener('scroll', measure)
+      ro.disconnect()
+    }
+  }, [tabs.length])
+  // Tab đang chọn luôn nằm trong vùng nhìn thấy (chọn bằng phím / từ nơi khác).
+  useEffect(() => {
+    strip.current
+      ?.querySelector<HTMLElement>('[aria-selected="true"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [value])
   return (
     <div
+      ref={strip}
       role="tablist"
-      className="flex shrink-0 gap-4 overflow-x-auto border-b border-ds-border-subtle px-3 [scrollbar-width:none]"
+      className={cx(
+        'flex shrink-0 gap-4 overflow-x-auto border-b border-ds-border-subtle px-3 [scrollbar-width:none]',
+        more && '[mask-image:linear-gradient(to_right,#000_calc(100%-28px),transparent)]'
+      )}
       onKeyDown={(e) => {
         choiceKeyDown(
           e,
