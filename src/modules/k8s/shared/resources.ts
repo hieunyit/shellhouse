@@ -18,10 +18,11 @@ export interface ResourceKind {
   section: ResourceSection
 }
 
-/** Nhóm trên thanh điều hướng — như Rancher (Service Discovery, Storage, Policy…). */
+/** Nhóm trên thanh điều hướng — như Rancher (Service Discovery, Config, Storage, Policy…). */
 export type ResourceSection =
   | 'Workloads'
   | 'Service Discovery'
+  | 'Config'
   | 'Storage'
   | 'Policy'
   | 'Access Control'
@@ -119,7 +120,7 @@ export const BUILTIN_KINDS: readonly ResourceKind[] = [
   k('', 'v1', 'services', 'Service', 'Services', 'Service Discovery'),
   k('', 'v1', 'persistentvolumes', 'PersistentVolume', 'PersistentVolumes', 'Storage', false),
   k('storage.k8s.io', 'v1', 'storageclasses', 'StorageClass', 'StorageClasses', 'Storage', false),
-  k('', 'v1', 'configmaps', 'ConfigMap', 'ConfigMaps', 'Storage'),
+  k('', 'v1', 'configmaps', 'ConfigMap', 'ConfigMaps', 'Config'),
   k(
     '',
     'v1',
@@ -128,7 +129,7 @@ export const BUILTIN_KINDS: readonly ResourceKind[] = [
     'PersistentVolumeClaims',
     'Storage'
   ),
-  k('', 'v1', 'secrets', 'Secret', 'Secrets', 'Storage'),
+  k('', 'v1', 'secrets', 'Secret', 'Secrets', 'Config'),
   k(
     'policy',
     'v1',

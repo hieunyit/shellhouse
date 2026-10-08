@@ -10,6 +10,7 @@ import { HELM, MAP, OVERVIEW } from './nav'
 const SECTIONS: readonly ResourceSection[] = [
   'Workloads',
   'Service Discovery',
+  'Config',
   'Storage',
   'Policy',
   'Access Control',

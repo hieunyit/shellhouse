@@ -171,7 +171,7 @@ for (const theme of ['light', 'dark'] as const) {
       await shot('k8s-02-pods', () => nav('pods'))
       await shot('k8s-03-deployments', () => nav('deployments.apps'))
       await shot('k8s-04-services', () => nav('services', 'Service Discovery'))
-      await shot('k8s-05-secrets', () => nav('secrets', 'Storage'))
+      await shot('k8s-05-secrets', () => nav('secrets', 'Config'))
       await shot('k8s-06-nodes', () => nav('nodes', 'Cluster'))
       await shot('k8s-07-helm', () => nav('helm-releases', 'Apps'))
       // Chi tiết Deployment: các tab.
@@ -200,7 +200,7 @@ for (const theme of ['light', 'dark'] as const) {
       })
       await page.keyboard.press('Escape')
       await shot('k8s-14-secret-data', async () => {
-        await nav('secrets', 'Storage')
+        await nav('secrets', 'Config')
         await view.getByTestId('k8s-row').first().dblclick()
         await detail.waitFor()
       })

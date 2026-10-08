@@ -299,7 +299,7 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await expect(view.getByTestId('k8s-ov-problem-nodes')).toBeVisible()
 
     // Secret: giá trị ẩn, bấm mới hiện.
-    await page.getByTestId('k8s-nav-group-Storage').click()
+    await page.getByTestId('k8s-nav-group-Config').click()
     await page.getByTestId('k8s-nav-secrets').click()
     await view.locator('[data-testid="k8s-row"][data-name="shop/db"]').click()
     await page.keyboard.press('d')
