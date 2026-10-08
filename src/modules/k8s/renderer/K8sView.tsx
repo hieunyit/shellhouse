@@ -952,7 +952,7 @@ export function ClusterTab({
                     }}
                   />
                 )}
-                <div className="relative w-72 max-w-[55%] min-w-40">
+                <div className="relative w-72 max-w-[55%] min-w-20">
                   <div
                     className={cx(
                       'flex h-ds-ctl items-center gap-1.5 rounded-ds-md border bg-subtle px-2',

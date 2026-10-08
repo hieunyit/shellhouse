@@ -165,9 +165,14 @@ export function Detail({
             {obj.metadata.name}
           </div>
           <div className="truncate text-xs text-faint">
-            {obj.kind}
-            {ns ? ` · ${ns}` : ''} ·{' '}
-            {t('{age} old', { age: age(Date.parse(obj.metadata.creationTimestamp ?? '')) })}
+            {/* Đối tượng lấy từ watch không có `kind` → bỏ phần đó, tránh dấu "·" thừa ở đầu. */}
+            {[
+              obj.kind,
+              ns,
+              t('{age} old', { age: age(Date.parse(obj.metadata.creationTimestamp ?? '')) })
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           </div>
           {statusText && (
             <div className="mt-1.5">
