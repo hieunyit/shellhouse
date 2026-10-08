@@ -1747,7 +1747,10 @@ export function DockerTab({
         labelAt="5xl"
         testId="docker-refresh"
         onClick={() => {
-          setReloadKey((n) => n + 1)
+          // Đang lỗi trên server SSH: quyền (nhóm `docker`…) chỉ có hiệu lực với kết nối SSH mới,
+          // nên tải lại qua kết nối cũ vẫn bị từ chối → mở lại phiên.
+          if (loadError && hostId && !wslDistroOf(hostId)) session.retry()
+          else setReloadKey((n) => n + 1)
         }}
       />
     </>
