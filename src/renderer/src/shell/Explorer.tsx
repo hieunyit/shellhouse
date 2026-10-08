@@ -1,7 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDownToLine,
-  ChevronRight,
   CircleAlert,
   CircleCheck,
   Clock,
@@ -34,7 +33,6 @@ import { openSidebarDialog } from '../stores/ui-requests'
 import { useTransfers } from '../stores/transfers'
 import { EXPLORER_WIDTH, useShell, type Area } from './store'
 import { useTransfersFilter, TRANSFER_FILTERS, transferCounts, rowKey } from './transfers-filter'
-import { useExplorerSlot } from './ExplorerNav'
 
 /** Hàng của Explorer (cao 28px, icon 16px màu chữ phụ, mục chọn: nền active + chữ chính). */
 export function ExplorerItem({
@@ -389,11 +387,6 @@ function SettingsExplorer(): React.JSX.Element {
   )
 }
 
-/** Ref ổn định: chỉ gọi khi gắn / gỡ — không gỡ rồi gắn lại cột điều hướng mỗi lần vẽ. */
-const setExplorerSlot = (el: HTMLDivElement | null): void => {
-  useExplorerSlot.getState().set(el)
-}
-
 /** Mục thanh bên của module (danh sách cluster / endpoint / account). */
 function ModuleExplorer({ id }: { id: string }): React.JSX.Element | null {
   const enabled = useModuleEnabled(id)
@@ -404,13 +397,7 @@ function ModuleExplorer({ id }: { id: string }): React.JSX.Element | null {
       useShell.getState().go('hosts')
   }, [loaded, enabled, id])
   const Section = rendererModule(id)?.SidebarSection
-  // Cột điều hướng của tab đang mở (Overview · Workloads · …) thu gọn được theo từng tab: nhiều cụm /
-  // endpoint cùng mở thì mỗi cây dài chiếm cả thanh bên.
-  const filled = useExplorerSlot((s) => s.filled)
-  const activeTab = useTabs((s) => s.tabs.find((x) => x.id === s.activeId))
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   if (!Section || !enabled) return null
-  const navCollapsed = Boolean(activeTab && collapsed.has(activeTab.id))
   return (
     <div
       className="min-h-0 flex-1 overflow-auto px-2 pb-2"
@@ -418,39 +405,6 @@ function ModuleExplorer({ id }: { id: string }): React.JSX.Element | null {
       data-testid={`explorer-module-${id}`}
     >
       <Section />
-      {/* Cột điều hướng của tab module đang mở (ExplorerNav). */}
-      {filled && activeTab && (
-        <button
-          type="button"
-          aria-expanded={!navCollapsed}
-          data-testid="explorer-module-nav-toggle"
-          className="mt-1 flex h-7 w-full items-center gap-1.5 rounded-ds-md border-t border-ds-border-subtle px-1.5 pt-1 text-left text-xs font-medium text-ds-fg-3 hover:text-ds-fg"
-          onClick={() => {
-            setCollapsed((prev) => {
-              const next = new Set(prev)
-              if (next.has(activeTab.id)) next.delete(activeTab.id)
-              else next.add(activeTab.id)
-              return next
-            })
-          }}
-        >
-          <ChevronRight
-            size={13}
-            className={cx(
-              'shrink-0 transition-transform duration-150',
-              !navCollapsed && 'rotate-90'
-            )}
-          />
-          <span className="min-w-0 flex-1 truncate" title={activeTab.title}>
-            {activeTab.title}
-          </span>
-        </button>
-      )}
-      <div
-        ref={setExplorerSlot}
-        className={navCollapsed ? 'hidden' : 'empty:hidden'}
-        data-testid="explorer-module-nav"
-      />
     </div>
   )
 }

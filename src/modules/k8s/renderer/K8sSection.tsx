@@ -28,6 +28,7 @@ import {
   confirmAction,
   environmentFromColor,
   environmentMenu,
+  NavTreeRow,
   monitorMenuItem,
   useSourceMonitorMap,
   EnvironmentPicker,
@@ -191,102 +192,115 @@ export function K8sSection(): React.JSX.Element {
       )}
       {open &&
         contexts.map((c) => (
-          <div
+          <NavTreeRow
             key={c.key}
-            role="button"
-            tabIndex={0}
-            data-testid="k8s-context"
-            data-name={c.name}
-            className="group flex h-(--ds-tree-row-h) cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus"
-            title={`${c.server}\n${c.sourceLabel}${c.settings.bastionHostId ? `\n${t('Through an SSH host')}` : ''}`}
-            onDoubleClick={() => openCluster(c)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') openCluster(c)
-            }}
-            onContextMenu={(e) => {
-              openMenu(e, [
-                {
-                  id: 'open',
-                  label: t('Open'),
-                  icon: <Ship size={14} />,
-                  onSelect: () => openCluster(c)
-                },
-                {
-                  id: 'ro',
-                  label: c.settings.readOnly ? t('Turn off read-only mode') : t('Read-only mode'),
-                  icon: <Eye size={14} />,
-                  onSelect: () => void k8sApi.setContext(c.ref, { readOnly: !c.settings.readOnly })
-                },
-                {
-                  id: 'hide',
-                  label: t('Hide from sidebar'),
-                  icon: <EyeOff size={14} />,
-                  onSelect: () => void k8sApi.setContext(c.ref, { hidden: true })
-                },
-                {
-                  id: 'settings',
-                  label: t('Context settings…'),
-                  icon: <Settings2 size={14} />,
-                  onSelect: () => {
-                    setEditing(c)
-                  }
-                },
-                monitorMenuItem(`k8s:${c.key}`, currentEnv(c), monitorMap),
-                'separator',
-                ...environmentMenu(
-                  environments,
-                  currentEnv(c),
-                  (id) => void setSourceEnvironment('k8s', c.key, id)
-                ),
-                'separator',
-                {
-                  id: 'delete',
-                  label: t('Delete context…'),
-                  icon: <FileX size={14} />,
-                  danger: true,
-                  onSelect: () => {
-                    setDeleting(c)
-                  }
-                },
-                ...(c.ref.source.startsWith('imported:')
-                  ? [
-                      {
-                        id: 'remove',
-                        label: t('Remove imported kubeconfig'),
-                        icon: <Trash2 size={14} />,
-                        danger: true,
-                        onSelect: () => {
-                          const id = c.ref.source.slice('imported:'.length)
-                          const name = imported.find((i) => i.id === id)?.name ?? c.sourceLabel
-                          void confirmAction({
-                            title: t('Remove “{name}”?', { name }),
-                            message: t(
-                              'The imported kubeconfig and all its contexts are removed from Shellhouse.'
-                            ),
-                            confirmLabel: t('Remove'),
-                            danger: true
-                          }).then((ok) => {
-                            if (ok) void k8sApi.removeImported(id)
-                          })
-                        }
+            owner={c.key}
+            row={({ active, chevron }) => (
+              <div
+                role="button"
+                tabIndex={0}
+                data-testid="k8s-context"
+                data-name={c.name}
+                className={cx(
+                  'group flex h-(--ds-tree-row-h) cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus',
+                  active && 'bg-ds-active'
+                )}
+                aria-current={active}
+                title={`${c.server}\n${c.sourceLabel}${c.settings.bastionHostId ? `\n${t('Through an SSH host')}` : ''}`}
+                onDoubleClick={() => openCluster(c)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') openCluster(c)
+                }}
+                onContextMenu={(e) => {
+                  openMenu(e, [
+                    {
+                      id: 'open',
+                      label: t('Open'),
+                      icon: <Ship size={14} />,
+                      onSelect: () => openCluster(c)
+                    },
+                    {
+                      id: 'ro',
+                      label: c.settings.readOnly
+                        ? t('Turn off read-only mode')
+                        : t('Read-only mode'),
+                      icon: <Eye size={14} />,
+                      onSelect: () =>
+                        void k8sApi.setContext(c.ref, { readOnly: !c.settings.readOnly })
+                    },
+                    {
+                      id: 'hide',
+                      label: t('Hide from sidebar'),
+                      icon: <EyeOff size={14} />,
+                      onSelect: () => void k8sApi.setContext(c.ref, { hidden: true })
+                    },
+                    {
+                      id: 'settings',
+                      label: t('Context settings…'),
+                      icon: <Settings2 size={14} />,
+                      onSelect: () => {
+                        setEditing(c)
                       }
-                    ]
-                  : [])
-              ])
-            }}
-          >
-            <KubernetesIcon size={15} strokeWidth={1.6} className="shrink-0 text-faint" />
-            <span className="min-w-0 flex-1 truncate text-[13px] text-fg">{c.name}</span>
-            <ContextEnv c={c} />
-            {c.settings.bastionHostId && (
-              <span className="rounded bg-subtle px-1 text-[11px] text-muted">SSH</span>
+                    },
+                    monitorMenuItem(`k8s:${c.key}`, currentEnv(c), monitorMap),
+                    'separator',
+                    ...environmentMenu(
+                      environments,
+                      currentEnv(c),
+                      (id) => void setSourceEnvironment('k8s', c.key, id)
+                    ),
+                    'separator',
+                    {
+                      id: 'delete',
+                      label: t('Delete context…'),
+                      icon: <FileX size={14} />,
+                      danger: true,
+                      onSelect: () => {
+                        setDeleting(c)
+                      }
+                    },
+                    ...(c.ref.source.startsWith('imported:')
+                      ? [
+                          {
+                            id: 'remove',
+                            label: t('Remove imported kubeconfig'),
+                            icon: <Trash2 size={14} />,
+                            danger: true,
+                            onSelect: () => {
+                              const id = c.ref.source.slice('imported:'.length)
+                              const name = imported.find((i) => i.id === id)?.name ?? c.sourceLabel
+                              void confirmAction({
+                                title: t('Remove “{name}”?', { name }),
+                                message: t(
+                                  'The imported kubeconfig and all its contexts are removed from Shellhouse.'
+                                ),
+                                confirmLabel: t('Remove'),
+                                danger: true
+                              }).then((ok) => {
+                                if (ok) void k8sApi.removeImported(id)
+                              })
+                            }
+                          }
+                        ]
+                      : [])
+                  ])
+                }}
+              >
+                {chevron}
+                <KubernetesIcon size={15} strokeWidth={1.6} className="shrink-0 text-faint" />
+                <span className="min-w-0 flex-1 truncate text-[13px] text-fg">{c.name}</span>
+                <ContextEnv c={c} />
+                {c.settings.bastionHostId && (
+                  <span className="rounded bg-subtle px-1 text-[11px] text-muted">SSH</span>
+                )}
+                {c.settings.readOnly && (
+                  <span className="rounded bg-subtle px-1 text-[11px] font-medium text-muted">
+                    {t('read-only')}
+                  </span>
+                )}
+              </div>
             )}
-            {c.settings.readOnly && (
-              <span className="rounded bg-subtle px-1 text-[11px] font-medium text-muted">
-                {t('read-only')}
-              </span>
-            )}
-          </div>
+          />
         ))}
       {importing && (
         <ImportDialog

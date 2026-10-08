@@ -1779,7 +1779,7 @@ export function DockerTab({
       data-ready={ready && list !== null}
     >
       <div className="flex min-h-0 flex-1">
-        <ExplorerNav active={active}>
+        <ExplorerNav active={active} owner={params.hostId ?? 'local'}>
           {(placement) => (
             <nav
               className={cx(

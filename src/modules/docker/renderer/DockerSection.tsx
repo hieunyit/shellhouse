@@ -14,6 +14,7 @@ import { cx, IconButton } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
 import {
   environmentMenu,
+  NavTreeRow,
   monitorMenuItem,
   useSourceMonitorMap,
   hostEnvironmentId,
@@ -180,39 +181,49 @@ export function DockerSection(): React.JSX.Element {
       </div>
       {open &&
         rows.map((r) => (
-          <div
+          <NavTreeRow
             key={r.hostId ?? 'local'}
-            role="button"
-            tabIndex={0}
-            data-testid="docker-endpoint"
-            data-name={sourceLabel(r.hostId)}
-            className="group flex h-(--ds-tree-row-h) cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus"
-            title={t('Double-click to open')}
-            onDoubleClick={() => openDocker(r.hostId)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') openDocker(r.hostId)
-            }}
-            onContextMenu={(e) => {
-              openMenu(e, rowMenu(r.hostId, r.readOnly))
-            }}
-          >
-            {wslDistroOf(r.hostId) ? (
-              <SquareTerminal size={14} className="shrink-0 text-muted" />
-            ) : r.hostId ? (
-              <Server size={14} className="shrink-0 text-muted" />
-            ) : (
-              <Laptop size={14} className="shrink-0 text-muted" />
+            owner={endpointKey(r.hostId)}
+            row={({ active, chevron }) => (
+              <div
+                role="button"
+                tabIndex={0}
+                data-testid="docker-endpoint"
+                data-name={sourceLabel(r.hostId)}
+                className={cx(
+                  'group flex h-(--ds-tree-row-h) cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus',
+                  active && 'bg-ds-active'
+                )}
+                aria-current={active}
+                title={t('Double-click to open')}
+                onDoubleClick={() => openDocker(r.hostId)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') openDocker(r.hostId)
+                }}
+                onContextMenu={(e) => {
+                  openMenu(e, rowMenu(r.hostId, r.readOnly))
+                }}
+              >
+                {chevron}
+                {wslDistroOf(r.hostId) ? (
+                  <SquareTerminal size={14} className="shrink-0 text-muted" />
+                ) : r.hostId ? (
+                  <Server size={14} className="shrink-0 text-muted" />
+                ) : (
+                  <Laptop size={14} className="shrink-0 text-muted" />
+                )}
+                <span className="min-w-0 flex-1 truncate text-[13px] text-fg">
+                  {sourceLabel(r.hostId)}
+                </span>
+                <EndpointEnv hostId={r.hostId} />
+                {r.readOnly && (
+                  <span className="rounded bg-subtle px-1 text-[11px] font-medium text-muted">
+                    {t('read-only')}
+                  </span>
+                )}
+              </div>
             )}
-            <span className="min-w-0 flex-1 truncate text-[13px] text-fg">
-              {sourceLabel(r.hostId)}
-            </span>
-            <EndpointEnv hostId={r.hostId} />
-            {r.readOnly && (
-              <span className="rounded bg-subtle px-1 text-[11px] font-medium text-muted">
-                {t('read-only')}
-              </span>
-            )}
-          </div>
+          />
         ))}
       {menu}
     </div>

@@ -176,7 +176,7 @@ export function ClusterTab({
       return false
     }
   })
-  const navPlacement = useNavPlacement()
+  const navPlacement = useNavPlacement(contextKey(params.ref))
   const [helpOpen, setHelpOpen] = useState(false)
   const [tableWidth, setTableWidth] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -916,7 +916,7 @@ export function ClusterTab({
 
           {/* Chi tiết phóng to (trang đầy đủ) → ẩn bảng. */}
           <div className="flex min-h-0 flex-1 [&:has(>aside[data-expanded])>[data-main]]:hidden">
-            <ExplorerNav active={active}>
+            <ExplorerNav active={active} owner={contextKey(params.ref)}>
               {(placement) =>
                 placement === 'explorer' || !navHidden ? (
                   <ResourceNav

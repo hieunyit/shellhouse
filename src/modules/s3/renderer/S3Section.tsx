@@ -22,6 +22,7 @@ import {
   t,
   useEnvironments,
   useSourceEnvironment,
+  useActiveModuleParams,
   useSourceEnvironmentMap
 } from '../../registry/renderer-kit'
 import { EnvLabel } from '../../../renderer/src/ds'
@@ -32,17 +33,21 @@ export function S3Section(): React.JSX.Element {
   const [open, setOpen] = useState(true)
   const [editing, setEditing] = useState<S3AccountSummary | 'new' | null>(null)
   // Tài khoản đang mở trong Explorer (hiện bucket bên dưới) — như cây của thiết kế v0.5.
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const buckets = useS3((s) => s.buckets)
   const toggleAccount = (id: string): void => {
-    const next = new Set(expanded)
-    if (next.has(id)) next.delete(id)
-    else {
-      next.add(id)
-      void useS3.getState().loadBuckets(id)
-    }
-    setExpanded(next)
+    const open = isOpen(id)
+    if (!open) void useS3.getState().loadBuckets(id)
+    setChosen(new Map(chosen).set(id, !open))
   }
+  // Account của tab S3 đang xem: tô sáng và tự mở danh sách bucket (người dùng gập lại được).
+  const activeParams = useActiveModuleParams('s3') as { accountId?: unknown } | null
+  const activeAccount = typeof activeParams?.accountId === 'string' ? activeParams.accountId : null
+  /** Account người dùng tự mở / gập (ghi đè việc tự mở theo tab đang xem). */
+  const [chosen, setChosen] = useState<ReadonlyMap<string, boolean>>(new Map())
+  const isOpen = (id: string): boolean => chosen.get(id) ?? id === activeAccount
+  useEffect(() => {
+    if (activeAccount) void useS3.getState().loadBuckets(activeAccount)
+  }, [activeAccount])
   const { menu, open: openMenu } = useContextMenu()
   const environments = useEnvironments()
   const sourceEnvs = useSourceEnvironmentMap()
@@ -92,7 +97,11 @@ export function S3Section(): React.JSX.Element {
               tabIndex={0}
               data-testid="s3-account"
               data-name={a.name}
-              className="group flex h-7 cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus"
+              className={cx(
+                'group flex h-7 cursor-default items-center gap-2 rounded-ds-md px-2 outline-none hover:bg-ds-hover focus-visible:shadow-ds-focus',
+                activeAccount === a.id && 'bg-ds-active'
+              )}
+              aria-current={activeAccount === a.id}
               title={`${a.endpoint ? new URL(a.endpoint).host : `AWS ${a.region || 'us-east-1'}`} · ${t('Double-click to open')}`}
               onDoubleClick={() => openS3(a)}
               onKeyDown={(e) => {
@@ -144,8 +153,8 @@ export function S3Section(): React.JSX.Element {
               <button
                 type="button"
                 tabIndex={-1}
-                aria-label={expanded.has(a.id) ? t('Hide buckets') : t('Show buckets')}
-                aria-expanded={expanded.has(a.id)}
+                aria-label={isOpen(a.id) ? t('Hide buckets') : t('Show buckets')}
+                aria-expanded={isOpen(a.id)}
                 data-testid="s3-account-expand"
                 className="-ml-1 flex size-4 shrink-0 items-center justify-center rounded-ds-sm text-ds-fg-3 hover:text-ds-fg"
                 onClick={(e) => {
@@ -155,7 +164,7 @@ export function S3Section(): React.JSX.Element {
               >
                 <ChevronRight
                   size={12}
-                  className={cx('transition-transform', expanded.has(a.id) && 'rotate-90')}
+                  className={cx('transition-transform', isOpen(a.id) && 'rotate-90')}
                 />
               </button>
               <Cloud size={14} strokeWidth={1.6} className="shrink-0 text-ds-fg-3" />
@@ -164,7 +173,7 @@ export function S3Section(): React.JSX.Element {
               </span>
               <AccountEnv id={a.id} />
             </div>
-            {expanded.has(a.id) && (
+            {isOpen(a.id) && (
               <BucketRows
                 list={buckets[a.id]}
                 onOpen={(bucket) => openS3(a, { bucket, prefix: '' })}

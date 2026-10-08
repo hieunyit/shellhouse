@@ -6,6 +6,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Changed
+
+- **Sidebar (Kubernetes, Docker, S3):** the row of the cluster / endpoint / account you are viewing
+  is highlighted, has its own collapse arrow, and its navigation tree (Overview, Workloads…) opens
+  right under it instead of below the whole list — with several clusters open you can tell which
+  tree belongs to which. S3 opens the buckets of the active account automatically.
+
 ## [1.2.0-beta.28] - 2026-10-08
 
 ### Added

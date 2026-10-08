@@ -104,7 +104,9 @@ export {
 export { environmentFromColor, type EnvironmentDef } from '@shared/environments'
 export {
   ExplorerNav,
+  NavTreeRow,
   useNavPlacement,
+  useNavRow,
   type NavPlacement
 } from '../../renderer/src/shell/ExplorerNav'
 /** Đa ngôn ngữ + định dạng ngày / số / dung lượng theo locale — xem src/shared/i18n. */
@@ -389,6 +391,14 @@ export function moduleTabTitle(module: string, tab: string, params: unknown): st
 }
 
 /** Mở tab của module (module phải đang bật). Trả về id tab, null nếu không mở được. */
+/** Tham số của tab module đang xem (null = tab đang xem không thuộc `module`). */
+export function useActiveModuleParams(module: string): unknown {
+  return useTabs((s) => {
+    const target = s.tabs.find((x) => x.id === s.activeId)?.target
+    return target?.kind === 'module' && target.module === module ? target.params : null
+  })
+}
+
 export function openModuleTab(module: string, tab: string, params: unknown): string | null {
   const def = moduleTab(module, tab)
   if (!def || !isModuleEnabled(module)) return null
