@@ -34,6 +34,7 @@ import { TOPOLOGY_KINDS, TopologyOf } from './Topology'
 import { TRAFFIC_KINDS, TrafficOf } from './TrafficTab'
 import { TIMELINE_KINDS, TimelineOf } from './Timeline'
 import { UsagePanel } from './Usage'
+import { OUTBOUND_KINDS, OutboundOf } from './OutboundOf'
 import { ObjectEvents } from './Events'
 import type { EventBus } from './useResourceList'
 import {
@@ -62,6 +63,7 @@ export type DetailTab =
   | 'metrics'
   | 'traffic'
   | 'timeline'
+  | 'outbound'
   | 'data'
   | 'events'
   | 'yaml'
@@ -256,6 +258,9 @@ export function Detail({
           ...(TIMELINE_KINDS.has(kindId)
             ? [{ id: 'timeline' as const, label: t('Timeline') }]
             : []),
+          ...(OUTBOUND_KINDS.has(kindId)
+            ? [{ id: 'outbound' as const, label: t('Outbound') }]
+            : []),
           ...(hasData
             ? [
                 {
@@ -305,6 +310,7 @@ export function Detail({
           />
         )}
         {tab === 'timeline' && <TimelineOf kindId={kindId} obj={obj} request={request} />}
+        {tab === 'outbound' && <OutboundOf kindId={kindId} obj={obj} request={request} />}
         {tab === 'related' && (
           <RelatedOf
             kindId={kindId}

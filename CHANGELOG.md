@@ -14,8 +14,9 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   and port — passwords and connection strings are never kept or shown). In **Topology** they are an
   Outbound lane on the right (dashed lines from the pods, grouped per destination); the new
   **Outbound** view lists them in a table (workload, host:port, type, where it is declared). In-cluster
-  Services, ExternalName Services, private IPs and external hosts are told apart. Turn the lane or
-  the reading of Secrets off in Topology › View.
+  Services, ExternalName Services, private IPs and external hosts are told apart. Each workload
+  (Deployment, StatefulSet, DaemonSet, Job, CronJob) also has its own **Outbound** tab in its
+  details. Turn the lane or the reading of Secrets off in Topology › View.
 
 ### Changed
 

@@ -42,6 +42,8 @@ export interface EgressResult {
   truncated: boolean
   /** Đã thử đọc Secret không. */
   readSecrets: boolean
+  /** Chế độ một workload: Service của cluster (để phân loại điểm đến). */
+  services?: { ns: string; name: string; type: string; clusterIP?: string; externalName?: string }[]
 }
 
 export interface RawEndpoint {

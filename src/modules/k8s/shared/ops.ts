@@ -119,7 +119,12 @@ export const K8sOp = z.discriminatedUnion('op', [
     op: z.literal('egress'),
     namespaces: z.array(Namespace).max(64),
     /** Đọc Secret mà workload tham chiếu (GET từng cái). Tắt → chỉ env / args / ConfigMap. */
-    secrets: z.boolean()
+    secrets: z.boolean(),
+    /**
+     * Chỉ một workload (chi tiết của nó): cần đúng một namespace; kết quả kèm danh sách Service để
+     * phân loại điểm đến mà không cần dữ liệu Map.
+     */
+    workload: z.object({ kind: z.string().min(1).max(64), name: Name }).optional()
   }),
   /** Helm 3 releases (đọc Secret owner=helm — không cần cài helm). */
   z.object({ op: z.literal('helm.releases'), namespaces: z.array(Namespace).max(64) }),

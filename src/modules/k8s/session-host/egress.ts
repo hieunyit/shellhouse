@@ -203,15 +203,46 @@ async function pool<T>(
   )
 }
 
+/** Chỉ một workload: GET đúng nó (không list cả namespace). */
+async function oneWorkload(
+  client: KubeClient,
+  namespace: string,
+  only: { kind: string; name: string },
+  signal?: AbortSignal
+): Promise<K8sObject | null> {
+  const k = WORKLOAD_KINDS.find((x) => x.id === only.kind)
+  if (!k) return null
+  try {
+    return await client.json<K8sObject>(
+      'GET',
+      `${k.path}/namespaces/${encodeURIComponent(namespace)}/${k.plural}/${encodeURIComponent(only.name)}`,
+      signal ? { signal } : {}
+    )
+  } catch (error) {
+    if (error instanceof KubeError && (error.status === 404 || error.status === 403)) return null
+    throw error
+  }
+}
+
 export async function egressData(
   client: KubeClient,
   namespaces: readonly string[],
   readSecrets: boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  only?: { kind: string; name: string }
 ): Promise<EgressResult> {
-  const lists = await Promise.all(
-    WORKLOAD_KINDS.map((k) => listAll(client, k.path, k.plural, namespaces, signal))
-  )
+  const single =
+    only && namespaces.length === 1
+      ? await oneWorkload(client, namespaces[0] ?? '', only, signal)
+      : null
+  const lists = only
+    ? WORKLOAD_KINDS.map((k) => ({
+        items: single && k.id === only.kind ? [single] : [],
+        truncated: false
+      }))
+    : await Promise.all(
+        WORKLOAD_KINDS.map((k) => listAll(client, k.path, k.plural, namespaces, signal))
+      )
   const items: EgressItem[] = []
   const wants = new Map<string, ObjectWant>()
   let scanned = 0
@@ -271,5 +302,20 @@ export async function egressData(
     seen.add(k)
     return true
   })
-  return { items: unique, skipped, scanned, truncated, readSecrets }
+  const result: EgressResult = { items: unique, skipped, scanned, truncated, readSecrets }
+  if (only) {
+    // Phân loại điểm đến cần Service của cluster (cả namespace khác: name.ns.svc).
+    const svcs = await listAll(client, '/api/v1', 'services', [], signal)
+    result.services = svcs.items.map((x) => {
+      const spec = o((x as unknown as Obj)['spec'])
+      return {
+        ns: x.metadata.namespace ?? '',
+        name: x.metadata.name,
+        type: s(spec['type']) || 'ClusterIP',
+        ...(s(spec['clusterIP']) ? { clusterIP: s(spec['clusterIP']) } : {}),
+        ...(s(spec['externalName']) ? { externalName: s(spec['externalName']) } : {})
+      }
+    })
+  }
+  return result
 }

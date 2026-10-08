@@ -498,7 +498,7 @@ export class K8sService implements HostModuleSession {
       case 'map':
         return mapData(client, op.namespaces, signal)
       case 'egress':
-        return egressData(client, op.namespaces, op.secrets, signal)
+        return egressData(client, op.namespaces, op.secrets, signal, op.workload)
       case 'helm.releases':
         return helmReleases(client, op.namespaces, signal)
       case 'helm.release':

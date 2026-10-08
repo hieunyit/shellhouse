@@ -184,4 +184,40 @@ describe('Điểm đến khai báo (egress)', () => {
     expect(kinds['api.stripe.com']).toBe('external')
     expect(kinds['mysql.prod.corp']).toBe('external')
   })
+
+  it('chế độ một workload: chỉ GET workload đó, kèm Service để phân loại', async () => {
+    const { server, run } = await setup()
+    seed(server)
+    server.upsert('deployments', {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: { name: 'other', namespace: 'shop' },
+      spec: {
+        selector: { matchLabels: { app: 'other' } },
+        template: {
+          metadata: { labels: { app: 'other' } },
+          spec: {
+            containers: [
+              { name: 'a', image: 'x', env: [{ name: 'H', value: 'https://other.example.com' }] }
+            ]
+          }
+        }
+      }
+    })
+    const before = server.requests.length
+    const r = await run<EgressResult>({
+      op: 'egress',
+      namespaces: ['shop'],
+      secrets: true,
+      workload: { kind: 'deployments.apps', name: 'egress-web' }
+    })
+    const reqs = server.requests.slice(before)
+    // Không list workload; chỉ một GET deployment theo tên.
+    expect(reqs.some((q) => /\/deployments$|\/deployments\?/.test(q))).toBe(false)
+    expect(reqs.some((q) => /\/deployments\/egress-web$/.test(q))).toBe(true)
+    expect(new Set(r.items.map((i) => i.workload.name))).toEqual(new Set(['egress-web']))
+    expect(r.items.some((i) => i.host === 'other.example.com')).toBe(false)
+    expect(r.services?.length).toBeGreaterThan(0)
+    expect(r.scanned).toBe(1)
+  })
 })
