@@ -1,5 +1,5 @@
 import type { FormKind } from '../shared/forms'
-import type { ContextRef, DiscoveredKind, K8sOp } from '../shared/ops'
+import type { ContextRef, DiscoveredKind, K8sOp, PortForwardInfo } from '../shared/ops'
 import type { K8sObject, ResourceKind } from '../shared/resources'
 import { t, tn, toast } from '../../registry/renderer-kit'
 import { CreateResourceDialog } from './CreateResourceDialog'
@@ -205,12 +205,17 @@ export function ClusterDialogs({
             onForwardStarted()
             run(
               {
-                loading: t('Forwarding localhost:{local} → {name}:{remote}…', ports),
-                success: t('Forwarding localhost:{local} → {name}:{remote}', ports),
+                loading: t('Forwarding to {name}:{remote}…', ports),
+                // Cổng "tự chọn" (0) → hiện cổng thật mà server đã cấp.
+                success: (started) =>
+                  t('Forwarding localhost:{local} → {name}:{remote}', {
+                    ...ports,
+                    local: String(started[0]?.localPort || local)
+                  }),
                 error: t('Could not forward to {name}', { name: target.metadata.name })
               },
               () =>
-                request({
+                request<PortForwardInfo[]>({
                   op: 'portForward',
                   namespace: target.metadata.namespace ?? '',
                   target: `${kindId === 'pods' ? 'pod' : 'service'}/${target.metadata.name}`,

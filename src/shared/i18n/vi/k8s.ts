@@ -365,8 +365,7 @@ export const k8s: Readonly<Record<string, string>> = {
   'Deleting {what}…': 'Đang xoá {what}…',
   'Deleted {what}': 'Đã xoá {what}',
   'Could not delete {what}': 'Không xoá được {what}',
-  'Forwarding localhost:{local} → {name}:{remote}…':
-    'Đang forward localhost:{local} → {name}:{remote}…',
+  'Forwarding to {name}:{remote}…': 'Đang forward tới {name}:{remote}…',
   'Forwarding localhost:{local} → {name}:{remote}':
     'Đang forward localhost:{local} → {name}:{remote}',
   'Could not forward to {name}': 'Không port-forward được tới {name}',

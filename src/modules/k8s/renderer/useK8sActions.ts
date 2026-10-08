@@ -23,9 +23,9 @@ export function notify(text: string, tone: 'success' | 'danger' = 'success'): vo
 }
 
 /** Thao tác có toast "đang chạy" → xong / lỗi (kèm lý do từ API server). */
-export function run(
-  messages: { loading: string; success: string; error: string },
-  fn: () => Promise<unknown>
+export function run<T>(
+  messages: { loading: string; success: string | ((result: T) => string); error: string },
+  fn: () => Promise<T>
 ): void {
   void toast
     .promise(fn(), {
