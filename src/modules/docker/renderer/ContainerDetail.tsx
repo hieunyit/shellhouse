@@ -118,7 +118,10 @@ function DetailHeader({
   onClose: () => void
 }): React.JSX.Element {
   const { menu, open } = useContextMenu()
-  const primary = actions.filter((a) => !a.danger && !a.secondary).slice(0, 4)
+  // "Files" đã là một tab của trang chi tiết; "Exec…" nằm trong menu (Shell đã mở terminal).
+  const primary = actions
+    .filter((a) => !a.danger && !a.secondary && a.id !== 'files' && a.id !== 'exec')
+    .slice(0, 4)
   return (
     <>
       <div className="flex items-start gap-2 border-b border-line px-3 py-2">
@@ -621,6 +624,9 @@ function Stats({
   const limit = Number(o(inspect?.['HostConfig'])['Memory'] ?? 0)
   const memPeak = Math.max(...stats.map((x) => x.memUsage), 1)
   const memRatio = limit > 0 ? last.memUsage / limit : 0
+  // Network `host` / `none`: Docker không có bộ đếm riêng của container → số 0 là "không đo được".
+  const netMode = o(inspect?.['HostConfig'])['NetworkMode']
+  const hostNet = netMode === 'host' || netMode === 'none'
   const rates = netRates(stats)
   const rate = rates.at(-1) ?? { rx: 0, tx: 0 }
   const netMax = Math.max(1, ...rates.map((r) => Math.max(r.rx, r.tx)))
@@ -682,24 +688,36 @@ function Stats({
         limit > 0 ? limit : memPeak * 1.25,
         'docker-stats-memory'
       )}
-      {chart(
-        t('Network'),
-        <span>
-          <span title={t('Received')}>↓ {formatRate(rate.rx)}</span>{' '}
-          <span className="text-faint" title={t('Sent')}>
-            ↑ {formatRate(rate.tx)}
-          </span>
-        </span>,
-        t('Since start: {in} in · {out} out', {
-          in: formatBytes(last.netRx),
-          out: formatBytes(last.netTx)
-        }),
-        [
-          { values: rates.map((r) => r.rx) },
-          { values: rates.map((r) => r.tx), className: 'opacity-50', fill: false }
-        ],
-        netMax,
-        'docker-stats-network'
+      {hostNet ? (
+        <div className="rounded-md border border-line p-2" data-testid="docker-stats-network">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-muted">{t('Network')}</span>
+            <span className="text-faint">—</span>
+          </div>
+          <div className="text-right text-[11px] text-faint">
+            {t('Not measured — Docker has no counters for this network mode')}
+          </div>
+        </div>
+      ) : (
+        chart(
+          t('Network'),
+          <span>
+            <span title={t('Received')}>↓ {formatRate(rate.rx)}</span>{' '}
+            <span className="text-faint" title={t('Sent')}>
+              ↑ {formatRate(rate.tx)}
+            </span>
+          </span>,
+          t('Since start: {in} in · {out} out', {
+            in: formatBytes(last.netRx),
+            out: formatBytes(last.netTx)
+          }),
+          [
+            { values: rates.map((r) => r.rx) },
+            { values: rates.map((r) => r.tx), className: 'opacity-50', fill: false }
+          ],
+          netMax,
+          'docker-stats-network'
+        )
       )}
     </div>
   )

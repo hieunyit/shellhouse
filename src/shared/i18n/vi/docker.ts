@@ -232,6 +232,8 @@ export const docker: Readonly<Record<string, string>> = {
   'Names use letters, digits, "_", "." and "-"': 'Tên chỉ gồm chữ, số, "_", "." và "-"',
   Navigate: 'Điều hướng',
   Network: 'Network',
+  'Not measured — Docker has no counters for this network mode':
+    'Không đo được — Docker không có bộ đếm cho kiểu network này',
   'Network in': 'Network in',
   'Network out': 'Network out',
   Networks: 'Networks',
