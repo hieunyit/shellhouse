@@ -344,10 +344,10 @@ function ModuleEmpty({ id }: { id: string }): React.JSX.Element {
   )
 }
 
-/** Dải tab khi một khu vực module có nhiều tab (vd. hai cluster, log của pod). */
+/** Dải tab của khu vực module (Docker, K8s…): luôn hiện khi có tab, để tab đơn cũng có nút đóng. */
 function StageTabs({ area, tabs }: { area: Area; tabs: Tab[] }): React.JSX.Element | null {
   const activeId = useTabs((s) => s.activeId)
-  if (tabs.length < 2) return null
+  if (tabs.length === 0) return null
   return (
     <div
       role="tablist"
