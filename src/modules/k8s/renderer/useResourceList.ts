@@ -30,6 +30,8 @@ export interface ResourceList {
   error: string | null
   /** Danh sách bị cắt ở MAX_PAGES trang (cluster rất lớn) — nên lọc hẹp hơn. */
   truncated: number | null
+  /** API server không trả lời từ lúc này (ms) — dữ liệu trên bảng có thể đã cũ; null = bình thường. */
+  stale: number | null
   reload: () => void
 }
 
@@ -56,6 +58,7 @@ export function useResourceList(
   } | null>(null)
   const [error, setError] = useState<{ key: string; text: string } | null>(null)
   const [relist, setRelist] = useState(0)
+  const [stale, setStale] = useState<number | null>(null)
   const subs = useRef(new Set<string>())
   const activeRef = useRef(active)
   const held = useRef<WatchEvent['events']>([])
@@ -121,6 +124,7 @@ export function useResourceList(
       if (event !== 'watch') return
       const w = payload as WatchEvent & { error?: string }
       if (!mine.has(w.subscription)) return
+      if (w.stale !== undefined) setStale(w.stale ? Date.now() : null)
       if (w.relist) {
         setRelist((n) => n + 1)
         return
@@ -189,6 +193,7 @@ export function useResourceList(
       const cut = lists.some((l) => l.cut)
       setData({ key: queryKey, request, map: all, truncated: cut ? all.size : null })
       setError(null)
+      setStale(null)
       for (const v of lists) {
         const w = await request<{ subscription: string }>({
           op: 'watch',
@@ -225,6 +230,7 @@ export function useResourceList(
     // Lỗi của truy vấn trước không hiện khi đã đổi truy vấn.
     error: error && error.key === queryKey ? error.text : null,
     truncated: current?.truncated ?? null,
+    stale,
     reload: () => {
       setRelist((n) => n + 1)
     }

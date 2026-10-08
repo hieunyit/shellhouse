@@ -392,6 +392,8 @@ export interface WatchEvent {
   events: { type: 'ADDED' | 'MODIFIED' | 'DELETED'; object: unknown }[]
   /** Server trả 410 Gone → renderer list lại từ đầu. */
   relist?: boolean
+  /** true: API server không trả lời (dữ liệu có thể cũ); false: nối lại được. */
+  stale?: boolean
 }
 
 /** Mức dùng (millicore CPU, byte RAM). */

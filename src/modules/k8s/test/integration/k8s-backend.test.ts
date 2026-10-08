@@ -11,6 +11,7 @@ import { credentialProvider, type OidcTokens } from '../../session-host/auth'
 import { drainRetry } from '../../session-host/operations'
 import {
   K8sService,
+  linkProbe,
   watchIdle,
   type K8sServiceDeps,
   type ResolvedClusterConfig
@@ -502,6 +503,54 @@ describe('K8s watch: kết nối chết im lặng', () => {
     await run({ op: 'watch', kind: 'configmaps', namespace: 'shop', resourceVersion: '5' })
     const watches = (): number => server.requests.filter((r) => r.includes('watch=true')).length
     await until(() => watches() >= 3, 5000)
+  })
+})
+
+describe('K8s watch: mất kết nối tới API server', () => {
+  it('API server không trả lời /version → báo "cũ" (stale); trả lời lại → báo hết cũ và nối lại watch', async () => {
+    const server = await api()
+    const saved = { ...linkProbe }
+    Object.assign(linkProbe, { intervalMs: 60, timeoutMs: 120, failures: 2 })
+    cleanups.push(() => {
+      Object.assign(linkProbe, saved)
+    })
+    const { run, events, until } = await setup(server)
+    await run({ op: 'watch', kind: 'configmaps', namespace: 'shop', resourceVersion: '5' })
+    const watches = (): number => server.requests.filter((r) => r.includes('watch=true')).length
+    await until(() => watches() >= 1)
+    const stale = (): boolean[] =>
+      events.flatMap((e) => {
+        const s = (e.data as { stale?: boolean }).stale
+        return s === undefined ? [] : [s]
+      })
+    // Đang khoẻ: không báo gì.
+    await new Promise((r) => setTimeout(r, 250))
+    expect(stale()).toEqual([])
+    // Treo: sau vài lần dò hụt → stale = true (một lần, không lặp).
+    server.stall(/\/version$/)
+    await until(() => stale().includes(true), 4000)
+    await new Promise((r) => setTimeout(r, 300))
+    expect(stale()).toEqual([true])
+    // Về lại: stale = false và luồng watch cũ bị bỏ để nối mới.
+    const before = watches()
+    server.stall(null)
+    await until(() => stale().includes(false), 4000)
+    await until(() => watches() > before, 4000)
+    expect(stale()).toEqual([true, false])
+  })
+
+  it('API server trả lỗi HTTP (5xx / 403) cho /version vẫn là đang trả lời — không báo cũ', async () => {
+    const server = await api()
+    const saved = { ...linkProbe }
+    Object.assign(linkProbe, { intervalMs: 50, timeoutMs: 100, failures: 2 })
+    cleanups.push(() => {
+      Object.assign(linkProbe, saved)
+    })
+    const { run, events } = await setup(server)
+    await run({ op: 'watch', kind: 'configmaps', namespace: 'shop', resourceVersion: '5' })
+    server.forbid(/\/version$/)
+    await new Promise((r) => setTimeout(r, 500))
+    expect(events.some((e) => (e.data as { stale?: boolean }).stale === true)).toBe(false)
   })
 })
 

@@ -158,6 +158,13 @@ function isBuiltinGroup(group: string): boolean {
 const WATCH_FLUSH_MS = 100
 /** Watch không nhận byte nào chừng này → coi kết nối đã chết, nối lại (test chỉnh được). */
 export const watchIdle = { ms: 360_000 }
+/**
+ * Dò kết nối tới API server khi đang có watch: server im lặng không có nghĩa là chết (watch yên
+ * ắng bình thường), nên hỏi thẳng `/version`. `failures` lần liên tiếp không trả lời → báo "cũ" tới
+ * renderer; trả lời lại → ngắt các luồng watch (có thể là socket nửa chết) để nối lại từ resourceVersion.
+ * Test chỉnh được.
+ */
+export const linkProbe = { intervalMs: 10_000, timeoutMs: 5_000, failures: 2 }
 /** Danh mục loại / quyền list được nhớ chừng này (CRD mới cài hiện sau tối đa 5 phút / Reload). */
 const DISCOVERY_TTL_MS = 5 * 60_000
 /** Chờ trước khi nối lại watch sau lỗi: base × 2^lần, tối đa max (test rút ngắn được). */
@@ -177,6 +184,8 @@ interface SharedWatch {
   advanced: boolean
   subscribers: Set<string>
   controller: AbortController
+  /** Lần kết nối hiện tại — huỷ riêng để nối lại mà không dừng cả watch. */
+  attempt: AbortController | null
   pending: { type: 'ADDED' | 'MODIFIED' | 'DELETED'; object: unknown }[]
   timer: NodeJS.Timeout | null
 }
@@ -256,6 +265,9 @@ export class K8sService implements HostModuleSession {
   private readonly trafficCache: TrafficCache = {}
   private readonly edits = new Map<string, { name: string; stop: () => void }>()
   private disposed = false
+  /** Dò kết nối (xem `linkProbe`): chạy khi có watch. `down` = đã báo "cũ" cho renderer. */
+  private probeTimer: NodeJS.Timeout | null = null
+  private link = { down: false, failures: 0 }
 
   constructor(private readonly deps: K8sServiceDeps) {}
 
@@ -1019,14 +1031,17 @@ export class K8sService implements HostModuleSession {
         advanced: false,
         subscribers: new Set(),
         controller: new AbortController(),
+        attempt: null,
         pending: [],
         timer: null
       }
       this.watches.set(key, w)
+      this.startProbe()
       void this.runWatch(w, kind, namespace, selector, resourceVersion, fieldSelector).finally(
         () => {
           // Watch đã dừng (410 Gone…): bỏ khỏi danh sách — người đến sau không nhập vào watch chết.
           if (this.watches.get(w.key) === w) this.watches.delete(w.key)
+          if (this.watches.size === 0) this.stopProbe()
         }
       )
     }
@@ -1037,12 +1052,80 @@ export class K8sService implements HostModuleSession {
         w.controller.abort()
         if (w.timer) clearTimeout(w.timer)
         if (this.watches.get(w.key) === w) this.watches.delete(w.key)
+        if (this.watches.size === 0) this.stopProbe()
       }
     })
     return { subscription: id }
   }
 
-  private flushWatch(w: SharedWatch, extra?: { relist?: boolean; error?: string }): void {
+  private startProbe(): void {
+    if (this.probeTimer || this.disposed) return
+    this.probeTimer = setInterval(() => {
+      void this.checkLink()
+    }, linkProbe.intervalMs)
+    this.probeTimer.unref()
+  }
+
+  private stopProbe(): void {
+    if (this.probeTimer) clearInterval(this.probeTimer)
+    this.probeTimer = null
+    this.link = { down: false, failures: 0 }
+  }
+
+  /**
+   * Hỏi `/version` (mọi tài khoản đều đọc được). Chỉ lỗi mạng / hết giờ mới là "mất kết nối": API
+   * server trả lỗi HTTP (kể cả 5xx) thì vẫn đang trả lời.
+   */
+  private async checkLink(): Promise<void> {
+    const client = this.client
+    if (!client || this.disposed || this.watches.size === 0) return
+    let reachable = true
+    // Hạn tổng cho cả bắt tay TLS (client thử lại tới 3 × 10 s, không nghe `signal` lúc đó) lẫn chờ
+    // trả lời: hết hạn là "không trả lời" ngay, request còn dang dở tự bị huỷ.
+    const deadline = new AbortController()
+    const timer = setTimeout(() => {
+      deadline.abort()
+    }, linkProbe.timeoutMs)
+    try {
+      await Promise.race([
+        client.json('GET', '/version', {
+          idleMs: linkProbe.timeoutMs,
+          signal: deadline.signal
+        }),
+        new Promise<never>((_, reject) => {
+          deadline.signal.addEventListener('abort', () => {
+            reject(new KubeTimeoutError('API server did not answer /version'))
+          })
+        })
+      ])
+    } catch (error) {
+      reachable = error instanceof KubeError
+    } finally {
+      clearTimeout(timer)
+    }
+    // dispose() xoá hết watch trong lúc chờ → không báo gì nữa.
+    if (this.watches.size === 0) return
+    if (reachable) {
+      const wasDown = this.link.down
+      this.link = { down: false, failures: 0 }
+      if (!wasDown) return
+      // Mạng về: socket watch cũ có thể đã chết nửa chừng — buộc nối lại từ resourceVersion.
+      for (const w of this.watches.values()) {
+        this.flushWatch(w, { stale: false })
+        w.attempt?.abort()
+      }
+      return
+    }
+    this.link.failures++
+    if (this.link.down || this.link.failures < linkProbe.failures) return
+    this.link.down = true
+    for (const w of this.watches.values()) this.flushWatch(w, { stale: true })
+  }
+
+  private flushWatch(
+    w: SharedWatch,
+    extra?: { relist?: boolean; error?: string; stale?: boolean }
+  ): void {
     if (w.timer) clearTimeout(w.timer)
     w.timer = null
     const events = w.pending
@@ -1074,6 +1157,21 @@ export class K8sService implements HostModuleSession {
       // Object (không phải let): được gán trong callback, TS không theo dõi được.
       const seen = { data: false }
       const started = Date.now()
+      // Mỗi lần kết nối có controller riêng: dò kết nối huỷ được nó (nối lại) mà không dừng watch.
+      const attempt = new AbortController()
+      const forced = { value: false }
+      const onStop = (): void => {
+        attempt.abort()
+      }
+      signal.addEventListener('abort', onStop, { once: true })
+      attempt.signal.addEventListener(
+        'abort',
+        () => {
+          forced.value = !signal.aborted
+        },
+        { once: true }
+      )
+      w.attempt = attempt
       try {
         await client.stream(
           'GET',
@@ -1090,7 +1188,7 @@ export class K8sService implements HostModuleSession {
             // Kết nối chết im lặng (NAT / bastion rớt) không bao giờ báo đóng → quá 6 phút không có
             // byte nào (server tự đóng sau 5 phút) thì bỏ và nối lại từ resourceVersion.
             idleMs: watchIdle.ms,
-            signal
+            signal: attempt.signal
           },
           (chunk) => {
             if (lostEvents) {
@@ -1135,6 +1233,7 @@ export class K8sService implements HostModuleSession {
         if (aborted()) return
         if (error instanceof KubeError && error.status === 410) gone = true
         else if (
+          forced.value ||
           error instanceof KubeTimeoutError ||
           (!(error instanceof KubeError) && (seen.data || Date.now() - started > 10_000))
         ) {
@@ -1153,6 +1252,7 @@ export class K8sService implements HostModuleSession {
             this.flushWatch(w, { error: error instanceof Error ? error.message : String(error) })
         }
       }
+      signal.removeEventListener('abort', onStop)
       if (failures >= 5) lostEvents = true
       if (gone) {
         // Phiên bản quá cũ — renderer list lại rồi đăng ký watch mới.
@@ -1622,6 +1722,7 @@ export class K8sService implements HostModuleSession {
 
   dispose(): void {
     this.disposed = true
+    this.stopProbe()
     this.stopRecorder()
     disposeTrafficCache(this.trafficCache)
     for (const stop of this.subscriptions.values()) stop()

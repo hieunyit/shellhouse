@@ -561,6 +561,9 @@ export const k8s: Readonly<Record<string, string>> = {
   '{n} namespaces': '{n} namespace',
   'Service Discovery': 'Service Discovery',
   Storage: 'Storage',
+  'Stale · reconnecting': 'Dữ liệu cũ · đang nối lại',
+  'No answer from the API server since {time} — the table may be out of date. Reconnecting…':
+    'API server không trả lời từ {time} — bảng có thể đã cũ. Đang nối lại…',
   Policy: 'Policy',
   'Access Control': 'Access Control',
   Cluster: 'Cluster',

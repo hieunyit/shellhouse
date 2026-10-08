@@ -24,7 +24,7 @@ import { Empty } from '../../../renderer/src/components/files/parts'
 import { KeyHints, Pill, TONE_TEXT, type Tone } from '../../../renderer/src/components/panels'
 import type { SortState } from '../../../renderer/src/components/SortMenu'
 import { cleanError } from '../../../renderer/src/lib/format'
-import { formatNumber, language, t, tn, toast } from '../../registry/renderer-kit'
+import { formatDateTime, formatNumber, language, t, tn, toast } from '../../registry/renderer-kit'
 import { tk } from './i18n'
 import { KindIcon } from './icons'
 import type { FormKind } from '../shared/forms'
@@ -1150,12 +1150,28 @@ export function ClusterTab({
                 )}
                 {!onOverview && !onMap && !onHelm && list.objects && !list.error && (
                   <span
-                    className="flex shrink-0 items-center gap-1 text-ds-fg-3"
-                    data-testid="k8s-live"
-                    title={t('Updates live (Kubernetes watch)')}
+                    className={cx(
+                      'flex shrink-0 items-center gap-1',
+                      list.stale ? 'text-warning' : 'text-ds-fg-3'
+                    )}
+                    data-testid={list.stale ? 'k8s-stale' : 'k8s-live'}
+                    title={
+                      list.stale
+                        ? t(
+                            'No answer from the API server since {time} — the table may be out of date. Reconnecting…',
+                            { time: formatDateTime(list.stale) }
+                          )
+                        : t('Updates live (Kubernetes watch)')
+                    }
                   >
-                    <span className="size-1.5 rounded-full bg-ds-success" aria-hidden />
-                    {t('Live')}
+                    <span
+                      className={cx(
+                        'size-1.5 rounded-full',
+                        list.stale ? 'bg-warning' : 'bg-ds-success'
+                      )}
+                      aria-hidden
+                    />
+                    {list.stale ? t('Stale · reconnecting') : t('Live')}
                   </span>
                 )}
               </div>
