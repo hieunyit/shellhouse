@@ -218,6 +218,10 @@ describe.skipIf(!findSftpServer())('Mạng xấu: SFTP', () => {
     // Lượt chạy ngầm phải kết thúc hẳn (file part đã đóng) — Windows không xoá được file đang mở.
     await queue.drained()
     expect(queue.list()).toHaveLength(1)
+    // Mạng đang "treo": server vẫn giữ file nguồn qua sftp-server cho tới khi thấy kết nối đứt. Cắt hẳn
+    // và đóng server trước khi dọn thư mục (Windows không xoá được file còn mở).
+    p.cutAll()
+    await s.close()
   }, 40_000)
 
   it('đứt kết nối giữa lúc tải lên → kết nối mới tải tiếp đúng sha256', async () => {

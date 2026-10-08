@@ -16,5 +16,5 @@ afterEach(() => {
   // Windows: tiến trình con (sftp-server.exe, shell) có thể chưa kịp thoát và còn giữ file → EPERM /
   // EBUSY. Thử lại vài lần thay vì làm hỏng test vì bước dọn dẹp.
   for (const dir of dirs.splice(0))
-    rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 })
+    rmSync(dir, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 })
 })
