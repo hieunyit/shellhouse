@@ -173,7 +173,12 @@ export const S3Op = z.discriminatedUnion('op', [
     op: z.literal('list'),
     bucket: Bucket,
     prefix: Key,
-    token: z.string().max(2048).optional()
+    token: z.string().max(2048).optional(),
+    /**
+     * Tìm trên server: chỉ các mục có tên BẮT ĐẦU bằng chuỗi này (S3 lọc theo prefix, phân biệt hoa
+     * thường) trong `prefix`. Tên mục vẫn tính theo `prefix` — dùng được cả khi thư mục lớn hơn một trang.
+     */
+    search: z.string().max(1024).optional()
   }),
   /** Tạo "thư mục" = object rỗng tên kết thúc bằng "/". */
   z.object({ op: z.literal('mkdir'), bucket: Bucket, key: Key }),
@@ -464,6 +469,8 @@ export const S3_LIST_PAGE = 5000
 export interface S3Listing {
   bucket: string
   prefix: string
+  /** Có khi liệt kê bằng `search`: chuỗi đã tìm. */
+  search?: string
   entries: S3Entry[]
   /** Thư mục quá lớn: chỉ hiện phần đầu. */
   truncated: boolean

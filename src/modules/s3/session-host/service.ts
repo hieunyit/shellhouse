@@ -300,7 +300,7 @@ export class S3Service {
         if (!this.custom) this.bucketRegions.set(op.bucket, this.region)
         return null
       case 'list':
-        return this.list(op.bucket, op.prefix, op.token)
+        return this.list(op.bucket, op.prefix, op.token, op.search)
       case 'mkdir':
         await (
           await this.clientFor(op.bucket)
@@ -635,8 +635,15 @@ export class S3Service {
     return id
   }
 
-  async list(bucket: string, prefix: string, startToken?: string): Promise<S3Listing> {
+  async list(
+    bucket: string,
+    prefix: string,
+    startToken?: string,
+    search?: string
+  ): Promise<S3Listing> {
     const client = await this.clientFor(bucket)
+    // Tìm trên server: S3 chỉ lọc theo prefix → hỏi `prefix + search`, tên vẫn tính theo `prefix`.
+    const queryPrefix = prefix + (search ?? '')
     const entries: S3Entry[] = []
     let token: string | undefined = startToken
     let truncated = false
@@ -644,7 +651,7 @@ export class S3Service {
       const out = await client.send(
         new ListObjectsV2Command({
           Bucket: bucket,
-          Prefix: prefix,
+          Prefix: queryPrefix,
           Delimiter: '/',
           ContinuationToken: token
         })
@@ -684,6 +691,7 @@ export class S3Service {
     return {
       bucket,
       prefix,
+      ...(search ? { search } : {}),
       entries,
       truncated,
       ...(truncated && token ? { nextToken: token } : {})

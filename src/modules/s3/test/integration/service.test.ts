@@ -682,4 +682,58 @@ describe('S3', () => {
     )
     await expect(service.run({ op: 'listBuckets' })).rejects.toThrow(/access key ID is not valid/)
   })
+
+  it(
+    '`search` hỏi server theo prefix trong thư mục: tên tính theo thư mục, phân biệt hoa thường, có cả thư mục con',
+    { timeout: 60_000 },
+    async () => {
+      const { s } = await setup()
+      const raw = rawClient()
+      const keys = [
+        ...Array.from({ length: 12 }, (_, i) => `many/f${String(i).padStart(5, '0')}.txt`),
+        'many/zeta.txt',
+        'many/sub/inner.txt'
+      ]
+      await Promise.all(
+        keys.map((Key) => raw.send(new PutObjectCommand({ Bucket: 'demo', Key, Body: 'x' })))
+      )
+      const found = (await s.run({
+        op: 'list',
+        bucket: 'demo',
+        prefix: 'many/',
+        search: 'f0000'
+      })) as S3Listing
+      expect(found.search).toBe('f0000')
+      expect(found.prefix).toBe('many/')
+      expect(found.entries.map((e) => e.name)).toEqual(
+        Array.from({ length: 10 }, (_, i) => `f0000${String(i)}.txt`)
+      )
+      expect(found.entries[0]?.key).toBe('many/f00000.txt')
+
+      const folder = (await s.run({
+        op: 'list',
+        bucket: 'demo',
+        prefix: 'many/',
+        search: 'su'
+      })) as S3Listing
+      expect(folder.entries).toEqual([
+        expect.objectContaining({ name: 'sub', isFolder: true, key: 'many/sub/' })
+      ])
+      // Phân biệt hoa thường (prefix của S3) và không khớp → rỗng, không lỗi.
+      expect(
+        (
+          (await s.run({
+            op: 'list',
+            bucket: 'demo',
+            prefix: 'many/',
+            search: 'ZETA'
+          })) as S3Listing
+        ).entries
+      ).toEqual([])
+      // Không `search` → như cũ (không có trường search).
+      const plain = (await s.run({ op: 'list', bucket: 'demo', prefix: 'many/' })) as S3Listing
+      expect(plain.search).toBeUndefined()
+      expect(plain.entries).toHaveLength(14)
+    }
+  )
 })

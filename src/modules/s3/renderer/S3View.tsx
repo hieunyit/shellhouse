@@ -342,6 +342,49 @@ export function S3View({
     }
   }
 
+  /**
+   * Thư mục lớn hơn một trang: bộ lọc cục bộ chỉ thấy phần đã tải. Gõ chữ lọc → hỏi thẳng S3 các
+   * mục có tên bắt đầu bằng chuỗi đó (prefix, phân biệt hoa thường) và gộp với phần khớp cục bộ.
+   */
+  const [remote, setRemote] = useState<{ query: string; where: string; entries: S3Entry[] } | null>(
+    null
+  )
+  const query = filter.trim()
+  const canSearch = Boolean(bucket && listing?.truncated && query && !versionsMode)
+  const where = `${listing?.bucket ?? ''}/${listing?.prefix ?? ''}`
+  // Đang chờ kết quả = chưa có kết quả khớp đúng chuỗi lọc + thư mục hiện tại.
+  const searching = canSearch && !(remote?.query === query && remote.where === where)
+  useEffect(() => {
+    if (!canSearch || !listing) return
+    const { bucket: b, prefix: p } = listing
+    let cancelled = false
+    const timer = setTimeout(() => {
+      run({ op: 'list', bucket: b, prefix: p, search: query }).then(
+        (result) => {
+          if (cancelled) return
+          setRemote({ query, where: `${b}/${p}`, entries: (result as S3Listing).entries })
+        },
+        () => {
+          if (cancelled) return
+          setRemote({ query, where: `${b}/${p}`, entries: [] })
+        }
+      )
+    }, 350)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+    // listing đổi (Load more) không hỏi lại: kết quả server không phụ thuộc phần đã tải.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSearch, query, listing?.bucket, listing?.prefix, run])
+
+  /** Cuộn gần cuối danh sách còn trang kế → tự tải tiếp (không cần bấm "Load more"). */
+  const onListScroll = (e: React.UIEvent<HTMLDivElement>): void => {
+    const el = e.currentTarget
+    if (listing?.nextToken && !loadingMore && !filter && !versionsMode)
+      if (el.scrollHeight - el.scrollTop - el.clientHeight < 480) void loadMore()
+  }
+
   const goRoot = useCallback(() => {
     loadSeq.current++
     here.current = null
@@ -937,6 +980,11 @@ export function S3View({
     const all = listing?.entries ?? []
     const q = filter.trim().toLowerCase()
     const shown = q ? all.filter((e) => e.name.toLowerCase().includes(q)) : [...all]
+    // Kết quả tìm trên server (phần ngoài trang đã tải) gộp vào, bỏ trùng theo key.
+    if (q && canSearch && remote?.query === filter.trim() && remote.where === where) {
+      const have = new Set(shown.map((e) => e.key))
+      for (const e of remote.entries) if (!have.has(e.key)) shown.push(e)
+    }
     const dir = sort.dir === 'asc' ? 1 : -1
     // Thư mục luôn đứng trước; cùng giá trị thì theo tên (số theo thứ tự tự nhiên: 2 < 10).
     return shown.sort((a, b) => {
@@ -951,7 +999,7 @@ export function S3View({
             : 0
       return (by || collator.compare(a.name, b.name)) * dir
     })
-  }, [listing, filter, sort])
+  }, [listing, filter, sort, remote, canSearch, where])
   const chosen = useMemo(() => entries.filter((e) => selected.has(e.key)), [entries, selected])
   const crumbs = prefix.split('/').filter(Boolean)
   const { fileCount, folderCount, filesSize } = useMemo(() => {
@@ -1321,7 +1369,7 @@ export function S3View({
           <Search size={12} className="shrink-0 text-faint" />
           <input
             className="min-w-0 flex-1 bg-transparent text-ds-sm outline-none placeholder:text-ds-fg-3"
-            placeholder={bucket === null ? t('Filter buckets') : t('Filter by prefix…')}
+            placeholder={bucket === null ? t('Filter buckets') : t('Filter this folder…')}
             aria-label={bucket === null ? t('Filter buckets') : t('Filter this folder')}
             data-testid="s3-filter"
             value={filter}
@@ -1705,6 +1753,7 @@ export function S3View({
               )}
               <div
                 ref={listRef}
+                onScroll={onListScroll}
                 className="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-accent/40 focus-visible:ring-inset"
                 role="grid"
                 aria-label={t('Objects')}
@@ -1744,7 +1793,7 @@ export function S3View({
                     }
                   />
                 )}
-                {listing && entries.length === 0 && (
+                {listing && entries.length === 0 && !searching && (
                   <Empty
                     icon={<FolderOpen size={20} />}
                     title={filter ? t('No matches') : t('This folder is empty')}
@@ -1788,11 +1837,19 @@ export function S3View({
                 ))}
                 {listing?.truncated && (
                   <div className="flex items-center gap-3 p-3 text-xs text-faint">
-                    <span className="min-w-0 flex-1">
-                      {t(
-                        'Showing the first {n} items. The filter only searches items that are loaded.',
-                        { n: formatNumber(listing.entries.length) }
-                      )}
+                    <span className="min-w-0 flex-1" data-testid="s3-truncated-note">
+                      {query
+                        ? searching
+                          ? t('Searching the whole folder for names starting with “{filter}”…', {
+                              filter: query
+                            })
+                          : t(
+                              'Showing the first {n} items, plus names starting with “{filter}” found on the server.',
+                              { n: formatNumber(listing.entries.length), filter: query }
+                            )
+                        : t('Showing the first {n} items. Type in the filter to search them all.', {
+                            n: formatNumber(listing.entries.length)
+                          })}
                     </span>
                     {listing.nextToken && (
                       <Button

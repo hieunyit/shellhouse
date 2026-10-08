@@ -265,8 +265,12 @@ export const s3: Readonly<Record<string, string>> = {
   'This folder is empty': 'Thư mục trống',
   'Drop files here, or upload from your computer.': 'Thả file vào đây, hoặc tải lên từ máy.',
   'Upload files': 'Tải file lên',
-  'Showing the first {n} items. The filter only searches items that are loaded.':
-    'Đang hiện {n} mục đầu tiên. Bộ lọc chỉ tìm trong các mục đã tải.',
+  'Showing the first {n} items. Type in the filter to search them all.':
+    'Đang hiện {n} mục đầu. Gõ vào ô lọc để tìm trong toàn bộ thư mục.',
+  'Showing the first {n} items, plus names starting with “{filter}” found on the server.':
+    'Đang hiện {n} mục đầu, cộng các tên bắt đầu bằng “{filter}” tìm thấy trên server.',
+  'Searching the whole folder for names starting with “{filter}”…':
+    'Đang tìm trong cả thư mục các tên bắt đầu bằng “{filter}”…',
   'Load {n} more': 'Tải thêm {n} mục',
   'Count every object in this folder and its subfolders':
     'Đếm mọi object trong thư mục này và các thư mục con',
@@ -616,7 +620,7 @@ export const s3: Readonly<Record<string, string>> = {
   'Use 3–63 lowercase letters, numbers, dots and hyphens':
     'Dùng 3–63 ký tự gồm chữ thường, số, dấu chấm và gạch ngang',
   'Invalid bucket name': 'Tên bucket không hợp lệ',
-  'Filter by prefix…': 'Lọc theo tiền tố…',
+  'Filter this folder…': 'Lọc trong thư mục này…',
   'Hide buckets': 'Ẩn bucket',
   'Show buckets': 'Hiện bucket',
   'Could not list buckets': 'Không đọc được danh sách bucket',
