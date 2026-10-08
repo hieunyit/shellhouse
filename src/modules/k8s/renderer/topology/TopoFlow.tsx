@@ -310,13 +310,14 @@ export const CardNode = memo(function CardNode({
             'border-[color-mix(in_srgb,var(--map-card-border)_60%,transparent)]'
           )}
           data-testid="k8s-topo-row"
+          // Cả dòng (đường dẫn → backend) thành một chú thích: từng nửa bị cắt thì tooltip nửa kia vô ích.
+          title={r.hint ? `${r.text}  ${r.hint}` : r.text}
         >
           <span
             className={cx(
               'min-w-0 truncate font-mono',
               r.tone === 'bad' ? 'text-danger' : r.tone === 'warn' ? 'text-warning' : 'text-fg'
             )}
-            title={r.text}
           >
             {r.text}
           </span>
@@ -326,7 +327,6 @@ export const CardNode = memo(function CardNode({
                 'ml-auto min-w-0 shrink truncate font-mono',
                 r.tone === 'bad' ? 'text-danger' : 'text-faint'
               )}
-              title={r.hint}
             >
               {r.hint}
             </span>

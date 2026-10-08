@@ -111,7 +111,8 @@ function loadOptions(): Options {
 
 /** Trạng thái xem theo tab (không lưu đĩa): quay lại thấy đúng như cũ. */
 interface TabState {
-  fold: { all: boolean; except: ReadonlySet<string> } | null
+  /** `auto`: giá trị tự động lúc ghi nhớ — đổi (vd. chọn lại namespace) thì bỏ lựa chọn cũ. */
+  fold: { all: boolean; except: ReadonlySet<string>; auto: boolean } | null
   showAll: ReadonlySet<string>
   expanded: ReadonlySet<string>
   focus: string | null
@@ -236,22 +237,29 @@ function TopologyInner({
   const autoFold =
     (data?.namespaces.length ?? 0) >= AUTO_FOLD_NAMESPACES ||
     (data?.workloads.length ?? 0) >= AUTO_FOLD_WORKLOADS
-  const fold = useMemo(
-    () => tab.fold ?? { all: autoFold, except: new Set<string>() },
-    [tab.fold, autoFold]
+  // Lựa chọn thu gọn / mở của người dùng chỉ còn giá trị khi cách tự động không đổi: chọn lại
+  // namespace (1 ↔ nhiều) thì bản đồ theo quy tắc tự động như lúc mới mở.
+  const foldOf = useCallback(
+    (s: TabState): { all: boolean; except: ReadonlySet<string>; auto: boolean } =>
+      s.fold?.auto === autoFold ? s.fold : { all: autoFold, except: new Set(), auto: autoFold },
+    [autoFold]
   )
+  const fold = useMemo(() => foldOf(tab), [tab, foldOf])
   const isFolded = useCallback((ns: string) => fold.all !== fold.except.has(ns), [fold])
+  /** Vừa mở / gập namespace: bản đồ đổi bề rộng → vừa khung lại nếu phần mở ra tràn khỏi màn. */
+  const toggledRef = useRef(false)
   const toggleNs = useCallback(
     (ns: string) => {
+      toggledRef.current = true
       setTab((s) => {
-        const f = s.fold ?? { all: autoFold, except: new Set<string>() }
+        const f = foldOf(s)
         const except = new Set(f.except)
         if (except.has(ns)) except.delete(ns)
         else except.add(ns)
-        return { fold: { all: f.all, except } }
+        return { fold: { all: f.all, except, auto: autoFold } }
       })
     },
-    [setTab, autoFold]
+    [setTab, foldOf, autoFold]
   )
   // Nhóm của namespace cho lưới tổng quan (mục đích / tiền tố / nhãn).
   const groups = useMemo(() => {
@@ -435,6 +443,14 @@ function TopologyInner({
     }
     if (fitWidth(layout, false)) fittedRef.current = scopeKey
   }, [layout, scopeKey, fitWidth])
+  useEffect(() => {
+    if (!layout || !toggledRef.current) return
+    toggledRef.current = false
+    const wrap = wrapRef.current
+    if (!wrap?.clientWidth) return
+    const v = rf.getViewport()
+    if (layout.width * v.zoom + v.x > wrap.clientWidth - 8) fitWidth(layout, false, 200)
+  }, [layout, rf, fitWidth])
   const centerOn = useCallback(
     (id: string) => {
       const n = byId.get(id)
@@ -472,12 +488,12 @@ function TopologyInner({
   const reveal = useCallback(
     (id: string, ns: string) => {
       setTab((s) => {
-        const f = s.fold ?? { all: autoFold, except: new Set<string>() }
+        const f = foldOf(s)
         const except = new Set(f.except)
         if (f.all) except.add(ns)
         else except.delete(ns)
         return {
-          fold: { all: f.all, except },
+          fold: { all: f.all, except, auto: autoFold },
           showAll: new Set([...s.showAll, ns]),
           focus: null
         }
@@ -486,7 +502,7 @@ function TopologyInner({
       setSearchOpen(false)
       setPendingGo(id)
     },
-    [setTab, autoFold]
+    [setTab, foldOf, autoFold]
   )
   useEffect(() => {
     if (!pendingGo || !byId.has(pendingGo)) return
@@ -845,6 +861,15 @@ function TopologyInner({
             }}
           />
         </div>
+        {searchOpen && parsedQuery && !results.length && !hiddenResults.length && (
+          // Không khớp gì: bản đồ đang mờ hết — nói rõ thay vì để người dùng đoán.
+          <div
+            className="absolute top-8 right-0 left-0 z-40 rounded-lg bg-ds-popover px-3 py-2 text-xs text-muted shadow-ds-popover"
+            data-testid="k8s-topo-no-results"
+          >
+            {t('Nothing on the map matches “{query}”', { query: query.trim() })}
+          </div>
+        )}
         {searchOpen && (results.length > 0 || hiddenResults.length > 0) && (
           <div
             className="absolute top-8 right-0 left-0 z-40 max-h-80 overflow-auto rounded-lg bg-ds-popover p-1 shadow-ds-popover"
@@ -1037,7 +1062,8 @@ function TopologyInner({
               icon={anyFolded ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
               testId="k8s-topo-fold-all"
               onClick={() => {
-                setTab({ fold: { all: !anyFolded, except: new Set() } })
+                toggledRef.current = true
+                setTab({ fold: { all: !anyFolded, except: new Set(), auto: autoFold } })
                 close()
               }}
             />
