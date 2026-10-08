@@ -21,6 +21,7 @@ import { DeployKeyDialog, ForwardsPanel, SftpPanel } from '../lazy'
 import type { SftpOp, TransferStatus } from '@shared/sftp'
 import type { ServerStats } from '@shared/server-stats'
 import { PromptDialog } from './PromptDialog'
+import { isFinished, orphanize, splitLocal } from './orphan-transfers'
 import { ServerStatsBar, ServerStatsPlaceholder } from './ServerStatsBar'
 import { t, tn } from '@shared/i18n'
 import { formatNumber, formatTime } from '@shared/i18n/format'
@@ -45,6 +46,9 @@ export function TerminalView({
   const [prompt, setPrompt] = useState<ActivePrompt | null>(null)
   const [forwards, setForwards] = useState<ForwardStatus[]>([])
   const [transfers, setTransfers] = useState<TransferStatus[]>([])
+  /** Lượt truyền của phiên hiện tại / của các phiên đã đóng (xem orphan-transfers). */
+  const liveTransfers = useRef<TransferStatus[]>([])
+  const orphanTransfers = useRef<TransferStatus[]>([])
   const [connected, setConnected] = useState(false)
   /** Module có dấu hiệu trên server này (gợi ý bật). */
   const [detected, setDetected] = useState<string[]>([])
@@ -125,16 +129,54 @@ export function TerminalView({
     [tabId]
   )
   // Trung tâm Transfers (khu vực Transfers + status bar) thấy lượt truyền của phiên này.
+  const publishTransfers = (): void => {
+    setTransfers([...orphanTransfers.current, ...liveTransfers.current])
+  }
+  /** Bỏ một lượt của phiên cũ; `parts`: xoá luôn file part dở trên máy này (tải xuống). */
+  const dropOrphan = (id: string, parts: boolean): void => {
+    const orphan = orphanTransfers.current.find((x) => x.id === id)
+    orphanTransfers.current = orphanTransfers.current.filter((x) => x.id !== id)
+    publishTransfers()
+    if (parts && orphan?.direction === 'download' && orphan.state !== 'done') {
+      const { dir, name } = splitLocal(orphan.localPath)
+      void runSftp({ op: 'discardLocalParts', dir, names: [name] }).catch(() => undefined)
+    }
+  }
   usePublishTransfers({
     id: `sftp:${tabId}`,
     label: sftpOrigin.label,
     kind: 'sftp',
     transfers,
-    cancel: (id) => void runSftp({ op: 'cancel', transferId: id }).catch(() => undefined),
-    retry: (id) => void runSftp({ op: 'retry', transferId: id }).catch(() => undefined),
-    discard: (id) => void runSftp({ op: 'discard', transferId: id }).catch(() => undefined),
-    clear: (keepParts) =>
-      void runSftp({ op: 'clearDone', keepParts: keepParts === true }).catch(() => undefined),
+    cancel: (id) => {
+      if (orphanTransfers.current.some((x) => x.id === id)) dropOrphan(id, false)
+      else void runSftp({ op: 'cancel', transferId: id }).catch(() => undefined)
+    },
+    retry: (id) => {
+      const orphan = orphanTransfers.current.find((x) => x.id === id)
+      // Phiên cũ đã mất hàng đợi: chạy lại như lượt mới trên phiên hiện tại (tiếp tục từ file part).
+      if (orphan)
+        void runSftp({
+          op: orphan.direction,
+          localPath: orphan.localPath,
+          remotePath: orphan.remotePath,
+          overwrite: true
+        }).then(
+          () => {
+            dropOrphan(id, false)
+          },
+          () => undefined
+        )
+      else void runSftp({ op: 'retry', transferId: id }).catch(() => undefined)
+    },
+    discard: (id) => {
+      if (orphanTransfers.current.some((x) => x.id === id)) dropOrphan(id, true)
+      else void runSftp({ op: 'discard', transferId: id }).catch(() => undefined)
+    },
+    clear: (keepParts) => {
+      for (const x of orphanTransfers.current.filter(isFinished))
+        dropOrphan(x.id, keepParts !== true && x.state !== 'done')
+      void runSftp({ op: 'clearDone', keepParts: keepParts === true }).catch(() => undefined)
+    },
     reveal: () => {
       useTabs.getState().activate(tabId)
     }
@@ -152,10 +194,27 @@ export function TerminalView({
         useTabStatus.getState().setPrompt(tabId, p)
       },
       onForwards: setForwards,
-      onTransfers: setTransfers,
+      onTransfers: (list) => {
+        liveTransfers.current = list
+        publishTransfers()
+      },
       onStats: setStats,
       onLatency: setLatency,
-      onConnectedChange: setConnected,
+      onConnectedChange: (isConnected) => {
+        setConnected(isConnected)
+        // Phiên đóng: lượt đang chạy của nó không bao giờ có tin nữa → chốt thành lỗi (không để "ma").
+        if (!isConnected && liveTransfers.current.length > 0) {
+          orphanTransfers.current = [
+            ...orphanTransfers.current,
+            ...orphanize(
+              liveTransfers.current,
+              t('Connection lost — start the transfer again to resume')
+            )
+          ]
+          liveTransfers.current = []
+          publishTransfers()
+        }
+      },
       onModuleSuggest: setDetected,
       onContextMenu: (x, y) => {
         useTerminalMenu.getState().open(tabId, x, y)

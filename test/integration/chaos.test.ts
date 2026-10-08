@@ -190,6 +190,35 @@ describe.skipIf(!findSftpServer())('Mạng xấu: SFTP', () => {
     expect(sha(readFileSync(join(local, 'big.bin')))).toBe(sha(data))
   }, 60_000)
 
+  it('mạng treo (không RST) rồi phiên đóng → lượt đang chạy chốt thành lỗi và được báo ngay (không "ma")', async () => {
+    const remote = tempDir()
+    const local = tempDir()
+    writeFileSync(join(remote, 'big.bin'), randomBytes(8 * 1024 * 1024))
+    const s = await server({ sftpRoot: remote })
+    const p = await proxy(s.port, { bytesPerSecond: 4 * 1024 * 1024 })
+    const c = await ssh(p.port)
+    const sftp = new SftpService(c.shell.client)
+    const updates: TransferStatus[][] = []
+    const queue = new TransferQueue(sftp, (l) => updates.push(l))
+    const id = queue.enqueue('download', join(local, 'big.bin'), join(remote, 'big.bin'), false)
+    await until(
+      () => (queue.list().find((t) => t.id === id)?.transferred ?? 0) > 1024 * 1024,
+      20_000,
+      '1 MB'
+    )
+    // Treo hẳn: callback của ssh2 không bao giờ được gọi nữa — chỉ dispose() mới chốt được trạng thái.
+    p.freeze()
+    queue.dispose()
+    sftp.close()
+    const last = updates.at(-1)?.find((t) => t.id === id)
+    expect(last?.state).toBe('error')
+    expect(last?.error).toMatch(/Connection closed/)
+    expect(last?.bytesPerSecond).toBe(0)
+    expect((await queue.settled(id)).state).toBe('error')
+    // File part (đủ lớn để tiếp tục) được giữ lại cho lần tải sau.
+    await until(() => queue.list().length === 1, 2_000, 'list')
+  }, 40_000)
+
   it('đứt kết nối giữa lúc tải lên → kết nối mới tải tiếp đúng sha256', async () => {
     const remote = tempDir()
     const local = tempDir()

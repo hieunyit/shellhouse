@@ -133,6 +133,10 @@ export const terminal: Readonly<Record<string, string>> = {
   '{time} left': 'còn {time}',
   'Retry failed': 'Thử lại các lượt lỗi',
   'Cancel all': 'Huỷ tất cả',
+  'Hide files': 'Ẩn các file',
+  'Show files': 'Hiện các file',
+  'Showing the first {n} files.': 'Đang hiện {n} file đầu.',
+  'Show all {n}': 'Hiện cả {n}',
   'Clear finished': 'Dọn lượt đã xong',
   'Clear finished transfers': 'Dọn các lượt truyền đã xong',
   '{n} incomplete transfer keeps a partial file ({size}) so it can resume later. Delete it too?':
@@ -159,6 +163,11 @@ export const terminal: Readonly<Record<string, string>> = {
     'File nguồn ngắn hơn dự kiến (đã bị sửa?)',
   'The local file changed during the upload': 'File trên máy đã thay đổi trong lúc tải lên',
   'Connection lost': 'Mất kết nối',
+  'Connection closed': 'Kết nối đã đóng',
+  'Connection closed — download or upload the same file again to resume':
+    'Kết nối đã đóng — tải lại đúng file này để tiếp tục',
+  'Connection lost — start the transfer again to resume':
+    'Mất kết nối — bắt đầu lại lượt truyền để tiếp tục',
   'This is a folder': 'Đây là thư mục',
   'The file is too large to save from the editor': 'File quá lớn để lưu từ editor',
   'Folder is too large to delete recursively (more than {max} items)':

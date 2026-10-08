@@ -1,4 +1,5 @@
 import { t } from '@shared/i18n'
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { mkdir, readdir } from 'node:fs/promises'
 import { basename, join } from 'node:path'
@@ -76,7 +77,8 @@ export async function downloadFolder(
   dirs.sort()
   files.sort(byPath((f) => f.remote))
   for (const dir of dirs) await mkdir(dir, { recursive: true })
-  for (const f of files) transfers.enqueue('download', f.local, f.remote, overwrite)
+  const batch = { id: randomUUID(), label: baseName(remoteDir) }
+  for (const f of files) transfers.enqueue('download', f.local, f.remote, overwrite, { batch })
   return files.length
 }
 
@@ -117,6 +119,7 @@ export async function uploadFolder(
       if (!(await sftp.statOrNull(dir))) await sftp.mkdir(dir)
     })
   files.sort(byPath((f) => f.remote))
-  for (const f of files) transfers.enqueue('upload', f.local, f.remote, overwrite)
+  const batch = { id: randomUUID(), label: basename(localDir) }
+  for (const f of files) transfers.enqueue('upload', f.local, f.remote, overwrite, { batch })
   return files.length
 }

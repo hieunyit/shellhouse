@@ -2,7 +2,12 @@ import { promises as fs } from 'node:fs'
 import { isAbsolute } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { t } from '@shared/i18n'
-import { PART_META_SUFFIX, PART_SUFFIX, type TransferStatus } from '@shared/sftp'
+import {
+  PART_META_SUFFIX,
+  PART_SUFFIX,
+  type TransferBatch,
+  type TransferStatus
+} from '@shared/sftp'
 import {
   openLocal,
   pipelinedDownload,
@@ -46,6 +51,8 @@ interface Job {
    * ngay), 'resumable' = giữ lại để tiếp tục, 'none' = chưa tạo (lỗi trước khi mở part).
    */
   part: 'none' | 'temp' | 'resumable'
+  /** Phiên đóng khi đang chạy: trạng thái cuối đã chốt trong dispose(). */
+  sessionEnded?: boolean
   /** Người chờ lượt truyền kết thúc (done / error / cancelled). */
   waiters: ((status: TransferStatus) => void)[]
 }
@@ -58,6 +65,8 @@ export interface EnqueueOptions {
   mode?: number
   /** Luôn làm lại từ đầu, bỏ file part cũ (tải về để sửa; lượt `edit` luôn như vậy). */
   noResume?: boolean
+  /** Lượt thuộc một lần tải thư mục (xem TransferBatch). */
+  batch?: TransferBatch
 }
 
 /**
@@ -170,7 +179,8 @@ export class TransferQueue {
         state: 'queued',
         error: null,
         bytesPerSecond: 0,
-        ...(options.edit ? { edit: true } : {})
+        ...(options.edit ? { edit: true } : {}),
+        ...(options.batch ? { batch: options.batch } : {})
       },
       overwrite,
       cancelled: false,
@@ -272,20 +282,27 @@ export class TransferQueue {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    let changed = false
     for (const job of this.jobs.values()) {
       job.cancelled = true
       if (job.status.state === 'queued') {
         job.status.state = 'cancelled'
         this.settle(job)
-        changed = true
+      } else if (job.status.state === 'running') {
+        // Phiên đóng (đứt kết nối, đóng tab) khi đang truyền: chốt "lỗi" ngay, gửi cho renderer. Không
+        // chờ đường ống tự thất bại — kết nối chết thì callback của ssh2 không bao giờ gọi, và sau
+        // dispose() `notify` bị tắt: renderer sẽ mãi thấy "đang chạy 39%" (lượt truyền ma).
+        job.sessionEnded = true
+        job.status.state = 'error'
+        job.status.error = t('Connection closed — download or upload the same file again to resume')
+        job.status.bytesPerSecond = 0
+        if (job.part === 'resumable' && job.status.transferred > 0) job.status.resumable = true
+        this.settle(job)
       }
     }
-    // Lần báo đang chờ (gom ~30 ms) không được mất: gửi ngay trạng thái cuối.
-    const pending = this.notifyTimer !== null
+    // Lần báo đang chờ (gom ~30 ms) không được mất: luôn gửi trạng thái cuối.
     if (this.notifyTimer) clearTimeout(this.notifyTimer)
     this.notifyTimer = null
-    if (pending || changed) this.onChange(this.list())
+    this.onChange(this.list())
   }
 
   private pump(): void {
@@ -315,6 +332,8 @@ export class TransferQueue {
       // Dọn / giữ file part TRƯỚC khi đổi trạng thái: ai thấy 'cancelled' / 'error' (renderer, test)
       // thì file part đã ở trạng thái cuối — không còn khoảng hở thấy rác vừa bị xoá.
       await this.afterFailure(job)
+      // Phiên đã đóng: trạng thái cuối đã chốt và gửi trong dispose().
+      if (job.sessionEnded) return
       job.status.state = job.cancelled ? 'cancelled' : 'error'
       job.status.error = job.cancelled ? null : errorText(error)
     } finally {

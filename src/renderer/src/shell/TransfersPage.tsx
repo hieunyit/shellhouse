@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import {
   ArrowLeftRight,
+  ChevronDown,
+  ChevronRight,
   CircleAlert,
   Download,
   FolderOpen,
@@ -20,6 +22,7 @@ import { cx, ICON, ICON_SM } from '../ds/utils'
 import { AreaHeader } from '../components/AreaHeader'
 import { useTransfers, type TransferSource } from '../stores/transfers'
 import { TRANSFER_FILTERS, matchesFilter, useTransfersFilter } from './transfers-filter'
+import { collapseBatches, sectionOf, type TransferEntry } from './transfer-batches'
 
 interface Item {
   src: TransferSource
@@ -85,6 +88,8 @@ export function TransfersPage(): React.JSX.Element {
         x.localPath.toLowerCase().includes(q) ||
         src.label.toLowerCase().includes(q))
   )
+  // Lần tải thư mục gộp thành một dòng (mở ra mới thấy từng file).
+  const entries = useMemo(() => collapseBatches(visible), [visible])
   const running = all.filter(({ x }) => x.state === 'running')
   const speed = running.reduce((n, { x }) => n + x.bytesPerSecond, 0)
   const finished = all.some(({ x }) => x.state !== 'running' && x.state !== 'queued')
@@ -204,7 +209,9 @@ export function TransfersPage(): React.JSX.Element {
           />
         ) : (
           GROUPS.map((g) => {
-            const items = visible.filter(({ x }) => groupOf(x) === g.id)
+            const items = entries.filter(
+              (e) => (e.kind === 'one' ? groupOf(e.item.x) : sectionOf(e.summary)) === g.id
+            )
             if (items.length === 0) return null
             return (
               <section key={g.id} data-testid={`transfers-group-${g.id}`}>
@@ -226,9 +233,13 @@ export function TransfersPage(): React.JSX.Element {
                   )}
                 </div>
                 <ul data-testid="transfers-center-list">
-                  {items.map((item) => (
-                    <Row key={`${item.src.id}:${item.x.id}`} item={item} />
-                  ))}
+                  {items.map((e) =>
+                    e.kind === 'one' ? (
+                      <Row key={e.key} item={e.item} />
+                    ) : (
+                      <BatchRow key={e.key} entry={e} />
+                    )
+                  )}
                 </ul>
               </section>
             )
@@ -236,6 +247,153 @@ export function TransfersPage(): React.JSX.Element {
         )}
       </div>
     </div>
+  )
+}
+
+/** Số dòng file hiện khi mở một lần tải thư mục (danh sách dài hơn: nút "Show all"). */
+const BATCH_PREVIEW = 100
+
+/** Một lần tải thư mục: một dòng tổng hợp; mở ra để thấy từng file. */
+function BatchRow({
+  entry
+}: {
+  entry: Extract<TransferEntry<TransferSource>, { kind: 'batch' }>
+}): React.JSX.Element {
+  const { src, members, summary: s, label } = entry
+  const [open, setOpen] = useState(false)
+  const [all, setAll] = useState(false)
+  const first = members[0]?.x
+  const upload = first?.direction === 'upload'
+  const active = s.running + s.queued
+  const failedMembers = members.filter(({ x }) => x.state === 'error' || x.state === 'cancelled')
+  const section = sectionOf(s)
+  const Dir = upload ? Upload : Download
+  const right =
+    section === 'done'
+      ? formatBytes(s.size)
+      : [formatPercent(s.ratio), s.bytesPerSecond > 0 && formatRate(s.bytesPerSecond)]
+          .filter(Boolean)
+          .join(' · ')
+  const parts = [
+    t('{n} files', { n: s.count }),
+    s.done > 0 && s.done < s.count && t('{n} done', { n: s.done }),
+    s.failed > 0 && t('{n} failed', { n: s.failed })
+  ].filter(Boolean)
+  const shown = all ? members : members.slice(0, BATCH_PREVIEW)
+  return (
+    <>
+      <li
+        className="group grid min-h-13 grid-cols-[20px_minmax(0,1.3fr)_minmax(0,1.4fr)_160px_150px_64px] items-center gap-3 border-b border-ds-border-subtle px-4 py-2 hover:bg-ds-hover"
+        data-testid="transfers-batch-row"
+        data-section={section}
+      >
+        <button
+          type="button"
+          className="flex size-5 items-center justify-center rounded-ds-sm text-ds-fg-3 hover:text-ds-fg"
+          aria-expanded={open}
+          aria-label={open ? t('Hide files') : t('Show files')}
+          data-testid="transfers-batch-toggle"
+          onClick={() => {
+            setOpen(!open)
+          }}
+        >
+          {open ? <ChevronDown {...ICON_SM} /> : <ChevronRight {...ICON_SM} />}
+        </button>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 truncate text-ds-base font-medium text-ds-fg">
+            <Dir {...ICON_SM} className="shrink-0 text-ds-fg-3" />
+            <span className="truncate" title={label}>
+              {label}/
+            </span>
+          </div>
+          <div className="truncate text-ds-sm text-ds-fg-3">
+            {src.kind.toUpperCase()} · {upload ? t('upload') : t('download')} · {parts.join(' · ')}
+          </div>
+        </div>
+        <div
+          className="truncate font-mono text-ds-sm text-ds-fg-2"
+          title={first ? route({ src, x: first }) : ''}
+        >
+          {first ? route({ src, x: first }) : ''}
+        </div>
+        <div>
+          {section !== 'done' && (
+            <div
+              className="h-1 overflow-hidden rounded-full bg-ds-surface-3"
+              role="progressbar"
+              aria-label={label}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.floor(s.ratio * 100)}
+            >
+              <div
+                className={cx(
+                  'h-full rounded-full',
+                  section === 'failed' ? 'bg-ds-danger' : 'bg-ds-info'
+                )}
+                style={{ width: `${String(s.ratio * 100)}%` }}
+              />
+            </div>
+          )}
+        </div>
+        <div className="text-right text-ds-sm tabular-nums text-ds-fg-2">{right}</div>
+        <div className="flex items-center justify-end gap-0.5">
+          {active > 0 && (
+            <IconButton
+              label={t('Cancel all')}
+              size="sm"
+              data-testid="transfers-batch-cancel"
+              onClick={() => {
+                for (const { x } of members)
+                  if (x.state === 'running' || x.state === 'queued') src.cancel(x.id)
+              }}
+            >
+              <X {...ICON_SM} />
+            </IconButton>
+          )}
+          {failedMembers.length > 0 && src.retry && (
+            <IconButton
+              label={t('Retry failed')}
+              size="sm"
+              data-testid="transfers-batch-retry"
+              onClick={() => {
+                for (const { x } of failedMembers) src.retry?.(x.id)
+              }}
+            >
+              <RotateCcw {...ICON_SM} />
+            </IconButton>
+          )}
+          {failedMembers.length > 0 && src.discard && (
+            <IconButton
+              label={t('Remove from list')}
+              size="sm"
+              data-testid="transfers-batch-discard"
+              onClick={() => {
+                for (const { x } of failedMembers) src.discard?.(x.id)
+              }}
+            >
+              <Trash2 {...ICON_SM} />
+            </IconButton>
+          )}
+        </div>
+      </li>
+      {open && shown.map((m) => <Row key={`${m.src.id}:${m.x.id}`} item={m} />)}
+      {open && !all && members.length > BATCH_PREVIEW && (
+        <li className="border-b border-ds-border-subtle px-4 py-2 text-ds-sm text-ds-fg-3">
+          {t('Showing the first {n} files.', { n: BATCH_PREVIEW })}{' '}
+          <button
+            type="button"
+            className="text-ds-accent hover:underline"
+            data-testid="transfers-batch-show-all"
+            onClick={() => {
+              setAll(true)
+            }}
+          >
+            {t('Show all {n}', { n: members.length })}
+          </button>
+        </li>
+      )}
+    </>
   )
 }
 

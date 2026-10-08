@@ -547,7 +547,10 @@ export class SftpService implements LossGuard {
   }
 
   close(): void {
-    void this.sftp?.then(
+    // Kết nối đã chết thì `end()` không làm callback đang chờ được gọi — báo mất để chúng thất bại.
+    const channel = this.sftp
+    this.markLost(new Error(t('Connection closed')))
+    void channel?.then(
       (s) => {
         s.end()
       },

@@ -160,6 +160,15 @@ export interface TransferStatus {
   edit?: boolean
   /** Lỗi / huỷ mà còn giữ file part: "Resume" tiếp tục từ chỗ dừng, "Discard" xoá file part. */
   resumable?: boolean
+  /** Cùng một lần tải thư mục: Transfers gộp thành một dòng (hàng trăm file nhỏ không ngập danh sách). */
+  batch?: TransferBatch
+}
+
+/** Nhóm lượt truyền của một lần tải thư mục. */
+export interface TransferBatch {
+  id: string
+  /** Tên thư mục. */
+  label: string
 }
 
 /** Chuỗi quyền kiểu `ls -l`: rwxr-xr-x. */
