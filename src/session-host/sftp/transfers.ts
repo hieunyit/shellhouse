@@ -196,6 +196,14 @@ export class TransferQueue {
   }
 
   /** Chờ lượt truyền kết thúc; trả về trạng thái cuối. */
+  /** Các lượt đang chạy ngầm (đã chốt trạng thái nhưng chưa trả file đang mở / dọn xong). */
+  private readonly active = new Set<Promise<void>>()
+
+  /** Xong khi mọi lượt chạy ngầm đã kết thúc hẳn — file local đã đóng. */
+  async drained(): Promise<void> {
+    await Promise.allSettled([...this.active])
+  }
+
   settled(id: string): Promise<TransferStatus> {
     const job = this.jobs.get(id)
     if (!job) return Promise.reject(new Error(t('Unknown transfer')))
@@ -313,10 +321,12 @@ export class TransferQueue {
       this.running++
       job.status.state = 'running'
       this.notify(true)
-      void this.run(job).finally(() => {
+      const run = this.run(job).finally(() => {
         this.running--
+        this.active.delete(run)
         this.pump()
       })
+      this.active.add(run)
     }
   }
 
