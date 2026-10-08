@@ -198,7 +198,28 @@ export class Session {
     try {
       if (this.spec.kind === 'local') {
         const launch = resolveLocalShell(this.deps.appVersion, this.spec.shell)
-        this.transport = new LocalPty(launch, this.spec.cols, this.spec.rows, callbacks)
+        const spawnedAt = Date.now()
+        let firstOutput = true
+        // Shell chậm lên prompt gần như luôn do file khởi động của nó (~/.bashrc, nvm, conda…) — ghi
+        // lại thời gian tới dòng đầu tiên để phân biệt với lỗi của app.
+        const timed = {
+          ...callbacks,
+          onData: (data: Uint8Array) => {
+            if (firstOutput) {
+              firstOutput = false
+              const ms = Date.now() - spawnedAt
+              this.deps.log(
+                ms > 1500 ? 'warn' : 'info',
+                `Session ${this.id}: ${launch.file} printed its first output after ${String(ms)} ms` +
+                  (ms > 1500
+                    ? ' — slow: the delay is the shell startup files (~/.bashrc, ~/.profile…), not Shellhouse'
+                    : '')
+              )
+            }
+            callbacks.onData(data)
+          }
+        }
+        this.transport = new LocalPty(launch, this.spec.cols, this.spec.rows, timed)
         this.deps.log('info', `Session ${this.id}: started ${launch.file}`)
       } else if (this.spec.kind === 'module') {
         const { module, sessionKind } = this.spec
