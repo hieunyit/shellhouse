@@ -214,6 +214,9 @@ export const k8sMap: Readonly<Record<string, string>> = {
     'Mọi traffic inbound bị NetworkPolicy {names} chặn',
   'No controller': 'Không có controller',
   'Claim is {status}': 'Claim đang {status}',
+  'Claim is {status} and no workload uses it': 'Claim đang {status} và chưa workload nào dùng',
+  'Pending is normal while waiting for a first consumer; otherwise check the StorageClass and the provisioner.':
+    'Pending là bình thường khi chờ pod đầu tiên dùng; nếu không, kiểm tra StorageClass và provisioner.',
   'Selector {selector} matches no pods — the Service has no endpoints':
     'Selector {selector} không khớp pod nào — Service không có endpoint',
   'No ready endpoints — requests to this Service fail':

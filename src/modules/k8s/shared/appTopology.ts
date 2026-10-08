@@ -750,6 +750,37 @@ function namespaceGraph(
     }
   }
 
+  // ——— PVC có vấn đề nhưng không workload nào gắn (chờ StorageClass, hết dung lượng…) ———
+  // Không hiện thì lỗi này vô hình trên bản đồ: không thẻ nào trỏ tới nó.
+  const claimed = new Set(workloads.flatMap((w) => w.pvcs))
+  for (const v of ix.pvcs.get(ns) ?? []) {
+    if (v.tone === 'ok' || claimed.has(v.name)) continue
+    addNode({
+      id: `pvc:${ns}/${v.name}`,
+      kind: 'pvc',
+      lane: 'deps',
+      ns,
+      name: v.name,
+      title: 'PersistentVolumeClaim',
+      sub: [v.status, v.capacity, v.storageClass].filter(Boolean).join(' · '),
+      tone: v.tone,
+      ref: { kind: 'persistentvolumeclaims', ns, name: v.name },
+      problems: [
+        {
+          code: 'pvc-unused',
+          severity: v.tone === 'bad' ? 'bad' : 'warn',
+          text: t('Claim is {status} and no workload uses it', {
+            status: v.status || t('not bound')
+          }),
+          fix: t(
+            'Pending is normal while waiting for a first consumer; otherwise check the StorageClass and the provisioner.'
+          )
+        }
+      ],
+      row: LOOSE_ROW
+    })
+  }
+
   // ——— Service ———
   const svcRow = new Map<string, number>()
   const missingSvc = new Map<string, TopoNode>()
@@ -852,7 +883,12 @@ function namespaceGraph(
       ? t('Headless')
       : s.type === 'ExternalName'
         ? `ExternalName → ${s.externalName ?? ''}`
-        : s.type
+        : s.type === 'NodePort'
+          ? [
+              s.type,
+              ...(s.portList ?? []).flatMap((p) => (p.nodePort ? [`:${String(p.nodePort)}`] : []))
+            ].join(' ')
+          : s.type
     const status =
       s.type === 'ExternalName'
         ? (s.externalName ?? '')
@@ -899,8 +935,9 @@ function namespaceGraph(
     const standaloneNode = wlNode.get(null)
     if (loose.length && standaloneNode)
       addEdge({ id: `${id}>${standaloneNode.id}`, from: id, to: standaloneNode.id, kind: 'select' })
-    // LoadBalancer / NodePort: lối vào từ ngoài cluster.
-    if (s.type === 'LoadBalancer' || s.type === 'NodePort') {
+    // LoadBalancer: lối vào từ ngoài cluster. NodePort không vẽ thêm nút riêng — thẻ Service đã ghi
+    // cổng node (cùng một thứ, vẽ hai lần chỉ làm rối).
+    if (s.type === 'LoadBalancer') {
       const lid = `lb:${ns}/${s.name}`
       const addr = s.external ?? []
       addNode({
@@ -910,18 +947,13 @@ function namespaceGraph(
         ns,
         name: s.name,
         title: s.type,
-        sub: addr.length
-          ? addr.join(', ')
-          : s.type === 'LoadBalancer'
-            ? t('Address pending')
-            : t('Every node'),
-        tone: s.type === 'LoadBalancer' && !addr.length ? 'warn' : 'ok',
+        sub: addr.length ? addr.join(', ') : t('Address pending'),
+        tone: addr.length ? 'ok' : 'warn',
         ref: { kind: 'services', ns, name: s.name },
         rows: (s.portList ?? []).map((p) => ({
-          text:
-            s.type === 'NodePort' || !addr.length
-              ? `:${String(p.nodePort ?? p.port)}`
-              : `${addr[0] ?? ''}:${String(p.port)}`,
+          text: !addr.length
+            ? `:${String(p.nodePort ?? p.port)}`
+            : `${addr[0] ?? ''}:${String(p.port)}`,
           hint: `→ ${String(p.port)}`
         })),
         problems: [],

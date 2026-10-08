@@ -810,3 +810,38 @@ describe('Định tuyến cạnh trực giao (mỗi cạnh một làn dọc)', (
     }
   })
 })
+
+describe('Bản đồ: NodePort, PVC mồ côi', () => {
+  it('NodePort không vẽ thêm nút lối vào — thẻ Service ghi cổng node; LoadBalancer vẫn có', () => {
+    const d = data()
+    d.services.push({
+      ns: 'shop',
+      name: 'np',
+      selector: { app: 'web' },
+      type: 'NodePort',
+      ports: '8000:31001/TCP',
+      clusterIP: '10.0.0.9',
+      portList: [{ port: 8000, targetPort: '8000', nodePort: 31001 }]
+    })
+    const n = byId(buildTopology(d, OPTS))
+    expect(n.has('lb:shop/np')).toBe(false)
+    expect(n.get('svc:shop/np')?.sub).toBe('NodePort :31001')
+    expect(n.get('lb:shop/edge')).toMatchObject({ title: 'LoadBalancer' })
+  })
+
+  it('PVC Pending không workload nào dùng vẫn hiện (nút + vấn đề); PVC đang được dùng thì không nhân đôi', () => {
+    const d = data()
+    d.pvcs.push({ ns: 'shop', name: 'stuck', status: 'Pending', capacity: '', tone: 'warn' })
+    const g = buildTopology(d, OPTS)
+    const n = byId(g)
+    expect(n.get('pvc:shop/stuck')).toMatchObject({ kind: 'pvc', tone: 'warn' })
+    expect(codes(n.get('pvc:shop/stuck'))).toEqual(['pvc-unused'])
+    expect(g.problems.some((p) => p.node === 'pvc:shop/stuck')).toBe(true)
+    // `data-db-0` do StatefulSet db dùng → là phụ thuộc bình thường, không bị coi là mồ côi.
+    expect(g.nodes.filter((x) => x.id === 'pvc:shop/data-db-0')).toHaveLength(1)
+    expect(codes(n.get('pvc:shop/data-db-0'))).not.toContain('pvc-unused')
+    // PVC Bound không workload dùng: không phải vấn đề.
+    d.pvcs.push({ ns: 'shop', name: 'spare', status: 'Bound', capacity: '1Gi', tone: 'ok' })
+    expect(byId(buildTopology(d, OPTS)).has('pvc:shop/spare')).toBe(false)
+  })
+})

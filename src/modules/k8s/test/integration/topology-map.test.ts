@@ -166,7 +166,9 @@ describe('Topology tĩnh — từ API server tới bố cục', () => {
     expect(codes('svc:shop/api')).toEqual([])
     expect(codes('svc:shop/postgres')).toEqual([])
     expect(n.get('lb:shop/web-public')).toMatchObject({ lane: 'entry', title: 'LoadBalancer' })
-    expect(n.get('lb:payments/checkout')).toMatchObject({ lane: 'entry', title: 'NodePort' })
+    // NodePort không có nút lối vào riêng — thẻ Service ghi cổng node.
+    expect(n.has('lb:payments/checkout')).toBe(false)
+    expect(n.get('svc:payments/checkout')?.sub).toMatch(/^NodePort :\d+/)
     expect(n.get('wl:daemonsets.apps:monitoring/node-exporter')?.replicas).toEqual({
       ready: 1,
       desired: 2
