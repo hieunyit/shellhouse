@@ -61,6 +61,7 @@ import { debugEphemeral, debugNode } from './debug'
 import { diffObjects } from './diff'
 import { helmRevision, helmRollback, helmUninstall } from './helm'
 import { mapData } from './map'
+import { egressData } from './egress'
 import { recordEvents } from './eventRecorder'
 import { workloadTimeline } from './timeline'
 import { eventCounts, probeHistory, trafficRange, trafficSeries } from './history'
@@ -496,6 +497,8 @@ export class K8sService implements HostModuleSession {
       }
       case 'map':
         return mapData(client, op.namespaces, signal)
+      case 'egress':
+        return egressData(client, op.namespaces, op.secrets, signal)
       case 'helm.releases':
         return helmReleases(client, op.namespaces, signal)
       case 'helm.release':

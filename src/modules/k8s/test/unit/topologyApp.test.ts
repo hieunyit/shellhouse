@@ -12,6 +12,7 @@ import {
   type TopoNode,
   type TopoOptions
 } from '../../shared/appTopology'
+import { egressRows, type EgressItem } from '../../shared/egress'
 import type { MapData, MapPod, MapWorkload } from '../../shared/map'
 
 afterEach(() => {
@@ -892,5 +893,69 @@ describe('Bản đồ: NodePort, PVC mồ côi, namespace lớn chia khối', ()
     const plan = planBlocks(many, [{ from: 'n0', to: 'n59' }])
     expect(new Set(plan.values()).size).toBeGreaterThan(1)
     expect(plan.get(0)).toBe(plan.get(59))
+  })
+})
+
+describe('Làn Outbound — điểm đến khai báo trong cấu hình', () => {
+  const web = { kind: 'deployments.apps', ns: 'shop', name: 'web' }
+  const items: EgressItem[] = [
+    { workload: web, source: 'env', via: '', key: 'DB_HOST', host: 'pg.prod.corp', port: 5432 },
+    { workload: web, source: 'secret', via: 'db', key: 'url', host: 'pg.prod.corp', port: 5432 },
+    { workload: web, source: 'env', via: '', key: 'API', host: 'api.stripe.com', port: 443 },
+    // Service trong cluster (cùng namespace) và Service ExternalName.
+    { workload: web, source: 'args', via: '', key: 'upstream', host: 'api', port: 80 },
+    { workload: web, source: 'env', via: '', key: 'PAY', host: 'payments', port: 443 }
+  ]
+  const d = data()
+  const rows = egressRows(items, d)
+
+  it('không truyền egress → không có làn / thẻ / cạnh Outbound', () => {
+    const g = buildTopology(d, OPTS)
+    expect(g.nodes.some((n) => n.kind === 'external')).toBe(false)
+    expect(g.edges.some((e) => e.kind === 'calls')).toBe(false)
+  })
+
+  it('mỗi đích một thẻ (gộp nhiều nguồn / nhiều workload), cạnh từ nhóm pod', () => {
+    const g = buildTopology(d, { ...OPTS, egress: rows })
+    const ext = g.nodes.filter((n) => n.kind === 'external')
+    expect(ext.map((n) => n.name).sort()).toEqual(
+      ['api.stripe.com:443', 'pay.example.com:443', 'pg.prod.corp:5432', 'shop/api:80'].sort()
+    )
+    expect(ext.every((n) => n.lane === 'egress')).toBe(true)
+    const pg = ext.find((n) => n.name === 'pg.prod.corp:5432')
+    expect(pg?.rows?.map((r) => r.text)).toEqual(['web'])
+    const calls = g.edges.filter((e) => e.kind === 'calls')
+    expect(calls).toHaveLength(4)
+    expect(calls.every((e) => e.from === 'pods:wl:deployments.apps:shop/web')).toBe(true)
+    // ExternalName: đích thật là tên bên ngoài, nhớ Service đã dùng.
+    const pay = ext.find((n) => n.name === 'pay.example.com:443')
+    expect(pay?.dest?.kind).toBe('external')
+    expect(pay?.sub).toContain('shop/payments')
+  })
+
+  it('bố cục: làn Outbound là cột cuối, bên phải Pods', () => {
+    const g = buildTopology(d, { ...OPTS, egress: rows, showDeps: true })
+    const l = layoutTopology(g)
+    const lanes = l.columns.map((c) => c.lane)
+    expect(lanes.at(-1)).toBe('egress')
+    expect(lanes.indexOf('egress')).toBeGreaterThan(lanes.indexOf('pods'))
+    const placed = l.nodes.filter((n) => n.kind === 'external')
+    const col = l.columns.find((c) => c.lane === 'egress')
+    expect(placed.every((n) => n.x >= (col?.x ?? 0))).toBe(true)
+  })
+
+  it('quá nhiều đích trong một namespace → gộp "+N more"', () => {
+    const many: EgressItem[] = Array.from({ length: 40 }, (_, i) => ({
+      workload: web,
+      source: 'env' as const,
+      via: '',
+      key: `H${String(i)}`,
+      host: `h${String(i)}.example.com`,
+      port: 443
+    }))
+    const g = buildTopology(d, { ...OPTS, egress: egressRows(many, d) })
+    expect(g.nodes.filter((n) => n.kind === 'external')).toHaveLength(24)
+    const more = g.nodes.find((n) => n.id === 'more-egress:shop')
+    expect(more?.more).toBe(16)
   })
 })

@@ -38,6 +38,7 @@ import {
   type TopoLayout,
   type TopoNode
 } from '../../shared/appTopology'
+import type { EgressRow } from '../../shared/egress'
 import {
   groupNamespaces,
   groupOrder,
@@ -137,6 +138,14 @@ export interface TopologyMapProps {
   traffic: TrafficState
   trafficOn: boolean
   onTrafficOn: (on: boolean) => void
+  /** Làn Outbound: điểm đến khai báo trong cấu hình (env, ConfigMap, Secret). */
+  egress: {
+    on: boolean
+    rows: readonly EgressRow[] | null
+    secrets: boolean
+    onOn: (on: boolean) => void
+    onSecrets: (on: boolean) => void
+  }
   darkCanvas: boolean
   onDarkCanvas: (on: boolean) => void
   /** Cách gom namespace của lưới tổng quan (lưu chung với tuỳ chọn Map). */
@@ -177,6 +186,7 @@ function TopologyInner({
   traffic,
   trafficOn,
   onTrafficOn,
+  egress,
   darkCanvas,
   onDarkCanvas,
   grouping,
@@ -272,6 +282,7 @@ function TopologyInner({
     const base = {
       hideSystem: options.hideSystem,
       showDeps: options.showDeps,
+      ...(egress.on && egress.rows ? { egress: egress.rows } : {}),
       expanded: tab.expanded,
       collapsed: isFolded,
       showAll: tab.showAll,
@@ -285,6 +296,8 @@ function TopologyInner({
     groups,
     options.hideSystem,
     options.showDeps,
+    egress.on,
+    egress.rows,
     tab.expanded,
     isFolded,
     tab.showAll,
@@ -1050,6 +1063,22 @@ function TopologyInner({
               onChange={(on) => {
                 setOptions({ showDeps: on })
               }}
+            />
+            <MenuToggle
+              on={egress.on}
+              label={t('Outbound lane')}
+              hint={t('Hosts and ports the workloads are configured to connect to')}
+              testId="k8s-topo-egress"
+              onChange={egress.onOn}
+            />
+            <MenuToggle
+              on={egress.secrets}
+              label={t('Read Secrets for destinations')}
+              hint={t(
+                'Reads only the Secrets a workload references, keeps just the host and port, and is recorded in the audit log'
+              )}
+              testId="k8s-topo-egress-secrets"
+              onChange={egress.onSecrets}
             />
             <MenuToggle
               on={!options.hideSystem}

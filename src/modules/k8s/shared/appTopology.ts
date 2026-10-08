@@ -1,5 +1,6 @@
 import { t, tn } from '@shared/i18n'
 import { formatDate } from '@shared/i18n/format'
+import { destLabel, type EgressDest, type EgressRow } from './egress'
 import {
   LabelIndex,
   regionOf,
@@ -24,14 +25,15 @@ import {
  * Thuần (renderer + test): cùng dữ liệu → cùng đồ thị, cùng toạ độ (làm mới không nhảy).
  */
 
-export type TopoLane = 'entry' | 'route' | 'service' | 'workload' | 'pods' | 'deps'
+export type TopoLane = 'entry' | 'route' | 'service' | 'workload' | 'pods' | 'deps' | 'egress'
 export const TOPO_LANES: readonly TopoLane[] = [
   'entry',
   'route',
   'service',
   'workload',
   'pods',
-  'deps'
+  'deps',
+  'egress'
 ]
 
 export type TopoKind =
@@ -45,6 +47,7 @@ export type TopoKind =
   | 'configmap'
   | 'secret'
   | 'pvc'
+  | 'external'
   | 'more'
   | 'namespace'
 
@@ -113,12 +116,23 @@ export interface TopoNode {
   service?: MapService
   route?: MapRoute
   workload?: MapWorkload
+  /** Thẻ điểm đến ngoài (kind external): đích đã phân loại + mọi nơi khai báo. */
+  dest?: EgressDest
   /** Workload: NetworkPolicy áp lên / HPA. */
   policies?: string[]
   hpa?: { name: string; min: number; max: number; current: number }
 }
 
-export type TopoEdgeKind = 'attach' | 'route' | 'expose' | 'select' | 'run' | 'uses' | 'mounts'
+export type TopoEdgeKind =
+  | 'attach'
+  | 'route'
+  | 'expose'
+  | 'select'
+  | 'run'
+  | 'uses'
+  | 'mounts'
+  /** Workload được cấu hình để gọi tới đích này (không cần traffic). */
+  | 'calls'
 
 export interface TopoEdge {
   id: string
@@ -174,6 +188,8 @@ export interface TopoOptions {
   hideSystem: boolean
   /** Hiện làn Config & storage. */
   showDeps: boolean
+  /** Điểm đến khai báo của workload (làn Outbound); thiếu / null = không vẽ làn này. */
+  egress?: readonly EgressRow[] | null
   /** Workload (id) đang mở danh sách pod. */
   expanded: ReadonlySet<string>
   /** Namespace đang gập (chỉ còn thẻ tóm tắt). */
@@ -190,6 +206,8 @@ export interface TopoOptions {
   groupOrder?: readonly string[]
 }
 
+/** Điểm đến ngoài tối đa mỗi namespace trước khi gộp "+N" (bảng Outbound vẫn có đủ). */
+export const MAX_EGRESS_NODES = 24
 /** Workload tối đa mỗi namespace trước khi gộp "+N". */
 export const MAX_ROWS_PER_NS = 30
 /** Dòng tối đa trong thẻ (luật / cổng) trước "+N more". */
@@ -373,12 +391,68 @@ interface NsGraph {
 /** Hàng của mục không gắn workload nào (Service không có pod, Ingress tới Service không có…). */
 const LOOSE_ROW = 1_000_000
 
+/** "env DB_HOST" / "Secret db › dsn" / "ConfigMap app › REDIS_URL" / "args --upstream". */
+export function egressSourceText(source: string, via: string, key: string): string {
+  switch (source) {
+    case 'secret':
+      return `Secret ${via} › ${key}`
+    case 'configmap':
+      return `ConfigMap ${via} › ${key}`
+    case 'args':
+      return `args ${key}`
+    default:
+      return `env ${key}`
+  }
+}
+
+const EGRESS_TITLE = (kind: EgressDest['kind']): string => {
+  switch (kind) {
+    case 'service':
+      return t('Service')
+    case 'private':
+      return t('Private network')
+    case 'pod':
+      return t('Pod')
+    case 'unresolved':
+      return t('Unresolved name')
+    default:
+      return t('External')
+  }
+}
+
+/** Thẻ điểm đến của làn Outbound. */
+function externalNode(id: string, ns: string, dest: EgressDest, row: number): TopoNode {
+  const svc = dest.service
+  const ref = svc ?? dest.viaService
+  return {
+    id,
+    kind: 'external',
+    lane: 'egress',
+    ns,
+    name: svc
+      ? `${svc.ns}/${svc.name}${dest.port !== undefined ? `:${String(dest.port)}` : ''}`
+      : destLabel(dest),
+    title: EGRESS_TITLE(dest.kind),
+    sub: dest.viaService
+      ? t('via {service}', { service: `${dest.viaService.ns}/${dest.viaService.name}` })
+      : [dest.scheme, dest.portImplied ? t('default port') : ''].filter(Boolean).join(' · '),
+    tone: 'muted',
+    ...(ref ? { ref: { kind: 'services', ns: ref.ns, name: ref.name } } : {}),
+    problems: [],
+    dest,
+    rows: [],
+    row
+  }
+}
+
 /** Dựng đồ thị đầy đủ (chưa cắt / gập) của một namespace. */
 function namespaceGraph(
   ns: string,
   ix: Index,
   data: MapData,
-  options: Pick<TopoOptions, 'showDeps' | 'expanded'>
+  options: Pick<TopoOptions, 'showDeps' | 'expanded'> & {
+    egress?: ReadonlyMap<string, readonly EgressRow[]>
+  }
 ): NsGraph {
   const nodes: TopoNode[] = []
   const edges: TopoEdge[] = []
@@ -478,6 +552,8 @@ function namespaceGraph(
   const wlNode = new Map<MapWorkload | null, TopoNode>()
   let podCount = 0
   const toneCount = { ok: 0, warn: 0, bad: 0 }
+  let egressNodes = 0
+  const egressHidden = new Set<string>()
   for (const item of rowItems) {
     const w = item.w
     const row = rowOfWorkload.get(w) ?? LOOSE_ROW
@@ -748,7 +824,48 @@ function namespaceGraph(
         for (const c of w.pvcs) dep('pvc', c, pvcByName.has(c))
       }
     }
+    // Kết nối ra ngoài khai báo trong cấu hình (env, ConfigMap, Secret…) → làn Outbound.
+    const mine = w ? options.egress?.get(`${w.kind}|${ns}/${w.name}`) : undefined
+    if (w && mine?.length) {
+      const from = nodeIds.has(`pods:${id}`) ? `pods:${id}` : id
+      for (const r of mine) {
+        const eid = `ext:${ns}/${r.dest.key}`
+        const hint = r.sources
+          .slice(0, 2)
+          .map((x) => egressSourceText(x.source, x.via, x.key))
+          .join(' · ')
+        let node = nodeIds.has(eid) ? nodes.find((n) => n.id === eid) : undefined
+        if (!node) {
+          if (egressNodes >= MAX_EGRESS_NODES) {
+            egressHidden.add(r.dest.key)
+            continue
+          }
+          egressNodes++
+          node = externalNode(eid, ns, r.dest, row)
+          addNode(node)
+        }
+        // Mỗi workload gọi tới đây là một dòng trong thẻ (nguồn khai báo ở bên phải).
+        const rows = (node.rows ??= [])
+        if (!rows.some((x) => x.text === w.name)) rows.push({ text: w.name, hint })
+        node.row = Math.min(node.row, row)
+        addEdge({ id: `${from}>${eid}`, from, to: eid, kind: 'calls' })
+      }
+    }
   }
+  if (egressHidden.size)
+    addNode({
+      id: `more-egress:${ns}`,
+      kind: 'more',
+      lane: 'egress',
+      ns,
+      name: tn(egressHidden.size, '+{n} more destination', '+{n} more destinations'),
+      title: '',
+      sub: '',
+      tone: 'muted',
+      problems: [],
+      more: egressHidden.size,
+      row: LOOSE_ROW
+    })
 
   // ——— PVC có vấn đề nhưng không workload nào gắn (chờ StorageClass, hết dung lượng…) ———
   // Không hiện thì lỗi này vô hình trên bản đồ: không thẻ nào trỏ tới nó.
@@ -1323,7 +1440,19 @@ export function buildTopology(data: MapData, options: TopoOptions): TopoGraph {
   const problems: TopoProblemRef[] = []
   const focus = options.focus ?? null
   const full = new Map<string, NsGraph>()
-  for (const ns of nsNames) full.set(ns, namespaceGraph(ns, ix, data, options))
+  const egress = new Map<string, EgressRow[]>()
+  for (const r of options.egress ?? []) {
+    const key = `${r.workload.kind}|${r.workload.ns}/${r.workload.name}`
+    const list = egress.get(key)
+    if (list) list.push(r)
+    else egress.set(key, [r])
+  }
+  const nsOptions = {
+    showDeps: options.showDeps,
+    expanded: options.expanded,
+    ...(options.egress ? { egress } : {})
+  }
+  for (const ns of nsNames) full.set(ns, namespaceGraph(ns, ix, data, nsOptions))
 
   // Gateway → Route (cả khác namespace — Gateway dùng chung).
   const crossEdges: TopoEdge[] = []
@@ -1495,7 +1624,8 @@ export const LANE_W: Record<TopoLane, number> = {
   service: 232,
   workload: 240,
   pods: 196,
-  deps: 212
+  deps: 212,
+  egress: 236
 }
 /**
  * Khoảng giữa làn này và làn kế tiếp (chỗ cho đường gấp khúc + nhãn traffic) — vừa đủ để đường
@@ -1507,7 +1637,8 @@ const LANE_GAP: Record<TopoLane, number> = {
   service: 88,
   workload: 40,
   pods: 56,
-  deps: 0
+  deps: 40,
+  egress: 0
 }
 /** Route (HTTPRoute / GRPCRoute) không có cột riêng: xếp ngay dưới Gateway của nó, thụt vào. */
 export const ROUTE_INDENT = 24
@@ -1557,6 +1688,8 @@ export function topoNodeHeight(n: TopoNode): number {
     case 'lb':
     case 'gateway':
       return CARD_HEAD + (n.rows?.length ?? 0) * CARD_ROW + 8
+    case 'external':
+      return CARD_HEAD + Math.min(n.rows?.length ?? 0, MAX_CARD_ROWS) * CARD_ROW + 8
     case 'more':
       return MORE_H
     case 'namespace':

@@ -20,6 +20,8 @@ export function laneTitle(lane: TopoLane): string {
       return t('Pods')
     case 'deps':
       return t('Config & storage')
+    case 'egress':
+      return t('Outbound')
   }
 }
 
@@ -40,5 +42,9 @@ export function laneHint(lane: TopoLane): string {
       return t('Pods of each workload — failing ones first')
     case 'deps':
       return t('ConfigMaps, Secrets and volumes the pods need to start')
+    case 'egress':
+      return t(
+        'Where the workloads are configured to connect (hosts and ports found in env, args, ConfigMaps and Secrets) — declared, not observed traffic'
+      )
   }
 }

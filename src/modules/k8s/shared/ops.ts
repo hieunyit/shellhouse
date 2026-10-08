@@ -111,6 +111,16 @@ export const K8sOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('overview'), namespaces: z.array(Namespace).max(64) }),
   /** Bản đồ cluster: workload, pod, service, route, PVC, HPA, policy — gọn để vẽ. */
   z.object({ op: z.literal('map'), namespaces: z.array(Namespace).max(64) }),
+  /**
+   * Điểm đến khai báo của workload (host:port trong env, args, ConfigMap, Secret được tham chiếu) —
+   * Map › Topology / Outbound. Không trả giá trị Secret, chỉ host / cổng.
+   */
+  z.object({
+    op: z.literal('egress'),
+    namespaces: z.array(Namespace).max(64),
+    /** Đọc Secret mà workload tham chiếu (GET từng cái). Tắt → chỉ env / args / ConfigMap. */
+    secrets: z.boolean()
+  }),
   /** Helm 3 releases (đọc Secret owner=helm — không cần cài helm). */
   z.object({ op: z.literal('helm.releases'), namespaces: z.array(Namespace).max(64) }),
   /** Chi tiết một release: values, notes, manifest, lịch sử revision. */

@@ -43,7 +43,7 @@ const num = (v: unknown): number => (typeof v === 'number' ? v : 0)
 const MAX_PER_KIND = 25_000
 const PAGE = 500
 
-const WORKLOAD_KINDS = [
+export const WORKLOAD_KINDS = [
   { id: 'deployments.apps', path: '/apis/apps/v1', plural: 'deployments' },
   { id: 'statefulsets.apps', path: '/apis/apps/v1', plural: 'statefulsets' },
   { id: 'daemonsets.apps', path: '/apis/apps/v1', plural: 'daemonsets' },
@@ -65,7 +65,7 @@ interface Listed {
  * MAX_PER_KIND (tính chung mọi namespace) — chạm mức mà còn dữ liệu (trang sau / namespace sau) →
  * truncated.
  */
-async function listAll(
+export async function listAll(
   client: KubeClient,
   api: string,
   plural: string,
@@ -114,7 +114,7 @@ async function listAll(
   return { items, truncated, ...(denied ? { denied } : {}), ...(missing ? { missing } : {}) }
 }
 
-function templateOf(kind: string, w: K8sObject): Obj {
+export function templateOf(kind: string, w: K8sObject): Obj {
   const spec = o(w.spec)
   return kind === 'cronjobs.batch'
     ? o(o(o(spec['jobTemplate'])['spec'])['template'])

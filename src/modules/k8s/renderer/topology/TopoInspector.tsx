@@ -531,6 +531,45 @@ function Facts({ node }: { node: TopoNode }): React.JSX.Element | null {
           />
         </section>
       )
+    case 'external': {
+      const d = node.dest
+      if (!d) return null
+      return (
+        <section data-testid="k8s-topo-external">
+          <Heading>{t('Details')}</Heading>
+          <DefList
+            items={[
+              [t('Host'), mono(d.host)],
+              d.port !== undefined
+                ? [
+                    t('Port'),
+                    mono(`${String(d.port)}${d.portImplied ? ` (${t('default port')})` : ''}`)
+                  ]
+                : null,
+              d.scheme ? [t('Protocol'), mono(d.scheme)] : null,
+              d.viaService
+                ? [t('Through Service'), mono(`${d.viaService.ns}/${d.viaService.name}`)]
+                : null
+            ]}
+          />
+          <Heading>{t('Declared in')}</Heading>
+          <div className="mt-1 flex flex-col gap-1">
+            {(node.rows ?? []).map((r, i) => (
+              <div
+                key={i}
+                className="flex justify-between gap-3 rounded bg-subtle px-2 py-1 font-mono text-[11.5px] text-fg"
+              >
+                <span className="min-w-0 truncate">{r.text}</span>
+                <span className="shrink-0 text-faint">{r.hint}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-faint">
+            {t('Read from configuration — not observed traffic.')}
+          </p>
+        </section>
+      )
+    }
     case 'pods': {
       const pods = node.pods ?? []
       const restarts = pods.reduce((n, p) => n + p.restarts, 0)

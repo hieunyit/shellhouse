@@ -6,6 +6,17 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- **Kubernetes › Map › Outbound:** where each workload is configured to connect, without needing any
+  traffic. Hosts, IPs and ports are read from the pod's environment variables and arguments, and
+  from the ConfigMaps and Secrets it references (a Secret's value is read only to extract the host
+  and port — passwords and connection strings are never kept or shown). In **Topology** they are an
+  Outbound lane on the right (dashed lines from the pods, grouped per destination); the new
+  **Outbound** view lists them in a table (workload, host:port, type, where it is declared). In-cluster
+  Services, ExternalName Services, private IPs and external hosts are told apart. Turn the lane or
+  the reading of Secrets off in Topology › View.
+
 ### Changed
 
 - **Sidebar (Kubernetes, Docker, S3):** the row of the cluster / endpoint / account you are viewing

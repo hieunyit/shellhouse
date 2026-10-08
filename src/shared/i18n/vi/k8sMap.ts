@@ -466,5 +466,53 @@ export const k8sMap: Readonly<Record<string, string>> = {
   'Average over the last {range}, from Prometheus': 'Trung bình {range} gần nhất, từ Prometheus',
   History: 'Lịch sử',
   'Time range': 'Khoảng thời gian',
-  'from Prometheus': 'từ Prometheus'
+  'from Prometheus': 'từ Prometheus',
+  Outbound: 'Đi ra ngoài',
+  'Through Service': 'Qua Service',
+  'Read from configuration — not observed traffic.':
+    'Đọc từ cấu hình — không phải traffic quan sát được.',
+  'via {service}': 'qua {service}',
+  'Reached through an ExternalName Service': 'Gọi qua một Service ExternalName',
+  'Outbound lane': 'Làn đi ra ngoài',
+  'Where the workloads are configured to connect (hosts and ports found in env, args, ConfigMaps and Secrets) — declared, not observed traffic':
+    'Nơi các workload được cấu hình để kết nối tới (host và cổng tìm thấy trong env, tham số, ConfigMap và Secret) — là khai báo, không phải traffic quan sát được',
+  'Hosts and ports the workloads are configured to connect to':
+    'Host và cổng mà các workload được cấu hình để kết nối tới',
+  'Hosts and ports the workloads are configured to connect to — from env, ConfigMaps and Secrets':
+    'Host và cổng mà các workload được cấu hình để kết nối tới — từ env, ConfigMap và Secret',
+  'Read Secrets for destinations': 'Đọc Secret để tìm điểm đến',
+  'Reads only the Secrets a workload references, keeps just the host and port, and is recorded in the audit log':
+    'Chỉ đọc đúng các Secret mà workload tham chiếu, chỉ giữ host và cổng, và được ghi vào audit log',
+  Service: 'Service',
+  Pod: 'Pod',
+  'Private network': 'Mạng riêng',
+  'Unresolved name': 'Tên chưa xác định',
+  'default port': 'cổng mặc định',
+  'In cluster': 'Trong cluster',
+  Destination: 'Điểm đến',
+  'Destination type': 'Loại điểm đến',
+  'Declared in': 'Khai báo ở',
+  'Default port of the scheme': 'Cổng mặc định của giao thức',
+  'Copy host:port': 'Sao chép host:port',
+  'Copy {value}': 'Sao chép {value}',
+  'Filter by workload, host, port or source': 'Lọc theo workload, host, cổng hoặc nơi khai báo',
+  'Filter outbound connections': 'Lọc kết nối đi ra',
+  'Nothing matches this filter.': 'Không có gì khớp bộ lọc này.',
+  'No connection targets found in the configuration of these workloads.':
+    'Không tìm thấy điểm đến kết nối nào trong cấu hình của các workload này.',
+  'Reading workload configuration…': 'Đang đọc cấu hình workload…',
+  'Large cluster — only part of it was scanned. Pick fewer namespaces.':
+    'Cluster lớn — mới quét một phần. Hãy chọn ít namespace hơn.',
+  'Read from configuration: environment variables, arguments, and the ConfigMaps and Secrets the pods reference. These are where workloads are set up to connect — not observed traffic, and not every connection is listed here.':
+    'Đọc từ cấu hình: biến môi trường, tham số, và các ConfigMap / Secret mà pod tham chiếu. Đây là nơi workload được thiết lập để kết nối — không phải traffic quan sát được, và không phải kết nối nào cũng có ở đây.',
+  '{n} ConfigMap or Secret could not be read (no permission).':
+    '{n} ConfigMap hoặc Secret không đọc được (thiếu quyền).',
+  '{n} ConfigMaps or Secrets could not be read (no permission).':
+    '{n} ConfigMap hoặc Secret không đọc được (thiếu quyền).',
+  '{n} Secret skipped (too many).': 'Bỏ qua {n} Secret (quá nhiều).',
+  '{n} Secrets skipped (too many).': 'Bỏ qua {n} Secret (quá nhiều).',
+  '{n} Secret not read (reading Secrets is off).': '{n} Secret chưa đọc (đang tắt đọc Secret).',
+  '{n} Secrets not read (reading Secrets is off).': '{n} Secret chưa đọc (đang tắt đọc Secret).',
+  '+{n} more destination': '+{n} điểm đến khác',
+  '+{n} more destinations': '+{n} điểm đến khác'
 }

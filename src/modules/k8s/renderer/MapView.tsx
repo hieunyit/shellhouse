@@ -4,7 +4,9 @@ import { cx } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { formatDateTime, formatTime, t } from '../../registry/renderer-kit'
 import { filterMapData, groupingKeys, parseLabelSelector, type MapData } from '../shared/map'
+import { egressRows as buildEgressRows, type EgressResult } from '../shared/egress'
 import { NodesView } from './NodesView'
+import { OutboundView } from './OutboundView'
 import { TrafficMap } from './TrafficMap'
 import { useTraffic } from './useTraffic'
 import {
@@ -20,6 +22,7 @@ import { TopologyMap } from './topology/TopologyMap'
 import { TrafficUnitContext } from './trafficUnit'
 
 const REFRESH_MS = 20_000
+const EGRESS_REFRESH_MS = 60_000
 
 const savedSelectors = new Map<string, string>()
 
@@ -133,6 +136,64 @@ export function MapView({
     }
   }, [request, nsKey, active, tick])
 
+  // ——— Điểm đến khai báo (làn Outbound của Topology + bảng Outbound) ———
+  const [egressLoaded, setEgressLoaded] = useState<{
+    request: Request
+    ns: string
+    secrets: boolean
+    result: EgressResult
+  } | null>(null)
+  const [egressError, setEgressError] = useState<string | null>(null)
+  const [egressLoading, setEgressLoading] = useState(false)
+  const wantEgress = active && ((view === 'topology' && options.egress) || view === 'outbound')
+  useEffect(() => {
+    if (!wantEgress) return
+    let cancelled = false
+    let inFlight = false
+    const load = (): void => {
+      if (inFlight) return
+      inFlight = true
+      setEgressLoading(true)
+      request<EgressResult>({
+        op: 'egress',
+        namespaces: nsKey ? nsKey.split(',') : [],
+        secrets: options.egressSecrets
+      }).then(
+        (result) => {
+          inFlight = false
+          if (cancelled) return
+          setEgressLoaded({ request, ns: nsKey, secrets: options.egressSecrets, result })
+          setEgressError(null)
+          setEgressLoading(false)
+        },
+        (e: unknown) => {
+          inFlight = false
+          if (cancelled) return
+          setEgressError(cleanError(e))
+          setEgressLoading(false)
+        }
+      )
+    }
+    load()
+    // Cấu hình ít đổi: đọc thưa hơn bản đồ (mỗi lần là nhiều request tới API server).
+    const timer = setInterval(load, EGRESS_REFRESH_MS)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [request, nsKey, wantEgress, options.egressSecrets, tick])
+  const egressResult =
+    egressLoaded &&
+    egressLoaded.request === request &&
+    egressLoaded.ns === nsKey &&
+    egressLoaded.secrets === options.egressSecrets
+      ? egressLoaded.result
+      : null
+  const egressRows = useMemo(
+    () => (egressResult && data ? buildEgressRows(egressResult.items, data) : null),
+    [egressResult, data]
+  )
+
   // ——— Lọc nhãn (Nodes): pod không khớp được làm mờ ———
   const parsedSelector = useMemo(() => parseLabelSelector(selectorText), [selectorText])
   const selectorError = parsedSelector && 'error' in parsedSelector ? parsedSelector.error : null
@@ -201,6 +262,13 @@ export function MapView({
                 value: 'traffic',
                 label: t('Traffic'),
                 hint: t('Who calls whom, and how much')
+              },
+              {
+                value: 'outbound',
+                label: t('Outbound'),
+                hint: t(
+                  'Hosts and ports the workloads are configured to connect to — from env, ConfigMaps and Secrets'
+                )
               }
             ]}
             onChange={(v) => {
@@ -267,6 +335,7 @@ export function MapView({
               <div className="flex-1" />
             </>
           )}
+          {view === 'outbound' && <div className="flex-1" />}
           {view === 'traffic' && (
             <>
               <TrafficWindowPicker
@@ -330,6 +399,15 @@ export function MapView({
               <TrafficMap traffic={past ?? traffic} scope={namespaces} onOpen={onOpen} />
             </div>
           )}
+          {view === 'outbound' && (
+            <OutboundView
+              rows={egressRows}
+              result={egressResult}
+              loading={egressLoading}
+              error={egressError}
+              onOpen={onOpen}
+            />
+          )}
           {view === 'topology' && (
             <TopologyMap
               tabId={tabId}
@@ -340,6 +418,17 @@ export function MapView({
               trafficOn={options.traffic}
               onTrafficOn={(on) => {
                 setOpt({ traffic: on })
+              }}
+              egress={{
+                on: options.egress,
+                rows: egressRows,
+                secrets: options.egressSecrets,
+                onOn: (on) => {
+                  setOpt({ egress: on })
+                },
+                onSecrets: (on) => {
+                  setOpt({ egressSecrets: on })
+                }
               }}
               darkCanvas={options.darkCanvas}
               onDarkCanvas={(on) => {

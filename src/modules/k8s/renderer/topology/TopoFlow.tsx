@@ -1,5 +1,5 @@
 import { createContext, memo, useContext } from 'react'
-import { ChevronDown, ChevronRight, ChevronsUpDown, Lock, ShieldAlert } from 'lucide-react'
+import { ChevronDown, ChevronRight, ChevronsUpDown, Globe, Lock, ShieldAlert } from 'lucide-react'
 import {
   Handle,
   Position,
@@ -94,6 +94,7 @@ const ICON_KIND: Record<string, string> = {
   configmap: 'configmaps',
   secret: 'secrets',
   pvc: 'persistentvolumeclaims',
+  external: 'endpoints',
   pods: 'pods',
   namespace: 'namespaces'
 }
@@ -287,6 +288,9 @@ export const CardNode = memo(function CardNode({
     >
       <CardHead
         n={n}
+        {...(n.kind === 'external' && !n.ref
+          ? { icon: <Globe size={22} className="shrink-0 text-faint" /> }
+          : {})}
         right={
           n.badges?.length ? (
             <span className="flex shrink-0 flex-col items-end gap-1">
@@ -889,7 +893,8 @@ const EDGE_COLOR: Record<PlacedTopoEdge['kind'], string> = {
   select: 'var(--map-accent)',
   run: 'var(--map-edge-muted)',
   uses: 'var(--map-edge-muted)',
-  mounts: 'var(--map-edge-muted)'
+  mounts: 'var(--map-edge-muted)',
+  calls: 'var(--map-edge-muted)'
 }
 
 /** Cạnh: đi sau thẻ (không đè chữ), mũi tên nhỏ ở đích; nổi bật theo đường đang xem. */
@@ -921,7 +926,11 @@ export const TopoEdgeComp = memo(function TopoEdgeComp(
   const rate = d.rate ?? 0
   const live = rate >= idleBelow(unit)
   const width = live ? (BANDS[bandFor(unit)(rate)]?.width ?? 1.5) : hot ? 2.2 : 1.5
-  const dash = e.broken ? '5 4' : e.kind === 'uses' || e.kind === 'mounts' ? '4 4' : undefined
+  const dash = e.broken
+    ? '5 4'
+    : e.kind === 'uses' || e.kind === 'mounts' || e.kind === 'calls'
+      ? '4 4'
+      : undefined
   const head =
     tree?.head ??
     `M${String(tx - 7)},${String(ty - 4)} L${String(tx)},${String(ty)} L${String(tx - 7)},${String(ty + 4)} Z`
