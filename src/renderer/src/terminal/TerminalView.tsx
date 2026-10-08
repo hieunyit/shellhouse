@@ -533,7 +533,7 @@ export function TerminalView({
             <div
               ref={ref}
               data-testid={`terminal-${tabId}`}
-              className="absolute inset-0 pt-2 pr-1 pb-1 pl-3"
+              className="sh-term-host absolute inset-0"
             />
             {prompt && !multiExec && view === 'terminal' && (
               <PromptDialog

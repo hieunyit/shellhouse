@@ -188,6 +188,7 @@ export class TerminalController {
   private statsOn = false
   private readonly disposables: IDisposable[] = []
   private resizeObserver: ResizeObserver | null = null
+  private dprCleanup: (() => void) | null = null
   /** Phần tử đang chứa terminal: container của tab, hoặc một ô của MultiExec. */
   private host: HTMLElement | null = null
   private resizeTimer: number | null = null
@@ -282,6 +283,20 @@ export class TerminalController {
     })
     this.host = this.container
     this.resizeObserver.observe(this.container)
+    // Đổi tỉ lệ màn hình (kéo sang màn hình khác, đổi scale Windows): kích thước CSS không đổi nên
+    // ResizeObserver im lặng, nhưng ô ký tự đổi → fit lại.
+    const watchDpr = (): void => {
+      const query = window.matchMedia(`(resolution: ${String(window.devicePixelRatio)}dppx)`)
+      const onChange = (): void => {
+        this.refitSoon()
+        watchDpr()
+      }
+      query.addEventListener('change', onChange, { once: true })
+      this.dprCleanup = () => {
+        query.removeEventListener('change', onChange)
+      }
+    }
+    watchDpr()
     this.safeFit()
 
     this.unsubscribeHost = useHostStatus.subscribe((s) => {
@@ -304,7 +319,9 @@ export class TerminalController {
         current[key] = value
         changed = true
       }
-      if (changed) this.safeFit()
+      // Đổi font / cỡ chữ: xterm đo lại ô ký tự ở khung hình kế tiếp → fit ngay còn dùng kích thước
+      // ô cũ (hàng cuối tràn khỏi khung, bị thanh dưới che). Fit lại sau khi đo xong.
+      if (changed) this.refitSoon()
       if (this.term.cols !== before.cols || this.term.rows !== before.rows)
         this.client?.resize(this.term.cols, this.term.rows)
       this.syncStats()
@@ -430,6 +447,8 @@ export class TerminalController {
     if (this.ghostFrame) cancelAnimationFrame(this.ghostFrame)
     this.hideGhost()
     this.resizeObserver?.disconnect()
+    this.dprCleanup?.()
+    this.dprCleanup = null
     if (this.resizeTimer !== null) window.clearTimeout(this.resizeTimer)
     for (const d of this.disposables) d.dispose()
     this.client?.close()
@@ -1350,6 +1369,17 @@ export class TerminalController {
     requestAnimationFrame(() => {
       waiter.resolve(performance.now())
     })
+  }
+
+  private refitSoon(): void {
+    this.safeFit()
+    requestAnimationFrame(() => {
+      this.safeFit()
+    })
+    for (const ms of [80, 300])
+      window.setTimeout(() => {
+        this.safeFit()
+      }, ms)
   }
 
   private scheduleFit(): void {

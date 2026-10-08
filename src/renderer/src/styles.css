@@ -175,6 +175,18 @@ body {
   /* Ứng dụng desktop: không bôi đen chữ giao diện khi kéo chuột; ô nhập / terminal vẫn chọn được. */
   user-select: none;
 }
+/*
+ * Lề của terminal đặt trên chính phần tử .xterm, không phải khung chứa: FitAddon chỉ trừ padding của
+ * .xterm khi tính số hàng / cột. Padding ở khung cha thì số hàng bị tính dư (tới 12px) và dòng cuối
+ * tràn khỏi khung, bị thanh dưới che mất một nửa.
+ */
+.sh-term-host .xterm {
+  padding: 8px 4px 4px 12px;
+}
+/* Viewport phủ cả vùng padding: để trong suốt cho lộ nền theme của khung (không thành viền đen). */
+.sh-term-host .xterm-viewport {
+  background-color: transparent !important;
+}
 /* Terminal, editor, chữ mono: không kế thừa letter-spacing / ký tự thay thế của chữ giao diện
    (xterm đo ô chữ theo font — lệch spacing là lệch con trỏ). */
 .xterm,
