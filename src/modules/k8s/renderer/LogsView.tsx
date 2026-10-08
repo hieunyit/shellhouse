@@ -268,11 +268,20 @@ function CommandFooter({ commands }: { commands: string[] }): React.JSX.Element 
       data-testid="k8s-logs-command"
     >
       <span className="shrink-0 text-faint">{t('Same as')}</span>
-      <code className="sh-selectable min-w-0 flex-1 truncate font-mono text-muted" title={command}>
+      <code
+        className="sh-selectable min-w-0 flex-1 truncate font-mono text-muted"
+        title={commands.join('\n')}
+      >
         {command}
       </code>
+      {commands.length > 1 && (
+        // kubectl logs nhận một pod mỗi lệnh — nút sao chép lấy đủ mọi lệnh.
+        <span className="shrink-0 text-faint" data-testid="k8s-logs-command-more">
+          {t('+{n} more', { n: String(commands.length - 1) })}
+        </span>
+      )}
       <IconButton
-        label={t('Copy')}
+        label={commands.length > 1 ? t('Copy all') : t('Copy')}
         size="sm"
         onClick={() => void window.shellhouse.writeClipboard(commands.join('\n'))}
       >
