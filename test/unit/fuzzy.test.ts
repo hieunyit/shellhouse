@@ -18,6 +18,12 @@ describe('fuzzyScore', () => {
     expect(word).toBeGreaterThan(scattered)
   })
 
+  it('không khớp "rải" qua một chuỗi dài', () => {
+    expect(fuzzyScore('theme', 'Import hosts (ssh config, MobaXterm, Termius, CSV)')).toBeNull()
+    expect(fuzzyScore('prodweb', 'production-web-01')).not.toBeNull()
+    expect(fuzzyScore('nh', 'New host')).not.toBeNull()
+  })
+
   it('bỏ dấu tiếng Việt ở cả hai phía', () => {
     expect(fuzzyScore('chao', 'Chào hỏi')).not.toBeNull()
     expect(fuzzyScore('dong', 'Đồng bộ')).not.toBeNull()

@@ -17,6 +17,8 @@ import { useHosts } from '../stores/hosts'
 import { useSettings } from '../stores/settings'
 import { useShells } from '../stores/shells'
 import { useTabs } from '../stores/tabs'
+import { useShell } from '../shell/store'
+import { SETTINGS_NAV } from './settings/settings-sections'
 import { cx, useEscapeToClose, useFocusTrap } from './ui'
 import { MANIFESTS } from '../../../modules/registry/manifests'
 import { ModuleIcon, rendererModule, useModules } from '../../../modules/registry/renderer-kit'
@@ -68,6 +70,40 @@ export function CommandPalette({
       shortcut: true,
       run: () => {
         runCommand(c.id)
+      }
+    }))
+    // Mở thẳng một trang Cài đặt ("theme" → Appearance) và chuyển giữa các khu vực chính.
+    const settingsPages: Item[] = SETTINGS_NAV.flatMap((g) =>
+      g.items.map((i) => ({
+        id: `settings:${i.id}`,
+        title: t('Settings: {page}', { page: i.title() }),
+        alias: `Settings ${i.id}`,
+        hint: i.id === 'appearance' ? t('Theme, density, language') : '',
+        group: 'Commands' as const,
+        icon: <i.icon size={14} />,
+        shortcut: false,
+        run: () => {
+          useShell.getState().openSettings(i.id)
+        }
+      }))
+    )
+    const goTo: Item[] = (
+      [
+        ['home', t('Go to: Home')],
+        ['hosts', t('Go to: Hosts')],
+        ['files', t('Go to: Files (SFTP)')],
+        ['transfers', t('Go to: Transfers')]
+      ] as const
+    ).map(([area, title]) => ({
+      id: `go:${area}`,
+      title,
+      alias: `Go to ${area}`,
+      hint: '',
+      group: 'Commands' as const,
+      icon: <SquareChevronRight size={14} />,
+      shortcut: false,
+      run: () => {
+        useShell.getState().go(area)
       }
     }))
     const connect: Item[] = hosts.map((h) => ({
@@ -151,6 +187,8 @@ export function CommandPalette({
     ]
     const all = [
       ...commands,
+      ...goTo,
+      ...settingsPages,
       ...designKit,
       ...enabledCommands,
       ...layouts,
