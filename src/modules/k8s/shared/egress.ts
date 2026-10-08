@@ -108,12 +108,22 @@ const NON_NETWORK_SCHEME =
 /** Giá trị cấu hình không phải tên máy ("true", "default"…). */
 const KEYWORD =
   /^(true|false|yes|no|on|off|none|null|nil|nan|default|enabled?|disabled?|auto|any|all|local|internal|external|public|private|primary|secondary|master|replica|slave|main|prod|production|stage|staging|dev|development|test)$/i
-/** Khoá gợi ý "đây là địa chỉ" — cho phép nhận giá trị chỉ có host có dấu chấm ("db.internal"). */
+/**
+ * Khoá gợi ý "đây là địa chỉ": từ gợi ý phải đứng CUỐI tên (EMAIL_HOST, DB_URL…). "EMAIL_HOST_PASSWORD"
+ * có chữ HOST nhưng là mật khẩu — không được coi là địa chỉ.
+ */
 const HOSTY_KEY =
-  /(^|[_.\-/])(host|hostname|hosts|addr|address|addrs|server|servers|endpoint|endpoints|broker|brokers|url|urls|uri|dsn|connection|connstr|conn|target|upstream|backend|registry|proxy|api|remote|master|primary|replica)([_.\-/]|$)/i
+  /(^|[_.\-/])(host|hostname|hosts|addr|address|addrs|server|servers|endpoint|endpoints|broker|brokers|url|urls|uri|dsn|connection|connstr|conn|target|upstream|backend|registry|proxy|api|remote|master|primary|replica)$/i
 /** Khoá chặt hơn: đủ chắc để nhận cả tên chỉ một nhãn ("redis", "mysql"). */
 const STRICT_HOSTY_KEY =
-  /(^|[_.\-/])(host|hostname|hosts|addr|address|addrs|server|servers|endpoint|endpoints|broker|brokers|url|urls|uri|dsn)([_.\-/]|$)/i
+  /(^|[_.\-/])(host|hostname|hosts|addr|address|addrs|server|servers|endpoint|endpoints|broker|brokers|url|urls|uri|dsn)$/i
+/** Khoá nói về bí mật: giá trị của nó không bao giờ là điểm đến (trừ khi là URL / host= rõ ràng). */
+const SECRETISH_KEY =
+  /(pass(word|wd|phrase)?|pwd|secret|token|credentials?|creds?|salt|signing|private[_-]?key|api[_-]?key|access[_-]?key|jwt)/i
+/** Chuỗi một nhãn trông như token / mật khẩu ngẫu nhiên (dài, lẫn chữ và số) — không phải tên máy. */
+const looksRandom = (host: string): boolean =>
+  !host.includes('.') &&
+  (host.length > 40 || (host.length >= 16 && /\d/.test(host) && /[a-z]/i.test(host)))
 
 const validPort = (n: number): boolean => Number.isInteger(n) && n >= 1 && n <= 65535
 
@@ -276,8 +286,10 @@ export function endpointsIn(
     if (seen.size > 0) return out
   }
 
-  // 3) host:port (IP, hoặc tên có dấu chấm) nằm trong văn bản — không áp cho Secret
-  if (!opts.strict)
+  // 3) host:port (IP, hoặc tên có dấu chấm) nằm trong văn bản — không áp cho Secret, và không áp cho
+  //    giá trị của khoá nói về bí mật (PASSWORD, TOKEN…)
+  const secretish = SECRETISH_KEY.test(keyHint)
+  if (!opts.strict && !secretish)
     for (const m of rest.matchAll(BARE_RE)) {
       const hp = parseHostPort(`${m[1] ?? ''}:${m[2] ?? ''}`)
       if (hp && !FILE_LIKE.test(hp.host))
@@ -286,9 +298,9 @@ export function endpointsIn(
 
   // 4) cả giá trị là một địa chỉ ("db.internal", "redis:6379", "10.0.0.5")
   const whole = rest.trim().replace(/^["']|["']$/g, '')
-  if (out.length === 0 && whole && !/\s/.test(whole)) {
+  if (out.length === 0 && whole && !/\s/.test(whole) && !secretish) {
     const hp = parseHostPort(whole)
-    if (hp && !FILE_LIKE.test(hp.host) && !KEYWORD.test(hp.host)) {
+    if (hp && !FILE_LIKE.test(hp.host) && !KEYWORD.test(hp.host) && !looksRandom(hp.host)) {
       const dotted = hp.host.includes('.')
       // Tên chỉ một nhãn ("redis") cần khoá chặt; có dấu chấm nhận khoá lỏng hơn; không gợi ý thì
       // phải là IP / host.có.chấm:cổng (không áp cho Secret).

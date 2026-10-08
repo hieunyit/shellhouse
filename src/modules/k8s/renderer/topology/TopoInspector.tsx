@@ -15,7 +15,12 @@ import { DefList, Heading, Pill } from '../../../../renderer/src/components/pane
 import { formatRelative, t, tn } from '../../../registry/renderer-kit'
 import { formatCpu, formatMemory } from '../../shared/resources'
 import { TECH, type MapPod, type MapTone } from '../../shared/map'
-import { selectorText, type TopoEdge, type TopoNode } from '../../shared/appTopology'
+import {
+  egressSourceText,
+  selectorText,
+  type TopoEdge,
+  type TopoNode
+} from '../../shared/appTopology'
 import type { TrafficRate } from '../../shared/traffic'
 import { KindIcon, TechIcon } from '../icons'
 import type { MapRef } from '../mapModel'
@@ -553,14 +558,15 @@ function Facts({ node }: { node: TopoNode }): React.JSX.Element | null {
             ]}
           />
           <Heading>{t('Declared in')}</Heading>
-          <div className="mt-1 flex flex-col gap-1">
-            {(node.rows ?? []).map((r, i) => (
-              <div
-                key={i}
-                className="flex justify-between gap-3 rounded bg-subtle px-2 py-1 font-mono text-[11.5px] text-fg"
-              >
-                <span className="min-w-0 truncate">{r.text}</span>
-                <span className="shrink-0 text-faint">{r.hint}</span>
+          <div className="mt-1 flex flex-col gap-1.5">
+            {(node.declared ?? []).map((x) => (
+              <div key={x.workload} className="rounded bg-subtle px-2 py-1 text-[11.5px]">
+                <div className="font-medium text-fg">{x.workload}</div>
+                {x.sources.map((src) => (
+                  <div key={`${src.source}|${src.via}|${src.key}`} className="font-mono text-faint">
+                    {egressSourceText(src.source, src.via, src.key)}
+                  </div>
+                ))}
               </div>
             ))}
           </div>

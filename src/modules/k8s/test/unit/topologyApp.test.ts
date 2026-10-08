@@ -923,7 +923,9 @@ describe('Làn Outbound — điểm đến khai báo trong cấu hình', () => {
     )
     expect(ext.every((n) => n.lane === 'egress')).toBe(true)
     const pg = ext.find((n) => n.name === 'pg.prod.corp:5432')
-    expect(pg?.rows?.map((r) => r.text)).toEqual(['web'])
+    // Một workload gọi tới → dòng trong thẻ là NƠI KHAI BÁO (khoá), không lặp tên workload.
+    expect(pg?.rows?.map((r) => `${r.text}:${r.hint}`)).toEqual(['DB_HOST:env', 'url:Secret'])
+    expect(pg?.declared?.map((x) => x.workload)).toEqual(['web'])
     const calls = g.edges.filter((e) => e.kind === 'calls')
     expect(calls).toHaveLength(4)
     expect(calls.every((e) => e.from === 'pods:wl:deployments.apps:shop/web')).toBe(true)
@@ -957,5 +959,29 @@ describe('Làn Outbound — điểm đến khai báo trong cấu hình', () => {
     expect(g.nodes.filter((n) => n.kind === 'external')).toHaveLength(24)
     const more = g.nodes.find((n) => n.id === 'more-egress:shop')
     expect(more?.more).toBe(16)
+  })
+
+  it('tên chưa xác định không vẽ lên bản đồ; nhiều workload → mỗi workload một dòng', () => {
+    const api = { kind: 'deployments.apps', ns: 'shop', name: 'api' }
+    const items: EgressItem[] = [
+      { workload: web, source: 'env', via: '', key: 'CACHE_HOST', host: 'nosuchsvc' },
+      { workload: web, source: 'env', via: '', key: 'PAY', host: 'pay.example.com', port: 443 },
+      {
+        workload: api,
+        source: 'configmap',
+        via: 'cfg',
+        key: 'PAY_URL',
+        host: 'pay.example.com',
+        port: 443
+      }
+    ]
+    const g = buildTopology(d, { ...OPTS, egress: egressRows(items, d) })
+    const ext = g.nodes.filter((n) => n.kind === 'external')
+    expect(ext.map((n) => n.name)).toEqual(['pay.example.com:443'])
+    expect(ext[0]?.rows?.map((r) => `${r.text}:${r.hint}`).sort()).toEqual([
+      'api:PAY_URL',
+      'web:PAY'
+    ])
+    expect(ext[0]?.declared).toHaveLength(2)
   })
 })

@@ -297,3 +297,31 @@ describe('classifyEndpoint — tên DNS trong cluster', () => {
     )
   })
 })
+
+describe('tên khoá nói về bí mật (lỗi thật: EMAIL_HOST_PASSWORD bị nhận là host)', () => {
+  const pw = 'bftrtt1722ai3r8vpqlme2rindsns10hk7bovpd49cxb'
+  it('mật khẩu / token trong khoá có chữ HOST không phải điểm đến', () => {
+    for (const strict of [true, false]) {
+      expect(endpointsIn(pw, 'EMAIL_HOST_PASSWORD', { strict })).toEqual([])
+      expect(endpointsIn('db.internal.corp', 'DB_HOST_PASSWORD', { strict })).toEqual([])
+      expect(endpointsIn('10.1.2.3', 'SERVER_TOKEN', { strict })).toEqual([])
+      expect(endpointsIn('smtp.corp:465', 'SMTP_HOST_SECRET', { strict })).toEqual([])
+      expect(endpointsIn('x.example.com:443', 'API_KEY', { strict })).toEqual([])
+    }
+  })
+  it('từ gợi ý phải đứng cuối tên khoá', () => {
+    expect(endpointsIn('smtp.corp', 'EMAIL_HOST')[0]?.host).toBe('smtp.corp')
+    expect(endpointsIn('smtp.corp', 'EMAIL_HOST', { strict: true })[0]?.host).toBe('smtp.corp')
+    expect(endpointsIn('smtp.corp', 'HOST_TIMEOUT')).toEqual([])
+    expect(endpointsIn('redis', 'HOSTNAME_PREFIX')).toEqual([])
+  })
+  it('chuỗi một nhãn trông như token ngẫu nhiên không phải tên máy', () => {
+    expect(endpointsIn(pw, 'EMAIL_HOST')).toEqual([])
+    expect(endpointsIn('a1b2c3d4e5f6g7h8i9', 'DB_HOST', { strict: true })).toEqual([])
+    expect(endpointsIn('redis', 'DB_HOST', { strict: true })[0]?.host).toBe('redis')
+    expect(endpointsIn('pg-primary', 'DB_HOST')[0]?.host).toBe('pg-primary')
+  })
+  it('URL rõ ràng trong khoá bí mật vẫn nhận (DATABASE_URL_SECRET không có trong thực tế, nhưng URL tự chứng tỏ)', () => {
+    expect(endpointsIn('https://vault.corp:8200', 'VAULT_TOKEN_URL')).toHaveLength(1)
+  })
+})

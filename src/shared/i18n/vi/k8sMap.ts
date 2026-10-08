@@ -468,6 +468,8 @@ export const k8sMap: Readonly<Record<string, string>> = {
   'Time range': 'Khoảng thời gian',
   'from Prometheus': 'từ Prometheus',
   Outbound: 'Đi ra ngoài',
+  '+{n} more place': '+{n} nơi khai báo khác',
+  '+{n} more places': '+{n} nơi khai báo khác',
   'Some workload kinds could not be listed (no permission) — the list may be incomplete.':
     'Có loại workload không list được (thiếu quyền) — danh sách có thể chưa đầy đủ.',
   'This workload could not be read (no permission).': 'Không đọc được workload này (thiếu quyền).',

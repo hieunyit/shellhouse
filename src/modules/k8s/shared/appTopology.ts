@@ -118,6 +118,8 @@ export interface TopoNode {
   workload?: MapWorkload
   /** Thẻ điểm đến ngoài (kind external): đích đã phân loại + mọi nơi khai báo. */
   dest?: EgressDest
+  /** Thẻ điểm đến ngoài: workload nào khai báo ở đâu (bảng chi tiết). */
+  declared?: { workload: string; sources: EgressRow['sources'] }[]
   /** Workload: NetworkPolicy áp lên / HPA. */
   policies?: string[]
   hpa?: { name: string; min: number; max: number; current: number }
@@ -405,6 +407,17 @@ export function egressSourceText(source: string, via: string, key: string): stri
   }
 }
 
+/** Từ ngắn cho nơi khai báo: env / args / ConfigMap / Secret. */
+export function egressSourceWord(source: string): string {
+  return source === 'secret'
+    ? 'Secret'
+    : source === 'configmap'
+      ? 'ConfigMap'
+      : source === 'args'
+        ? 'args'
+        : 'env'
+}
+
 const EGRESS_TITLE = (kind: EgressDest['kind']): string => {
   switch (kind) {
     case 'service':
@@ -435,7 +448,7 @@ function externalNode(id: string, ns: string, dest: EgressDest, row: number): To
     title: EGRESS_TITLE(dest.kind),
     sub: dest.viaService
       ? t('via {service}', { service: `${dest.viaService.ns}/${dest.viaService.name}` })
-      : [dest.scheme, dest.portImplied ? t('default port') : ''].filter(Boolean).join(' · '),
+      : (dest.scheme ?? ''),
     tone: 'muted',
     ...(ref ? { ref: { kind: 'services', ns: ref.ns, name: ref.name } } : {}),
     problems: [],
@@ -555,7 +568,6 @@ function namespaceGraph(
   let egressNodes = 0
   const egressHidden = new Set<string>()
   const egressNode = new Map<string, TopoNode>()
-  const egressMore = new Map<string, number>()
   for (const item of rowItems) {
     const w = item.w
     const row = rowOfWorkload.get(w) ?? LOOSE_ROW
@@ -831,11 +843,10 @@ function namespaceGraph(
     if (w && mine?.length) {
       const from = nodeIds.has(`pods:${id}`) ? `pods:${id}` : id
       for (const r of mine) {
+        // Tên chưa xác định (một nhãn, không khớp Service nào) hay bị nhận nhầm từ giá trị cấu hình
+        // bất kỳ — chỉ nằm trong bảng, không vẽ lên bản đồ.
+        if (r.dest.kind === 'unresolved') continue
         const eid = `ext:${ns}/${r.dest.key}`
-        const hint = r.sources
-          .slice(0, 2)
-          .map((x) => egressSourceText(x.source, x.via, x.key))
-          .join(' · ')
         let node = egressNode.get(eid)
         if (!node) {
           if (egressNodes >= MAX_EGRESS_NODES) {
@@ -847,22 +858,38 @@ function namespaceGraph(
           egressNode.set(eid, node)
           addNode(node)
         }
-        // Mỗi workload gọi tới đây là một dòng trong thẻ (nguồn khai báo ở bên phải); quá nhiều thì
-        // chỉ đếm — thẻ giữ chiều cao cố định, không dựng hàng trăm dòng.
-        const rows = (node.rows ??= [])
-        if (!rows.some((x) => x.text === w.name)) {
-          if (rows.length < MAX_CARD_ROWS - 1) rows.push({ text: w.name, hint })
-          else egressMore.set(eid, (egressMore.get(eid) ?? 0) + 1)
-        }
+        const declared = (node.declared ??= [])
+        if (!declared.some((x) => x.workload === w.name))
+          declared.push({ workload: w.name, sources: r.sources })
         node.row = Math.min(node.row, row)
         addEdge({ id: `${from}>${eid}`, from, to: eid, kind: 'calls' })
       }
     }
   }
-  for (const [eid, n] of egressMore)
-    egressNode
-      .get(eid)
-      ?.rows?.push({ text: tn(n, '+{n} more workload', '+{n} more workloads'), hint: '' })
+  // Dòng trong thẻ: một workload gọi tới → liệt kê NƠI KHAI BÁO (khoá env / ConfigMap…; workload đã rõ
+  // nhờ đường nối); nhiều workload → mỗi workload một dòng. Thẻ giữ chiều cao cố định, phần dư "+N".
+  for (const node of egressNode.values()) {
+    const declared = node.declared ?? []
+    const single = declared.length === 1
+    const lines = single
+      ? (declared[0]?.sources ?? []).map((x) => ({ text: x.key, hint: egressSourceWord(x.source) }))
+      : declared.map((x) => ({ text: x.workload, hint: x.sources[0]?.key ?? '' }))
+    const shown = lines.slice(0, MAX_CARD_ROWS - 1)
+    const rest = lines.length - shown.length
+    node.rows = [
+      ...shown,
+      ...(rest > 0
+        ? [
+            {
+              text: single
+                ? tn(rest, '+{n} more place', '+{n} more places')
+                : tn(rest, '+{n} more workload', '+{n} more workloads'),
+              hint: ''
+            }
+          ]
+        : [])
+    ]
+  }
   if (egressHidden.size)
     addNode({
       id: `more-egress:${ns}`,
