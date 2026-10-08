@@ -32,7 +32,7 @@ import { useTabs } from '../stores/tabs'
 import { openSidebarDialog } from '../stores/ui-requests'
 import { useTransfers } from '../stores/transfers'
 import { EXPLORER_WIDTH, useShell, type Area } from './store'
-import { useTransfersFilter, TRANSFER_FILTERS, transferCounts } from './transfers-filter'
+import { useTransfersFilter, TRANSFER_FILTERS, transferCounts, rowKey } from './transfers-filter'
 import { useExplorerSlot } from './ExplorerNav'
 
 /** Hàng của Explorer (cao 28px, icon 16px màu chữ phụ, mục chọn: nền active + chữ chính). */
@@ -332,7 +332,7 @@ function TransfersExplorer(): React.JSX.Element {
               key={src.id}
               icon={<ArrowDownToLine {...ICON_SM} />}
               label={src.label}
-              meta={src.transfers.length}
+              meta={new Set(src.transfers.map(rowKey)).size}
               onClick={() => src.reveal?.()}
             />
           ))}

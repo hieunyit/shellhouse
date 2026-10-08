@@ -66,3 +66,26 @@ describe('gộp lượt truyền của một lần tải thư mục', () => {
     expect(sec('done', 'done')).toBe('done')
   })
 })
+
+describe('transferCounts', () => {
+  it('lần tải thư mục (batch) chỉ tính một hàng', async () => {
+    const { transferCounts } = await import('../../src/renderer/src/shell/transfers-filter')
+    const mk = (id: string, state: string, batch?: string): never =>
+      ({ id, state, ...(batch ? { batch: { id: batch, label: 'tree' } } : {}) }) as never
+    const counts = transferCounts({
+      a: {
+        id: 'a',
+        label: 'a',
+        transfers: [
+          mk('1', 'done', 'b'),
+          mk('2', 'done', 'b'),
+          mk('3', 'error', 'b'),
+          mk('4', 'done')
+        ]
+      }
+    } as never)
+    expect(counts.all).toBe(2)
+    expect(counts.done).toBe(2)
+    expect(counts.failed).toBe(1)
+  })
+})

@@ -28,20 +28,32 @@ export function matchesFilter(x: TransferStatus, filter: TransferFilter): boolea
   }
 }
 
+/** Số hàng hiện trong Transfers: mỗi lần tải thư mục (batch) chỉ tính một hàng, không tính từng file. */
+export function rowKey(x: TransferStatus): string {
+  return x.batch?.id ?? x.id
+}
+
 export function transferCounts(
   sources: Record<string, TransferSource>
 ): Record<TransferFilter, number> {
-  const counts: Record<TransferFilter, number> = {
-    all: 0,
-    active: 0,
-    queued: 0,
-    failed: 0,
-    done: 0
+  const seen: Record<TransferFilter, Set<string>> = {
+    all: new Set(),
+    active: new Set(),
+    queued: new Set(),
+    failed: new Set(),
+    done: new Set()
   }
   for (const src of Object.values(sources))
     for (const x of src.transfers)
-      for (const f of TRANSFER_FILTERS) if (matchesFilter(x, f.id)) counts[f.id]++
-  return counts
+      for (const f of TRANSFER_FILTERS)
+        if (matchesFilter(x, f.id)) seen[f.id].add(`${src.id}:${rowKey(x)}`)
+  return {
+    all: seen.all.size,
+    active: seen.active.size,
+    queued: seen.queued.size,
+    failed: seen.failed.size,
+    done: seen.done.size
+  }
 }
 
 export const useTransfersFilter = create<{
