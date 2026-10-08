@@ -1126,6 +1126,8 @@ export const k8s: Readonly<Record<string, string>> = {
   'Unbound volume claims': 'PVC chưa Bound',
   'No problems found — pods, nodes and volume claims look healthy.':
     'Không thấy vấn đề — pod, node và PVC đều ổn.',
+  'No pods in view — pick All namespaces to check the whole cluster.':
+    'Không có pod nào trong phạm vi đang xem — chọn All namespaces để kiểm tra cả cluster',
   'Needs attention': 'Cần xem',
   'None in view: {kinds}': 'Không có trong phạm vi đang xem: {kinds}',
   'Recent warning events ({n})': 'Sự kiện cảnh báo gần đây ({n})',

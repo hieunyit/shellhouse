@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react'
+import { CheckCircle2, ChevronRight, Info, RefreshCw } from 'lucide-react'
 import { Heading, Meter, StatCard } from '../../../renderer/src/components/panels'
 import { cx, Notice } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
@@ -80,9 +80,12 @@ function OpenRow({
 /** Vấn đề cần xem, theo nhóm — bấm một dòng để mở tài nguyên. */
 function Problems({
   problems,
+  noPods,
   onOpen
 }: {
   problems: NonNullable<OverviewResult['problems']>
+  /** Không có pod nào trong phạm vi đang xem (namespace rỗng) — "khoẻ" ở đây không có nghĩa gì. */
+  noPods: boolean
   onOpen: (kind: string, ns: string | undefined, name: string) => void
 }): React.JSX.Element {
   const groups = GROUP_ORDER.filter((g) => problems[g].total > 0)
@@ -92,8 +95,14 @@ function Problems({
         className="flex items-center gap-2 rounded-lg border border-line px-3 py-2.5 text-xs text-muted"
         data-testid="k8s-ov-problems"
       >
-        <CheckCircle2 size={14} className="text-success" />
-        {t('No problems found — pods, nodes and volume claims look healthy.')}
+        {noPods ? (
+          <Info size={14} className="text-faint" />
+        ) : (
+          <CheckCircle2 size={14} className="text-success" />
+        )}
+        {noPods
+          ? t('No pods in view — pick All namespaces to check the whole cluster.')
+          : t('No problems found — pods, nodes and volume claims look healthy.')}
       </div>
     )
   return (
@@ -339,7 +348,11 @@ export function ClusterOverview({
 
       {data.problems && (
         <div className="mt-4">
-          <Problems problems={data.problems} onOpen={onOpen} />
+          <Problems
+            problems={data.problems}
+            noPods={p.running + p.pending + p.failed + p.succeeded + p.restarting === 0}
+            onOpen={onOpen}
+          />
         </div>
       )}
 

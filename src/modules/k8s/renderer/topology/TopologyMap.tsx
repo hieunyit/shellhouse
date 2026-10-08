@@ -376,6 +376,18 @@ function TopologyInner({
     if (!parsedQuery || !layout) return null
     return new Set(layout.nodes.filter(matchNode).map((n) => n.id))
   }, [parsedQuery, layout, matchNode])
+  /** Nhóm pod có tên chỉ là số lượng ("1") — gợi ý hiện tên pod khớp với chuỗi tìm. */
+  const resultLabel = useCallback(
+    (n: TopoNode): string => {
+      if (n.kind !== 'pods' || !parsedQuery || !('text' in parsedQuery)) return n.name
+      const q = parsedQuery.text ?? ''
+      const hits = (n.pods ?? []).filter((p) => p.name.toLowerCase().includes(q))
+      const first = hits[0]
+      if (!first) return n.name
+      return hits.length > 1 ? `${first.name} (+${String(hits.length - 1)})` : first.name
+    },
+    [parsedQuery]
+  )
   const results = useMemo(() => {
     if (!parsedQuery || !layout) return []
     return layout.nodes
@@ -889,7 +901,7 @@ function TopologyInner({
                 }}
               >
                 <KindIcon kind={n.ref?.kind ?? 'pods'} size={14} />
-                <span className="min-w-0 flex-1 truncate font-mono text-fg">{n.name}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-fg">{resultLabel(n)}</span>
                 <span className="shrink-0 text-faint">
                   {n.title} · {n.ns}
                 </span>
