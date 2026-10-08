@@ -1313,7 +1313,7 @@ function LaneHeaders({ layout }: { layout: TopoLayout }): React.JSX.Element {
     >
       {layout.columns.map((c, i) => (
         <span
-          key={c.lane}
+          key={`${c.lane}@${String(c.x)}`}
           className={cx(
             'pointer-events-auto absolute top-0 flex h-7 items-center truncate font-semibold text-faint uppercase',
             zoom < FAR_ZOOM ? 'text-[11px] tracking-normal' : 'text-[11px] tracking-wider'
@@ -1321,7 +1321,11 @@ function LaneHeaders({ layout }: { layout: TopoLayout }): React.JSX.Element {
           // Rộng tới làn kế (gồm khoảng trống): thu nhỏ vẫn đủ chỗ cho tên làn.
           style={{
             left: tx + c.x * zoom,
-            width: Math.max(40, ((layout.columns[i + 1]?.x ?? c.x + c.w) - c.x) * zoom)
+            // Cột cuối của một khối: kế tiếp là khối khác (cách xa) — không kéo dài nhãn sang đó.
+            width: Math.max(
+              40,
+              Math.min((layout.columns[i + 1]?.x ?? c.x + c.w) - c.x, c.w + 120) * zoom
+            )
           }}
           title={laneHint(c.lane)}
           data-lane={c.lane}

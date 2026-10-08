@@ -1575,6 +1575,76 @@ function rowAnchor(n: { h: number }, i: number): number {
  * Bố cục: cột cố định theo làn (chung mọi namespace), dải namespace xếp dọc, trong dải xếp theo
  * hàng workload — thẻ đầu của mỗi làn canh tâm với thẻ workload để đường đi thẳng.
  */
+/**
+ * Namespace rất nhiều workload: một cột dọc dài hàng nghìn px, "vừa khung" chỉ còn vài % — chữ không
+ * đọc nổi. Từ ngưỡng này chia các hàng thành tối đa BLOCK_MAX khối đặt cạnh nhau (mỗi khối đủ các làn).
+ */
+const BLOCK_MIN_H = 2400
+const BLOCK_MAX = 3
+const BLOCK_GAP = 72
+
+/**
+ * Hàng → khối. Các hàng nối với nhau bằng cạnh (Service chung nhiều workload…) luôn nằm cùng khối để
+ * đường nối không đi ngang qua khối khác. Hàng giữ nguyên thứ tự (đã xếp: công khai trước).
+ */
+export function planBlocks(
+  list: readonly TopoNode[],
+  edges: readonly Pick<TopoEdge, 'from' | 'to'>[]
+): Map<number, number> {
+  const byRow = groupBy(
+    list.filter((n) => n.kind !== 'namespace'),
+    (n) => String(n.row)
+  )
+  const rows = [...byRow.keys()].map(Number).sort((a, b) => a - b)
+  const plan = new Map<number, number>()
+  const heights = new Map<number, number>()
+  for (const r of rows) {
+    const lanes = groupBy(byRow.get(String(r)) ?? [], (n) => columnLane(n.lane))
+    let h = 0
+    for (const stack of lanes.values())
+      h = Math.max(h, stack.reduce((sum, n) => sum + topoNodeHeight(n) + ITEM_GAP, 0) - ITEM_GAP)
+    heights.set(r, h + ROW_GAP)
+  }
+  const total = [...heights.values()].reduce((a, b) => a + b, 0)
+  const blocks = total > BLOCK_MIN_H ? Math.min(BLOCK_MAX, Math.ceil(total / BLOCK_MIN_H)) : 1
+  if (blocks === 1) {
+    for (const r of rows) plan.set(r, 0)
+    return plan
+  }
+  // Hàng nối nhau → cùng một đơn vị (union-find).
+  const parent = new Map(rows.map((r) => [r, r]))
+  const find = (r: number): number => {
+    let x = r
+    while ((parent.get(x) ?? x) !== x) x = parent.get(x) ?? x
+    return x
+  }
+  const rowOf = new Map(list.map((n) => [n.id, n.row]))
+  for (const e of edges) {
+    const a = rowOf.get(e.from)
+    const b = rowOf.get(e.to)
+    if (a === undefined || b === undefined || a === b) continue
+    const ra = find(a)
+    const rb = find(b)
+    if (ra !== rb) parent.set(Math.max(ra, rb), Math.min(ra, rb))
+  }
+  const units = [...groupBy(rows, (r) => String(find(r))).values()].sort(
+    (a, b) => (a[0] ?? 0) - (b[0] ?? 0)
+  )
+  const target = total / blocks
+  let block = 0
+  let filled = 0
+  for (const unit of units) {
+    const h = unit.reduce((sum, r) => sum + (heights.get(r) ?? 0), 0)
+    if (filled > 0 && block < blocks - 1 && filled + h / 2 > target) {
+      block++
+      filled = 0
+    }
+    for (const r of unit) plan.set(r, block)
+    filled += h
+  }
+  return plan
+}
+
 export function layoutTopology(
   graph: Pick<TopoGraph, 'nodes' | 'edges' | 'namespaces'>,
   groupOrder: readonly string[] = []
@@ -1593,15 +1663,26 @@ export function layoutTopology(
   const contentRight = last ? last.x + last.w : PAD
   const folded = graph.namespaces.filter((n) => n.collapsed)
   const overviewW = folded.length ? Math.max(contentRight - PAD, OVERVIEW_MIN_W) : 0
-  const width = Math.max(contentRight, PAD + overviewW) + PAD
+  const byNs = groupBy(graph.nodes, (n) => n.ns)
+  // Namespace lớn chia khối (xem `planBlocks`); khối kế tiếp dịch sang phải một bề rộng làn.
+  const blockPlan = new Map<string, Map<number, number>>()
+  let maxBlocks = 1
+  for (const ns of graph.namespaces) {
+    if (ns.collapsed) continue
+    const plan = planBlocks(byNs.get(ns.name) ?? [], graph.edges)
+    blockPlan.set(ns.name, plan)
+    for (const b of plan.values()) maxBlocks = Math.max(maxBlocks, b + 1)
+  }
+  const blockW = contentRight - PAD + BLOCK_GAP
+  const width = Math.max(contentRight + (maxBlocks - 1) * blockW, PAD + overviewW) + PAD
   const colOf = new Map(columns.map((c) => [c.lane, c]))
   // Route → Gateway đầu tiên gắn vào (để xếp route ngay dưới Gateway).
   const parentOf = new Map<string, string>()
   for (const e of graph.edges)
     if (e.kind === 'attach' && !parentOf.has(e.to)) parentOf.set(e.to, e.from)
-  const byNs = groupBy(graph.nodes, (n) => n.ns)
   const placed: PlacedTopoNode[] = []
   const bands: TopoBand[] = []
+  const blockOfNode = new Map<string, number>()
   let y = PAD
 
   // ——— Lưới tổng quan: namespace đang gập thành ô, gom theo nhóm, đứng đầu bản đồ ———
@@ -1653,8 +1734,13 @@ export function layoutTopology(
     let bottom = top + BAND_HEAD
     const rows = groupBy(list, (n) => String(n.row))
     const order = [...rows.keys()].map(Number).sort((a, b) => a - b)
-    let ry = top + BAND_HEAD
+    const plan = blockPlan.get(ns.name) ?? new Map<number, number>()
+    // Mỗi khối có "con trỏ" dọc riêng.
+    const blockY = new Map<number, number>()
     for (const r of order) {
+      const block = plan.get(r) ?? 0
+      const dx = block * blockW
+      const ry = blockY.get(block) ?? top + BAND_HEAD
       const items = rows.get(String(r)) ?? []
       const byLane = groupBy(items, (n) => columnLane(n.lane))
       // Đường tâm của hàng: mỗi làn có một điểm "dẫn" (tâm thẻ đầu, hoặc dòng đầu của thẻ có
@@ -1685,9 +1771,10 @@ export function layoutTopology(
             n.kind === 'route' && prevGateway !== null && parentOf.get(n.id) === prevGateway
           if (n.kind === 'gateway') prevGateway = n.id
           else if (!nested) prevGateway = null
+          blockOfNode.set(n.id, block)
           placed.push({
             ...n,
-            x: nested ? col.x + ROUTE_INDENT : col.x,
+            x: (nested ? col.x + ROUTE_INDENT : col.x) + dx,
             y: sy,
             w: n.kind === 'more' ? Math.min(col.w, 220) : nested ? col.w - ROUTE_INDENT : col.w,
             h
@@ -1696,9 +1783,10 @@ export function layoutTopology(
         }
         rowBottom = Math.max(rowBottom, sy - ITEM_GAP)
       }
-      ry = rowBottom + ROW_GAP
+      blockY.set(block, rowBottom + ROW_GAP)
     }
-    bottom = Math.max(bottom, ry - ROW_GAP) + BAND_PAD
+    for (const by of blockY.values()) bottom = Math.max(bottom, by - ROW_GAP)
+    bottom += BAND_PAD
     bands.push({
       ns: ns.name,
       x: PAD / 2,
@@ -1761,11 +1849,15 @@ export function layoutTopology(
     }
   }
   // Đoạn dọc: mỗi cạnh một làn dọc riêng trong khe giữa hai cột (xem `routeChannels`).
-  const gapOf = new Map<TopoLane, { from: number; to: number }>()
-  columns.forEach((c, i) => {
-    const next = columns[i + 1]
-    gapOf.set(c.lane, { from: c.x + c.w, to: next ? next.x : c.x + c.w + 48 })
-  })
+  const gapOf = new Map<string, { from: number; to: number }>()
+  for (let b = 0; b < maxBlocks; b++)
+    columns.forEach((c, i) => {
+      const next = columns[i + 1]
+      gapOf.set(`${c.lane}@${String(b)}`, {
+        from: c.x + c.w + b * blockW,
+        to: (next ? next.x : c.x + c.w + 48) + b * blockW
+      })
+    })
   const wires: Wire[] = []
   for (const e of kept) {
     const s = at.get(e.from)
@@ -1777,7 +1869,7 @@ export function layoutTopology(
     if (Math.abs(ty - sy) < 0.5) continue
     wires.push({
       id: e.id,
-      gap: columnLane(s.lane),
+      gap: `${columnLane(s.lane)}@${String(blockOfNode.get(s.id) ?? 0)}`,
       sy,
       ty,
       sPort: `${e.from}#${String(e.fromRow ?? '')}`,
@@ -1800,7 +1892,10 @@ export function layoutTopology(
       ...(tree ? { tree: { sw: s.w, sh: s.h, th: tg.h } } : {})
     }
   })
-  return { nodes: placed, edges, bands, columns, width, height }
+  const headers = Array.from({ length: maxBlocks }, (_, b) =>
+    columns.map((c) => ({ ...c, x: c.x + b * blockW }))
+  ).flat()
+  return { nodes: placed, edges, bands, columns: headers, width, height }
 }
 
 /**
@@ -1837,8 +1932,8 @@ function spread(list: readonly { id: string }[], h: number, out: Map<string, num
 /** Cạnh có đoạn dọc, cần một làn dọc (track) trong khe sau cột nguồn. */
 export interface Wire {
   id: string
-  /** Cột nguồn — khe ngay sau cột này chứa đoạn dọc. */
-  gap: TopoLane
+  /** Cột nguồn (và khối, dạng `lane@block`) — khe ngay sau cột này chứa đoạn dọc. */
+  gap: string
   sy: number
   ty: number
   /** Cổng nguồn (thẻ + dòng) / điểm vào ở đích. */

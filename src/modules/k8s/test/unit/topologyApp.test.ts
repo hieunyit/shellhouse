@@ -3,6 +3,7 @@ import { setLanguage } from '@shared/i18n'
 import {
   buildTopology,
   layoutTopology,
+  planBlocks,
   pathThrough,
   routeChannels,
   topoStructureKey,
@@ -811,7 +812,7 @@ describe('Định tuyến cạnh trực giao (mỗi cạnh một làn dọc)', (
   })
 })
 
-describe('Bản đồ: NodePort, PVC mồ côi', () => {
+describe('Bản đồ: NodePort, PVC mồ côi, namespace lớn chia khối', () => {
   it('NodePort không vẽ thêm nút lối vào — thẻ Service ghi cổng node; LoadBalancer vẫn có', () => {
     const d = data()
     d.services.push({
@@ -843,5 +844,53 @@ describe('Bản đồ: NodePort, PVC mồ côi', () => {
     // PVC Bound không workload dùng: không phải vấn đề.
     d.pvcs.push({ ns: 'shop', name: 'spare', status: 'Bound', capacity: '1Gi', tone: 'ok' })
     expect(byId(buildTopology(d, OPTS)).has('pvc:shop/spare')).toBe(false)
+  })
+
+  it('namespace nhiều workload chia khối cạnh nhau: không chồng thẻ, đủ làn, nằm trong bề rộng', () => {
+    const d = data()
+    for (let i = 0; i < 28; i++)
+      d.workloads.push(workload({ name: `w${String(i).padStart(2, '0')}`, ports: [] }))
+    const g = buildTopology(d, { ...OPTS, showAll: new Set(['shop']) })
+    const l = layoutTopology(g)
+    const lanes = new Set(l.columns.map((c) => c.lane)).size
+    // Có ≥ 2 khối: tiêu đề làn lặp lại cho khối thứ hai.
+    expect(l.columns.length).toBeGreaterThan(lanes)
+    expect(Math.max(...l.nodes.map((x) => x.x + x.w))).toBeLessThanOrEqual(l.width)
+    for (let i = 0; i < l.nodes.length; i++)
+      for (let j = i + 1; j < l.nodes.length; j++) {
+        const a = l.nodes[i]
+        const b = l.nodes[j]
+        if (!a || !b) continue
+        const apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y
+        expect(apart, `${a.id} ↔ ${b.id}`).toBe(true)
+      }
+    // Cạnh không bao giờ đi ngược từ khối này sang khối khác: mọi cạnh cùng khối.
+    const at = new Map(l.nodes.map((x) => [x.id, x]))
+    for (const e of l.edges) {
+      const s = at.get(e.from)
+      const t = at.get(e.to)
+      if (s && t) expect(t.x + t.w).toBeGreaterThan(s.x)
+    }
+  })
+
+  it('planBlocks: hàng nối nhau bằng cạnh luôn cùng khối; ít hàng thì một khối', () => {
+    const mk = (id: string, row: number): TopoNode => ({
+      id,
+      kind: 'workload',
+      lane: 'workload',
+      ns: 'x',
+      name: id,
+      title: 'Deployment',
+      sub: '',
+      tone: 'ok',
+      problems: [],
+      row
+    })
+    const few = [mk('a', 0), mk('b', 1)]
+    expect([...planBlocks(few, []).values()]).toEqual([0, 0])
+    const many = Array.from({ length: 60 }, (_, i) => mk(`n${String(i)}`, i))
+    const plan = planBlocks(many, [{ from: 'n0', to: 'n59' }])
+    expect(new Set(plan.values()).size).toBeGreaterThan(1)
+    expect(plan.get(0)).toBe(plan.get(59))
   })
 })
