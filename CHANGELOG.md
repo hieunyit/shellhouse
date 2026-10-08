@@ -6,6 +6,46 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.27] - 2026-10-08
+
+### Added
+
+- **SFTP:** uploading or downloading a folder is one row in Transfers (expand it to see each file)
+  instead of hundreds; the counts in the sidebar follow the rows.
+- **S3:** in a folder with more than one page of objects, the filter also searches the server for
+  names that start with what you type (not only the loaded page), and the list loads the next page
+  as you scroll.
+- **Docker:** Volumes show **Used by** (the containers that mount the volume) and **Size**
+  (loaded in the background, sortable).
+- **Remote Desktop:** after an unexpected disconnect the session reconnects by itself (2 s, 5 s,
+  10 s) and says so; when it gives up, the message explains why.
+- **Command palette:** commands for every Settings page ("theme" → Appearance) and for moving
+  between Home, Hosts, Files and Transfers.
+- **Kubernetes:** custom resource tables show the CRD's printer columns like `kubectl get`;
+  "Stale · reconnecting" when the API server stops answering; a Config group in the navigation;
+  on the Map, a namespace with many workloads is split into 2–3 blocks placed side by side.
+
+### Fixed
+
+- **SFTP:** a transfer no longer stays "running" forever after the connection drops — it fails
+  at once, the partial file is kept and the same transfer resumes from where it stopped.
+- **Terminal:** the last line is no longer half hidden behind the bottom bar (the terminal counted
+  up to 12 px of extra rows depending on the font size); changing the font size or the screen scale
+  refits the terminal.
+- **Docker over SSH:** after you grant the `docker` group, Refresh reconnects (the group only
+  applies to a new SSH connection); a container on the `host` network shows "Not measured"
+  instead of 0 B/s; the container panel no longer repeats Files and Exec.
+- **Tabs:** a single Docker / Kubernetes tab can be closed (the tab strip was hidden with one tab).
+- **Settings:** the page no longer jumps 5 px between pages; the default environments'
+  descriptions are translated.
+- **Command palette:** the fuzzy search no longer matches letters scattered over a long title
+  ("theme" matched "Import hosts (ssh config, MobaXterm…)").
+- **Kubernetes:** Overview and Fleet no longer say "0 healthy nodes" when the account cannot list
+  nodes or pods, and an empty namespace is not reported as healthy; the Map shows a NodePort
+  service once, the find box names the matching pod and says when nothing matches; the list toolbar
+  no longer clips "Live" next to the detail panel; log footers show "+N more" when several pods are
+  followed; the port-forward toast shows the real port.
+
 ## [1.2.0-beta.26] - 2026-10-07
 
 ### Added
