@@ -407,7 +407,11 @@ export class K8sService implements HostModuleSession {
         return this.apply(client, op.yaml, signal)
       case 'delete':
         await client.json('DELETE', resourcePath(this.kind(op.kind), op.namespace, op.name), {
-          ...(op.force ? { query: { gracePeriodSeconds: 0 } } : {}),
+          // Như kubectl: luôn xoá nền — không gửi thì REST mặc định của Job là "orphan" (pod con ở lại).
+          query: {
+            propagationPolicy: 'Background',
+            ...(op.force ? { gracePeriodSeconds: 0 } : {})
+          },
           signal
         })
         return null

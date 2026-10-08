@@ -890,6 +890,16 @@ kind: Broken
     await run({ op: 'delete', kind: 'pods', namespace: 'shop', name: 'web-1', force: true })
   })
 
+  it('delete: luôn gửi propagationPolicy=Background (không thì Job để lại pod mồ côi)', async () => {
+    const { run, server } = await setup()
+    await run({ op: 'delete', kind: 'pods', namespace: 'shop', name: 'web-1' })
+    await run({ op: 'delete', kind: 'pods', namespace: 'shop', name: 'web-2', force: true })
+    const deletes = server.requests.filter((r) => r.startsWith('DELETE '))
+    expect(deletes).toHaveLength(2)
+    for (const d of deletes) expect(d).toContain('propagationPolicy=Background')
+    expect(deletes[1]).toContain('gracePeriodSeconds=0')
+  })
+
   it('metrics.range: lịch sử CPU / RAM từ Prometheus trong cluster; không có → source none', async () => {
     const { run, server } = await setup()
     const none = await run<MetricsRange>({
