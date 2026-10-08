@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   ArrowDownToLine,
+  ChevronRight,
   CircleAlert,
   CircleCheck,
   Clock,
@@ -403,7 +404,13 @@ function ModuleExplorer({ id }: { id: string }): React.JSX.Element | null {
       useShell.getState().go('hosts')
   }, [loaded, enabled, id])
   const Section = rendererModule(id)?.SidebarSection
+  // Cột điều hướng của tab đang mở (Overview · Workloads · …) thu gọn được theo từng tab: nhiều cụm /
+  // endpoint cùng mở thì mỗi cây dài chiếm cả thanh bên.
+  const filled = useExplorerSlot((s) => s.filled)
+  const activeTab = useTabs((s) => s.tabs.find((x) => x.id === s.activeId))
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   if (!Section || !enabled) return null
+  const navCollapsed = Boolean(activeTab && collapsed.has(activeTab.id))
   return (
     <div
       className="min-h-0 flex-1 overflow-auto px-2 pb-2"
@@ -412,7 +419,38 @@ function ModuleExplorer({ id }: { id: string }): React.JSX.Element | null {
     >
       <Section />
       {/* Cột điều hướng của tab module đang mở (ExplorerNav). */}
-      <div ref={setExplorerSlot} className="empty:hidden" data-testid="explorer-module-nav" />
+      {filled && activeTab && (
+        <button
+          type="button"
+          aria-expanded={!navCollapsed}
+          data-testid="explorer-module-nav-toggle"
+          className="mt-1 flex h-7 w-full items-center gap-1.5 rounded-ds-md border-t border-ds-border-subtle px-1.5 pt-1 text-left text-xs font-medium text-ds-fg-3 hover:text-ds-fg"
+          onClick={() => {
+            setCollapsed((prev) => {
+              const next = new Set(prev)
+              if (next.has(activeTab.id)) next.delete(activeTab.id)
+              else next.add(activeTab.id)
+              return next
+            })
+          }}
+        >
+          <ChevronRight
+            size={13}
+            className={cx(
+              'shrink-0 transition-transform duration-150',
+              !navCollapsed && 'rotate-90'
+            )}
+          />
+          <span className="min-w-0 flex-1 truncate" title={activeTab.title}>
+            {activeTab.title}
+          </span>
+        </button>
+      )}
+      <div
+        ref={setExplorerSlot}
+        className={navCollapsed ? 'hidden' : 'empty:hidden'}
+        data-testid="explorer-module-nav"
+      />
     </div>
   )
 }

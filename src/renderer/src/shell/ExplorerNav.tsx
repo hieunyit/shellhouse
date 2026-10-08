@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { create } from 'zustand'
 
@@ -10,10 +10,17 @@ import { create } from 'zustand'
 export const useExplorerSlot = create<{
   el: HTMLElement | null
   set: (el: HTMLElement | null) => void
+  /** Có cột điều hướng của một tab module đang đặt trong chỗ này (để Explorer vẽ nút thu gọn). */
+  filled: boolean
+  setFilled: (filled: boolean) => void
 }>((set, get) => ({
   el: null,
   set: (el) => {
     if (get().el !== el) set({ el })
+  },
+  filled: false,
+  setFilled: (filled) => {
+    if (get().filled !== filled) set({ filled })
   }
 }))
 
@@ -28,6 +35,14 @@ export function ExplorerNav({
   children: (placement: NavPlacement) => ReactNode
 }): ReactNode {
   const slot = useExplorerSlot((s) => s.el)
+  const fills = Boolean(slot) && active
+  useEffect(() => {
+    if (!fills) return
+    useExplorerSlot.getState().setFilled(true)
+    return () => {
+      useExplorerSlot.getState().setFilled(false)
+    }
+  }, [fills])
   if (slot) return active ? createPortal(children('explorer'), slot) : null
   return children('inline')
 }
