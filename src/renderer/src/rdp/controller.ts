@@ -97,6 +97,11 @@ interface IronErrorLike {
     { httpStatusCode?: number; wsaErrorCode?: number; tlsAlertCode?: number } | undefined
 }
 
+/** Chờ giữa các lần tự kết nối lại sau khi mất kết nối bất ngờ (hết dãy → báo lỗi). */
+const RECONNECT_DELAYS_MS = [2000, 5000, 10000]
+/** Phiên sống quá ngưỡng này rồi mới mất → được thử lại từ đầu. */
+const RECONNECT_RESET_MS = 60_000
+
 function isIronError(error: unknown): error is IronErrorLike {
   return (
     typeof error === 'object' &&
@@ -256,6 +261,9 @@ export class RdpController {
   })
   private disposed = false
   private userClosing = false
+  /** Số lần đã tự kết nối lại sau khi mất kết nối bất ngờ (về 0 khi người dùng chủ động kết nối). */
+  private reconnectAttempts = 0
+  private reconnectTimer: number | null = null
 
   constructor(
     readonly hostId: string,
@@ -392,6 +400,8 @@ export class RdpController {
 
   /** Kết nối (hoặc kết nối lại). */
   start(): void {
+    this.reconnectAttempts = 0
+    this.clearReconnect()
     // Mount lại sau dispose (React StrictMode chạy effect hai lần ở bản dev).
     this.disposed = false
     void this.flow()
@@ -502,8 +512,14 @@ export class RdpController {
       await this.connectDesktop(gen, viaSessionId, prep)
     } catch (error) {
       if (this.stale(gen)) return
-      this.fail(plainMessage(error))
+      this.failOrRetry(plainMessage(error))
     }
+  }
+
+  /** Đang trong chuỗi tự kết nối lại → thử tiếp theo lịch; hết lượt (hoặc kết nối lần đầu) → báo lỗi. */
+  private failOrRetry(message: string): void {
+    if (this.reconnectAttempts > 0 && this.scheduleReconnect()) return
+    this.fail(message)
   }
 
   private askCredentials(request: RdpCredentialsRequest): Promise<TypedCredentials | null> {
@@ -594,7 +610,7 @@ export class RdpController {
           this.typed = again
           continue
         }
-        this.fail(failure.message)
+        this.failOrRetry(failure.message)
         return
       }
       if (this.stale(gen)) {
@@ -642,14 +658,56 @@ export class RdpController {
         if (this.userClosing || this.stale(gen)) return
         this.close(reason ? t('The session ended: {reason}', { reason }) : t('The session ended'))
       },
-      (error: unknown) => {
+      () => {
         if (this.session !== session) return
         this.session = null
         if (this.userClosing || this.stale(gen)) return
-        const failure = describeConnectError(error)
-        this.fail(failure.kind === 'other' ? failure.message : t('The connection was lost'))
+        // Phiên đã sống đủ lâu → lần mất kết nối này không tính vào hạn mức thử lại.
+        const since = this.state.connectedAt
+        if (since !== null && Date.now() - since > RECONNECT_RESET_MS) this.reconnectAttempts = 0
+        if (this.scheduleReconnect()) return
+        this.fail(
+          this.reconnectAttempts > 0
+            ? t(
+                'The connection to the server was lost and could not be restored — check the network or the server, then reconnect.'
+              )
+            : t(
+                'The connection to the server was lost — check the network or the server, then reconnect.'
+              )
+        )
       }
     )
+  }
+
+  /** Chờ rồi tự kết nối lại (mất mạng thoáng qua, server khởi động lại). false = hết lượt. */
+  private scheduleReconnect(): boolean {
+    const delay = RECONNECT_DELAYS_MS[this.reconnectAttempts]
+    if (delay === undefined) return false
+    const attempt = ++this.reconnectAttempts
+    const gen = ++this.generation
+    this.stopSession()
+    this.set({
+      phase: 'connecting',
+      credentials: null,
+      probe: null,
+      error: null,
+      connectedAt: null,
+      detail: t('Connection lost — reconnecting in {seconds}s (attempt {n}/{max})…', {
+        seconds: Math.round(delay / 1000),
+        n: attempt,
+        max: RECONNECT_DELAYS_MS.length
+      })
+    })
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null
+      if (!this.stale(gen)) void this.flow()
+    }, delay)
+    return true
+  }
+
+  private clearReconnect(): void {
+    if (this.reconnectTimer !== null) window.clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = null
   }
 
   private initialSize(prep: Extract<RdpViewPrepare, { ok: true }>): {
@@ -746,6 +804,7 @@ export class RdpController {
   }
 
   private close(message: string | null): void {
+    this.clearReconnect()
     this.generation++
     this.certAnswer?.(false)
     this.credAnswer?.(null)
@@ -765,6 +824,7 @@ export class RdpController {
   }
 
   private fail(message: string, external = false): void {
+    this.clearReconnect()
     this.generation++
     this.certAnswer?.(false)
     this.credAnswer?.(null)

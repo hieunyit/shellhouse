@@ -93,7 +93,12 @@ export const rdpViewer: Readonly<Record<string, string>> = {
   'Signing in as {user}…': 'Đang đăng nhập bằng {user}…',
   'The session ended: {reason}': 'Phiên đã kết thúc: {reason}',
   'The session ended': 'Phiên đã kết thúc',
-  'The connection was lost': 'Mất kết nối',
+  'The connection to the server was lost — check the network or the server, then reconnect.':
+    'Mất kết nối tới máy chủ — kiểm tra mạng hoặc máy chủ rồi kết nối lại.',
+  'The connection to the server was lost and could not be restored — check the network or the server, then reconnect.':
+    'Mất kết nối tới máy chủ và không khôi phục được — kiểm tra mạng hoặc máy chủ rồi kết nối lại.',
+  'Connection lost — reconnecting in {seconds}s (attempt {n}/{max})…':
+    'Mất kết nối — tự kết nối lại sau {seconds}s (lần {n}/{max})…',
   // Hiệu năng (bảng đo Ctrl+Shift+Alt+P, tuỳ chọn trong form host)
   'Best performance': 'Nhanh nhất',
   Balanced: 'Cân bằng',

@@ -227,6 +227,68 @@ describe('RdpController', () => {
     c.dispose()
   })
 
+  it('mất kết nối bất ngờ → tự kết nối lại theo lịch; hết lượt → báo lỗi dễ hiểu; Disconnect huỷ lịch', async () => {
+    prepare = { ...prepare, username: 'saved', hasPassword: true } as typeof prepare
+    probe = { ...probe, status: 'trusted' }
+    const delays: number[] = []
+    const timers: (() => void)[] = []
+    // Chỉ lịch kết nối lại (≥ 2 giây) cần chạy tay; timer ngắn của giao diện bỏ qua.
+    const fire = (): void => {
+      const i = delays.findIndex((d, k) => d >= 2000 && timers[k] !== undefined)
+      const fn = timers[i]
+      if (fn) {
+        timers[i] = undefined as never
+        fn()
+      }
+    }
+    const win = globalThis.window as unknown as { setTimeout: unknown }
+    win.setTimeout = (fn: () => void, ms: number) => {
+      delays.push(ms)
+      timers.push(fn)
+      return timers.length
+    }
+    // Mỗi phiên "chết" ngay sau khi nối được.
+    let sessions = 0
+    const dying = {
+      ...fakeSession,
+      run: () =>
+        Promise.reject(Object.assign(new Error('x'), { kind: () => 0, backtrace: () => 'io' }))
+    }
+    connectResult = () => {
+      sessions++
+      return Promise.resolve(sessions === 1 ? { ...fakeSession, run: dying.run } : dying)
+    }
+    const { RdpController } = await import('../../src/renderer/src/rdp/controller')
+    const c = new RdpController('h1', 'win')
+    c.attach(element(), element())
+    c.start()
+    await settle()
+    // Phiên đầu rớt → chờ 2 giây, rồi kết nối lại.
+    expect(c.getState().phase).toBe('connecting')
+    expect(c.getState().detail).toMatch(/reconnecting in 2s/)
+    for (let i = 0; i < 3; i++) {
+      fire()
+      await settle()
+    }
+    expect(delays.filter((d) => d >= 2000)).toEqual([2000, 5000, 10000])
+    expect(c.getState().phase).toBe('disconnected')
+    expect(c.getState().error?.message).toMatch(/could not be restored/)
+
+    // Disconnect trong lúc chờ → không kết nối lại nữa.
+    sessions = 0
+    timers.length = 0
+    delays.length = 0
+    c.start()
+    await settle()
+    expect(c.getState().phase).toBe('connecting')
+    c.disconnect()
+    fire()
+    await settle()
+    expect(c.getState().phase).toBe('disconnected')
+    expect(c.getState().userClosed).toBe(true)
+    c.dispose()
+  })
+
   it('không tin chứng chỉ → dừng, không mở proxy', async () => {
     const { RdpController } = await import('../../src/renderer/src/rdp/controller')
     const c = new RdpController('h1', 'win')
