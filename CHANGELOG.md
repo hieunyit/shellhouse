@@ -6,7 +6,7 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
-## [1.2.0-beta.27] - 2026-10-08
+## [1.2.0-beta.28] - 2026-10-08
 
 ### Added
 
@@ -27,6 +27,11 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Fixed
 
+- **Kubernetes / Docker:** the navigation tree of the open cluster or endpoint (Overview,
+  Workloads…) can be collapsed from the row above it, one state per tab, so several open clusters
+  no longer fill the whole sidebar.
+- **Terminal:** the suggested command (the grey text after the cursor) stays right after what
+  you typed.
 - **SFTP:** a transfer no longer stays "running" forever after the connection drops — it fails
   at once, the partial file is kept and the same transfer resumes from where it stopped.
 - **Terminal:** the last line is no longer half hidden behind the bottom bar (the terminal counted
@@ -45,6 +50,10 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   service once, the find box names the matching pod and says when nothing matches; the list toolbar
   no longer clips "Live" next to the detail panel; log footers show "+N more" when several pods are
   followed; the port-forward toast shows the real port.
+
+## [1.2.0-beta.27] - 2026-10-08
+
+Never published — everything in it is in 1.2.0-beta.28.
 
 ## [1.2.0-beta.26] - 2026-10-07
 
