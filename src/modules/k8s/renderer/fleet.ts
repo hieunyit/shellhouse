@@ -100,21 +100,32 @@ export function fleetStats(r: FleetResult): FleetStat[] {
   const failing = r.problems.failing.total + r.problems.imagePull.total
   const pending = r.problems.pending.total
   const notReady = r.nodes.total - r.nodes.ready
+  const noNodes = r.limited?.includes('nodes') === true
+  const noPods = r.limited?.includes('pods') === true
   return [
-    {
-      label: t('Nodes'),
-      value: `${String(r.nodes.ready)}/${String(r.nodes.total)}`,
-      tone: notReady > 0 ? 'danger' : 'ok',
-      title:
-        notReady > 0
-          ? tn(notReady, '{n} node not ready', '{n} nodes not ready')
-          : t('All nodes ready')
-    },
-    {
-      label: t('Failing pods'),
-      value: String(failing),
-      tone: failing > 0 ? 'danger' : 'muted'
-    },
+    noNodes
+      ? { label: t('Nodes'), value: '—', tone: 'muted', title: t('No permission to list nodes') }
+      : {
+          label: t('Nodes'),
+          value: `${String(r.nodes.ready)}/${String(r.nodes.total)}`,
+          tone: notReady > 0 ? 'danger' : 'ok',
+          title:
+            notReady > 0
+              ? tn(notReady, '{n} node not ready', '{n} nodes not ready')
+              : t('All nodes ready')
+        },
+    noPods
+      ? {
+          label: t('Failing pods'),
+          value: '—',
+          tone: 'muted',
+          title: t('No permission to read pods across the cluster')
+        }
+      : {
+          label: t('Failing pods'),
+          value: String(failing),
+          tone: failing > 0 ? 'danger' : 'muted'
+        },
     ...(pending > 0
       ? [{ label: t('Pending'), value: String(pending), tone: 'warning' as const }]
       : [])

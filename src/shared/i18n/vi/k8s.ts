@@ -561,9 +561,14 @@ export const k8s: Readonly<Record<string, string>> = {
   '{n} namespaces': '{n} namespace',
   'Service Discovery': 'Service Discovery',
   Storage: 'Storage',
+  'no access': 'không có quyền',
   'Stale · reconnecting': 'Dữ liệu cũ · đang nối lại',
   'No answer from the API server since {time} — the table may be out of date. Reconnecting…':
     'API server không trả lời từ {time} — bảng có thể đã cũ. Đang nối lại…',
+  'No permission to list nodes': 'Không có quyền list node',
+  'No permission to read pods across the cluster': 'Không có quyền đọc pod trên toàn cluster',
+  'Node capacity is hidden — this account cannot list nodes, so only requests are shown.':
+    'Dung lượng node bị ẩn — tài khoản này không list được node nên chỉ hiện mức đã yêu cầu (requests).',
   Policy: 'Policy',
   'Access Control': 'Access Control',
   Cluster: 'Cluster',

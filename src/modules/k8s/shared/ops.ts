@@ -575,7 +575,8 @@ export interface RbacReach {
 
 export interface OverviewResult {
   version: string
-  nodes: { total: number; ready: number; cordoned: number }
+  /** `known: false` — tài khoản không list được node (số liệu node và dung lượng không có). */
+  nodes: { total: number; ready: number; cordoned: number; known?: boolean }
   /** Tổng allocatable của các node (millicore / byte). */
   capacity: Usage
   /** Tổng requests của pod đang chạy. */
@@ -604,6 +605,8 @@ export interface FleetResult {
   version: string
   nodes: { total: number; ready: number }
   problems: Record<ProblemGroup, { total: number; items: OverviewProblem[] }>
+  /** Loại tài khoản không đọc được toàn cluster (thiếu quyền) — số liệu tương ứng là "không biết". */
+  limited?: ('nodes' | 'pods' | 'pvcs')[]
   /** Hạn chứng chỉ (ISO): của API server và của client-certificate trong kubeconfig. */
   serverCertExpiry?: string
   clientCertExpiry?: string

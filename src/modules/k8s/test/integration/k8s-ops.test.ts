@@ -116,7 +116,7 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     expect(h.deployments['shop']).toBe(1)
     const o = await run<OverviewResult>({ op: 'overview', namespaces: ['shop'] })
     expect(o.version).toBe('v1.31.2')
-    expect(o.nodes).toEqual({ total: 2, ready: 1, cordoned: 0 })
+    expect(o.nodes).toEqual({ total: 2, ready: 1, cordoned: 0, known: true })
     expect(o.capacity).toEqual({ cpu: 8000, memory: 16 * 1024 ** 3 })
     expect(o.pods).toMatchObject({ running: 2, restarting: 1 })
     expect(o.requests).toEqual({ cpu: 500, memory: 256 * 1024 ** 2 })
@@ -910,6 +910,19 @@ kind: Broken
     // Thiếu quyền đọc CRD → bảng vẫn dùng được (chỉ Name / Namespace / Age).
     server.forbid(/customresourcedefinitions/)
     expect(await run({ op: 'crd.columns', kind: 'widgets.example.com' })).toEqual([])
+  })
+
+  it('tài khoản không list được node: Overview / Fleet nói "không biết", không báo 0 node khoẻ', async () => {
+    const { run, server } = await setup()
+    server.forbid(/^\/api\/v1\/nodes$/)
+    const o = await run<OverviewResult>({ op: 'overview', namespaces: ['shop'] })
+    expect(o.nodes).toMatchObject({ total: 0, known: false })
+    const f = await run<FleetResult>({ op: 'fleet' })
+    expect(f.limited).toEqual(['nodes'])
+    server.forbid(/^\/api\/v1\/(nodes|pods)$/)
+    expect((await run<FleetResult>({ op: 'fleet' })).limited?.sort()).toEqual(['nodes', 'pods'])
+    server.forbid(null)
+    expect((await run<FleetResult>({ op: 'fleet' })).limited).toBeUndefined()
   })
 
   it('delete: luôn gửi propagationPolicy=Background (không thì Job để lại pod mồ côi)', async () => {

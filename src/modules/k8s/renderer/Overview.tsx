@@ -219,6 +219,9 @@ export function ClusterOverview({
       </div>
     )
   const p = data.pods
+  // Tài khoản không list được node: không có dung lượng → không vẽ "x of 0m" / thanh 0%.
+  const nodesKnown = data.nodes.known !== false
+  const capacityKnown = nodesKnown && data.capacity.cpu > 0
   return (
     <div className="min-h-0 flex-1 overflow-auto p-4" data-testid="k8s-overview">
       {error && (
@@ -258,13 +261,17 @@ export function ClusterOverview({
       <div className="grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-2">
         <StatCard
           label={t('Nodes')}
-          value={`${formatNumber(data.nodes.ready)}/${formatNumber(data.nodes.total)}`}
-          sub={
-            data.nodes.cordoned
-              ? t('{n} cordoned', { n: formatNumber(data.nodes.cordoned) })
-              : t('ready')
+          value={
+            nodesKnown ? `${formatNumber(data.nodes.ready)}/${formatNumber(data.nodes.total)}` : '—'
           }
-          tone={data.nodes.ready < data.nodes.total ? 'warn' : 'ok'}
+          sub={
+            !nodesKnown
+              ? t('no access')
+              : data.nodes.cordoned
+                ? t('{n} cordoned', { n: formatNumber(data.nodes.cordoned) })
+                : t('ready')
+          }
+          tone={!nodesKnown ? 'muted' : data.nodes.ready < data.nodes.total ? 'warn' : 'ok'}
           onClick={() => {
             onNavigate('nodes')
           }}
@@ -351,15 +358,19 @@ export function ClusterOverview({
                 })}
               />
             )}
-            <Meter
-              value={data.requests.cpu}
-              max={data.capacity.cpu}
-              label={t('Requested')}
-              detail={t('{used} of {total}', {
-                used: formatCpu(data.requests.cpu),
-                total: formatCpu(data.capacity.cpu)
-              })}
-            />
+            {capacityKnown ? (
+              <Meter
+                value={data.requests.cpu}
+                max={data.capacity.cpu}
+                label={t('Requested')}
+                detail={t('{used} of {total}', {
+                  used: formatCpu(data.requests.cpu),
+                  total: formatCpu(data.capacity.cpu)
+                })}
+              />
+            ) : (
+              <Plain label={t('Requested')} value={formatCpu(data.requests.cpu)} />
+            )}
           </div>
         </div>
         <div className="rounded-lg border border-line p-3" data-testid="k8s-ov-memory">
@@ -376,18 +387,29 @@ export function ClusterOverview({
                 })}
               />
             )}
-            <Meter
-              value={data.requests.memory}
-              max={data.capacity.memory}
-              label={t('Requested')}
-              detail={t('{used} of {total}', {
-                used: formatMemory(data.requests.memory),
-                total: formatMemory(data.capacity.memory)
-              })}
-            />
+            {capacityKnown ? (
+              <Meter
+                value={data.requests.memory}
+                max={data.capacity.memory}
+                label={t('Requested')}
+                detail={t('{used} of {total}', {
+                  used: formatMemory(data.requests.memory),
+                  total: formatMemory(data.capacity.memory)
+                })}
+              />
+            ) : (
+              <Plain label={t('Requested')} value={formatMemory(data.requests.memory)} />
+            )}
           </div>
         </div>
       </div>
+      {!capacityKnown && (
+        <p className="mt-2 text-xs text-faint" data-testid="k8s-ov-no-capacity">
+          {t(
+            'Node capacity is hidden — this account cannot list nodes, so only requests are shown.'
+          )}
+        </p>
+      )}
       {!data.usage && (
         <p className="mt-2 text-xs text-faint">
           {t('Live usage needs metrics-server in the cluster; requests are shown instead.')}
@@ -450,6 +472,16 @@ export function ClusterOverview({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/** Dòng số liệu không có mức tối đa (không biết dung lượng): nhãn ở trái, giá trị ở phải. */
+function Plain({ label, value }: { label: string; value: string }): React.JSX.Element {
+  return (
+    <div className="flex items-baseline justify-between gap-3 text-xs">
+      <span className="text-muted">{label}</span>
+      <span className="text-fg tabular-nums">{value}</span>
     </div>
   )
 }

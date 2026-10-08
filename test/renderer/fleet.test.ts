@@ -106,6 +106,21 @@ describe('Tóm tắt cluster', () => {
       ['Pending', '4', 'warning']
     ])
   })
+
+  it('tài khoản không đọc được node / pod toàn cluster: "—" xám, không báo khoẻ', async () => {
+    const { fleetStats } = await import('../../src/modules/k8s/renderer/fleet')
+    const r = result({ nodes: { total: 0, ready: 0 }, limited: ['nodes', 'pods'] })
+    expect(fleetStats(r).map((s) => [s.label, s.value, s.tone])).toEqual([
+      ['Nodes', '—', 'muted'],
+      ['Failing pods', '—', 'muted']
+    ])
+    expect(
+      fleetStats(result({ limited: ['pods'] })).map((s) => [s.label, s.value, s.tone])
+    ).toEqual([
+      ['Nodes', '3/3', 'ok'],
+      ['Failing pods', '—', 'muted']
+    ])
+  })
 })
 
 describe('Tóm tắt Docker', () => {

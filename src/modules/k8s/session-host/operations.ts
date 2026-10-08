@@ -144,10 +144,15 @@ export async function overview(
 ): Promise<OverviewResult> {
   const opts = { signal }
   const none = { items: [] as K8sObject[], truncated: false }
+  // Không list được node (thiếu quyền) ≠ "0 node": báo `known: false` để giao diện không vẽ 0/0.
+  const access = { nodes: true }
   const [version, nodeList, podList, deployList, setList, daemonList, eventList, usage, pvcList] =
     await Promise.all([
       client.json<{ gitVersion?: string }>('GET', '/version', opts),
-      listPaged(client, '/api/v1/nodes', opts).catch(() => none),
+      listPaged(client, '/api/v1/nodes', opts).catch(() => {
+        access.nodes = false
+        return none
+      }),
       listIn(client, (n) => `/api/v1${n ? ns(n) : ''}/pods`, namespaces, opts),
       listIn(client, (n) => `/apis/apps/v1${n ? ns(n) : ''}/deployments`, namespaces, opts).catch(
         () => none
@@ -244,7 +249,7 @@ export async function overview(
     .slice(0, 50)
   return {
     version: version.gitVersion ?? '',
-    nodes: { total: nodes.items.length, ready, cordoned },
+    nodes: { total: nodes.items.length, ready, cordoned, known: access.nodes },
     capacity,
     requests,
     usage: usageSum,
@@ -912,11 +917,18 @@ export async function fleet(
 ): Promise<FleetResult> {
   const opts = { signal, max: 5000 }
   const none = { items: [] as K8sObject[], truncated: false }
+  // Không đọc được (thiếu quyền) ≠ "không có": ghi lại để hàng không báo "khoẻ" khi chưa nhìn thấy gì.
+  const limited: NonNullable<FleetResult['limited']> = []
+  const read = (what: 'nodes' | 'pods' | 'pvcs', path: string): ReturnType<typeof listPaged> =>
+    listPaged(client, path, opts).catch(() => {
+      limited.push(what)
+      return none
+    })
   const [version, nodes, pods, pvcs] = await Promise.all([
     client.json<{ gitVersion?: string }>('GET', '/version', signal ? { signal } : {}),
-    listPaged(client, '/api/v1/nodes', opts).catch(() => none),
-    listPaged(client, '/api/v1/pods', opts).catch(() => none),
-    listPaged(client, '/api/v1/persistentvolumeclaims', opts).catch(() => none)
+    read('nodes', '/api/v1/nodes'),
+    read('pods', '/api/v1/pods'),
+    read('pvcs', '/api/v1/persistentvolumeclaims')
   ])
   const found = findProblems(nodes.items, pods.items, pvcs.items)
   const clientCertExpiry = clientCert ? certExpiry(clientCert) : null
@@ -924,6 +936,7 @@ export async function fleet(
     version: version.gitVersion ?? '',
     nodes: { total: nodes.items.length, ready: nodes.items.length - found.nodes.total },
     problems: found,
+    ...(limited.length ? { limited } : {}),
     ...(client.serverCertExpiry ? { serverCertExpiry: client.serverCertExpiry } : {}),
     ...(clientCertExpiry ? { clientCertExpiry } : {})
   }
