@@ -647,7 +647,10 @@ export function ClusterTab({
 
   if (session.error)
     return (
-      <div className="flex h-full items-center justify-center bg-canvas p-6" data-testid="k8s-view">
+      <div
+        className="sh-selectable flex h-full items-center justify-center bg-canvas p-6"
+        data-testid="k8s-view"
+      >
         <div className="flex max-w-md flex-col items-center gap-3 text-center">
           <Ship size={28} className="text-faint" />
           <p className="text-sm text-fg" data-testid="k8s-error">
@@ -746,7 +749,8 @@ export function ClusterTab({
       <GuardProvider value={guardProvider.value}>
         <div
           ref={rootRef}
-          className="relative flex h-full flex-col bg-surface"
+          // Cả vùng K8s chọn / copy được (event, IP, tên, giá trị…); nút, icon vẫn không bôi đen.
+          className="sh-selectable relative flex h-full flex-col bg-surface"
           data-testid="k8s-view"
           data-tab={tabId}
           data-ready={ready && (loaded || onOverview || onMap)}

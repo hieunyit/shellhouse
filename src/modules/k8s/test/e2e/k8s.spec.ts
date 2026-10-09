@@ -1178,6 +1178,9 @@ test('Kubernetes: Connections — khai báo (env) ghép với traffic quan sát:
       timeout: 30_000
     })
     await expect(map.getByTestId('k8s-conn-traffic-note')).toContainText('Hubble')
+    // Chọn / copy được giá trị trong bảng (trước đây toàn app user-select: none).
+    await mrow('api.stripe.com').getByText('api.stripe.com:443').dblclick()
+    expect(await page.evaluate(() => window.getSelection()?.toString() ?? '')).toContain('stripe')
     await map.getByTestId('k8s-conn-filter-declared').click()
     await expect(map.getByTestId('k8s-conn-row')).toHaveCount(1)
     await expect(mrow('203.0.113.99')).toBeVisible()

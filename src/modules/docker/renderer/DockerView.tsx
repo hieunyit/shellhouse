@@ -1507,7 +1507,7 @@ export function DockerTab({
   if (session.error)
     return (
       <div
-        className="flex h-full items-center justify-center bg-canvas p-6"
+        className="sh-selectable flex h-full items-center justify-center bg-canvas p-6"
         data-testid="docker-view"
       >
         <div className="flex max-w-md flex-col items-center gap-3 text-center">
@@ -1774,7 +1774,7 @@ export function DockerTab({
   return (
     <div
       ref={rootRef}
-      className="relative flex h-full flex-col bg-surface"
+      className="sh-selectable relative flex h-full flex-col bg-surface"
       data-testid="docker-view"
       data-ready={ready && list !== null}
     >
