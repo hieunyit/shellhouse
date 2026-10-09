@@ -6,15 +6,33 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.30] - 2026-10-09
+
 ### Added
 
-- K8s: **Connections** (Map › Connections và tab Connections trong từng workload) thay cho Outbound — ghép kết nối khai báo (env / args / ConfigMap / Secret) với kết nối quan sát được (Caretta / Hubble): Active, Idle, Not seen, Can't tell, Not measured, Undeclared. Vẫn đọc Secret (mặc định bật).
-- K8s: ghép tên miền khai báo với IP quan sát bằng DNS trên máy này (chỉ tên công khai; tuỳ chọn thêm tên nội bộ), gộp IP theo CIDR.
-- K8s: Topology hiển thị trạng thái kết nối ra ngoài trên lane Outbound.
+- **Kubernetes › Connections** (Map › Connections, and a Connections tab on every workload) replaces
+  Outbound. It joins where a workload is configured to connect (env, arguments, ConfigMaps, Secrets)
+  with the traffic that was actually seen (Caretta or Hubble), and labels each destination Active,
+  Idle, Not seen, Can't tell, Not measured or Undeclared. Secrets are still read (on by default).
+- Declared host names are matched to observed IPs with DNS lookups from this computer (public names
+  only; an option adds internal names), and IPs are grouped by CIDR.
+- The Topology Outbound lane shows each connection's status, including traffic seen but declared
+  nowhere.
+
+### Fixed
+
+- Kubernetes: a Secret value (for example a password) could be shown as an "Unresolved name" host in
+  beta.29. Destinations are now recognised by the shape of the value (host:port, URL, domain), not by
+  the variable name.
+- Kubernetes: Map › Connections now recognises Services in namespaces outside the selected scope
+  (they showed as "Unresolved name").
+- Kubernetes and Docker: text in every tab (events, IPs, values…) can be selected and copied; before,
+  nothing could be highlighted.
 
 ### Changed
 
-- K8s: tab Traffic chỉ liệt kê đích đi ra cho cửa sổ lịch sử (Prometheus); cửa sổ live trỏ sang Connections.
+- The Traffic tab lists outgoing peers only for past windows (Prometheus); the live window points to
+  Connections.
 
 ## [1.2.0-beta.29] - 2026-10-09
 
