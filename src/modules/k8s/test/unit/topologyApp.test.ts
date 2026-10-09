@@ -12,7 +12,9 @@ import {
   type TopoNode,
   type TopoOptions
 } from '../../shared/appTopology'
+import { buildConnections } from '../../shared/connections'
 import { egressRows, type EgressItem } from '../../shared/egress'
+import type { TrafficPeer, TrafficRate } from '../../shared/traffic'
 import type { MapData, MapPod, MapWorkload } from '../../shared/map'
 
 afterEach(() => {
@@ -907,7 +909,7 @@ describe('Làn Outbound — điểm đến khai báo trong cấu hình', () => {
     { workload: web, source: 'env', via: '', key: 'PAY', host: 'payments', port: 443 }
   ]
   const d = data()
-  const rows = egressRows(items, d)
+  const rows = buildConnections({ declared: egressRows(items, d), observed: null })
 
   it('không truyền egress → không có làn / thẻ / cạnh Outbound', () => {
     const g = buildTopology(d, OPTS)
@@ -955,7 +957,10 @@ describe('Làn Outbound — điểm đến khai báo trong cấu hình', () => {
       host: `h${String(i)}.example.com`,
       port: 443
     }))
-    const g = buildTopology(d, { ...OPTS, egress: egressRows(many, d) })
+    const g = buildTopology(d, {
+      ...OPTS,
+      egress: buildConnections({ declared: egressRows(many, d), observed: null })
+    })
     expect(g.nodes.filter((n) => n.kind === 'external')).toHaveLength(24)
     const more = g.nodes.find((n) => n.id === 'more-egress:shop')
     expect(more?.more).toBe(16)
@@ -975,7 +980,10 @@ describe('Làn Outbound — điểm đến khai báo trong cấu hình', () => {
         port: 443
       }
     ]
-    const g = buildTopology(d, { ...OPTS, egress: egressRows(items, d) })
+    const g = buildTopology(d, {
+      ...OPTS,
+      egress: buildConnections({ declared: egressRows(items, d), observed: null })
+    })
     const ext = g.nodes.filter((n) => n.kind === 'external')
     expect(ext.map((n) => n.name)).toEqual(['pay.example.com:443'])
     expect(ext[0]?.rows?.map((r) => `${r.text}:${r.hint}`).sort()).toEqual([
@@ -983,5 +991,38 @@ describe('Làn Outbound — điểm đến khai báo trong cấu hình', () => {
       'web:PAY'
     ])
     expect(ext[0]?.declared).toHaveLength(2)
+  })
+
+  it('ghép với traffic quan sát: trạng thái trên thẻ + cạnh, đích chỉ-quan-sát vẫn lên bản đồ', () => {
+    const client: TrafficPeer = { kind: 'Deployment', ns: 'shop', name: 'web' }
+    const ext = (name: string): TrafficPeer => ({ kind: 'external', ns: '', name })
+    const observed: TrafficRate[] = [
+      { client, server: ext('api.stripe.com'), port: '443', rate: 5000 },
+      { client, server: ext('198.51.100.7'), port: '6379', rate: 12 }
+    ]
+    const items: EgressItem[] = [
+      { workload: web, source: 'env', via: '', key: 'PAY', host: 'api.stripe.com', port: 443 },
+      { workload: web, source: 'env', via: '', key: 'OLD', host: '203.0.113.99', port: 9042 }
+    ]
+    const conns = buildConnections({ declared: egressRows(items, d), observed })
+    const g = buildTopology(d, { ...OPTS, egress: conns })
+    const node = (name: string): TopoNode | undefined => g.nodes.find((n) => n.name === name)
+    expect(node('api.stripe.com:443')?.conn).toMatchObject({ status: 'active', rate: 5000 })
+    expect(node('203.0.113.99:9042')?.conn?.status).toBe('declared')
+    // chỉ quan sát: không khai báo ở đâu → vẫn có thẻ, huy hiệu "Undeclared"
+    const und = node('198.51.100.7:6379')
+    expect(und?.conn?.status).toBe('undeclared')
+    expect(und?.badges?.[0]?.text).toBe('Undeclared')
+    expect(und?.rows?.[0]?.text).toBe('not declared')
+    const edge = (label: string) => g.edges.find((e) => e.kind === 'calls' && e.to.endsWith(label))
+    const stripeEdge = g.edges.find((e) => e.kind === 'calls' && e.status === 'active')
+    expect(stripeEdge?.rate).toBe(5000)
+    expect(edge('obs:198.51.100.7:6379')?.status).toBe('undeclared')
+    // không có nguồn traffic → "chưa đo": không huy hiệu gây nhiễu
+    const quiet = buildTopology(d, {
+      ...OPTS,
+      egress: buildConnections({ declared: egressRows(items, d), observed: null })
+    })
+    expect(quiet.nodes.find((n) => n.name === 'api.stripe.com:443')?.badges).toBeUndefined()
   })
 })

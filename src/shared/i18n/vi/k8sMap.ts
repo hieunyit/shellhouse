@@ -468,6 +468,53 @@ export const k8sMap: Readonly<Record<string, string>> = {
   'Time range': 'Khoảng thời gian',
   'from Prometheus': 'từ Prometheus',
   Outbound: 'Đi ra ngoài',
+  'All types': 'Mọi loại',
+  Observed: 'Quan sát',
+  Idle: 'Yên',
+  Seen: 'Đã thấy',
+  Undeclared: 'Không khai báo',
+  'Not seen': 'Chưa thấy',
+  'Not measured': 'Chưa đo',
+  "Can't tell": 'Chưa rõ',
+  'Show addresses': 'Hiện từng địa chỉ',
+  'Looking up…': 'Đang tra cứu…',
+  'No connection seen': 'Không thấy kết nối',
+  'not declared': 'không khai báo',
+  'not declared anywhere': 'không khai báo ở đâu',
+  'Filter by workload, destination or source': 'Lọc theo workload, đích hoặc nơi khai báo',
+  'Filter connections': 'Lọc kết nối',
+  'Observed traffic: {source}, average over the last minute.':
+    'Traffic quan sát: {source}, trung bình 1 phút gần nhất.',
+  'No traffic source in this cluster (Caretta or Hubble) — only the configuration is shown, so nothing can be marked seen or undeclared.':
+    'Cluster này không có nguồn traffic (Caretta hoặc Hubble) — chỉ hiện cấu hình nên không thể đánh dấu "đã thấy" hay "không khai báo".',
+  'No traffic source in this cluster (Caretta or Hubble) — only the configuration is shown.':
+    'Cluster này không có nguồn traffic (Caretta hoặc Hubble) — chỉ hiện cấu hình.',
+  'Hostnames are looked up on this computer to match the IPs that were seen — a cluster with its own DNS can answer differently.':
+    'Tên máy được tra DNS trên máy này để khớp với các IP đã thấy — DNS riêng của cluster có thể trả lời khác.',
+  'Hostnames are looked up on this computer to match the IPs that were seen. Also look up internal names (.corp, .internal…) with this computer’s DNS':
+    'Tên máy được tra DNS trên máy này để khớp với các IP đã thấy. Tra cả tên nội bộ (.corp, .internal…) bằng DNS của máy này',
+  'Also look up internal names (.corp, .internal…) with this computer’s DNS':
+    'Tra cả tên nội bộ (.corp, .internal…) bằng DNS của máy này',
+  'Show {n} system connection (DNS, kube-system)': 'Hiện {n} kết nối hệ thống (DNS, kube-system)',
+  'Show {n} system connections (DNS, kube-system)': 'Hiện {n} kết nối hệ thống (DNS, kube-system)',
+  'Where this workload is configured to connect (env, arguments, ConfigMaps, Secrets), next to the traffic that was actually seen.':
+    'Nơi workload này được cấu hình để kết nối (env, tham số, ConfigMap, Secret), đặt cạnh traffic thực sự đã thấy.',
+  'Where each workload connects: what is declared in env / ConfigMaps / Secrets next to the traffic that was actually seen':
+    'Mỗi workload nối tới đâu: phần khai báo trong env / ConfigMap / Secret đặt cạnh traffic thực sự đã thấy',
+  'The destinations, with what is declared in the configuration next to what was seen, are in':
+    'Các đích đi ra, kèm phần khai báo trong cấu hình đặt cạnh phần đã thấy, nằm ở',
+  'Declared in the configuration, and traffic is flowing to it now':
+    'Có khai báo trong cấu hình, và đang có traffic tới đó',
+  'Declared, and a connection was seen, but it is quiet right now':
+    'Có khai báo, đã thấy kết nối nhưng lúc này đang yên',
+  'Declared in the configuration but no connection to it was seen — a dead setting, a backup path, or not used yet':
+    'Có khai báo trong cấu hình nhưng không thấy kết nối nào tới đó — cấu hình chết, đường dự phòng, hoặc chưa ai dùng',
+  'Declared by a name that could not be matched to the IPs that were seen (an internal name that is not looked up, or the lookup failed)':
+    'Khai báo bằng một tên không ghép được với các IP đã thấy (tên nội bộ chưa được tra, hoặc tra cứu thất bại)',
+  'This cluster has no traffic source (Caretta or Hubble), so only the configuration is known':
+    'Cluster này không có nguồn traffic (Caretta hoặc Hubble) nên chỉ biết cấu hình',
+  'Traffic was seen to a destination that is not declared in any env, ConfigMap or Secret — hardcoded, discovered at runtime, or unexpected':
+    'Có traffic tới một đích không khai báo trong env, ConfigMap hay Secret nào — hardcode, tìm lúc chạy, hoặc bất ngờ',
   '+{n} more place': '+{n} nơi khai báo khác',
   '+{n} more places': '+{n} nơi khai báo khác',
   'Some workload kinds could not be listed (no permission) — the list may be incomplete.':

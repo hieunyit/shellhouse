@@ -6,7 +6,8 @@ import { formatDateTime, formatTime, t } from '../../registry/renderer-kit'
 import { filterMapData, groupingKeys, parseLabelSelector, type MapData } from '../shared/map'
 import { egressRows as buildEgressRows, type EgressResult } from '../shared/egress'
 import { NodesView } from './NodesView'
-import { OutboundView } from './OutboundView'
+import { ConnectionsView } from './ConnectionsView'
+import { useConnections } from './useConnections'
 import { TrafficMap } from './TrafficMap'
 import { useTraffic } from './useTraffic'
 import {
@@ -151,7 +152,7 @@ export function MapView({
   const [egressLoading, setEgressLoading] = useState(false)
   /** Nút Refresh (tick đổi) phải đọc lại ngay, kể cả khi kết quả còn mới. */
   const egressTick = useRef(tick)
-  const wantEgress = active && ((view === 'topology' && options.egress) || view === 'outbound')
+  const wantEgress = active && ((view === 'topology' && options.egress) || view === 'connections')
   useEffect(() => {
     if (!wantEgress) return
     let cancelled = false
@@ -223,6 +224,15 @@ export function MapView({
     [egressResult, data]
   )
 
+  // Connections: khai báo ghép với traffic quan sát (cùng luồng đọc Caretta / Hubble với Traffic).
+  const connections = useConnections({
+    request,
+    declared: egressRows,
+    data,
+    active: active && view === 'connections',
+    internalDns: options.internalDns
+  })
+
   // ——— Lọc nhãn (Nodes): pod không khớp được làm mờ ———
   const parsedSelector = useMemo(() => parseLabelSelector(selectorText), [selectorText])
   const selectorError = parsedSelector && 'error' in parsedSelector ? parsedSelector.error : null
@@ -293,10 +303,10 @@ export function MapView({
                 hint: t('Who calls whom, and how much')
               },
               {
-                value: 'outbound',
-                label: t('Outbound'),
+                value: 'connections',
+                label: t('Connections'),
                 hint: t(
-                  'Hosts and ports the workloads are configured to connect to — from env, ConfigMaps and Secrets'
+                  'Where each workload connects: what is declared in env / ConfigMaps / Secrets next to the traffic that was actually seen'
                 )
               }
             ]}
@@ -364,7 +374,7 @@ export function MapView({
               <div className="flex-1" />
             </>
           )}
-          {view === 'outbound' && <div className="flex-1" />}
+          {view === 'connections' && <div className="flex-1" />}
           {view === 'traffic' && (
             <>
               <TrafficWindowPicker
@@ -428,12 +438,19 @@ export function MapView({
               <TrafficMap traffic={past ?? traffic} scope={namespaces} onOpen={onOpen} />
             </div>
           )}
-          {view === 'outbound' && (
-            <OutboundView
-              rows={egressRows}
+          {view === 'connections' && (
+            <ConnectionsView
+              rows={connections.rows}
               result={egressResult}
+              traffic={connections.traffic}
+              measured={connections.measured}
+              resolving={connections.resolving}
               loading={egressLoading}
               error={egressError}
+              internalDns={options.internalDns}
+              onInternalDns={(on) => {
+                setOpt({ internalDns: on })
+              }}
               onOpen={onOpen}
             />
           )}
@@ -448,6 +465,7 @@ export function MapView({
               onTrafficOn={(on) => {
                 setOpt({ traffic: on })
               }}
+              internalDns={options.internalDns}
               egress={{
                 on: options.egress,
                 rows: egressRows,

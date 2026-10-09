@@ -45,12 +45,15 @@ export function TrafficOf({
   kindId,
   obj,
   request,
-  onNavigate
+  onNavigate,
+  onOpenConnections
 }: {
   kindId: string
   obj: K8sObject
   request: Request
   onNavigate?: (kind: string, name: string, namespace?: string) => void
+  /** Mở tab Connections (khai báo ghép với traffic) — danh sách đích chi tiết nằm ở đó. */
+  onOpenConnections?: () => void
 }): React.JSX.Element {
   const [window, setWindow] = useState<TrafficWindow>('live')
   const probe = useHistoryProbe(request)
@@ -200,12 +203,41 @@ export function TrafficOf({
               peer={(r) => r.client}
               {...(onNavigate ? { onNavigate } : {})}
             />
-            <Peers
-              title={t('Outgoing to')}
-              rates={mine.outgoing}
-              peer={(r) => r.server}
-              {...(onNavigate ? { onNavigate } : {})}
-            />
+            {past ? (
+              // Lịch sử (Prometheus): Connections chỉ có dữ liệu trực tiếp, nên danh sách đi ra ở lại đây.
+              <Peers
+                title={t('Outgoing to')}
+                rates={mine.outgoing}
+                peer={(r) => r.server}
+                {...(onNavigate ? { onNavigate } : {})}
+              />
+            ) : (
+              // Trực tiếp: một danh sách duy nhất ở tab Connections (khai báo ghép với quan sát).
+              <section>
+                <Heading>
+                  {t('Outgoing to')}{' '}
+                  <span className="ml-1 font-normal text-faint">{mine.outgoing.length}</span>
+                </Heading>
+                <p className="text-xs text-muted" data-testid="k8s-traffic-outgoing-pointer">
+                  {t(
+                    'The destinations, with what is declared in the configuration next to what was seen, are in'
+                  )}{' '}
+                  {onOpenConnections ? (
+                    <button
+                      type="button"
+                      className="text-accent hover:underline"
+                      data-testid="k8s-traffic-open-connections"
+                      onClick={onOpenConnections}
+                    >
+                      {t('Connections')}
+                    </button>
+                  ) : (
+                    t('Connections')
+                  )}
+                  .
+                </p>
+              </section>
+            )}
             <p className="text-[11px] text-faint">
               {t(
                 'Bands are absolute ({bands}) so traffic is comparable across clusters. Traffic sent to a Service is counted for the workloads behind it.',

@@ -62,6 +62,7 @@ import { diffObjects } from './diff'
 import { helmRevision, helmRollback, helmUninstall } from './helm'
 import { mapData } from './map'
 import { egressData } from './egress'
+import { HostResolver, type Lookup } from './resolve'
 import { recordEvents } from './eventRecorder'
 import { workloadTimeline } from './timeline'
 import { eventCounts, probeHistory, trafficRange, trafficSeries } from './history'
@@ -146,6 +147,8 @@ export interface K8sServiceDeps {
   persistOidc?(ref: ContextRef, tokens: OidcTokens): Promise<void>
   /** Ghi một lô event của cluster (main lưu 7 ngày) — thiếu → không ghi. */
   recordEvents?(cluster: string, events: RecordedEvent[]): Promise<void>
+  /** Phân giải DNS (thiếu → dùng bộ phân giải của hệ điều hành). */
+  lookup?: Lookup
   /** Event đã ghi trên máy + cluster có đang được ghi không. */
   queryEvents?(q: QueryEvents): Promise<{ events: RecordedEvent[]; recording: boolean }>
 }
@@ -270,7 +273,10 @@ export class K8sService implements HostModuleSession {
   private probeTimer: NodeJS.Timeout | null = null
   private link = { down: false, failures: 0 }
 
-  constructor(private readonly deps: K8sServiceDeps) {}
+  private readonly hostResolver: HostResolver
+  constructor(private readonly deps: K8sServiceDeps) {
+    this.hostResolver = new HostResolver(deps.lookup)
+  }
 
   private async connect(ref: ContextRef): Promise<KubeClient> {
     const cluster: ResolvedClusterConfig = ResolvedClusterSchema.parse(await this.deps.resolve(ref))
@@ -497,6 +503,8 @@ export class K8sService implements HostModuleSession {
       }
       case 'map':
         return mapData(client, op.namespaces, signal)
+      case 'resolve':
+        return this.hostResolver.resolve(op.hosts, signal, op.internal === true)
       case 'egress':
         return egressData(client, op.namespaces, op.secrets, signal, op.workload)
       case 'helm.releases':

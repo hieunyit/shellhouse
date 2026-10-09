@@ -6,6 +6,16 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- K8s: **Connections** (Map › Connections và tab Connections trong từng workload) thay cho Outbound — ghép kết nối khai báo (env / args / ConfigMap / Secret) với kết nối quan sát được (Caretta / Hubble): Active, Idle, Not seen, Can't tell, Not measured, Undeclared. Vẫn đọc Secret (mặc định bật).
+- K8s: ghép tên miền khai báo với IP quan sát bằng DNS trên máy này (chỉ tên công khai; tuỳ chọn thêm tên nội bộ), gộp IP theo CIDR.
+- K8s: Topology hiển thị trạng thái kết nối ra ngoài trên lane Outbound.
+
+### Changed
+
+- K8s: tab Traffic chỉ liệt kê đích đi ra cho cửa sổ lịch sử (Prometheus); cửa sổ live trỏ sang Connections.
+
 ## [1.2.0-beta.29] - 2026-10-09
 
 ### Added

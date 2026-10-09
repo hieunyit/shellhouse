@@ -20,11 +20,13 @@ export interface Options {
   /** Cách gom namespace của lưới tổng quan (Topology). */
   grouping: MapGrouping
   /** Topology (mặc định), theo node (hạ tầng), hay service map từ traffic (Caretta / Hubble). */
-  view: 'topology' | 'nodes' | 'traffic' | 'outbound'
+  view: 'topology' | 'nodes' | 'traffic' | 'connections'
   /** Topology: làn Outbound (điểm đến khai báo trong cấu hình). */
   egress: boolean
   /** Đọc Secret mà workload tham chiếu để tìm điểm đến (chỉ rút host / cổng). */
   egressSecrets: boolean
+  /** Connections: phân giải cả tên nội bộ (.corp / .internal…) bằng DNS của máy này. */
+  internalDns: boolean
   /** Đã chuyển sang Topology làm mặc định (một lần — người dùng cũ cũng thấy Topology trước). */
   topologyDefault?: boolean
 }
@@ -37,6 +39,7 @@ export function loadOptions(): Options {
     view: 'topology',
     egress: true,
     egressSecrets: true,
+    internalDns: false,
     topologyDefault: true
   }
   try {
@@ -45,15 +48,19 @@ export function loadOptions(): Options {
       const saved = JSON.parse(raw) as Partial<Omit<Options, 'view'>> & { view?: string }
       // Chế độ Workloads cũ đã gộp vào Topology (namespace gập = lưới tổng quan).
       const view: Options['view'] =
-        saved.view === 'nodes' || saved.view === 'traffic' || saved.view === 'outbound'
+        saved.view === 'nodes' || saved.view === 'traffic' || saved.view === 'connections'
           ? saved.view
-          : 'topology'
+          : // Chế độ "outbound" cũ đã gộp vào Connections.
+            saved.view === 'outbound'
+            ? 'connections'
+            : 'topology'
       return {
         traffic: saved.traffic ?? base.traffic,
         darkCanvas: saved.darkCanvas ?? base.darkCanvas,
         grouping: saved.grouping ?? base.grouping,
         egress: saved.egress ?? base.egress,
         egressSecrets: saved.egressSecrets ?? base.egressSecrets,
+        internalDns: saved.internalDns ?? base.internalDns,
         view: saved.topologyDefault ? view : 'topology',
         topologyDefault: true
       }
@@ -62,6 +69,15 @@ export function loadOptions(): Options {
     // Bỏ qua.
   }
   return base
+}
+
+/** Ghi đè một phần tuỳ chọn bản đồ (dùng chung giữa Map và tab chi tiết). */
+export function saveOptions(patch: Partial<Options>): void {
+  try {
+    window.localStorage.setItem(OPTIONS_KEY, JSON.stringify({ ...loadOptions(), ...patch }))
+  } catch {
+    // Bỏ qua.
+  }
 }
 
 /** Tên vùng để hiện: vùng theo mục đích và "Other" / "System" được dịch; tên nhãn giữ nguyên. */

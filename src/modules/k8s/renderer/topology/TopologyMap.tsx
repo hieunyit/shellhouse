@@ -39,6 +39,7 @@ import {
   type TopoNode
 } from '../../shared/appTopology'
 import type { EgressRow } from '../../shared/egress'
+import { useConnections } from '../useConnections'
 import {
   groupNamespaces,
   groupOrder,
@@ -146,6 +147,8 @@ export interface TopologyMapProps {
     onOn: (on: boolean) => void
     onSecrets: (on: boolean) => void
   }
+  /** Phân giải cả tên nội bộ (.corp…) bằng DNS của máy này khi ghép khai báo với traffic. */
+  internalDns: boolean
   darkCanvas: boolean
   onDarkCanvas: (on: boolean) => void
   /** Cách gom namespace của lưới tổng quan (lưu chung với tuỳ chọn Map). */
@@ -187,6 +190,7 @@ function TopologyInner({
   trafficOn,
   onTrafficOn,
   egress,
+  internalDns,
   darkCanvas,
   onDarkCanvas,
   grouping,
@@ -277,12 +281,22 @@ function TopologyInner({
     const of = groupNamespaces(data, grouping)
     return { of, order: groupOrder(of.values(), grouping) }
   }, [data, grouping])
+  // Điểm đến khai báo ghép với traffic quan sát (cùng luồng Caretta / Hubble đã đọc cho bản đồ).
+  const conn = useConnections({
+    request,
+    declared: egress.on ? egress.rows : null,
+    data,
+    active: egress.on && trafficOn,
+    internalDns,
+    traffic,
+    observe: trafficOn
+  })
   const graph = useMemo<TopoGraph | null>(() => {
     if (!data) return null
     const base = {
       hideSystem: options.hideSystem,
       showDeps: options.showDeps,
-      ...(egress.on && egress.rows ? { egress: egress.rows } : {}),
+      ...(egress.on && conn.rows ? { egress: conn.rows } : {}),
       expanded: tab.expanded,
       collapsed: isFolded,
       showAll: tab.showAll,
@@ -297,7 +311,7 @@ function TopologyInner({
     options.hideSystem,
     options.showDeps,
     egress.on,
-    egress.rows,
+    conn.rows,
     tab.expanded,
     isFolded,
     tab.showAll,
@@ -676,9 +690,17 @@ function TopologyInner({
     if (!layout) return []
     const labelled = new Set<string>()
     return layout.edges.map((e) => {
-      const rate = e.kind === 'select' ? topoTraffic?.rates.get(e.to)?.in : undefined
-      const label = rate !== undefined && rate >= idleBelow(unit) && !labelled.has(e.to)
-      if (label) labelled.add(e.to)
+      // Cạnh `select` (Service → workload): tốc độ vào của workload. Cạnh `calls` (làn Outbound): tốc độ
+      // của đúng cặp workload → đích, đã ghép từ traffic quan sát.
+      const rate =
+        e.kind === 'select'
+          ? topoTraffic?.rates.get(e.to)?.in
+          : e.kind === 'calls'
+            ? e.rate
+            : undefined
+      const labelKey = e.kind === 'calls' ? e.id : e.to
+      const label = rate !== undefined && rate >= idleBelow(unit) && !labelled.has(labelKey)
+      if (label) labelled.add(labelKey)
       return {
         id: e.id,
         source: e.from,

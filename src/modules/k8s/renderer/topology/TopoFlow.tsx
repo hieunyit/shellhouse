@@ -922,13 +922,22 @@ export const TopoEdgeComp = memo(function TopoEdgeComp(
       : `M${String(sx)},${String(sy)} C${String(sx + 60)},${String(sy)} ${String(tx - 60)},${String(ty)} ${String(tx)},${String(ty)}`
   const hot = ctx.lit ? ctx.lit.has(e.from) && ctx.lit.has(e.to) : false
   const faded = ctx.lit !== null && !hot
-  const color = e.broken ? 'var(--map-bad)' : EDGE_COLOR[e.kind]
+  // Cạnh `calls`: màu theo trạng thái khai báo ↔ quan sát (không khai báo = cần chú ý).
+  const callColor =
+    e.kind === 'calls'
+      ? e.status === 'undeclared'
+        ? 'var(--map-warn)'
+        : e.status === 'active'
+          ? 'var(--map-accent)'
+          : undefined
+      : undefined
+  const color = e.broken ? 'var(--map-bad)' : (callColor ?? EDGE_COLOR[e.kind])
   const rate = d.rate ?? 0
   const live = rate >= idleBelow(unit)
   const width = live ? (BANDS[bandFor(unit)(rate)]?.width ?? 1.5) : hot ? 2.2 : 1.5
   const dash = e.broken
     ? '5 4'
-    : e.kind === 'uses' || e.kind === 'mounts' || e.kind === 'calls'
+    : e.kind === 'uses' || e.kind === 'mounts' || (e.kind === 'calls' && !live)
       ? '4 4'
       : undefined
   const head =

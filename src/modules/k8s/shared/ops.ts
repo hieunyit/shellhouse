@@ -126,6 +126,16 @@ export const K8sOp = z.discriminatedUnion('op', [
      */
     workload: z.object({ kind: z.string().min(1).max(64), name: Name }).optional()
   }),
+  /**
+   * Phân giải tên máy công khai → IP trên máy này (để đối chiếu Connections với kết nối quan sát
+   * được). Tên nội bộ (.internal / .corp / .svc…) bị bỏ, không gửi tới DNS.
+   */
+  z.object({
+    op: z.literal('resolve'),
+    hosts: z.array(z.string().min(1).max(253)).max(64),
+    /** Cho phép cả tên nội bộ (.corp / .internal…) — người dùng chấp nhận gửi chúng tới DNS của máy này. */
+    internal: z.boolean().optional()
+  }),
   /** Helm 3 releases (đọc Secret owner=helm — không cần cài helm). */
   z.object({ op: z.literal('helm.releases'), namespaces: z.array(Namespace).max(64) }),
   /** Chi tiết một release: values, notes, manifest, lịch sử revision. */

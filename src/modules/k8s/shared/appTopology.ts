@@ -1,6 +1,15 @@
 import { t, tn } from '@shared/i18n'
 import { formatDate } from '@shared/i18n/format'
-import { destLabel, type EgressDest, type EgressRow } from './egress'
+import {
+  aggregateStatus,
+  connStatusLabel,
+  type ConnectionRow,
+  type ConnKind,
+  type ConnObserved,
+  type ConnStatus
+} from './connections'
+import { type EgressDest, type EgressRow } from './egress'
+import { formatRate, type TrafficUnit } from './traffic'
 import {
   LabelIndex,
   regionOf,
@@ -119,7 +128,14 @@ export interface TopoNode {
   /** Thẻ điểm đến ngoài (kind external): đích đã phân loại + mọi nơi khai báo. */
   dest?: EgressDest
   /** Thẻ điểm đến ngoài: workload nào khai báo ở đâu (bảng chi tiết). */
-  declared?: { workload: string; sources: EgressRow['sources'] }[]
+  declared?: {
+    workload: string
+    sources: EgressRow['sources'] | null
+    status: ConnStatus
+    observed: ConnObserved | null
+  }[]
+  /** Thẻ điểm đến ngoài: trạng thái gộp (khai báo ghép với traffic quan sát) và tốc độ tổng. */
+  conn?: { status: ConnStatus; rate: number; unit?: TrafficUnit }
   /** Workload: NetworkPolicy áp lên / HPA. */
   policies?: string[]
   hpa?: { name: string; min: number; max: number; current: number }
@@ -145,6 +161,9 @@ export interface TopoEdge {
   fromRow?: number
   /** Cạnh tới thứ không tồn tại / đang hỏng (nét đứt đỏ). */
   broken?: boolean
+  /** Cạnh `calls`: trạng thái khai báo ↔ quan sát và tốc độ (byte/s hoặc kết nối/s). */
+  status?: ConnStatus
+  rate?: number
 }
 
 export interface TopoNsStats {
@@ -191,7 +210,7 @@ export interface TopoOptions {
   /** Hiện làn Config & storage. */
   showDeps: boolean
   /** Điểm đến khai báo của workload (làn Outbound); thiếu / null = không vẽ làn này. */
-  egress?: readonly EgressRow[] | null
+  egress?: readonly ConnectionRow[] | null
   /** Workload (id) đang mở danh sách pod. */
   expanded: ReadonlySet<string>
   /** Namespace đang gập (chỉ còn thẻ tóm tắt). */
@@ -418,8 +437,10 @@ export function egressSourceWord(source: string): string {
         : 'env'
 }
 
-const EGRESS_TITLE = (kind: EgressDest['kind']): string => {
+const EGRESS_TITLE = (kind: ConnKind): string => {
   switch (kind) {
+    case 'workload':
+      return t('Workload')
     case 'service':
       return t('Service')
     case 'private':
@@ -433,26 +454,24 @@ const EGRESS_TITLE = (kind: EgressDest['kind']): string => {
   }
 }
 
-/** Thẻ điểm đến của làn Outbound. */
-function externalNode(id: string, ns: string, dest: EgressDest, row: number): TopoNode {
-  const svc = dest.service
-  const ref = svc ?? dest.viaService
+/** Thẻ điểm đến của làn Outbound (khai báo, quan sát, hoặc cả hai). */
+function externalNode(id: string, ns: string, c: ConnectionRow, row: number): TopoNode {
+  const dest = c.dest
+  const ref = dest?.service ?? dest?.viaService
   return {
     id,
     kind: 'external',
     lane: 'egress',
     ns,
-    name: svc
-      ? `${svc.ns}/${svc.name}${dest.port !== undefined ? `:${String(dest.port)}` : ''}`
-      : destLabel(dest),
-    title: EGRESS_TITLE(dest.kind),
-    sub: dest.viaService
+    name: c.label,
+    title: EGRESS_TITLE(c.kind),
+    sub: dest?.viaService
       ? t('via {service}', { service: `${dest.viaService.ns}/${dest.viaService.name}` })
-      : (dest.scheme ?? ''),
+      : (dest?.scheme ?? ''),
     tone: 'muted',
     ...(ref ? { ref: { kind: 'services', ns: ref.ns, name: ref.name } } : {}),
     problems: [],
-    dest,
+    ...(dest ? { dest } : {}),
     rows: [],
     row
   }
@@ -464,7 +483,7 @@ function namespaceGraph(
   ix: Index,
   data: MapData,
   options: Pick<TopoOptions, 'showDeps' | 'expanded'> & {
-    egress?: ReadonlyMap<string, readonly EgressRow[]>
+    egress?: ReadonlyMap<string, readonly ConnectionRow[]>
   }
 ): NsGraph {
   const nodes: TopoNode[] = []
@@ -838,42 +857,78 @@ function namespaceGraph(
         for (const c of w.pvcs) dep('pvc', c, pvcByName.has(c))
       }
     }
-    // Kết nối ra ngoài khai báo trong cấu hình (env, ConfigMap, Secret…) → làn Outbound.
+    // Kết nối ra ngoài (khai báo trong env / ConfigMap / Secret, ghép với traffic quan sát) → làn Outbound.
     const mine = w ? options.egress?.get(`${w.kind}|${ns}/${w.name}`) : undefined
     if (w && mine?.length) {
       const from = nodeIds.has(`pods:${id}`) ? `pods:${id}` : id
       for (const r of mine) {
         // Tên chưa xác định (một nhãn, không khớp Service nào) hay bị nhận nhầm từ giá trị cấu hình
-        // bất kỳ — chỉ nằm trong bảng, không vẽ lên bản đồ.
-        if (r.dest.kind === 'unresolved') continue
-        const eid = `ext:${ns}/${r.dest.key}`
+        // bất kỳ — chỉ nằm trong bảng, không vẽ lên bản đồ. Nhiễu hệ thống (DNS…) cũng ẩn.
+        if (r.dest?.kind === 'unresolved' || r.system) continue
+        const key = r.dest ? r.dest.key : `obs:${r.label}`
+        const eid = `ext:${ns}/${key}`
         let node = egressNode.get(eid)
         if (!node) {
           if (egressNodes >= MAX_EGRESS_NODES) {
-            egressHidden.add(r.dest.key)
+            egressHidden.add(key)
             continue
           }
           egressNodes++
-          node = externalNode(eid, ns, r.dest, row)
+          node = externalNode(eid, ns, r, row)
           egressNode.set(eid, node)
           addNode(node)
         }
         const declared = (node.declared ??= [])
         if (!declared.some((x) => x.workload === w.name))
-          declared.push({ workload: w.name, sources: r.sources })
+          declared.push({
+            workload: w.name,
+            sources: r.declared,
+            status: r.status,
+            observed: r.observed
+          })
         node.row = Math.min(node.row, row)
-        addEdge({ id: `${from}>${eid}`, from, to: eid, kind: 'calls' })
+        addEdge({
+          id: `${from}>${eid}`,
+          from,
+          to: eid,
+          kind: 'calls',
+          status: r.status,
+          ...(r.observed ? { rate: r.observed.rate } : {})
+        })
       }
     }
   }
-  // Dòng trong thẻ: một workload gọi tới → liệt kê NƠI KHAI BÁO (khoá env / ConfigMap…; workload đã rõ
-  // nhờ đường nối); nhiều workload → mỗi workload một dòng. Thẻ giữ chiều cao cố định, phần dư "+N".
+  // Trạng thái gộp + dòng trong thẻ. Một workload gọi tới → liệt kê NƠI KHAI BÁO (khoá env /
+  // ConfigMap…; workload đã rõ nhờ đường nối) hoặc "không khai báo" nếu chỉ quan sát; nhiều
+  // workload → mỗi workload một dòng. Thẻ giữ chiều cao cố định, phần dư "+N".
   for (const node of egressNode.values()) {
     const declared = node.declared ?? []
+    const status = aggregateStatus(declared.map((x) => x.status))
+    const rate = declared.reduce((n, x) => n + (x.observed?.rate ?? 0), 0)
+    const unit = declared.find((x) => x.observed?.unit)?.observed?.unit
+    node.conn = { status, rate, ...(unit ? { unit } : {}) }
+    // Chỉ huy hiệu cho kết luận có nghĩa; "Not measured" / "Can't tell" không thêm nhiễu lên thẻ.
+    if (status !== 'unmeasured' && status !== 'unknown')
+      node.badges = [
+        {
+          text: connStatusLabel(status),
+          tone:
+            status === 'active'
+              ? 'ok'
+              : status === 'undeclared'
+                ? 'bad'
+                : status === 'declared'
+                  ? 'warn'
+                  : 'muted',
+          title: rate > 0 ? formatRate(rate, unit) : ''
+        }
+      ]
     const single = declared.length === 1
     const lines = single
-      ? (declared[0]?.sources ?? []).map((x) => ({ text: x.key, hint: egressSourceWord(x.source) }))
-      : declared.map((x) => ({ text: x.workload, hint: x.sources[0]?.key ?? '' }))
+      ? declared[0]?.sources
+        ? declared[0].sources.map((x) => ({ text: x.key, hint: egressSourceWord(x.source) }))
+        : [{ text: t('not declared'), hint: rate > 0 ? formatRate(rate, unit) : '' }]
+      : declared.map((x) => ({ text: x.workload, hint: x.sources?.[0]?.key ?? t('not declared') }))
     const shown = lines.slice(0, MAX_CARD_ROWS - 1)
     const rest = lines.length - shown.length
     node.rows = [
@@ -1478,7 +1533,7 @@ export function buildTopology(data: MapData, options: TopoOptions): TopoGraph {
   const problems: TopoProblemRef[] = []
   const focus = options.focus ?? null
   const full = new Map<string, NsGraph>()
-  const egress = new Map<string, EgressRow[]>()
+  const egress = new Map<string, ConnectionRow[]>()
   for (const r of options.egress ?? []) {
     const key = `${r.workload.kind}|${r.workload.ns}/${r.workload.name}`
     const list = egress.get(key)

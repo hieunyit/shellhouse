@@ -1092,12 +1092,93 @@ test('Kubernetes: traffic từ Hubble (Cilium, không cần Caretta) — kết n
     await detail.getByTestId('k8s-detail-tab-traffic').click()
     const traffic = detail.getByTestId('k8s-traffic')
     await expect(traffic).toHaveAttribute('data-status', 'live', { timeout: 20_000 })
-    const stripe = traffic.locator('[data-testid="k8s-traffic-peer"][data-name="api.stripe.com"]')
-    await expect(stripe).toHaveCount(1)
-    await expect(stripe).toContainText('conn/s')
     await expect(
       traffic.locator('[data-testid="k8s-traffic-peer"][data-name="ingress-nginx-controller"]')
     ).toHaveCount(1)
+    // Đích đi ra nằm ở tab Connections (quan sát, chưa khai báo ở đâu → Undeclared).
+    await expect(traffic.getByTestId('k8s-traffic-outgoing-pointer')).toBeVisible()
+    await detail.getByTestId('k8s-traffic-open-connections').click()
+    const stripe = detail.locator(
+      '[data-testid="k8s-detail-conn-row"][data-label^="api.stripe.com"]'
+    )
+    await expect(stripe).toHaveCount(1)
+    await expect(stripe).toContainText('conn/s')
+    await expect(stripe).toHaveAttribute('data-status', 'undeclared')
+  } finally {
+    clearInterval(timer)
+    await launched.close()
+    await server.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('Kubernetes: Connections — khai báo (env) ghép với traffic quan sát: Active / Not seen / Undeclared', async () => {
+  test.setTimeout(90_000)
+  const server = await startApiTestServer()
+  server.enableHubble()
+  // web khai báo: api.stripe.com (có traffic), 203.0.113.99:9042 (không bao giờ thấy).
+  const web = server.get('deployments', 'shop', 'web') as {
+    spec: { template: { spec: { containers: { env?: unknown[] }[] } } }
+  }
+  const container = web.spec.template.spec.containers[0]
+  if (container)
+    container.env = [
+      { name: 'PAYMENTS_URL', value: 'https://api.stripe.com/v1' },
+      { name: 'LEGACY_ADDR', value: '203.0.113.99:9042' }
+    ]
+  server.upsert('deployments', web as never)
+  const from = { ns: 'shop', pod: 'web-1', workload: ['Deployment', 'web'] as [string, string] }
+  // web gọi api.stripe.com (đã khai báo) và 198.51.100.7:6379 (không khai báo ở đâu).
+  const timer = setInterval(() => {
+    server.emitFlow(
+      hubbleFlow({ from, to: { ip: '104.26.12.64', names: ['api.stripe.com'] }, port: 443 })
+    )
+    server.emitFlow(hubbleFlow({ from, to: { ip: '198.51.100.7', names: [] }, port: 6379 }))
+  }, 200)
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    const view = page.getByTestId('k8s-view')
+    // Chi tiết Deployment web › Connections.
+    await page.getByTestId('k8s-nav-deployments.apps').click()
+    await view.locator('[data-testid="k8s-row"][data-name="shop/web"]').click()
+    await page.keyboard.press('d')
+    const detail = view.getByTestId('k8s-describe')
+    await detail.getByTestId('k8s-detail-tab-connections').click()
+    const conns = detail.getByTestId('k8s-detail-connections')
+    const row = (label: string) =>
+      conns.locator(`[data-testid="k8s-detail-conn-row"][data-label^="${label}"]`)
+    await expect(row('api.stripe.com')).toHaveAttribute('data-status', 'active', {
+      timeout: 30_000
+    })
+    await expect(row('api.stripe.com')).toContainText('conn/s')
+    await expect(row('203.0.113.99')).toHaveAttribute('data-status', 'declared')
+    await expect(row('198.51.100.7')).toHaveAttribute('data-status', 'undeclared')
+    await expect(row('198.51.100.7')).toContainText('not declared anywhere')
+    // Không lộ giá trị env ngoài host / cổng.
+    await expect(conns).not.toContainText('/v1')
+
+    // Map › Connections: cùng dữ liệu cho mọi workload, lọc theo trạng thái.
+    await page.getByTestId('explorer-module-nav').getByText('Map', { exact: true }).click()
+    await view.getByTestId('k8s-map-view-connections').click()
+    const map = view.getByTestId('k8s-connections')
+    const mrow = (label: string) =>
+      map.locator(`[data-testid="k8s-conn-row"][data-label^="${label}"]`)
+    await expect(mrow('api.stripe.com')).toHaveAttribute('data-status', 'active', {
+      timeout: 30_000
+    })
+    await expect(map.getByTestId('k8s-conn-traffic-note')).toContainText('Hubble')
+    await map.getByTestId('k8s-conn-filter-declared').click()
+    await expect(map.getByTestId('k8s-conn-row')).toHaveCount(1)
+    await expect(mrow('203.0.113.99')).toBeVisible()
+    await map.getByTestId('k8s-conn-filter-undeclared').click()
+    await expect(map.getByTestId('k8s-conn-row')).toHaveCount(1)
+    await expect(mrow('198.51.100.7')).toBeVisible()
   } finally {
     clearInterval(timer)
     await launched.close()
@@ -1155,12 +1236,6 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await expect(
       traffic.locator('[data-testid="k8s-traffic-peer"][data-name="203.0.113.7"]')
     ).toHaveCount(1)
-    await expect(
-      traffic.locator('[data-testid="k8s-traffic-peer"][data-name="db.example.com"]')
-    ).toContainText(':5432')
-    await expect(traffic.locator('[data-testid="k8s-traffic-peer"][data-name="tool"]')).toHaveCount(
-      1
-    )
     // Bản đồ nhỏ: bên gọi (Internet) trái, web giữa, bên được gọi (DB, tool) phải.
     const focusMap = traffic.getByTestId('k8s-traffic-focus-map')
     await expect(
@@ -1169,6 +1244,16 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await expect(
       focusMap.locator('[data-testid="k8s-traffic-node"][data-name="203.0.113.7"]')
     ).toHaveCount(1)
+    // Đích đi ra (DB, tool) nằm ở tab Connections: quan sát được, chưa khai báo ở đâu → Undeclared.
+    await traffic.getByTestId('k8s-traffic-open-connections').click()
+    const conns = detail.getByTestId('k8s-detail-connections')
+    await expect(
+      conns.locator('[data-testid="k8s-detail-conn-row"][data-label^="db.example.com"]')
+    ).toContainText(':5432')
+    await expect(
+      conns.locator('[data-testid="k8s-detail-conn-row"][data-label*="/tool"]')
+    ).toHaveCount(1)
+    await detail.getByTestId('k8s-detail-tab-traffic').click()
 
     // Topology của Deployment: thêm bên gọi tới / được gọi theo Caretta (namespace khác, ngoài cluster).
     await detail.getByTestId('k8s-detail-tab-topology').click()

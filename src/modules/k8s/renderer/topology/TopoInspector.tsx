@@ -15,6 +15,7 @@ import { DefList, Heading, Pill } from '../../../../renderer/src/components/pane
 import { formatRelative, t, tn } from '../../../registry/renderer-kit'
 import { formatCpu, formatMemory } from '../../shared/resources'
 import { TECH, type MapPod, type MapTone } from '../../shared/map'
+import { ObservedText, StatusPill } from '../ConnectionBits'
 import {
   egressSourceText,
   selectorText,
@@ -538,41 +539,47 @@ function Facts({ node }: { node: TopoNode }): React.JSX.Element | null {
       )
     case 'external': {
       const d = node.dest
-      if (!d) return null
+      const conn = node.conn
       return (
-        <section data-testid="k8s-topo-external">
+        <section data-testid="k8s-topo-external" data-status={conn?.status}>
           <Heading>{t('Details')}</Heading>
           <DefList
             items={[
-              [t('Host'), mono(d.host)],
-              d.port !== undefined
-                ? [
-                    t('Port'),
-                    mono(`${String(d.port)}${d.portImplied ? ` (${t('default port')})` : ''}`)
-                  ]
-                : null,
-              d.scheme ? [t('Protocol'), mono(d.scheme)] : null,
-              d.viaService
+              [t('Destination'), mono(node.name)],
+              conn ? [t('Status'), <StatusPill key="s" status={conn.status} />] : null,
+              d?.scheme ? [t('Protocol'), mono(d.scheme)] : null,
+              d?.viaService
                 ? [t('Through Service'), mono(`${d.viaService.ns}/${d.viaService.name}`)]
                 : null
             ]}
           />
-          <Heading>{t('Declared in')}</Heading>
+          <Heading>{t('Workloads')}</Heading>
           <div className="mt-1 flex flex-col gap-1.5">
             {(node.declared ?? []).map((x) => (
-              <div key={x.workload} className="rounded bg-subtle px-2 py-1 text-[11.5px]">
-                <div className="font-medium text-fg">{x.workload}</div>
-                {x.sources.map((src) => (
-                  <div key={`${src.source}|${src.via}|${src.key}`} className="font-mono text-faint">
-                    {egressSourceText(src.source, src.via, src.key)}
-                  </div>
-                ))}
+              <div key={x.workload} className="rounded bg-subtle px-2 py-1.5 text-[11.5px]">
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate font-medium text-fg">{x.workload}</span>
+                  <StatusPill status={x.status} />
+                </div>
+                <div className="mt-1 grid grid-cols-[5rem_minmax(0,1fr)] gap-x-2 gap-y-0.5">
+                  <span className="text-faint">{t('Declared in')}</span>
+                  <span className="flex flex-col font-mono text-muted">
+                    {x.sources ? (
+                      x.sources.map((src) => (
+                        <span key={`${src.source}|${src.via}|${src.key}`}>
+                          {egressSourceText(src.source, src.via, src.key)}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="font-sans text-faint">{t('not declared anywhere')}</span>
+                    )}
+                  </span>
+                  <span className="text-faint">{t('Observed')}</span>
+                  <ObservedText observed={x.observed} measured={conn?.status !== 'unmeasured'} />
+                </div>
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[11px] text-faint">
-            {t('Read from configuration — not observed traffic.')}
-          </p>
         </section>
       )
     }

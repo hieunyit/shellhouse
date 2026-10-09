@@ -34,7 +34,7 @@ import { TOPOLOGY_KINDS, TopologyOf } from './Topology'
 import { TRAFFIC_KINDS, TrafficOf } from './TrafficTab'
 import { TIMELINE_KINDS, TimelineOf } from './Timeline'
 import { UsagePanel } from './Usage'
-import { OUTBOUND_KINDS, OutboundOf } from './OutboundOf'
+import { CONNECTION_KINDS, ConnectionsOf } from './ConnectionsOf'
 import { ObjectEvents } from './Events'
 import type { EventBus } from './useResourceList'
 import {
@@ -63,7 +63,7 @@ export type DetailTab =
   | 'metrics'
   | 'traffic'
   | 'timeline'
-  | 'outbound'
+  | 'connections'
   | 'data'
   | 'events'
   | 'yaml'
@@ -258,8 +258,8 @@ export function Detail({
           ...(TIMELINE_KINDS.has(kindId)
             ? [{ id: 'timeline' as const, label: t('Timeline') }]
             : []),
-          ...(OUTBOUND_KINDS.has(kindId)
-            ? [{ id: 'outbound' as const, label: t('Outbound') }]
+          ...(CONNECTION_KINDS.has(kindId)
+            ? [{ id: 'connections' as const, label: t('Connections') }]
             : []),
           ...(hasData
             ? [
@@ -306,11 +306,14 @@ export function Detail({
             kindId={kindId}
             obj={obj}
             request={request}
+            onOpenConnections={() => {
+              setTab('connections')
+            }}
             {...(onNavigate ? { onNavigate } : {})}
           />
         )}
         {tab === 'timeline' && <TimelineOf kindId={kindId} obj={obj} request={request} />}
-        {tab === 'outbound' && <OutboundOf kindId={kindId} obj={obj} request={request} />}
+        {tab === 'connections' && <ConnectionsOf kindId={kindId} obj={obj} request={request} />}
         {tab === 'related' && (
           <RelatedOf
             kindId={kindId}
