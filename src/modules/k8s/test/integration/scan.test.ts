@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { connect, type Socket } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ExecResult, LimitedSpawn } from '../../../registry/host-types'
@@ -115,9 +115,6 @@ describe('Kubernetes: quét cấu hình bằng Trivy', () => {
     expect(r.findings).toHaveLength(1)
     expect(r.findings[0]).toMatchObject({ id: 'AVD-KSV-0014', severity: 'HIGH', line: 7 })
     expect(existsSync(call?.dir ?? '')).toBe(false)
-    expect(
-      readdirSync(call?.dir.replace(/[^/]+$/, '') ?? '/').includes(call?.dir.split('/').pop() ?? '')
-    ).toBe(false)
   })
 
   it('Secret không được quét — không gọi Trivy, không đọc đối tượng', async () => {
