@@ -1,6 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
-import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { t } from '@shared/i18n'
 import type { HostModule, HostModuleContext, SshCapability } from '../../registry/host-types'
 import { dockerManifest } from '../manifest'
@@ -12,6 +10,7 @@ import { DockerService } from './service'
 import { DockerSessionConfig, type DockerTcpConfig, type RegistryAuth } from '../shared/ops'
 import { DockerIpc, tcpSource, wslSource } from '../shared/ipc'
 import { connectTls, describeTlsError } from './tls'
+import { localTempConfig, remoteTempConfig } from './docker-config'
 
 /**
  * Phần Session Host của Docker (ADR-014 mục 6.2): nói chuyện với Engine API qua socket (máy này)
@@ -82,33 +81,11 @@ async function registryAuth(ctx: HostModuleContext, id: string): Promise<Registr
   return { server: r.server, username: r.username, password: r.password }
 }
 
-/** `mktemp -d` trên server / trong WSL → thư mục tạm cho `docker --config`. */
-async function remoteTempDir(
-  exec: (argv: string[]) => Promise<{ code: number | null; stdout: string; stderr: string }>
-): Promise<{ path: string; remove(): Promise<void> }> {
-  const r = await exec(['mktemp', '-d'])
-  const path = r.stdout.trim()
-  if (r.code !== 0 || !/^\/[\w./-]+$/.test(path))
-    throw new Error(`mktemp failed: ${r.stderr.trim() || path}`)
-  return {
-    path,
-    remove: async () => {
-      await exec(['rm', '-rf', '--', path])
-    }
-  }
-}
-
 function localCli(ctx: HostModuleContext): DockerCli {
   return {
     exec: (args, options) => ctx.spawn.exec('docker', args, options),
     spawn: (args, signal) => ctx.spawn.spawn('docker', args, signal),
-    tempDir: async () => {
-      const path = await mkdtemp(join(tmpdir(), 'shellhouse-docker-'))
-      return {
-        path,
-        remove: () => rm(path, { recursive: true, force: true })
-      }
-    }
+    tempDir: () => localTempConfig()
   }
 }
 
@@ -116,7 +93,7 @@ function sshCli(ssh: SshCapability): DockerCli {
   return {
     exec: (args, options) => ssh.exec(['docker', ...args], options),
     spawn: (args, signal) => ssh.spawn(['docker', ...args], signal),
-    tempDir: () => remoteTempDir((argv) => ssh.exec(argv, { timeoutMs: 15_000 }))
+    tempDir: () => remoteTempConfig((argv) => ssh.exec(argv, { timeoutMs: 15_000 }))
   }
 }
 
@@ -166,7 +143,7 @@ function wslCli(ctx: HostModuleContext, distro: string): DockerCli {
     exec: (args, options) => ctx.spawn.exec('wsl', wrap(args), options),
     spawn: (args, signal) => ctx.spawn.spawn('wsl', wrap(args), signal),
     tempDir: () =>
-      remoteTempDir((argv) =>
+      remoteTempConfig((argv) =>
         ctx.spawn.exec('wsl', ['-d', distro, '-e', ...argv], { timeoutMs: 15_000 })
       )
   }

@@ -6,6 +6,14 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Docker › Build (buildx) and image push / pull with a saved registry** lost your buildx builders
+  and your docker context while signed in: a multi-platform push with a builder you created
+  (`docker buildx create`) failed with "no builder found", and on Docker Desktop the build could go
+  to the wrong engine. The throw-away sign-in folder now keeps pointing at your builders and current
+  context; only the registry credentials stay in it.
+
 ### Removed
 
 - **Security scanning with Trivy** (Docker › Images › Scan for vulnerabilities…, Kubernetes › Scan
