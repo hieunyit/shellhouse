@@ -103,7 +103,13 @@ export const NetworkSpec = z.object({
 export type NetworkSpec = z.infer<typeof NetworkSpec>
 
 /** Build image bằng `docker build` (BuildKit) trên máy chạy Docker. */
-export const BuildSpec = z.object({
+/** Nền tảng của buildx: `linux/amd64`, `linux/arm64`, `linux/arm/v7`… */
+export const BuildPlatform = z
+  .string()
+  .regex(/^[a-z0-9]+\/[a-z0-9]+(\/[a-z0-9]+)?$/, 'Like linux/amd64')
+
+/** Build image bằng `docker build` (BuildKit) trên máy chạy Docker; có nền tảng / output → `docker buildx build`. */
+const BuildSpecObject = z.object({
   /** Thư mục build context trên máy chạy Docker (server với SSH, máy này với local). */
   context: z
     .string()
@@ -131,9 +137,40 @@ export const BuildSpec = z.object({
     .regex(/^[A-Za-z0-9][\w.-]*$/)
     .optional(),
   noCache: z.boolean(),
-  pull: z.boolean()
+  pull: z.boolean(),
+  /** Có = `docker buildx build --platform …` (build đa nền tảng). */
+  platforms: z.array(BuildPlatform).max(8).optional(),
+  /**
+   * load = nạp vào Engine này (một nền tảng); push = đẩy lên registry (bắt buộc khi nhiều nền tảng
+   * muốn giữ kết quả); none = chỉ build (kiểm tra, làm ấm cache).
+   */
+  output: z.enum(['load', 'push', 'none']).optional(),
+  /** Builder của buildx (`docker buildx ls`); không có = builder đang dùng. */
+  builder: z
+    .string()
+    .regex(/^[A-Za-z0-9][\w.-]{0,63}$/, 'Letters, digits, "_", "." and "-" only')
+    .optional(),
+  /** Registry đã lưu (vault) để đăng nhập khi `output: push`; null / không có = không đăng nhập. */
+  registry: z.string().min(1).max(64).nullable().optional()
+})
+export const BuildSpec = BuildSpecObject.superRefine((spec, ctx) => {
+  if (spec.output === 'push' && spec.tags.length === 0)
+    ctx.addIssue({ code: 'custom', path: ['tags'], message: 'Pushing needs at least one tag' })
+  if (spec.output === 'load' && (spec.platforms?.length ?? 0) > 1)
+    ctx.addIssue({
+      code: 'custom',
+      path: ['output'],
+      message: 'Several platforms cannot be loaded into the engine — push them or build only'
+    })
 })
 export type BuildSpec = z.infer<typeof BuildSpec>
+
+/** Buildx trên máy chạy Docker. */
+export interface BuildInfo {
+  /** Phiên bản buildx — null = không có (plugin chưa cài). */
+  buildx: string | null
+  builders: { name: string; driver: string; current: boolean; platforms: string[] }[]
+}
 
 /** Container mới (hộp thoại Run). */
 const RunSpecObject = z.object({
@@ -266,6 +303,8 @@ export const DockerOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('registry.check'), registry: z.string().min(1).max(64) }),
   /** Build image (CLI `docker build`, BuildKit) → luồng sự kiện 'build'. */
   z.object({ op: z.literal('build'), spec: BuildSpec }),
+  /** Buildx có không (phiên bản) và các builder — để hộp thoại Build bật / tắt tuỳ chọn nền tảng. */
+  z.object({ op: z.literal('build.info') }),
   z.object({ op: z.literal('volumes') }),
   /** Dung lượng từng volume (`/system/df`, có thể chậm trên máy lớn) — hỏi riêng sau khi có danh sách. */
   z.object({ op: z.literal('volumes.sizes') }),

@@ -21,6 +21,7 @@ import {
   DockerTerminalParams,
   isMutating,
   maskEnv,
+  type BuildInfo,
   type BuildSpec,
   type ContainerFileList,
   type ContainerRow,
@@ -30,6 +31,7 @@ import {
 } from '../shared/ops'
 import { normalizeRegistry, registryOf } from '../shared/ipc'
 import {
+  authServer,
   buildArgs,
   cliErrorText,
   composeArgs,
@@ -454,6 +456,8 @@ export class DockerService implements HostModuleSession {
       }
       case 'build':
         return this.build(op.spec)
+      case 'build.info':
+        return this.buildInfo(signal)
       case 'volume.create':
         return { name: await backend.volumeCreate(op.spec) }
       case 'network.create':
@@ -551,6 +555,76 @@ export class DockerService implements HostModuleSession {
   }
 
   /**
+   * Đăng nhập registry cho `docker buildx build --push`: chỉ khi chọn registry đã lưu VÀ mọi tag nằm
+   * đúng trên registry đó. `pre` = `--config <thư mục tạm>` đặt trước lệnh; `done` xoá thư mục.
+   */
+  private async buildLogin(
+    spec: BuildSpec,
+    signal: AbortSignal
+  ): Promise<{ pre: string[]; done: () => Promise<void> }> {
+    const none = { pre: [] as string[], done: () => Promise.resolve() }
+    if (spec.output !== 'push' || !spec.registry) return none
+    let auth: RegistryAuth | null = null
+    for (const tag of spec.tags) auth = await this.auth(spec.registry, tag)
+    if (!auth) return none
+    if (!this.deps.cli.tempDir)
+      throw new Error(t('Signing in to a registry is not available with this Docker connection.'))
+    const dir = await this.deps.cli.tempDir()
+    const done = (): Promise<void> => dir.remove().catch(() => undefined)
+    try {
+      const pre = ['--config', dir.path]
+      const r = await this.deps.cli.exec(
+        [...pre, 'login', '--username', auth.username, '--password-stdin', authServer(auth.server)],
+        { input: auth.password, signal, timeoutMs: 60_000 }
+      )
+      if (r.code !== 0) throw new Error(cliErrorText(r.stderr, r.code))
+      return { pre, done }
+    } catch (error) {
+      await done()
+      throw error
+    }
+  }
+
+  /** Buildx (phiên bản, builder, nền tảng) trên máy chạy Docker — không có thì `buildx: null`. */
+  private async buildInfo(signal: AbortSignal): Promise<BuildInfo> {
+    const exec = (args: string[]): Promise<{ code: number | null; stdout: string } | null> =>
+      this.deps.cli.exec(args, { signal, timeoutMs: 15_000 }).catch(() => null)
+    const v = await exec(['buildx', 'version'])
+    if (!v || v.code !== 0) return { buildx: null, builders: [] }
+    const version = /v?(\d+\.\d+\.\d+[\w.+-]*)/.exec(v.stdout)?.[1] ?? v.stdout.trim().slice(0, 40)
+    const ls = await exec(['buildx', 'ls', '--format', '{{json .}}'])
+    const builders: BuildInfo['builders'] = []
+    for (const line of (ls?.code === 0 ? ls.stdout : '').split('\n')) {
+      if (!line.trim().startsWith('{')) continue
+      try {
+        const b = JSON.parse(line) as {
+          Name?: unknown
+          Driver?: unknown
+          Current?: unknown
+          Nodes?: { Platforms?: unknown }[]
+        }
+        if (typeof b.Name !== 'string') continue
+        const platforms = new Set<string>()
+        for (const n of b.Nodes ?? []) {
+          const raw = n.Platforms
+          const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split(',') : []
+          for (const p of list)
+            if (typeof p === 'string') platforms.add(p.trim().replace(/\*$/, ''))
+        }
+        builders.push({
+          name: b.Name,
+          driver: typeof b.Driver === 'string' ? b.Driver : '',
+          current: b.Current === true,
+          platforms: [...platforms].filter(Boolean)
+        })
+      } catch {
+        // Dòng không đọc được — bỏ qua.
+      }
+    }
+    return { buildx: version, builders }
+  }
+
+  /**
    * `docker build` (BuildKit, output chữ) chạy bằng CLI trên máy chạy Docker — context là thư mục
    * ở đó (server với SSH). Engine API cần gửi cả context dạng tar từ máy này, nên không dùng.
    */
@@ -564,10 +638,13 @@ export class DockerService implements HostModuleSession {
         for (const line of text.split('\n')) if (line.trim()) tail.push(line)
         if (tail.length > 20) tail.splice(0, tail.length - 20)
       }
+      // `--push` qua CLI: đăng nhập registry đã lưu vào thư mục `--config` tạm, xoá ngay khi xong.
+      const login = await this.buildLogin(spec, s)
       let program
       try {
-        program = await this.deps.cli.spawn(buildArgs(spec), s)
+        program = await this.deps.cli.spawn([...login.pre, ...buildArgs(spec)], s)
       } catch (error) {
+        await login.done()
         throw new Error(
           t('Building images needs the docker command where Docker runs: {error}', {
             error: error instanceof Error ? error.message : String(error)
@@ -587,6 +664,7 @@ export class DockerService implements HostModuleSession {
       const code = await new Promise<number | null>((resolve) => {
         program.onExit(resolve)
       })
+      await login.done()
       batch.flush()
       if (isAborted(s)) return
       if (code !== 0) {

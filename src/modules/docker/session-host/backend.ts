@@ -268,13 +268,20 @@ export function buildArgs(spec: BuildSpec): string[] {
     dockerfile && !absolute(dockerfile)
       ? `${spec.context.replace(/[\\/]+$/, '')}/${dockerfile}`
       : dockerfile
+  const platforms = spec.platforms ?? []
+  // Nền tảng / output / builder → buildx; không thì `docker build` như trước.
+  const buildx = platforms.length > 0 || spec.output !== undefined || spec.builder !== undefined
   return [
-    'build',
+    ...(buildx
+      ? ['buildx', 'build', ...(spec.builder ? ['--builder', spec.builder] : [])]
+      : ['build']),
     '--progress=plain',
     ...(file ? ['-f', file] : []),
     ...spec.tags.flatMap((tag) => ['-t', tag]),
     ...spec.buildArgs.flatMap((a) => ['--build-arg', a]),
     ...(spec.target ? ['--target', spec.target] : []),
+    ...(platforms.length ? ['--platform', platforms.join(',')] : []),
+    ...(spec.output === 'push' ? ['--push'] : spec.output === 'load' ? ['--load'] : []),
     ...(spec.noCache ? ['--no-cache'] : []),
     ...(spec.pull ? ['--pull'] : []),
     '--',

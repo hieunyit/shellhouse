@@ -768,3 +768,100 @@ test('Docker qua TCP + TLS: thêm engine bằng địa chỉ + chứng chỉ, k�
     await proxy.close()
   }
 })
+
+test('Docker: build đa nền tảng (buildx) — chọn nền tảng, push với registry đã lưu, build thường vẫn như cũ', async () => {
+  test.setTimeout(60_000)
+  test.skip(isWindows, 'Engine giả dùng unix socket; docker giả là script sh')
+  const engine = await startEngineTestServer()
+  const bin = mkdtempSync(join(tmpdir(), 'sh-docker-bin-'))
+  const log = join(bin, 'args.log')
+  // `docker` giả: buildx có sẵn với một builder hỗ trợ thêm riscv64; build / login chỉ ghi tham số.
+  writeFileSync(
+    join(bin, 'docker'),
+    [
+      '#!/bin/sh',
+      `echo "$@" >> '${log}'`,
+      'case "$1 $2" in',
+      '  "buildx version") echo "github.com/docker/buildx v0.17.1 abc"; exit 0;;',
+      `  "buildx ls") echo '{"Name":"multi","Driver":"docker-container","Current":true,"Nodes":[{"Platforms":["linux/amd64*","linux/arm64","linux/riscv64"]}]}'; exit 0;;`,
+      'esac',
+      'case "$*" in',
+      '  *" login "*) cat > /dev/null; echo "Login Succeeded"; exit 0;;',
+      '  *build*) echo "#1 building"; echo "#2 DONE"; exit 0;;',
+      'esac',
+      'exit 0',
+      ''
+    ].join('\n')
+  )
+  chmodSync(join(bin, 'docker'), 0o755)
+  const launched = await launchApp({
+    DOCKER_HOST: `unix://${engine.path}`,
+    PATH: `${bin}:${process.env['PATH'] ?? ''}`
+  })
+  const { page, app } = launched
+  try {
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = () => Promise.resolve({ response: 0, checkboxChecked: false })
+    })
+    await enableDocker(page)
+    // Registry đã lưu (mật khẩu vào vault) — build push sẽ đăng nhập bằng nó.
+    const saved = await page.evaluate(() =>
+      window.shellhouse.invokeModule('docker', 'saveRegistry', [
+        { name: 'GHCR', server: 'ghcr.io', username: 'me', secret: 'tok3n' }
+      ])
+    )
+    expect(saved).toMatchObject({ ok: true })
+    await page.locator('[data-testid="docker-endpoint"][data-name="This computer"]').dblclick()
+    const view = page.getByTestId('docker-view')
+    await page.getByTestId('docker-nav-images').click()
+    await view.getByTestId('docker-build').click()
+    const dialog = page.getByTestId('docker-build-dialog')
+    await dialog.getByTestId('docker-build-context').fill('/srv/app')
+    await dialog.getByTestId('docker-build-tags').fill('ghcr.io/me/app:1')
+
+    // Có buildx → hiện nền tảng (kể cả riscv64 do builder báo); chọn hai → chỉ còn push / build only.
+    await expect(dialog.getByTestId('docker-build-platform-linux/riscv64')).toBeVisible()
+    await dialog.getByTestId('docker-build-platform-linux/amd64').check()
+    await expect(dialog.getByTestId('docker-build-output')).toHaveValue('load')
+    await dialog.getByTestId('docker-build-platform-linux/arm64').check()
+    await expect(dialog.getByTestId('docker-build-output')).toHaveValue('push')
+    expect(
+      await dialog
+        .getByTestId('docker-build-output')
+        .evaluate((el) => (el as HTMLSelectElement).options[0]?.disabled)
+    ).toBe(true)
+    await dialog.getByTestId('docker-build-registry').selectOption({ label: 'GHCR (me)' })
+    await dialog.getByTestId('docker-build-submit').click()
+    await expect(dialog.getByTestId('docker-build-log')).toContainText('#2 DONE')
+    await expect(dialog.getByTestId('docker-build-status')).toContainText('Built ghcr.io/me/app:1')
+
+    const lines = readFileSync(log, 'utf8').trim().split('\n')
+    const login = lines.find((l) => l.includes(' login '))
+    expect(login).toMatch(/^--config \S+ login --username me --password-stdin ghcr\.io$/)
+    expect(lines.join('\n')).not.toContain('tok3n')
+    const build = lines.find((l) => l.includes('buildx build'))
+    expect(build).toMatch(
+      /^--config \S+ buildx build .*--platform linux\/amd64,linux\/arm64 --push .*-- \/srv\/app$/
+    )
+    // Cùng thư mục --config cho login và build.
+    expect(login?.split(' ')[1]).toBe(build?.split(' ')[1])
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+
+    // Không chọn nền tảng → `docker build` thường, không buildx.
+    await view.getByTestId('docker-build').click()
+    const again = page.getByTestId('docker-build-dialog')
+    await again.getByTestId('docker-build-platform-linux/amd64').uncheck()
+    await again.getByTestId('docker-build-platform-linux/arm64').uncheck()
+    await again.getByTestId('docker-build-submit').click()
+    await expect(again.getByTestId('docker-build-log')).toContainText('#2 DONE')
+    const plain = readFileSync(log, 'utf8')
+      .trim()
+      .split('\n')
+      .filter((l) => l.startsWith('build '))
+    expect(plain).toHaveLength(1)
+  } finally {
+    await launched.close()
+    rmSync(bin, { recursive: true, force: true })
+  }
+})

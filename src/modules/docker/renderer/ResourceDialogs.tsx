@@ -14,11 +14,12 @@ import {
 } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { confirmAction, t, toast } from '../../registry/renderer-kit'
-import { normalizeRegistry, type DockerRegistry } from '../shared/ipc'
+import { normalizeRegistry, registryFor, type DockerRegistry } from '../shared/ipc'
 import {
   BuildSpec,
   NetworkSpec,
   VolumeSpec,
+  type BuildInfo,
   type ContainerRow,
   type NetworkRow
 } from '../shared/ops'
@@ -865,7 +866,16 @@ interface BuildForm {
   target: string
   noCache: boolean
   pull: boolean
+  /** Nền tảng buildx đã chọn; rỗng = `docker build` thường. */
+  platforms: string[]
+  output: 'load' | 'push' | 'none'
+  builder: string
+  /** Registry đã lưu để đăng nhập khi push; '' = không đăng nhập. */
+  registry: string
 }
+
+/** Nền tảng hay gặp — thêm các nền tảng builder đang chọn báo hỗ trợ. */
+const COMMON_PLATFORMS = ['linux/amd64', 'linux/arm64', 'linux/arm/v7', 'linux/386']
 
 const EMPTY_BUILD: BuildForm = {
   context: '',
@@ -874,7 +884,11 @@ const EMPTY_BUILD: BuildForm = {
   buildArgs: '',
   target: '',
   noCache: false,
-  pull: false
+  pull: false,
+  platforms: [],
+  output: 'load',
+  builder: '',
+  registry: ''
 }
 
 function loadForm(key: string): BuildForm {
@@ -896,6 +910,8 @@ const BUILD_LOG_MAX = 400_000
 export function BuildDialog({
   where,
   storageKey,
+  registries,
+  info,
   start,
   cancel,
   subscribe,
@@ -905,6 +921,10 @@ export function BuildDialog({
   /** Context nằm ở đâu: máy này / server / WSL. */
   where: 'local' | 'ssh' | 'wsl'
   storageKey: string
+  /** Registry đã lưu (đăng nhập khi push). */
+  registries: readonly DockerRegistry[]
+  /** Buildx có không, và các builder — hỏi một lần khi mở. */
+  info: () => Promise<BuildInfo>
   start: (spec: BuildSpec) => Promise<string>
   cancel: (subscription: string) => void
   subscribe: (listener: (event: string, data: unknown) => void) => () => void
@@ -915,6 +935,21 @@ export function BuildDialog({
   const [phase, setPhase] = useState<'form' | 'running' | 'done' | 'failed'>('form')
   const [log, setLog] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [buildInfo, setBuildInfo] = useState<BuildInfo | 'unknown' | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    info().then(
+      (i) => {
+        if (!cancelled) setBuildInfo(i)
+      },
+      () => {
+        if (!cancelled) setBuildInfo('unknown')
+      }
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [info])
   const sub = useRef<string | null>(null)
   const logRef = useRef<HTMLPreElement>(null)
   const stick = useRef(true)
@@ -926,6 +961,18 @@ export function BuildDialog({
     .split('\n')
     .map((l) => l.trim())
     .filter(Boolean)
+  const multi = form.platforms.length > 1
+  // Nhiều nền tảng không nạp được vào Engine → push (hoặc chỉ build).
+  const output = multi && form.output === 'load' ? 'push' : form.output
+  const buildx = buildInfo !== null && buildInfo !== 'unknown' && buildInfo.buildx !== null
+  const chosenBuilder =
+    buildInfo !== null && buildInfo !== 'unknown'
+      ? (buildInfo.builders.find((b) => b.name === form.builder.trim()) ??
+        buildInfo.builders.find((b) => b.current))
+      : undefined
+  const platformChoices = [...new Set([...COMMON_PLATFORMS, ...(chosenBuilder?.platforms ?? [])])]
+  const registryChoice =
+    output === 'push' ? (registries.find((r) => r.id === form.registry) ?? null) : null
   const spec = BuildSpec.safeParse({
     context: form.context.trim(),
     ...(form.dockerfile.trim() ? { dockerfile: form.dockerfile.trim() } : {}),
@@ -933,12 +980,22 @@ export function BuildDialog({
     buildArgs: args,
     ...(form.target.trim() ? { target: form.target.trim() } : {}),
     noCache: form.noCache,
-    pull: form.pull
+    pull: form.pull,
+    ...(form.platforms.length > 0
+      ? {
+          platforms: form.platforms,
+          output,
+          ...(output === 'push' && registryChoice ? { registry: registryChoice.id } : {})
+        }
+      : {}),
+    ...(form.builder.trim() ? { builder: form.builder.trim() } : {})
   })
   const problem =
     !spec.success && form.context.trim()
       ? spec.error.issues[0]?.path[0] === 'tags'
-        ? t('Tags look like app:1.0 or ghcr.io/org/app:1.0')
+        ? output === 'push' && form.platforms.length > 0 && tags.length === 0
+          ? t('Pushing needs at least one tag')
+          : t('Tags look like app:1.0 or ghcr.io/org/app:1.0')
         : spec.error.issues[0]?.path[0] === 'buildArgs'
           ? t('Build arguments look like NAME=value')
           : spec.error.issues[0]?.path[0] === 'target'
@@ -1161,6 +1218,112 @@ export function BuildDialog({
                 set('pull', e.target.checked)
               }}
             />
+          </div>
+          <div
+            className="flex flex-col gap-2 rounded-md border border-line p-3"
+            data-testid="docker-build-platforms"
+          >
+            <span className="text-xs font-medium text-muted">{t('Platforms (buildx)')}</span>
+            {buildInfo === null ? (
+              <span className="text-xs text-faint">{t('Checking buildx…')}</span>
+            ) : !buildx ? (
+              <span className="text-xs text-faint" data-testid="docker-build-no-buildx">
+                {t(
+                  'Docker Buildx is not available here — builds use the single-platform docker build.'
+                )}
+              </span>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+                  {platformChoices.map((p) => (
+                    <Checkbox
+                      key={p}
+                      label={p}
+                      checked={form.platforms.includes(p)}
+                      data-testid={`docker-build-platform-${p}`}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? [...form.platforms, p]
+                          : form.platforms.filter((x) => x !== p)
+                        setForm((f) => ({
+                          ...f,
+                          platforms: next,
+                          // Nhiều nền tảng không nạp được → chuyển sang push.
+                          output: next.length > 1 && f.output === 'load' ? 'push' : f.output
+                        }))
+                      }}
+                    />
+                  ))}
+                </div>
+                {form.platforms.length > 0 && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label={t('Result')}>
+                      <Select
+                        value={output}
+                        data-testid="docker-build-output"
+                        onChange={(e) => {
+                          set('output', e.target.value as BuildForm['output'])
+                        }}
+                      >
+                        <option value="load" disabled={multi}>
+                          {t('Load into this engine')}
+                        </option>
+                        <option value="push">{t('Push to a registry')}</option>
+                        <option value="none">{t('Build only (check it builds)')}</option>
+                      </Select>
+                    </Field>
+                    {output === 'push' && (
+                      <Field label={t('Registry login')}>
+                        <Select
+                          value={registryChoice?.id ?? ''}
+                          data-testid="docker-build-registry"
+                          onChange={(e) => {
+                            set('registry', e.target.value)
+                          }}
+                        >
+                          <option value="">
+                            {t('No login (use what the server already has)')}
+                          </option>
+                          {registries
+                            .filter((r) => tags.every((tag) => registryFor(tag, [r]) !== null))
+                            .map((r) => (
+                              <option key={r.id} value={r.id}>
+                                {`${r.name} (${r.username})`}
+                              </option>
+                            ))}
+                        </Select>
+                      </Field>
+                    )}
+                  </div>
+                )}
+                {buildInfo.builders.length > 0 && (
+                  <Field
+                    label={t('Builder')}
+                    hint={t(
+                      'Several platforms need a builder with the docker-container driver (docker buildx create --use). Empty = the current builder.'
+                    )}
+                  >
+                    <Select
+                      value={form.builder}
+                      data-testid="docker-build-builder"
+                      onChange={(e) => {
+                        set('builder', e.target.value)
+                      }}
+                    >
+                      <option value="">
+                        {t('Current builder')}
+                        {chosenBuilder ? ` (${chosenBuilder.name})` : ''}
+                      </option>
+                      {buildInfo.builders.map((b) => (
+                        <option key={b.name} value={b.name}>
+                          {`${b.name} · ${b.driver}`}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                )}
+              </>
+            )}
           </div>
           {problem && <p className="text-xs text-warning">{problem}</p>}
           {tags.length === 0 && form.context.trim() !== '' && (

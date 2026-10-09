@@ -264,6 +264,60 @@ describe('build', () => {
     )
   })
 
+  it('buildx: nền tảng / output / builder → `docker buildx build`, một nền tảng không đổi hành vi cũ', () => {
+    const base = {
+      tags: ['app:1'],
+      buildArgs: [],
+      noCache: false,
+      pull: false,
+      context: '/srv/app'
+    }
+    // Không dùng buildx nếu không chọn gì: giữ nguyên `docker build`.
+    expect(buildArgs(base)[0]).toBe('build')
+    expect(
+      buildArgs({ ...base, platforms: ['linux/amd64', 'linux/arm64'], output: 'push' })
+    ).toEqual([
+      'buildx',
+      'build',
+      '--progress=plain',
+      '-t',
+      'app:1',
+      '--platform',
+      'linux/amd64,linux/arm64',
+      '--push',
+      '--',
+      '/srv/app'
+    ])
+    const loaded = buildArgs({
+      ...base,
+      platforms: ['linux/arm64'],
+      output: 'load',
+      builder: 'multi'
+    })
+    expect(loaded.slice(0, 4)).toEqual(['buildx', 'build', '--builder', 'multi'])
+    expect(loaded).toContain('--load')
+    // Chỉ build: không cờ output.
+    const none = buildArgs({ ...base, platforms: ['linux/amd64', 'linux/arm64'], output: 'none' })
+    expect(none).not.toContain('--push')
+    expect(none).not.toContain('--load')
+  })
+
+  it('buildx schema: nhiều nền tảng không nạp được; push cần tag; nền tảng / builder đúng dạng', () => {
+    const op = (spec: Record<string, unknown>): boolean =>
+      DockerOp.safeParse({
+        op: 'build',
+        spec: { context: '/x', tags: ['a:1'], buildArgs: [], noCache: false, pull: false, ...spec }
+      }).success
+    expect(op({ platforms: ['linux/amd64', 'linux/arm64'], output: 'push' })).toBe(true)
+    expect(op({ platforms: ['linux/amd64', 'linux/arm64'], output: 'load' })).toBe(false)
+    expect(op({ platforms: ['linux/arm64'], output: 'load' })).toBe(true)
+    expect(op({ output: 'push', tags: [] })).toBe(false)
+    expect(op({ platforms: ['--push'] })).toBe(false)
+    expect(op({ platforms: ['linux/amd64'], builder: '--bad' })).toBe(false)
+    expect(op({ platforms: ['linux/amd64'], builder: 'multi-arch_1' })).toBe(true)
+    expect(op({ platforms: Array.from({ length: 9 }, () => 'linux/amd64') })).toBe(false)
+  })
+
   it('schema: context / Dockerfile không được bắt đầu bằng "-" (không thành tuỳ chọn)', () => {
     const op = (context: string, dockerfile?: string): boolean =>
       DockerOp.safeParse({

@@ -84,7 +84,7 @@ ngoài những gì Trivy tự làm.
 
 ## 4. Ưu tiên 3 (sau 1 và 2)
 
-- Buildx / đa nền tảng: mở rộng `BuildSpec` (`platforms[]`, builder, push / load) — chỉ khi `docker
+- Buildx / đa nền tảng (XONG): mở rộng `BuildSpec` (`platforms[]`, builder, push / load) — chỉ khi `docker
 buildx` có trên máy; hiện tiến trình từng nền tảng.
 - Runbook gắn môi trường: chuỗi lệnh kiểm tra theo host / cluster / endpoint; chạy một cú nhấp; kết quả
   theo bước. Cần thiết kế riêng (lưu ở đâu, chạy lệnh nào ở K8s / Docker, xác nhận khi chạy trên

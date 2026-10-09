@@ -60,6 +60,7 @@ import {
 import type { ModuleTabProps } from '../../registry/renderer-types'
 import { tcpIdOf, wslDistroOf } from '../shared/ipc'
 import type {
+  BuildInfo,
   BuildSpec,
   ComposeAction,
   ContainerAction,
@@ -350,6 +351,8 @@ export function DockerTab({
   const env = useEndpointEnvironment(hostId ?? null)
   useReportEnvironment(tabId, env?.id)
   const { request, ready } = session
+  /** Buildx của máy chạy Docker (hộp thoại Build hỏi một lần khi mở). */
+  const buildInfoOf = useCallback(() => request<BuildInfo>({ op: 'build.info' }), [request])
   const readOnly = session.readOnly || env?.readOnly === true
   /** Engine thêm bằng địa chỉ TCP: chỉ Engine API — không có `docker` CLI (shell, build, Compose). */
   const noCli = tcpIdOf(hostId ?? null) !== null
@@ -2685,6 +2688,8 @@ export function DockerTab({
         <BuildDialog
           where={where}
           storageKey={`docker-build:${hostId ?? 'local'}`}
+          registries={registries}
+          info={buildInfoOf}
           start={(spec: BuildSpec) =>
             request<{ subscription: string }>({ op: 'build', spec }).then((r) => r.subscription)
           }

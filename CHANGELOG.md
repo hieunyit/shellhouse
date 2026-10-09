@@ -8,6 +8,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Added
 
+- **Docker › Build for several platforms (buildx):** the Build dialog lists the platforms of your
+  buildx builder (amd64, arm64…), builds with `docker buildx build --platform …` and can load the
+  result into the engine (one platform), push it (several) or only check that it builds. Pushing
+  signs in with a registry saved in your vault, through a throw-away `--config` folder that is
+  deleted afterwards — the password goes over stdin, never on the command line. Without a chosen
+  platform nothing changes: it is still the plain `docker build`.
 - **Docker over TCP + TLS:** Docker › Endpoints › Add by address (TLS)… connects to a daemon that
   listens on `tcp://host:2376` with `--tlsverify`. Give the CA, client certificate and private
   key (paste or choose the files): Shellhouse checks them (valid PEM, key matches the certificate,

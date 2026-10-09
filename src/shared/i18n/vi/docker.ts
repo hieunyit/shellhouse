@@ -719,5 +719,18 @@ export const docker: Readonly<Record<string, string>> = {
   'The server refused the client certificate (or none was given). Check that it is signed by the CA the daemon trusts.':
     'Máy chủ từ chối chứng chỉ client (hoặc chưa đưa chứng chỉ). Kiểm tra nó do CA mà daemon tin cậy ký.',
   '{where} closed the connection during the TLS handshake. It may not be a TLS port (Docker uses 2376 for TLS, 2375 for plain).':
-    '{where} đóng kết nối khi bắt tay TLS. Có thể đây không phải cổng TLS (Docker dùng 2376 cho TLS, 2375 cho không mã hoá).'
+    '{where} đóng kết nối khi bắt tay TLS. Có thể đây không phải cổng TLS (Docker dùng 2376 cho TLS, 2375 cho không mã hoá).',
+  'Pushing needs at least one tag': 'Đẩy lên registry cần ít nhất một tag',
+  'Platforms (buildx)': 'Nền tảng (buildx)',
+  'Checking buildx…': 'Đang kiểm tra buildx…',
+  'Docker Buildx is not available here — builds use the single-platform docker build.':
+    'Ở đây không có Docker Buildx — build dùng docker build một nền tảng.',
+  'Load into this engine': 'Nạp vào engine này',
+  'Push to a registry': 'Đẩy lên registry',
+  'Build only (check it builds)': 'Chỉ build (kiểm tra build được)',
+  'No login (use what the server already has)': 'Không đăng nhập (dùng thứ máy chủ đã có)',
+  Builder: 'Builder',
+  'Several platforms need a builder with the docker-container driver (docker buildx create --use). Empty = the current builder.':
+    'Nhiều nền tảng cần builder dùng driver docker-container (docker buildx create --use). Để trống = builder hiện tại.',
+  'Current builder': 'Builder hiện tại'
 }
