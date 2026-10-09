@@ -1165,7 +1165,9 @@ test('Kubernetes: Connections — khai báo (env) ghép với traffic quan sát:
 
     // Map › Connections: cùng dữ liệu cho mọi workload, lọc theo trạng thái.
     await page.keyboard.press('Escape')
+    await expect(detail).toBeHidden()
     await page.getByTestId('k8s-nav-map').click()
+    await expect(view.getByTestId('k8s-map')).toBeVisible()
     await view.getByTestId('k8s-map').getByTestId('k8s-map-view-connections').click()
     const map = view.getByTestId('k8s-connections')
     const mrow = (label: string) =>
