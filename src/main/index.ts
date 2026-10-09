@@ -1,3 +1,5 @@
+// Từ điển tiếng Việt trước mọi import khác (chuỗi tính lúc nạp module).
+import '@shared/i18n/load-vi'
 import { writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'

@@ -130,6 +130,8 @@ export interface TopoNode {
   /** Thẻ điểm đến ngoài: workload nào khai báo ở đâu (bảng chi tiết). */
   declared?: {
     workload: string
+    /** `ConnectionRow.key` — phủ tốc độ mới lên thẻ mà không dựng lại graph (withObserved). */
+    key: string
     sources: EgressRow['sources'] | null
     status: ConnStatus
     observed: ConnObserved | null
@@ -164,6 +166,8 @@ export interface TopoEdge {
   /** Cạnh `calls`: trạng thái khai báo ↔ quan sát và tốc độ (byte/s hoặc kết nối/s). */
   status?: ConnStatus
   rate?: number
+  /** Cạnh `calls`: `ConnectionRow.key` — lấy tốc độ mới nhất khi vẽ. */
+  connKey?: string
 }
 
 export interface TopoNsStats {
@@ -882,6 +886,7 @@ function namespaceGraph(
         if (!declared.some((x) => x.workload === w.name))
           declared.push({
             workload: w.name,
+            key: r.key,
             sources: r.declared,
             status: r.status,
             observed: r.observed
@@ -893,58 +898,14 @@ function namespaceGraph(
           to: eid,
           kind: 'calls',
           status: r.status,
+          connKey: r.key,
           ...(r.observed ? { rate: r.observed.rate } : {})
         })
       }
     }
   }
-  // Trạng thái gộp + dòng trong thẻ. Một workload gọi tới → liệt kê NƠI KHAI BÁO (khoá env /
-  // ConfigMap…; workload đã rõ nhờ đường nối) hoặc "không khai báo" nếu chỉ quan sát; nhiều
-  // workload → mỗi workload một dòng. Thẻ giữ chiều cao cố định, phần dư "+N".
-  for (const node of egressNode.values()) {
-    const declared = node.declared ?? []
-    const status = aggregateStatus(declared.map((x) => x.status))
-    const rate = declared.reduce((n, x) => n + (x.observed?.rate ?? 0), 0)
-    const unit = declared.find((x) => x.observed?.unit)?.observed?.unit
-    node.conn = { status, rate, ...(unit ? { unit } : {}) }
-    // Chỉ huy hiệu cho kết luận có nghĩa; "Not measured" / "Can't tell" không thêm nhiễu lên thẻ.
-    if (status !== 'unmeasured' && status !== 'unknown')
-      node.badges = [
-        {
-          text: connStatusLabel(status),
-          tone:
-            status === 'active'
-              ? 'ok'
-              : status === 'undeclared'
-                ? 'bad'
-                : status === 'declared'
-                  ? 'warn'
-                  : 'muted',
-          title: rate > 0 ? formatRate(rate, unit) : ''
-        }
-      ]
-    const single = declared.length === 1
-    const lines = single
-      ? declared[0]?.sources
-        ? declared[0].sources.map((x) => ({ text: x.key, hint: egressSourceWord(x.source) }))
-        : [{ text: t('not declared'), hint: rate > 0 ? formatRate(rate, unit) : '' }]
-      : declared.map((x) => ({ text: x.workload, hint: x.sources?.[0]?.key ?? t('not declared') }))
-    const shown = lines.slice(0, MAX_CARD_ROWS - 1)
-    const rest = lines.length - shown.length
-    node.rows = [
-      ...shown,
-      ...(rest > 0
-        ? [
-            {
-              text: single
-                ? tn(rest, '+{n} more place', '+{n} more places')
-                : tn(rest, '+{n} more workload', '+{n} more workloads'),
-              hint: ''
-            }
-          ]
-        : [])
-    ]
-  }
+  // Trạng thái gộp + dòng trong thẻ (decorateExternal).
+  for (const node of egressNode.values()) decorateExternal(node)
   if (egressHidden.size)
     addNode({
       id: `more-egress:${ns}`,
@@ -1481,6 +1442,78 @@ export function pathThrough(
 }
 
 /** Đồ thị hiện trên màn hình: gom namespace, cắt bớt / gập, chế độ tập trung. */
+/**
+ * Thẻ điểm đến ngoài: trạng thái gộp + tốc độ tổng, huy hiệu, dòng trong thẻ — tính từ
+ * `node.declared`. Một workload gọi tới → liệt kê NƠI KHAI BÁO (khoá env / ConfigMap…; workload đã
+ * rõ nhờ đường nối) hoặc "không khai báo" nếu chỉ quan sát; nhiều workload → mỗi workload một dòng.
+ * Thẻ giữ chiều cao cố định, phần dư "+N".
+ */
+function decorateExternal(node: TopoNode): void {
+  const declared = node.declared ?? []
+  const status = aggregateStatus(declared.map((x) => x.status))
+  const rate = declared.reduce((n, x) => n + (x.observed?.rate ?? 0), 0)
+  const unit = declared.find((x) => x.observed?.unit)?.observed?.unit
+  node.conn = { status, rate, ...(unit ? { unit } : {}) }
+  // Chỉ huy hiệu cho kết luận có nghĩa; "Not measured" / "Can't tell" không thêm nhiễu lên thẻ.
+  if (status !== 'unmeasured' && status !== 'unknown')
+    node.badges = [
+      {
+        text: connStatusLabel(status),
+        tone:
+          status === 'active'
+            ? 'ok'
+            : status === 'undeclared'
+              ? 'bad'
+              : status === 'declared'
+                ? 'warn'
+                : 'muted',
+        title: rate > 0 ? formatRate(rate, unit) : ''
+      }
+    ]
+  const single = declared.length === 1
+  const lines = single
+    ? declared[0]?.sources
+      ? declared[0].sources.map((x) => ({ text: x.key, hint: egressSourceWord(x.source) }))
+      : [{ text: t('not declared'), hint: rate > 0 ? formatRate(rate, unit) : '' }]
+    : declared.map((x) => ({ text: x.workload, hint: x.sources?.[0]?.key ?? t('not declared') }))
+  const shown = lines.slice(0, MAX_CARD_ROWS - 1)
+  const rest = lines.length - shown.length
+  node.rows = [
+    ...shown,
+    ...(rest > 0
+      ? [
+          {
+            text: single
+              ? tn(rest, '+{n} more place', '+{n} more places')
+              : tn(rest, '+{n} more workload', '+{n} more workloads'),
+            hint: ''
+          }
+        ]
+      : [])
+  ]
+}
+
+/**
+ * Thẻ điểm đến ngoài với tốc độ MỚI NHẤT (`observed` theo `ConnectionRow.key`): mỗi lần đo traffic chỉ
+ * phủ lại thẻ Outbound, không dựng lại / xếp lại cả topology. Node khác (không có `declared`) giữ
+ * nguyên object. Khoá không có trong `observed` → giữ giá trị lúc dựng.
+ */
+export function withObserved<N extends TopoNode>(
+  node: N,
+  observed: ReadonlyMap<string, ConnObserved | null>
+): N {
+  if (!node.declared?.length) return node
+  const next: N = {
+    ...node,
+    declared: node.declared.map((x) =>
+      observed.has(x.key) ? { ...x, observed: observed.get(x.key) ?? null } : x
+    )
+  }
+  delete next.badges
+  decorateExternal(next)
+  return next
+}
+
 /** Gợi ý sửa chung theo mã lỗi (mã có gợi ý riêng theo ngữ cảnh thì đặt ngay lúc phát hiện). */
 const FIXES: Partial<Record<string, () => string>> = {
   'svc-no-match': () =>

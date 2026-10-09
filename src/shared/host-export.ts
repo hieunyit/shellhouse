@@ -1,5 +1,8 @@
 import { stringify } from 'yaml'
 import type { HostTree } from './hosts'
+import { sshAlias } from './ssh-alias'
+
+export { sshAlias }
 
 /**
  * Xuất danh sách host (thiết kế v0.7): Shellhouse YAML (giữ cây nhóm, môi trường, mặc định của
@@ -41,19 +44,6 @@ function groupPath(tree: HostTree, id: string | null): string[] {
       current.parentId === null ? undefined : tree.groups.find((g) => g.id === current?.parentId)
   }
   return out
-}
-
-/** Bí danh Host cho OpenSSH config: chữ thường, không dấu cách. */
-export function sshAlias(label: string): string {
-  return (
-    label
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/đ/gi, 'd')
-      .replace(/[^A-Za-z0-9._-]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .toLowerCase() || 'host'
-  )
 }
 
 function csvCell(value: string): string {

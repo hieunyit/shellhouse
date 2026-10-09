@@ -31,6 +31,15 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - The local file pane cannot move your home folder, SSH/GPG keys, cloud credentials or the app's
   data to the Trash.
 
+### Changed
+
+- Faster start in English: the Vietnamese dictionary (~290 KB) is only loaded when the interface is
+  in Vietnamese, and Quick Connect no longer pulls in the YAML library (~100 KB). The startup
+  script is 25% smaller (1.72 MB → 1.30 MB).
+- Kubernetes Topology with the Outbound lane on no longer rebuilds and re-lays out the whole map
+  every time traffic is measured (every 10 seconds). Only the outbound cards and lines update,
+  unless a destination or status changes (~135 ms → ~12 ms per update on a 15,000-pod cluster).
+
 ### Fixed
 
 - Restoring a backup copies the current data aside (with its write-ahead log) before removing

@@ -33,12 +33,14 @@ import {
   buildTopology,
   layoutTopology,
   pathThrough,
+  withObserved,
   workloadId,
   type TopoGraph,
   type TopoLayout,
   type TopoNode
 } from '../../shared/appTopology'
 import type { EgressRow } from '../../shared/egress'
+import { connectionShape, observedByKey, type ConnectionRow } from '../../shared/connections'
 import { useConnections } from '../useConnections'
 import {
   groupNamespaces,
@@ -291,12 +293,30 @@ function TopologyInner({
     traffic,
     observe: trafficOn
   })
+  // Làn Outbound: graph chỉ dựng / xếp lại khi HÌNH DẠNG kết nối đổi (đích, trạng thái, cổng…). Tốc
+  // độ đổi mỗi lần đo traffic (10 giây) chỉ được phủ lên thẻ / cạnh (liveNodes, flowEdges) — dựng lại
+  // cả topology mỗi lần đo tốn ~140 ms với cụm 15k pod và làm cả bản đồ vẽ lại.
+  const liveRows = egress.on ? conn.rows : null
+  const liveShape = useMemo(() => (liveRows ? connectionShape(liveRows) : null), [liveRows])
+  // Hàng dùng để DỰNG graph: chỉ thay khi hình dạng đổi (giá trị trước giữ trong state, cập nhật
+  // ngay trong lúc render — mẫu "điều chỉnh state khi prop đổi" của React).
+  const [shaped, setShaped] = useState<{ shape: string; rows: readonly ConnectionRow[] } | null>(
+    null
+  )
+  if (liveRows && liveShape !== null && shaped?.shape !== liveShape)
+    setShaped({ shape: liveShape, rows: liveRows })
+  const egressRows =
+    liveRows && liveShape !== null ? (shaped?.shape === liveShape ? shaped.rows : liveRows) : null
+  const liveObserved = useMemo(
+    () => (liveRows && liveRows !== egressRows ? observedByKey(liveRows) : null),
+    [liveRows, egressRows]
+  )
   const graph = useMemo<TopoGraph | null>(() => {
     if (!data) return null
     const base = {
       hideSystem: options.hideSystem,
       showDeps: options.showDeps,
-      ...(egress.on && conn.rows ? { egress: conn.rows } : {}),
+      ...(egressRows ? { egress: egressRows } : {}),
       expanded: tab.expanded,
       collapsed: isFolded,
       showAll: tab.showAll,
@@ -310,8 +330,7 @@ function TopologyInner({
     groups,
     options.hideSystem,
     options.showDeps,
-    egress.on,
-    conn.rows,
+    egressRows,
     tab.expanded,
     isFolded,
     tab.showAll,
@@ -324,7 +343,14 @@ function TopologyInner({
   const byId = useMemo(() => new Map((layout?.nodes ?? []).map((n) => [n.id, n])), [layout])
   // Mục chọn biến mất sau khi làm mới / đổi bộ lọc → coi như không chọn.
   const selected = selectedRaw && byId.has(selectedRaw) ? selectedRaw : null
-  const selectedNode = selected ? byId.get(selected) : undefined
+  // Thẻ Outbound với tốc độ mới nhất (node khác giữ nguyên object — React Flow không vẽ lại chúng).
+  const liveNodes = useMemo(() => {
+    const m = new Map<string, TopoLayout['nodes'][number]>()
+    if (!liveObserved || !layout) return m
+    for (const n of layout.nodes) if (n.declared?.length) m.set(n.id, withObserved(n, liveObserved))
+    return m
+  }, [layout, liveObserved])
+  const selectedNode = selected ? (liveNodes.get(selected) ?? byId.get(selected)) : undefined
 
   // ——— Traffic (lớp phủ) ———
   const podOwner = useMemo(() => {
@@ -686,6 +712,14 @@ function TopologyInner({
       })
     return out
   }, [layout, graph, tab.moved])
+  const liveFlowNodes = useMemo<TopoFlowNode[]>(() => {
+    if (liveNodes.size === 0) return flowNodes
+    return flowNodes.map((f) => {
+      const live = liveNodes.get(f.id)
+      // Chỉ thẻ (không phải dải namespace) mới có `declared`.
+      return live && f.type !== 'band' ? { ...f, data: { node: live } } : f
+    })
+  }, [flowNodes, liveNodes])
   const flowEdges = useMemo<TopoFlowEdge[]>(() => {
     if (!layout) return []
     const labelled = new Set<string>()
@@ -696,7 +730,9 @@ function TopologyInner({
         e.kind === 'select'
           ? topoTraffic?.rates.get(e.to)?.in
           : e.kind === 'calls'
-            ? e.rate
+            ? e.connKey && liveObserved?.has(e.connKey)
+              ? liveObserved.get(e.connKey)?.rate
+              : e.rate
             : undefined
       const labelKey = e.kind === 'calls' ? e.id : e.to
       const label = rate !== undefined && rate >= idleBelow(unit) && !labelled.has(labelKey)
@@ -711,7 +747,7 @@ function TopologyInner({
         data: { edge: e, ...(rate !== undefined ? { rate } : {}), ...(label ? { label } : {}) }
       }
     })
-  }, [layout, topoTraffic, unit])
+  }, [layout, topoTraffic, unit, liveObserved])
 
   const ctx = useMemo<TopoCtx>(
     () => ({
@@ -1168,7 +1204,7 @@ function TopologyInner({
       >
         <TopoContext.Provider value={ctx}>
           <ReactFlow<TopoFlowNode, TopoFlowEdge>
-            nodes={flowNodes}
+            nodes={liveFlowNodes}
             edges={flowEdges}
             nodeTypes={TOPO_NODE_TYPES}
             edgeTypes={TOPO_EDGE_TYPES}

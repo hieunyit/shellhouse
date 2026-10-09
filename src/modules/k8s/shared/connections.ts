@@ -377,3 +377,17 @@ export function aggregateStatus(list: readonly ConnStatus[]): ConnStatus {
   const order: ConnStatus[] = ['active', 'idle', 'declared', 'unknown', 'unmeasured', 'undeclared']
   return order.find((o) => list.includes(o)) ?? 'unmeasured'
 }
+
+/**
+ * "Hình dạng" của danh sách kết nối: mọi thứ TRỪ tốc độ (`observed.rate`). Topology chỉ dựng / xếp
+ * lại khi hình dạng đổi (đích mới, trạng thái đổi, cổng / peer mới) — mỗi lần đo traffic (10 giây)
+ * tốc độ được phủ lên thẻ và cạnh (`observedByKey` + `withObserved`), không dựng lại cả bản đồ.
+ */
+export function connectionShape(rows: readonly ConnectionRow[]): string {
+  return JSON.stringify(rows, (key, value: unknown) => (key === 'rate' ? undefined : value))
+}
+
+/** Quan sát mới nhất theo `ConnectionRow.key` (chỉ hàng cấp trên — topology vẽ theo các hàng đó). */
+export function observedByKey(rows: readonly ConnectionRow[]): Map<string, ConnObserved | null> {
+  return new Map(rows.map((r) => [r.key, r.observed]))
+}

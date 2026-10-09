@@ -10,7 +10,7 @@ import { cx, ICON_SM } from '../ds/utils'
 import { HostAvatar } from '../components/HostAvatar'
 import { connect } from '../components/sidebar/actions'
 import { hostAddress, useHosts } from '../stores/hosts'
-import { sshAlias } from '@shared/host-export'
+import { sshAlias } from '@shared/ssh-alias'
 import { useTabs } from '../stores/tabs'
 import { openSidebarDialog } from '../stores/ui-requests'
 

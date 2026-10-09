@@ -48,14 +48,19 @@ describe('pool', () => {
     }
   })
 
-  it('mapLimit: giữ thứ tự, song song thật (nhanh hơn tuần tự), lỗi → reject', async () => {
-    const started = Date.now()
-    const out = await mapLimit([30, 30, 30, 30, 30, 30, 30, 30], 8, async (ms, i) => {
+  it('mapLimit: giữ thứ tự, song song thật (đúng trần), lỗi → reject', async () => {
+    // Đếm số việc chạy cùng lúc thay vì đo đồng hồ (không phụ thuộc máy nhanh / chậm).
+    let active = 0
+    let peak = 0
+    const out = await mapLimit([5, 1, 4, 2, 3, 1, 2, 5], 3, async (ms, i) => {
+      active++
+      peak = Math.max(peak, active)
       await sleep(ms)
+      active--
       return i * 2
     })
     expect(out).toEqual([0, 2, 4, 6, 8, 10, 12, 14])
-    expect(Date.now() - started).toBeLessThan(150) // tuần tự sẽ ≥ 240 ms
+    expect(peak).toBe(3)
     await expect(
       mapLimit([1, 2, 3], 2, async (n) => {
         if (n === 2) throw new Error('hỏng')

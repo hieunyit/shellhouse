@@ -3,6 +3,8 @@
  * Sẽ chứa mọi kết nối SSH, PTY, SFTP, forwarding. Crash ở đây không làm sập UI;
  * main sẽ tự khởi động lại process này.
  */
+// Từ điển tiếng Việt trước mọi import khác (chuỗi tính lúc nạp module).
+import '@shared/i18n/load-vi'
 import { dirname } from 'node:path'
 import type { MessagePortMain } from 'electron'
 import {

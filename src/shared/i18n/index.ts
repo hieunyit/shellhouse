@@ -1,5 +1,3 @@
-import { vi } from './vi'
-
 /**
  * Đa ngôn ngữ (dùng chung main + renderer + module). Chuỗi tiếng Anh trong code CHÍNH LÀ khoá:
  *
@@ -26,7 +24,19 @@ export const LANGUAGES: readonly { value: Language; label: string }[] = [
   { value: 'vi', label: 'Tiếng Việt' }
 ]
 
-const CATALOGS: Record<Language, Readonly<Record<string, string>> | null> = { en: null, vi }
+/**
+ * Từ điển theo ngôn ngữ — không import sẵn ở đây: từ điển tiếng Việt ~290 KB, renderer chỉ nạp khi
+ * giao diện là tiếng Việt (renderer/src/i18n.ts). Main / Session Host / test nạp đồng bộ bằng
+ * `@shared/i18n/load-vi`. Chưa nạp → hiện tiếng Anh.
+ */
+const CATALOGS: Record<Language, Readonly<Record<string, string>> | null> = { en: null, vi: null }
+
+export function registerCatalog(
+  language: Language,
+  catalog: Readonly<Record<string, string>>
+): void {
+  CATALOGS[language] = catalog
+}
 
 let current: Language = 'en'
 let currentLocale = 'en-US'

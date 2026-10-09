@@ -14,6 +14,7 @@ export default defineConfig({
       'src/modules/*/test/{unit,integration}/**/*.test.ts'
     ],
     environment: 'node',
+    setupFiles: ['test/setup-i18n.ts'],
     // Runner CI (nhất là macOS Intel) chậm hơn máy dev nhiều lần: test tích hợp chạy ssh-keygen,
     // sftp-server thật — 5 giây mặc định không đủ.
     testTimeout: process.env['CI'] ? 30_000 : 5_000

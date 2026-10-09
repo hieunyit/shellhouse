@@ -7,12 +7,13 @@ import {
   pathThrough,
   routeChannels,
   topoStructureKey,
+  withObserved,
   MAX_ROWS_PER_NS,
   type TopoGraph,
   type TopoNode,
   type TopoOptions
 } from '../../shared/appTopology'
-import { buildConnections } from '../../shared/connections'
+import { buildConnections, connectionShape, observedByKey } from '../../shared/connections'
 import { egressRows, type EgressItem } from '../../shared/egress'
 import type { TrafficPeer, TrafficRate } from '../../shared/traffic'
 import type { MapData, MapPod, MapWorkload } from '../../shared/map'
@@ -1024,5 +1025,46 @@ describe('Làn Outbound — điểm đến khai báo trong cấu hình', () => {
       egress: buildConnections({ declared: egressRows(items, d), observed: null })
     })
     expect(quiet.nodes.find((n) => n.name === 'api.stripe.com:443')?.badges).toBeUndefined()
+  })
+
+  it('traffic đo lại (chỉ tốc độ đổi): cùng hình dạng → không dựng lại; tốc độ mới phủ lên thẻ + cạnh', () => {
+    const client: TrafficPeer = { kind: 'Deployment', ns: 'shop', name: 'web' }
+    const ext = (name: string): TrafficPeer => ({ kind: 'external', ns: '', name })
+    const items: EgressItem[] = [
+      { workload: web, source: 'env', via: '', key: 'PAY', host: 'api.stripe.com', port: 443 }
+    ]
+    const declared = egressRows(items, d)
+    const at = (rate: number, extra: TrafficRate[] = []) =>
+      buildConnections({
+        declared,
+        observed: [{ client, server: ext('api.stripe.com'), port: '443', rate }, ...extra]
+      })
+    const first = at(5000)
+    const later = at(7)
+    // Chỉ tốc độ đổi → cùng hình dạng (topology không dựng lại).
+    expect(connectionShape(later)).toBe(connectionShape(first))
+    // Đích mới (chỉ quan sát) → hình dạng khác (dựng lại).
+    expect(
+      connectionShape(at(5000, [{ client, server: ext('198.51.100.7'), port: '6379', rate: 3 }]))
+    ).not.toBe(connectionShape(first))
+
+    const g = buildTopology(d, { ...OPTS, egress: first })
+    const stripe = g.nodes.find((n) => n.name === 'api.stripe.com:443')
+    if (!stripe) throw new Error('no stripe card')
+    expect(stripe.conn?.rate).toBe(5000)
+    const live = withObserved(stripe, observedByKey(later))
+    expect(live).not.toBe(stripe)
+    expect(live.conn).toMatchObject({ status: 'active', rate: 7 })
+    expect(live.declared?.[0]?.observed?.rate).toBe(7)
+    expect(live.badges?.[0]?.text).toBe(stripe.badges?.[0]?.text)
+    expect(live.badges?.[0]?.title).not.toBe(stripe.badges?.[0]?.title)
+    // Bản gốc không bị sửa; node không phải thẻ Outbound giữ nguyên object.
+    expect(stripe.conn?.rate).toBe(5000)
+    const workloadNode = g.nodes.find((n) => n.kind === 'workload')
+    if (!workloadNode) throw new Error('no workload')
+    expect(withObserved(workloadNode, observedByKey(later))).toBe(workloadNode)
+    // Cạnh `calls` mang khoá để lấy tốc độ mới khi vẽ.
+    const edge = g.edges.find((e) => e.kind === 'calls')
+    expect(edge?.connKey && observedByKey(later).get(edge.connKey)?.rate).toBe(7)
   })
 })

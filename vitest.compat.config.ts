@@ -7,6 +7,7 @@ export default defineConfig({
   test: {
     include: ['test/compat/**/*.test.ts'],
     globalSetup: ['test/compat/setup.ts'],
+    setupFiles: ['test/setup-i18n.ts'],
     testTimeout: 60_000,
     hookTimeout: 20 * 60_000,
     // Một luồng: các test dùng chung container.
