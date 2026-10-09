@@ -6,6 +6,17 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Added
+
+- **Security scanning with Trivy** (uses the `trivy` you already have; Shellhouse does not ship a
+  scanner and asks before it first runs the program):
+  - Docker › Images › Scan for vulnerabilities… lists the CVEs of an image by severity, with the
+    installed and fixed versions, a "has a fix" filter, search and Copy as CSV. It runs where Docker
+    runs: this computer, a WSL distribution, or an SSH server (Trivy must be installed there).
+  - Kubernetes › Scan configuration… checks a workload's live YAML against Trivy's misconfiguration
+    rules (root file system, privileges…) with the suggested fix and the YAML line. Secrets are
+    never scanned, and no cluster credentials are handed to Trivy.
+
 ### Security
 
 - Production safety: on an environment that asks you to type the name, three more actions now do

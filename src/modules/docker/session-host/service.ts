@@ -2,7 +2,19 @@ import { randomUUID } from 'node:crypto'
 import { lstat, stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { t } from '@shared/i18n'
-import type { HostModuleSession, TerminalSize } from '../../registry/host-types'
+import {
+  imageScanArgs,
+  parseTrivyReport,
+  SCAN_MAX_OUTPUT_BYTES,
+  SCAN_TIMEOUT_MS,
+  trivyFailure
+} from '@shared/trivy'
+import type {
+  ExecOptions,
+  ExecResult,
+  HostModuleSession,
+  TerminalSize
+} from '../../registry/host-types'
 import type { Transport, TransportCallbacks } from '../../../session-host/transport/types'
 import {
   DockerOp,
@@ -54,6 +66,8 @@ export interface DockerServiceDeps {
   reprobeCli?: boolean
   /** Thông tin đăng nhập registry đã lưu (main giải mã từ vault). */
   registryAuth?(id: string): Promise<RegistryAuth>
+  /** `trivy …` trên máy chạy Docker (máy này, WSL hoặc server SSH). Không có = không quét được. */
+  scanner?: (args: readonly string[], options: ExecOptions) => Promise<ExecResult>
 }
 
 /** Liệt kê qua archive (container không có shell): đọc tối đa chừng này rồi dừng. */
@@ -255,6 +269,17 @@ export class DockerService implements HostModuleSession {
         return backend.top(op.id)
       case 'image.history':
         return backend.imageHistory(op.id)
+      case 'image.scan': {
+        const scanner = this.deps.scanner
+        if (!scanner) throw new Error(t('Scanning is not available for this Docker source.'))
+        const r = await scanner(imageScanArgs(op.ref), {
+          timeoutMs: SCAN_TIMEOUT_MS,
+          maxOutputBytes: SCAN_MAX_OUTPUT_BYTES,
+          signal
+        })
+        if (r.code !== 0) throw trivyFailure(r.code, r.stderr)
+        return parseTrivyReport(r.stdout, op.ref)
+      }
       case 'run':
         return { id: await backend.run(op.spec, signal) }
       case 'statsAll.subscribe':

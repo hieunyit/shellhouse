@@ -71,6 +71,8 @@ export const K8sOp = z.discriminatedUnion('op', [
     name: Name,
     format: z.enum(['json', 'yaml'])
   }),
+  /** Quét cấu hình của một đối tượng bằng Trivy (`trivy config` trên YAML tạm) — không đọc Secret. */
+  z.object({ op: z.literal('scan'), kind: Kind, namespace: Namespace.optional(), name: Name }),
   /** Ghi đè (replace) có kiểm resourceVersion — xung đột → báo, không ghi đè. */
   z.object({ op: z.literal('apply'), yaml: z.string().max(4 * 1024 * 1024) }),
   /** force = xoá ngay (grace period 0) — "kill" của k9s. */

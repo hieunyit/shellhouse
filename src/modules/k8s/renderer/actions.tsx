@@ -11,6 +11,7 @@ import {
   RefreshCcwDot,
   RotateCw,
   Scale,
+  ShieldCheck,
   SquareTerminal,
   Trash2,
   Unlock,
@@ -53,6 +54,8 @@ export interface ActionHandlers {
   restart(obj: K8sObject): void
   pause(obj: K8sObject, paused: boolean): void
   history(obj: K8sObject): void
+  /** Quét cấu hình bằng Trivy (`trivy config` trên YAML của đối tượng). */
+  scan(obj: K8sObject): void
   remove(obj: K8sObject, force: boolean): void
   cordon(obj: K8sObject, unschedulable: boolean): void
   drain(obj: K8sObject): void
@@ -65,6 +68,16 @@ export interface ActionHandlers {
   copyCommand(obj: K8sObject): void
 }
 
+/** Loại có pod template (hoặc là pod): Trivy có luật cấu hình cho chúng. */
+const SCANNABLE = [
+  'pods',
+  'deployments.apps',
+  'statefulsets.apps',
+  'daemonsets.apps',
+  'replicasets.apps',
+  'jobs.batch',
+  'cronjobs.batch'
+]
 const WORKLOADS = ['deployments.apps', 'statefulsets.apps', 'daemonsets.apps']
 const SCALABLE = ['deployments.apps', 'statefulsets.apps', 'replicasets.apps']
 /** Loại có selector → xem log của mọi pod. */
@@ -180,6 +193,15 @@ export function actionsFor(
       key: 'h',
       run: () => {
         h.history(obj)
+      }
+    })
+  if (SCANNABLE.includes(kindId))
+    out.push({
+      id: 'scan',
+      label: t('Scan configuration…'),
+      icon: <ShieldCheck size={14} />,
+      run: () => {
+        h.scan(obj)
       }
     })
   out.push({

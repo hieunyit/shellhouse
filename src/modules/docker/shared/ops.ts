@@ -213,6 +213,8 @@ export const DockerOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('top'), id: Id }),
   /** Các lớp của image (`docker history`). */
   z.object({ op: z.literal('image.history'), id: Id }),
+  /** Quét lỗ hổng của image bằng Trivy (chạy trên máy chạy Docker; cần Trivy cài sẵn ở đó). */
+  z.object({ op: z.literal('image.scan'), ref: ImageRef }),
   /** Tạo + chạy container (như `docker run -d`). */
   z.object({ op: z.literal('run'), spec: RunSpec }),
   /** Log nhiều container (Compose project) — mỗi dòng có tiền tố tên. */

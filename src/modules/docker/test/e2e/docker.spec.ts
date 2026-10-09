@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -585,5 +585,110 @@ test('Docker trên Production: xoá hàng loạt và dọn dẹp phải gõ lạ
     await expect(view.getByTestId('docker-image')).toHaveCount(2)
   } finally {
     await launched.close()
+  }
+})
+
+test('Docker: quét lỗ hổng image bằng Trivy — xin phép chạy chương trình, bảng kết quả, lọc, lỗi', async () => {
+  test.setTimeout(60_000)
+  test.skip(isWindows, 'Engine giả dùng unix socket; Trivy giả là script sh')
+  const engine = await startEngineTestServer()
+  // Trivy giả: ghi lại tham số; "postgres" → báo lỗi như khi thiếu mạng tải CSDL.
+  const bin = mkdtempSync(join(tmpdir(), 'sh-trivy-'))
+  const log = join(bin, 'args.log')
+  const report = JSON.stringify({
+    ArtifactName: 'nginx:1.27',
+    Metadata: { OS: { Family: 'debian', Name: '12.5' } },
+    Results: [
+      {
+        Target: 'nginx:1.27 (debian 12.5)',
+        Vulnerabilities: [
+          {
+            VulnerabilityID: 'CVE-2024-0001',
+            PkgName: 'openssl',
+            InstalledVersion: '3.0.1',
+            FixedVersion: '3.0.2',
+            Severity: 'CRITICAL',
+            Title: 'openssl: remote thing'
+          },
+          {
+            VulnerabilityID: 'CVE-2024-0002',
+            PkgName: 'zlib',
+            InstalledVersion: '1.2',
+            Severity: 'MEDIUM',
+            Title: 'zlib: local thing'
+          }
+        ]
+      }
+    ]
+  })
+  writeFileSync(join(bin, 'report.json'), report)
+  writeFileSync(
+    join(bin, 'trivy'),
+    `#!/bin/sh\necho "$@" >> '${log}'\ncase "$*" in\n  *postgres*) echo 'FATAL failed to download vulnerability DB' >&2; exit 1;;\nesac\ncat '${join(bin, 'report.json')}'\n`
+  )
+  chmodSync(join(bin, 'trivy'), 0o755)
+  const launched = await launchApp({
+    DOCKER_HOST: `unix://${engine.path}`,
+    PATH: `${bin}:${process.env['PATH'] ?? ''}`
+  })
+  const { page, app } = launched
+  try {
+    // Hộp thoại xin phép chạy chương trình: ghi lại và đồng ý.
+    await app.evaluate(({ dialog }) => {
+      const g = globalThis as unknown as { __asked: string[] }
+      g.__asked = []
+      dialog.showMessageBox = (...args: unknown[]) => {
+        g.__asked.push((args.at(-1) as { message?: string }).message ?? '')
+        return Promise.resolve({ response: 0, checkboxChecked: false })
+      }
+    })
+    await enableDocker(page)
+    await page.locator('[data-testid="docker-endpoint"][data-name="This computer"]').dblclick()
+    const view = page.getByTestId('docker-view')
+    await page.getByTestId('docker-nav-images').click()
+    const image = (name: string) =>
+      view.locator(`[data-testid="docker-image"][data-name="${name}"]`)
+    await image('nginx:1.27').click()
+    await view.getByTestId('docker-detail-more').click()
+    await page.getByRole('menuitem', { name: 'Scan for vulnerabilities…' }).click()
+    const dialog = page.getByTestId('scan-dialog')
+    await expect(dialog.getByTestId('scan-target')).toHaveText('nginx:1.27')
+    await expect(dialog.getByTestId('scan-sev-CRITICAL')).toHaveAttribute('data-count', '1')
+    await expect(dialog.getByTestId('scan-sev-MEDIUM')).toHaveAttribute('data-count', '1')
+    await expect(dialog.getByTestId('scan-row')).toHaveCount(2)
+    // Dòng nặng nhất lên đầu, có phiên bản sửa.
+    await expect(dialog.getByTestId('scan-row').first()).toHaveAttribute('data-id', 'CVE-2024-0001')
+    await expect(dialog.getByTestId('scan-row').first()).toContainText('3.0.2')
+    await dialog.getByTestId('scan-fixable').check()
+    await expect(dialog.getByTestId('scan-row')).toHaveCount(1)
+    await dialog.getByTestId('scan-fixable').uncheck()
+    await dialog.getByTestId('scan-sev-MEDIUM').click()
+    await expect(dialog.getByTestId('scan-row')).toHaveCount(1)
+    await expect(dialog.getByTestId('scan-row')).toHaveAttribute('data-id', 'CVE-2024-0002')
+    await dialog.getByTestId('scan-filter').fill('nothing-matches')
+    await expect(dialog.getByTestId('scan-row')).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+
+    // Tham số đúng (ref nằm sau "--") và đã hỏi xin chạy trivy đúng một lần.
+    const args = readFileSync(log, 'utf8').trim().split('\n')
+    expect(args).toHaveLength(1)
+    expect(args[0]).toMatch(/^image .*--format json .*-- nginx:1\.27$/)
+    const asked = await app.evaluate(() => (globalThis as unknown as { __asked: string[] }).__asked)
+    expect(asked.filter((m) => m.includes('trivy'))).toHaveLength(1)
+
+    // Trivy báo lỗi → hiện nguyên văn dòng lỗi; "Try again" chạy lại.
+    await image('postgres:16').click()
+    await view.getByTestId('docker-detail-more').click()
+    await page.getByRole('menuitem', { name: 'Scan for vulnerabilities…' }).click()
+    await expect(page.getByTestId('scan-error')).toContainText(
+      'Trivy failed: FATAL failed to download vulnerability DB'
+    )
+    await page.getByTestId('scan-retry').click()
+    await expect(page.getByTestId('scan-error')).toBeVisible()
+    expect(readFileSync(log, 'utf8').trim().split('\n')).toHaveLength(3)
+  } finally {
+    await launched.close()
+    rmSync(bin, { recursive: true, force: true })
   }
 })

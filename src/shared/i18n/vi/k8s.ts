@@ -1286,5 +1286,8 @@ export const k8s: Readonly<Record<string, string>> = {
   'For an API server with a self-signed certificate, or behind a proxy that inspects TLS. The proxy comes from proxy-url in the kubeconfig, otherwise from Settings › Network.':
     'Cho API server dùng chứng chỉ tự ký, hoặc đi qua proxy có kiểm tra TLS. Proxy lấy từ proxy-url trong kubeconfig, nếu không có thì theo Cài đặt › Network.',
   '{error} — if you trust this API server, turn on “Skip certificate verification” in the context settings':
-    '{error} — nếu tin API server này, bật “Bỏ qua kiểm tra chứng chỉ” trong cài đặt của context'
+    '{error} — nếu tin API server này, bật “Bỏ qua kiểm tra chứng chỉ” trong cài đặt của context',
+  'Scan configuration…': 'Quét cấu hình…',
+  'Configuration issues in {name}': 'Vấn đề cấu hình của {name}',
+  'Secrets are not scanned.': 'Không quét Secret.'
 }

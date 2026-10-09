@@ -23,7 +23,7 @@ Kết luận: Ưu tiên 1 không phải làm từ đầu — chỉ còn ba lỗ 
 Không làm trong đợt này: ép buộc ở Session Host (phía renderer vẫn là lớp bảo vệ duy nhất cho
 "gõ tên"). Chế độ chỉ đọc đã được Session Host kiểm riêng (không tin cờ renderer) — giữ nguyên.
 
-## 1. Ưu tiên 1 — đóng ba lỗ hổng xác nhận (làm trước)
+## 1. Ưu tiên 1 — đóng ba lỗ hổng xác nhận (làm trước) — XONG (3fbc448)
 
 Quy tắc chung: chỉ khi môi trường của đích có `confirm === 'type'` và thao tác nguy hiểm. Chuỗi phải
 gõ:
@@ -48,7 +48,7 @@ Việc làm:
 Tiêu chí xong: trên Production không còn đường nào xoá / ghi hàng loạt chỉ bằng một cú bấm; e2e xanh
 trên cả ba hệ điều hành.
 
-## 2. Ưu tiên 2a — quét bằng Trivy (không tự viết engine quét)
+## 2. Ưu tiên 2a — quét bằng Trivy (không tự viết engine quét) — XONG
 
 Nguyên tắc: gọi `trivy` nếu máy có; hiển thị kết quả. Không tải, không cài, không tự cập nhật CSDL
 ngoài những gì Trivy tự làm.

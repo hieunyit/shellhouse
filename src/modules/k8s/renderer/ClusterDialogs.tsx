@@ -1,7 +1,8 @@
+import type { ScanResult } from '@shared/trivy'
 import type { FormKind } from '../shared/forms'
 import type { ContextRef, DiscoveredKind, K8sOp, PortForwardInfo } from '../shared/ops'
 import type { K8sObject, ResourceKind } from '../shared/resources'
-import { t, tn, toast } from '../../registry/renderer-kit'
+import { ScanDialog, t, tn, toast } from '../../registry/renderer-kit'
 import { CreateResourceDialog } from './CreateResourceDialog'
 import {
   DeleteDialog,
@@ -17,7 +18,7 @@ import { DebugDialog } from './DebugDialog'
 import { notify, nsOf, run } from './useK8sActions'
 import { objectKey } from './useResourceList'
 
-type Request = <T>(op: K8sOp) => Promise<T>
+type Request = <T>(op: K8sOp, signal?: AbortSignal) => Promise<T>
 
 export type Dialog =
   | {
@@ -34,6 +35,7 @@ export type Dialog =
   | { kind: 'scale'; obj: K8sObject }
   | { kind: 'drain'; obj: K8sObject }
   | { kind: 'history'; obj: K8sObject }
+  | { kind: 'scan'; obj: K8sObject }
   | { kind: 'debug'; target: 'pod' | 'node'; obj: K8sObject }
   | { kind: 'bulk'; action: BulkKind; objects: K8sObject[] }
   | null
@@ -264,6 +266,27 @@ export function ClusterDialogs({
           node={dialog.obj}
           production={production}
           request={request}
+          onClose={() => {
+            setDialog(null)
+          }}
+        />
+      )}
+      {dialog.kind === 'scan' && (
+        <ScanDialog
+          title={t('Configuration issues in {name}', { name: dialog.obj.metadata.name })}
+          run={(signal) =>
+            request<ScanResult>(
+              {
+                op: 'scan',
+                kind: kindId,
+                ...(dialog.obj.metadata.namespace
+                  ? { namespace: dialog.obj.metadata.namespace }
+                  : {}),
+                name: dialog.obj.metadata.name
+              },
+              signal
+            )
+          }
           onClose={() => {
             setDialog(null)
           }}

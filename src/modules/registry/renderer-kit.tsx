@@ -134,6 +134,7 @@ export {
 } from '../../renderer/src/components/CollapsibleNav'
 /** Ô mật khẩu có nút hiện / ẩn và cảnh báo Caps Lock. */
 export { PasswordInput } from '../../renderer/src/components/PasswordInput'
+export { ScanDialog } from '../../renderer/src/components/ScanDialog'
 /** Hộp thoại xác nhận của app (thay window.confirm) — xem stores/confirm. */
 export {
   confirmAction,

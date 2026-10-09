@@ -2,12 +2,20 @@ import { usablePrinterColumns, type PrinterColumn } from '../shared/printer'
 import { findPrometheus, podRange, type PromTarget } from './prometheus'
 import { randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
-import { lstat, open, readFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { lstat, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { createServer, type Server, type Socket } from 'node:net'
 import { parse as parseYaml, stringify as toYaml } from 'yaml'
 import { z } from 'zod'
 import { t } from '@shared/i18n'
+import {
+  configScanArgs,
+  parseTrivyReport,
+  SCAN_MAX_OUTPUT_BYTES,
+  SCAN_TIMEOUT_MS,
+  trivyFailure
+} from '@shared/trivy'
 import type WebSocket from 'ws'
 import type { HostModuleSession, TerminalSize } from '../../registry/host-types'
 import type { Transport, TransportCallbacks } from '../../../session-host/transport/types'
@@ -453,6 +461,28 @@ export class K8sService implements HostModuleSession {
         if (kind.id === 'secrets')
           o = op.format === 'yaml' ? hideSecretValuesForEdit(o) : hideSecretValues(o)
         return op.format === 'yaml' ? toYaml(o) : o
+      }
+      case 'scan': {
+        const kind = this.kind(op.kind)
+        // Secret có giá trị bí mật — không đưa cho chương trình ngoài, cũng không có gì để quét.
+        if (kind.id === 'secrets') throw new Error(t('Secrets are not scanned.'))
+        const live = slim(
+          await client.json<K8sObject>('GET', resourcePath(kind, op.namespace, op.name), { signal })
+        )
+        const dir = await mkdtemp(join(tmpdir(), 'shellhouse-scan-'))
+        try {
+          await writeFile(join(dir, 'resource.yaml'), toYaml(live), { mode: 0o600 })
+          const r = await this.deps.spawn.exec('trivy', configScanArgs(dir), {
+            timeoutMs: SCAN_TIMEOUT_MS,
+            maxOutputBytes: SCAN_MAX_OUTPUT_BYTES,
+            signal
+          })
+          if (r.code !== 0) throw trivyFailure(r.code, r.stderr)
+          const label = `${kind.kind} ${op.namespace ? `${op.namespace}/` : ''}${op.name}`
+          return parseTrivyReport(r.stdout, label, Date.now(), true)
+        } finally {
+          await rm(dir, { recursive: true, force: true })
+        }
       }
       case 'apply':
         return this.apply(client, op.yaml, signal)
