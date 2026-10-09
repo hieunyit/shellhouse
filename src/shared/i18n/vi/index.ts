@@ -9,7 +9,6 @@ import { k8sMap } from './k8sMap'
 import { main } from './main'
 import { rdp } from './rdp'
 import { rdpViewer } from './rdpViewer'
-import { runbook } from './runbook'
 import { s3 } from './s3'
 import { shell } from './shell'
 import { terminal } from './terminal'
@@ -28,7 +27,6 @@ export const PARTS = {
   s3,
   rdp,
   rdpViewer,
-  runbook,
   accounts,
   ds,
   shell,

@@ -1,4 +1,4 @@
-# Kế hoạch: an toàn production, quét bảo mật, Docker TLS, runbook (2026-10)
+# Kế hoạch: an toàn production, quét bảo mật, Docker TLS (2026-10)
 
 Nguồn: bản đề xuất ưu tiên 1–4 của người dùng. Kế hoạch này đã đối chiếu với code hiện tại — phần
 nào đã có thì ghi rõ, không làm lại.
@@ -86,9 +86,8 @@ ngoài những gì Trivy tự làm.
 
 - Buildx / đa nền tảng (XONG): mở rộng `BuildSpec` (`platforms[]`, builder, push / load) — chỉ khi `docker
 buildx` có trên máy; hiện tiến trình từng nền tảng.
-- Runbook gắn môi trường (XONG — module `runbook`, xem `docs/adr/0016-runbooks.md`): bước HTTP /
-  lệnh SSH / rollout K8s / container Docker, mỗi bước một đích; Production gõ tên runbook, môi
-  trường chỉ đọc chặn bước lệnh; header bí mật trong vault; xuất / nhập, nhân bản, lịch sử.
+- Runbook gắn môi trường (KHÔNG LÀM — đã cài đặt rồi gỡ trước 1.2.0-beta.31, lý do ở
+  `docs/adr/0016-runbooks.md` mục 8).
 
 ## 5. Ưu tiên 4 — chưa làm
 

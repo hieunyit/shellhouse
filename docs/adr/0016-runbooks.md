@@ -1,6 +1,6 @@
 # ADR-016: Runbook — chuỗi kiểm tra gắn với môi trường, chạy một cú nhấp
 
-- Trạng thái: **Đang triển khai** — phạm vi đã chọn (2026-10-09): cả bốn loại bước (http, lệnh SSH, K8s, Docker)
+- Trạng thái: **Không làm** (2026-10-09) — đã cài đặt rồi gỡ trước khi phát hành, xem mục 8
 - Ngày: 2026-10-09
 - Liên quan: ADR-014 (khuôn module), ADR-015 (môi trường); `docs/plan-2026-10-roadmap.md` mục 4;
   `src/shared/snippets.ts` (snippet), `MultiExecView` (gõ vào nhiều terminal)
@@ -81,43 +81,17 @@ dạng văn bản để dán vào ticket.
 4. **Đích kiểu nhóm / môi trường**: chạy tuần tự trên từng host rồi gộp kết quả, hay chỉ cho một host
    mỗi lần ở giai đoạn đầu?
 
-## 8. Quyết định (2026-10-09)
+## 8. Quyết định (2026-10-09): không làm
 
-1. **Phạm vi**: cả bốn loại bước ngay giai đoạn đầu (người dùng chọn).
-2. **Là một module** (`runbook`, ADR-014): có bảng riêng, phần Session Host (chạy lệnh SSH, gọi HTTP)
-   và khu vực riêng trên activity bar — đây cũng là câu trả lời cho "đặt ở đâu".
-3. **Module không import module khác** (ESLint, ADR-014) → bước K8s / Docker đi qua điểm mở rộng
-   mới của registry: `RendererModule.runbookSteps`. K8s đăng ký `k8s.rollout`, Docker đăng ký
-   `docker.container`; Runbook chỉ thấy các loại bước của module **đang bật**. Bước của module đã
-   tắt báo "module chưa bật", không chạy ngầm.
-4. **Đích nằm ở từng bước**, không ở runbook: một runbook "sau deploy" có thể gồm HTTP + lệnh trên
-   host + rollout trên cluster + container trên endpoint. (Đảo lại mô hình ở mục 2.)
-5. **Môi trường suy ra từ các đích thật của bước**, không phải nhãn người dùng tự gắn cho runbook:
-   bất kỳ đích nào thuộc môi trường `confirm: 'type'` → phải gõ lại tên runbook; bước `command` nhắm
-   vào đích thuộc môi trường chỉ đọc → bị chặn (các bước kiểm tra còn lại chỉ đọc nên vẫn chạy).
-6. Chưa đồng bộ runbook giữa các máy (lưu cục bộ trong DB của module); lịch sử chạy chỉ ở máy này.
+Đã cài đặt thành module `runbook` (commit `b8c3eee`: bốn loại bước, header bí mật trong vault, dùng
+chung phiên theo đích, xuất / nhập) rồi revert trước khi phát hành 1.2.0-beta.31. Lý do:
 
-## 9. Đã làm (2026-10-09)
+- Không thiết yếu: nhóm có CI/CD đã có smoke test sau deploy, `kubectl rollout status` trong
+  pipeline và giám sát uptime; từng mảnh lẻ app đã có (snippet + gõ vào nhiều terminal, trạng thái
+  rollout của K8s, health của Docker). Giá trị riêng chỉ là gộp lại + đạt / lỗi + một cú nhấp.
+- Chi phí lớn so với giá trị: ~4.150 dòng code + ~2.000 dòng test, thêm một nơi lưu bí mật, thêm
+  đường gọi HTTP / chạy lệnh từ app, bảo trì theo mỗi thay đổi của K8s / Docker. Lần rà cuối vẫn ra
+  thêm lỗi (dùng chung phiên, rollout StatefulSet OnDelete / partition, tiền tố id container).
 
-- Module `runbook`: bảng `runbook_runbooks`, Session Host (`exec` qua kênh SSH, `http` từ máy này —
-  chỉ `http:` / `https:`, đọc tối đa 64 KB thân), khu vực riêng trên activity bar.
-- Bốn loại bước; K8s / Docker qua `RendererModule.runbookSteps`. Loại bước có thể khai `prepare()`
-  (K8s: nạp danh sách context) — runbook gọi trước khi tính chính sách, để môi trường Production
-  của đích không bị bỏ sót chỉ vì store của module chưa nạp.
-- Hộp thoại chạy: nhập biến, cảnh báo bước bị chặn, gõ lại tên (không cho dán) khi có đích
-  Production. Bảng kết quả theo bước, "Chạy lại bước lỗi" (chỉ chạy lại bước lỗi / bị chặn / bị bỏ
-  qua, giữ kết quả bước đã đạt), "Sao chép kết quả"; lịch sử 5 lần gần nhất trong localStorage.
-- Đang chạy thì khoá sửa bước; đóng tab khi đang chạy / còn thay đổi chưa lưu thì hỏi; xoá runbook
-  thì đóng tab của nó.
-- Một lần chạy dùng chung phiên theo đích (`SessionPool` trong `renderer-session.ts`): các bước trên
-  cùng host / cluster / engine chỉ kết nối và hỏi mật khẩu một lần; bước lỗi / hết giờ / bị dừng
-  thì bỏ phiên đó (bước sau kết nối lại); hết lần chạy thì đóng hết.
-- Che bí mật cả khoá JSON (`"password": "…"`, `"access_token": "…"`), giữ ngoặc của giá trị.
-- Bước HTTP: GET / HEAD / POST, header; giá trị header bí mật nằm ở bảng `runbook_secrets` (mã hoá
-  bằng vault, quyền `secrets`) — bước chỉ giữ `secretId`; main giải mã trong `resolveSession` thẳng
-  sang Session Host. Proxy theo Settings › Network (`ctx.proxyFor`, theo địa chỉ ban đầu); tuỳ chọn
-  bỏ kiểm chứng chỉ theo bước. Chuyển hướng tự xử lý (tối đa 5): sang origin khác thì bỏ header bí
-  mật / `Authorization` / `Cookie`. Bí mật không runbook nào dùng (quá 1 ngày) được dọn khi bật module.
-- Lịch sử xem lại được từng bước. Nhân bản; xuất / nhập file `shellhouse-runbooks` v1: không có
-  `secretId`; host SSH kèm nhãn + địa chỉ để máy nhập ghép host (nhãn + địa chỉ → địa chỉ → nhãn);
-  tên trùng thêm "(2)".
+Làm lại khi có người dùng thật sự yêu cầu: bắt đầu từ `b8c3eee` (cùng các sửa lỗi nêu trên), giữ
+module tắt mặc định và phạm vi hẹp.

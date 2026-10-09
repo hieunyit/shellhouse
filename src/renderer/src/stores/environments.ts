@@ -70,18 +70,3 @@ export function hostEnvironmentId(hostId: string | null | undefined): string | n
 export function useHostEnvironmentId(hostId: string | null | undefined): string | null {
   return useHosts((s) => (hostId ? (s.effective.get(hostId)?.environment ?? null) : null))
 }
-
-/** Id môi trường đã chọn cho một nguồn (đọc một lần, không theo dõi); `legacy` như `useSourceEnvironment`. */
-export function sourceEnvironmentId(
-  module: string,
-  id: string | null | undefined,
-  legacy?: string
-): string | null {
-  const s = useSettings.getState().settings
-  return (id ? s.sourceEnvironments[sourceKey(module, id)] : undefined) ?? legacy ?? null
-}
-
-/** Môi trường theo id (đọc một lần, không theo dõi). */
-export function environmentById(id: string | null | undefined): EnvironmentDef | undefined {
-  return findEnvironment(useSettings.getState().settings.environments, id)
-}

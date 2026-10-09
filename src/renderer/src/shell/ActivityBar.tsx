@@ -21,7 +21,7 @@ import { useShell, type Area } from './store'
 const ICON = { size: 18, strokeWidth: 1.5 } as const
 
 /** Thứ tự module trên activity bar theo thiết kế: Kubernetes → Docker → S3; module khác xếp sau. */
-const MODULE_ORDER = ['k8s', 'docker', 's3', 'runbook']
+const MODULE_ORDER = ['k8s', 'docker', 's3']
 const moduleRank = (id: string): number => {
   const i = MODULE_ORDER.indexOf(id)
   return i === -1 ? MODULE_ORDER.length : i

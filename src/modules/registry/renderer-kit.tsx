@@ -16,12 +16,7 @@ import type { ZodType } from 'zod'
 import type { ConnectionPhase, ExitReason, PromptRequest } from '@shared/stream-protocol'
 import type { TransferStatus } from '@shared/sftp'
 import { openSession } from '../../renderer/src/lib/sessions'
-import {
-  setCloseGuard,
-  useTabs,
-  type CloseConcern,
-  type ModuleTerminalTarget
-} from '../../renderer/src/stores/tabs'
+import { useTabs, type ModuleTerminalTarget } from '../../renderer/src/stores/tabs'
 import { useTabStatus } from '../../renderer/src/stores/tab-status'
 import { useSettings } from '../../renderer/src/stores/settings'
 import { useHosts } from '../../renderer/src/stores/hosts'
@@ -39,7 +34,6 @@ import { t } from '@shared/i18n'
 import { SessionClient } from '../../renderer/src/terminal/session-client'
 import type { TerminalState } from '../../renderer/src/terminal/controller'
 import type { HostContext, ModuleMenuEntry, ModuleTabDef, RendererModule } from './renderer-types'
-import { runInSession, type OneShotClient, type OneShotContext } from './renderer-session'
 import type { ModuleState } from './types'
 import { BackgroundSession, type BackgroundSessionHandlers } from './renderer-background'
 
@@ -89,10 +83,8 @@ export {
   type FleetState
 } from '../../renderer/src/stores/fleet'
 export {
-  environmentById,
   hostEnvironmentId,
   setSourceEnvironment,
-  sourceEnvironmentId,
   useEnvironments,
   useHostEnvironmentId,
   useSourceEnvironment,
@@ -309,16 +301,6 @@ export function useSavedHosts(): SavedHostInfo[] {
   )
 }
 
-/** Mọi host đã lưu (đọc một lần, không theo dõi). */
-export function savedHosts(): SavedHostInfo[] {
-  return useHosts.getState().tree.hosts.map((h) => ({
-    id: h.id,
-    label: h.label,
-    address: `${h.username}@${h.hostname}`,
-    protocol: h.protocol
-  }))
-}
-
 export function savedHost(id: string): SavedHostInfo | undefined {
   const h = useHosts.getState().tree.hosts.find((x) => x.id === id)
   return h
@@ -429,16 +411,6 @@ export function openModuleTab(module: string, tab: string, params: unknown): str
   return useTabs
     .getState()
     .addTarget(def.title(parsed.data), { kind: 'module', module, tab, params: parsed.data })
-}
-
-/** Tab của module đang mở có tham số khớp (để bấm lại thì chuyển tới tab đó, không mở thêm). */
-export function findModuleTab(module: string, match: (params: unknown) => boolean): string | null {
-  const tab = useTabs
-    .getState()
-    .tabs.find(
-      (x) => x.target.kind === 'module' && x.target.module === module && match(x.target.params)
-    )
-  return tab?.id ?? null
 }
 
 /** Tab module đổi tham số (vị trí đang xem…) → cập nhật đích (nhân bản / workspace) và tiêu đề. */
@@ -588,26 +560,6 @@ export function onTabClosed(tabId: string, listener: () => void): () => void {
   return unsub
 }
 
-/**
- * Hỏi trước khi đóng tab (thay đổi chưa lưu, việc đang chạy): `guard` trả lý do, null = đóng luôn.
- * Gọi với null để bỏ. Trả hàm bỏ guard.
- */
-export function setTabCloseGuard(
-  tabId: string,
-  guard: (() => CloseConcern | null) | null
-): () => void {
-  setCloseGuard(tabId, guard)
-  return () => {
-    setCloseGuard(tabId, null)
-  }
-}
-
-/** Đóng tab ngay, không hỏi (việc trong tab đã xong / đích của tab không còn). */
-export function closeTabNow(tabId: string): void {
-  setCloseGuard(tabId, null)
-  useTabs.getState().close(tabId)
-}
-
 /** Chấm trạng thái trên tab (connecting / connected / disconnected). */
 export function setTabState(tabId: string, state: TerminalState | null): void {
   if (state) useTabStatus.getState().set(tabId, state)
@@ -725,27 +677,6 @@ export class ModuleSessionClient {
     this.client?.close()
     this.client = null
   }
-}
-
-export { SessionPool } from './renderer-session'
-
-/**
- * Chạy một việc một lần trong phiên module (mở → đợi kết nối → làm → đóng) — cho bước runbook của
- * module. Hết giờ / huỷ / đứt kết nối đều làm lỗi và đóng phiên. `ctx.pool` có → các việc trên cùng
- * đích dùng chung một phiên (đóng khi pool đóng).
- */
-export function runInModuleSession<T>(
-  module: string,
-  target: ModuleSessionTarget,
-  ctx: OneShotContext,
-  work: (client: OneShotClient, remainingMs: () => number) => Promise<T>
-): Promise<T> {
-  return runInSession<T>(
-    (events) => ModuleSessionClient.open(module, target, events),
-    ctx,
-    work,
-    `${module}:${JSON.stringify(target)}`
-  )
 }
 
 // ——— Phiên chạy nền ———
