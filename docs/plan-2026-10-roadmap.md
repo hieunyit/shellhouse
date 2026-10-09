@@ -68,7 +68,7 @@ ngoài những gì Trivy tự làm.
 - Test: parser JSON Trivy bằng fixture; tích hợp bằng trivy giả (script in JSON) qua `LimitedSpawn`;
   e2e hiển thị kết quả.
 
-## 3. Ưu tiên 2b — Docker qua TCP + TLS
+## 3. Ưu tiên 2b — Docker qua TCP + TLS — XONG (chỉ Engine API; không Compose / build / shell)
 
 - Mô hình: endpoint mới `kind = 'tcp'` (host, port, có TLS, CA, chứng chỉ + khoá client). Hiện
   `docker_endpoints` chỉ có local / `host_id` SSH → migration `0004_tcp.sql`.

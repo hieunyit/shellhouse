@@ -4,6 +4,8 @@ import {
   Container,
   Eye,
   Laptop,
+  Network,
+  Pencil,
   Plus,
   RefreshCw,
   Server,
@@ -13,6 +15,7 @@ import {
 import { cx, IconButton } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
 import {
+  confirmAction,
   environmentMenu,
   NavTreeRow,
   monitorMenuItem,
@@ -27,8 +30,9 @@ import {
   useSourceEnvironmentMap
 } from '../../registry/renderer-kit'
 import { EnvLabel } from '../../../renderer/src/ds'
-import { wslDistroOf, wslSource } from '../shared/ipc'
+import { tcpIdOf, wslDistroOf, wslSource, type DockerTcpEndpoint } from '../shared/ipc'
 import { dockerApi, openDocker, sourceLabel } from './api'
+import { TcpEndpointDialog } from './TcpEndpointDialog'
 import { useDocker } from './store'
 
 /**
@@ -38,8 +42,11 @@ import { useDocker } from './store'
 export function DockerSection(): React.JSX.Element {
   const endpoints = useDocker((s) => s.endpoints)
   const wsl = useDocker((s) => s.wsl)
+  const tcp = useDocker((s) => s.tcp)
   const hosts = useSavedHosts()
   const [open, setOpen] = useState(true)
+  /** Hộp thoại thêm / sửa engine TCP + TLS (`true` = thêm mới). */
+  const [tcpDialog, setTcpDialog] = useState<DockerTcpEndpoint | true | null>(null)
   const { menu, open: openMenu } = useContextMenu()
 
   useEffect(() => {
@@ -61,9 +68,17 @@ export function DockerSection(): React.JSX.Element {
       const key = wslSource(d.name)
       return { hostId: key, readOnly: endpoints.find((e) => e.hostId === key)?.readOnly ?? false }
     })
+  // Engine TCP + TLS: bản ghi trong danh sách nguồn + định nghĩa còn tồn tại.
+  const tcpRows = endpoints
+    .filter((e) => {
+      const id = tcpIdOf(e.hostId)
+      return id !== null && tcp.some((x) => x.id === id)
+    })
+    .map((e) => ({ hostId: e.hostId, readOnly: e.readOnly }))
   const rows = [
     { hostId: null, readOnly: local?.readOnly ?? false },
     ...wslRows,
+    ...tcpRows,
     ...remote.map((e) => ({ hostId: e.hostId, readOnly: e.readOnly }))
   ]
   const addableWsl = wsl.filter((d) => !wslRows.some((r) => r.hostId === wslSource(d.name)))
@@ -98,19 +113,51 @@ export function DockerSection(): React.JSX.Element {
       sourceEnvs[`docker:${endpointKey(hostId)}`] ?? hostEnvironmentId(hostId),
       (id) => void setSourceEnvironment('docker', endpointKey(hostId), id)
     ),
-    ...(hostId
+    ...(tcpIdOf(hostId)
       ? [
+          {
+            id: 'docker-tcp-edit',
+            label: t('Edit connection…'),
+            icon: <Pencil size={14} />,
+            onSelect: () => {
+              setTcpDialog(tcp.find((x) => x.id === tcpIdOf(hostId)) ?? null)
+            }
+          },
           'separator' as const,
           {
             id: 'docker-remove',
-            label: wslDistroOf(hostId) ? t('Hide from Docker') : t('Remove from Docker'),
+            label: t('Delete engine'),
             icon: <Trash2 size={14} />,
             danger: true,
-            onSelect: () =>
-              void (wslDistroOf(hostId) ? dockerApi.hide(hostId) : dockerApi.remove(hostId))
+            onSelect: () => {
+              const id = tcpIdOf(hostId) ?? ''
+              void confirmAction({
+                title: t('Delete {name}?', { name: sourceLabel(hostId) }),
+                message: t(
+                  'The address and the certificates stored for it are deleted from the vault.'
+                ),
+                confirmLabel: t('Delete'),
+                danger: true,
+                testId: 'docker-tcp-delete-confirm'
+              }).then((ok) => {
+                if (ok) void dockerApi.deleteTcp(id)
+              })
+            }
           }
         ]
-      : [])
+      : hostId
+        ? [
+            'separator' as const,
+            {
+              id: 'docker-remove',
+              label: wslDistroOf(hostId) ? t('Hide from Docker') : t('Remove from Docker'),
+              icon: <Trash2 size={14} />,
+              danger: true,
+              onSelect: () =>
+                void (wslDistroOf(hostId) ? dockerApi.hide(hostId) : dockerApi.remove(hostId))
+            }
+          ]
+        : [])
   ]
 
   return (
@@ -171,7 +218,16 @@ export function DockerSection(): React.JSX.Element {
                     onSelect: () => {
                       void dockerApi.add(h.id)
                     }
-                  })))
+                  }))),
+              'separator' as const,
+              {
+                id: 'docker-add-tcp',
+                label: t('Add by address (TLS)…'),
+                icon: <Network size={14} />,
+                onSelect: () => {
+                  setTcpDialog(true)
+                }
+              }
             ]
             openMenu(e, entries)
           }}
@@ -207,6 +263,8 @@ export function DockerSection(): React.JSX.Element {
                 {chevron}
                 {wslDistroOf(r.hostId) ? (
                   <SquareTerminal size={14} className="shrink-0 text-muted" />
+                ) : tcpIdOf(r.hostId) ? (
+                  <Network size={14} className="shrink-0 text-muted" />
                 ) : r.hostId ? (
                   <Server size={14} className="shrink-0 text-muted" />
                 ) : (
@@ -226,6 +284,18 @@ export function DockerSection(): React.JSX.Element {
           />
         ))}
       {menu}
+      {tcpDialog !== null && (
+        <TcpEndpointDialog
+          endpoint={tcpDialog === true ? undefined : tcpDialog}
+          onClose={() => {
+            setTcpDialog(null)
+          }}
+          onSaved={() => {
+            setTcpDialog(null)
+            void useDocker.getState().reload()
+          }}
+        />
+      )}
     </div>
   )
 }

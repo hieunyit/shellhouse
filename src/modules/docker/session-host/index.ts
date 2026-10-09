@@ -9,8 +9,9 @@ import type { DockerBackend, DockerCli } from './backend'
 import { CliBackend } from './cli-backend'
 import { EngineClient, type Connect } from './engine'
 import { DockerService } from './service'
-import { DockerSessionConfig, type RegistryAuth } from '../shared/ops'
-import { DockerIpc, wslSource } from '../shared/ipc'
+import { DockerSessionConfig, type DockerTcpConfig, type RegistryAuth } from '../shared/ops'
+import { DockerIpc, tcpSource, wslSource } from '../shared/ipc'
+import { connectTls, describeTlsError } from './tls'
 
 /**
  * Phần Session Host của Docker (ADR-014 mục 6.2): nói chuyện với Engine API qua socket (máy này)
@@ -223,6 +224,43 @@ function wslService(ctx: HostModuleContext, distro: string): DockerService {
   })
 }
 
+/**
+ * Engine ở địa chỉ TCP + TLS (daemon `-H tcp://…:2376 --tlsverify`): chỉ Engine API — không có
+ * `docker` CLI ở đầu kia nên Compose, build và shell vào container báo "chưa hỗ trợ".
+ */
+function tcpService(ctx: HostModuleContext, cfg: DockerTcpConfig): DockerService {
+  const unsupported = <T>(): Promise<T> =>
+    Promise.reject(
+      new Error(
+        t(
+          'This needs the docker command line, which is not available for engines added by TCP address.'
+        )
+      )
+    )
+  return new DockerService({
+    cli: { exec: unsupported, spawn: unsupported },
+    connect: async (signal): Promise<DockerBackend> => {
+      const engine = new EngineClient(() => connectTls(cfg))
+      // TLS 1.3 báo thiếu / sai chứng chỉ client ngay ở yêu cầu đầu tiên, không ở bước bắt tay.
+      await engine.ping(signal).catch((e: unknown) => {
+        throw describeTlsError(e, cfg)
+      })
+      ctx.log('info', `engine at ${cfg.host}:${String(cfg.port)} over TLS`)
+      return new ApiBackend(engine)
+    },
+    openPty: unsupported,
+    storedReadOnly: () => storedReadOnly(ctx, tcpSource(cfg.id)),
+    registryAuth: (id) => registryAuth(ctx, id),
+    reprobeCli: false,
+    emit: (event, data) => {
+      ctx.emit(event, data)
+    },
+    log: (level, message) => {
+      ctx.log(level, message)
+    }
+  })
+}
+
 function remoteService(ctx: HostModuleContext, ssh: SshCapability): DockerService {
   const cli = sshCli(ssh)
   return new DockerService({
@@ -274,6 +312,7 @@ export const dockerHost: HostModule = {
   manifest: dockerManifest,
   createSession: (_kind, raw, ctx) => {
     const config = DockerSessionConfig.parse(raw ?? {})
+    if (config.tcp) return tcpService(ctx, config.tcp)
     return config.wsl ? wslService(ctx, config.wsl) : localService(ctx)
   },
   attachToSsh: (ctx) => remoteService(ctx, ctx.ssh)

@@ -663,5 +663,61 @@ export const docker: Readonly<Record<string, string>> = {
   'build cache': 'build cache',
   'Scan for vulnerabilities…': 'Quét lỗ hổng…',
   'Vulnerabilities in {name}': 'Lỗ hổng trong {name}',
-  'Scanning is not available for this Docker source.': 'Nguồn Docker này không quét được.'
+  'Scanning is not available for this Docker source.': 'Nguồn Docker này không quét được.',
+  'The Docker engines you add by TCP address': 'Các engine Docker bạn thêm bằng địa chỉ TCP',
+  'Reads the CA, client certificate and key files you choose when you add an engine by TCP address':
+    'Đọc tệp CA, chứng chỉ client và khoá bạn chọn khi thêm engine bằng địa chỉ TCP',
+  'Choose the CA certificate (ca.pem)': 'Chọn chứng chỉ CA (ca.pem)',
+  'Choose the client certificate (cert.pem)': 'Chọn chứng chỉ client (cert.pem)',
+  'Choose the client private key (key.pem)': 'Chọn khoá riêng của client (key.pem)',
+  'The engine no longer exists': 'Engine này không còn nữa',
+  'The CA file is not a PEM certificate.': 'Tệp CA không phải chứng chỉ PEM.',
+  'Give both the client certificate and its private key, or neither.':
+    'Hãy đưa cả chứng chỉ client lẫn khoá riêng của nó, hoặc không đưa cái nào.',
+  'The private key is protected by a passphrase. Remove it first (openssl pkey -in key.pem -out key-nopass.pem).':
+    'Khoá riêng đang đặt passphrase. Hãy gỡ passphrase trước (openssl pkey -in key.pem -out key-nopass.pem).',
+  'The private key file is not a valid PEM key.': 'Tệp khoá riêng không phải khoá PEM hợp lệ.',
+  'The client certificate is not a PEM certificate.': 'Chứng chỉ client không phải chứng chỉ PEM.',
+  'The client certificate and the private key do not belong together.':
+    'Chứng chỉ client và khoá riêng không thuộc về nhau.',
+  'The client certificate expired on {date}.': 'Chứng chỉ client đã hết hạn từ {date}.',
+  'Edit connection…': 'Sửa kết nối…',
+  'Delete engine': 'Xoá engine',
+  'Delete {name}?': 'Xoá {name}?',
+  'The address and the certificates stored for it are deleted from the vault.':
+    'Địa chỉ và các chứng chỉ đã lưu cho nó bị xoá khỏi vault.',
+  'Add by address (TLS)…': 'Thêm bằng địa chỉ (TLS)…',
+  'Saved in the vault — leave empty to keep it': 'Đã lưu trong vault — để trống để giữ nguyên',
+  'Remove saved': 'Xoá bản đã lưu',
+  'Will be removed when you save': 'Sẽ bị xoá khi bạn lưu',
+  'Edit engine': 'Sửa engine',
+  'Add an engine by address': 'Thêm engine bằng địa chỉ',
+  'For a Docker daemon listening on a TLS port (usually 2376). Certificates are checked, then stored encrypted in your vault.':
+    'Dành cho Docker daemon nghe ở cổng TLS (thường là 2376). Chứng chỉ được kiểm tra rồi lưu mã hoá trong vault.',
+  'CA certificate': 'Chứng chỉ CA',
+  'The CA that signed the daemon’s certificate (ca.pem). Empty = system CAs.':
+    'CA đã ký chứng chỉ của daemon (ca.pem). Để trống = CA của hệ thống.',
+  'Client certificate': 'Chứng chỉ client',
+  'cert.pem — needed when the daemon runs with --tlsverify.':
+    'cert.pem — cần khi daemon chạy với --tlsverify.',
+  'Client private key': 'Khoá riêng của client',
+  'key.pem without a passphrase. It never leaves the vault after saving.':
+    'key.pem không đặt passphrase. Sau khi lưu, nó không rời khỏi vault.',
+  'Compose, image builds and opening a shell in a container need the docker command line and are not available for engines added by address.':
+    'Compose, build image và mở shell trong container cần dòng lệnh docker nên không dùng được với engine thêm bằng địa chỉ.',
+  'This needs the docker command line, which is not available for engines added by TCP address.':
+    'Việc này cần dòng lệnh docker, không có với engine thêm bằng địa chỉ TCP.',
+  'Nothing is listening on {where} (connection refused).':
+    'Không có gì đang nghe ở {where} (kết nối bị từ chối).',
+  'Could not find the host {host}.': 'Không tìm thấy máy {host}.',
+  '{where} did not answer in time.': '{where} không trả lời kịp.',
+  'The server certificate is not signed by the CA you gave (or you gave none). Add the CA that signed the Docker daemon certificate.':
+    'Chứng chỉ của máy chủ không do CA bạn đưa ký (hoặc bạn chưa đưa CA). Hãy thêm CA đã ký chứng chỉ của Docker daemon.',
+  'The server certificate is not valid for {host}. Connect with a name or address listed in it.':
+    'Chứng chỉ của máy chủ không hợp lệ cho {host}. Hãy kết nối bằng tên hoặc địa chỉ có trong chứng chỉ.',
+  'The server certificate has expired.': 'Chứng chỉ của máy chủ đã hết hạn.',
+  'The server refused the client certificate (or none was given). Check that it is signed by the CA the daemon trusts.':
+    'Máy chủ từ chối chứng chỉ client (hoặc chưa đưa chứng chỉ). Kiểm tra nó do CA mà daemon tin cậy ký.',
+  '{where} closed the connection during the TLS handshake. It may not be a TLS port (Docker uses 2376 for TLS, 2375 for plain).':
+    '{where} đóng kết nối khi bắt tay TLS. Có thể đây không phải cổng TLS (Docker dùng 2376 cho TLS, 2375 cho không mã hoá).'
 }

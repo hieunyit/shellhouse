@@ -1,11 +1,14 @@
+import { t } from '@shared/i18n'
 import type { MainModule } from '../../registry/main-types'
 import { dockerManifest } from '../manifest'
-import { DockerIpc, endpointId, type DockerEndpoint } from '../shared/ipc'
+import { DockerIpc, endpointId, tcpSource, type DockerEndpoint } from '../shared/ipc'
 import { DockerSessionConfig } from '../shared/ops'
 import m0001 from '../migrations/0001_endpoints.sql?raw'
 import m0002 from '../migrations/0002_hidden.sql?raw'
 import m0003 from '../migrations/0003_registries.sql?raw'
+import m0004 from '../migrations/0004_tcp.sql?raw'
 import { DockerRegistries } from './registries'
+import { DockerTcpEndpoints } from './tcp-endpoints'
 
 interface Row {
   id: string
@@ -20,7 +23,8 @@ export const dockerMain: MainModule = {
   migrations: [
     { version: 1, name: 'endpoints', sql: m0001 },
     { version: 2, name: 'hidden', sql: m0002 },
-    { version: 3, name: 'registries', sql: m0003 }
+    { version: 3, name: 'registries', sql: m0003 },
+    { version: 4, name: 'tcp', sql: m0004 }
   ],
   activate(ctx) {
     const now = (): number => Date.now()
@@ -74,6 +78,47 @@ export const dockerMain: MainModule = {
       changed()
     })
     ctx.ipc.handle('wslDistros', DockerIpc.wslDistros, () => ctx.wslDistros())
+    // Engine TCP + TLS (chứng chỉ trong vault): lưu → hiện ngay ở thanh bên như mọi nguồn khác.
+    const tcp = new DockerTcpEndpoints(ctx.db, ctx.secrets)
+    ctx.ipc.handle('tcpEndpoints', DockerIpc.tcpEndpoints, () => tcp.list())
+    ctx.ipc.handle('saveTcp', DockerIpc.saveTcp, (input) => {
+      try {
+        const id = tcp.save(input)
+        const source = tcpSource(id)
+        ctx.db
+          .prepare(
+            `INSERT INTO docker_endpoints (id, host_id, read_only, added_at, updated_at)
+             VALUES (?, ?, 0, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET hidden = 0, updated_at = excluded.updated_at`
+          )
+          .run(endpointId(source), source, now(), now())
+        changed()
+        return { ok: true, id }
+      } catch (error) {
+        return { ok: false, message: error instanceof Error ? error.message : String(error) }
+      }
+    })
+    ctx.ipc.handle('pickPem', DockerIpc.pickPem, async (what) => {
+      const files = await ctx.pickFiles({
+        title:
+          what === 'ca'
+            ? t('Choose the CA certificate (ca.pem)')
+            : what === 'cert'
+              ? t('Choose the client certificate (cert.pem)')
+              : t('Choose the client private key (key.pem)'),
+        filters: [
+          { name: 'PEM', extensions: ['pem', 'crt', 'cer', 'key'] },
+          { name: t('All files'), extensions: ['*'] }
+        ]
+      })
+      const file = files[0]
+      return file ? { name: file.name, content: file.content } : null
+    })
+    ctx.ipc.handle('deleteTcp', DockerIpc.deleteTcp, (id) => {
+      tcp.delete(id)
+      ctx.db.prepare('DELETE FROM docker_endpoints WHERE id = ?').run(endpointId(tcpSource(id)))
+      changed()
+    })
     // Registry (mật khẩu / token trong vault): renderer chỉ thấy tên, máy chủ, tên đăng nhập.
     const registries = new DockerRegistries(ctx.db, ctx.secrets)
     ctx.ipc.handle('registries', DockerIpc.registries, () => registries.list())
@@ -109,7 +154,10 @@ export const dockerMain: MainModule = {
       // Phiên trên máy này: không có gì cần giải mã — Session Host tự dò socket. Tab / terminal
       // của Docker trong WSL mang tên distro.
       resolveSession: (_kind, raw): DockerSessionConfig => {
-        const wsl = (raw as { wsl?: unknown } | null)?.wsl
+        const params = raw as { wsl?: unknown; tcp?: unknown } | null
+        // Engine TCP + TLS: main giải mã chứng chỉ, chỉ Session Host nhận.
+        if (typeof params?.tcp === 'string') return { tcp: tcp.resolve(params.tcp) }
+        const wsl = params?.wsl
         return DockerSessionConfig.parse(wsl === undefined ? {} : { wsl })
       }
     }

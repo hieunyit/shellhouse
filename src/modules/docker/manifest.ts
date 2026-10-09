@@ -50,6 +50,12 @@ export const dockerManifest: ModuleManifest = {
     { kind: 'local-socket', path: '/run/user/*/docker.sock' },
     { kind: 'local-socket', path: '/run/user/*/podman/podman.sock' },
     { kind: 'local-socket', path: '\\\\.\\pipe\\docker_engine' },
+    { kind: 'network', hosts: 'The Docker engines you add by TCP address' },
+    {
+      kind: 'pick-file',
+      detail:
+        'Reads the CA, client certificate and key files you choose when you add an engine by TCP address'
+    },
     { kind: 'run-program', binary: 'docker' },
     { kind: 'run-program', binary: 'trivy' },
     {

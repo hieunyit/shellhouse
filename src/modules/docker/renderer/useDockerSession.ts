@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PromptRequest } from '@shared/stream-protocol'
 import { ModuleSessionClient, whenHostRunning, setTabState, t } from '../../registry/renderer-kit'
 import type { DockerOp } from '../shared/ops'
-import { wslDistroOf } from '../shared/ipc'
+import { tcpIdOf, wslDistroOf } from '../shared/ipc'
 import { useDocker } from './store'
 
 export interface DockerSession {
@@ -62,9 +62,11 @@ export function useDockerSession(
       'docker',
       wslDistroOf(hostId)
         ? { kind: 'module', sessionKind: 'engine', params: { wsl: wslDistroOf(hostId) } }
-        : hostId
-          ? { kind: 'ssh', hostId }
-          : { kind: 'module', sessionKind: 'engine', params: {} },
+        : tcpIdOf(hostId)
+          ? { kind: 'module', sessionKind: 'engine', params: { tcp: tcpIdOf(hostId) } }
+          : hostId
+            ? { kind: 'ssh', hostId }
+            : { kind: 'module', sessionKind: 'engine', params: {} },
       {
         onStatus: (phase, detail) => {
           if (cancelled) return
@@ -127,7 +129,7 @@ export function useDockerSession(
   // hostId để Session Host hỏi main cờ đã lưu (máy này / WSL: Session Host tự biết nguồn).
   useEffect(() => {
     if (!ready) return
-    const sshHost = hostId && !wslDistroOf(hostId) ? hostId : undefined
+    const sshHost = hostId && !wslDistroOf(hostId) && !tcpIdOf(hostId) ? hostId : undefined
     void clientRef.current
       ?.request({ op: 'configure', readOnly, ...(sshHost ? { hostId: sshHost } : {}) })
       .catch(() => undefined)

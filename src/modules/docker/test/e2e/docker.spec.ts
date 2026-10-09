@@ -14,6 +14,7 @@ import {
   waitForText
 } from '../../../../../test/e2e/fixtures'
 import { startEngineTestServer } from '../engine-test-server'
+import { pem, startTlsProxy } from '../tls-proxy-server'
 
 /** Bật module Docker qua Settings → Modules (xác nhận quyền lần đầu). */
 async function enableDocker(page: Page): Promise<void> {
@@ -690,5 +691,80 @@ test('Docker: quét lỗ hổng image bằng Trivy — xin phép chạy chương
   } finally {
     await launched.close()
     rmSync(bin, { recursive: true, force: true })
+  }
+})
+
+test('Docker qua TCP + TLS: thêm engine bằng địa chỉ + chứng chỉ, kết nối mTLS, sửa, xoá', async () => {
+  test.setTimeout(60_000)
+  test.skip(isWindows, 'Engine giả dùng unix socket')
+  const engine = await startEngineTestServer()
+  const proxy = await startTlsProxy(engine, true)
+  const launched = await launchApp()
+  const { page } = launched
+  try {
+    await enableDocker(page)
+    await page.getByTestId('docker-add-server').click()
+    await page.getByRole('menuitem', { name: 'Add by address (TLS)…' }).click()
+    const dialog = page.getByTestId('docker-tcp-dialog')
+    await dialog.getByTestId('docker-tcp-name').fill('legacy-build')
+    await dialog.getByTestId('docker-tcp-host').fill('127.0.0.1')
+    await dialog.getByTestId('docker-tcp-port').fill(String(proxy.port))
+
+    // Khoá không khớp chứng chỉ → báo ngay trong hộp thoại, chưa lưu gì.
+    await dialog.getByTestId('docker-tcp-ca').fill(pem('ca.pem'))
+    await dialog.getByTestId('docker-tcp-cert').fill(pem('client.pem'))
+    await dialog.getByTestId('docker-tcp-key').fill(pem('other-key.pem'))
+    await dialog.getByTestId('docker-tcp-save').click()
+    await expect(dialog.getByTestId('docker-tcp-error')).toContainText('do not belong together')
+    // Khoá đặt passphrase → hướng dẫn gỡ.
+    await dialog.getByTestId('docker-tcp-key').fill(pem('encrypted-key.pem'))
+    await dialog.getByTestId('docker-tcp-save').click()
+    await expect(dialog.getByTestId('docker-tcp-error')).toContainText('passphrase')
+    // Đúng → lưu, hộp thoại đóng, engine hiện ở thanh bên với biểu tượng riêng.
+    await dialog.getByTestId('docker-tcp-key').fill(pem('client-key.pem'))
+    await dialog.getByTestId('docker-tcp-save').click()
+    await expect(dialog).toHaveCount(0)
+    const endpoint = page.locator('[data-testid="docker-endpoint"][data-name="legacy-build"]')
+    await expect(endpoint).toBeVisible()
+
+    // Mở: mTLS tới Engine giả → danh sách container; build / shell (cần docker CLI) bị ẩn.
+    await endpoint.dblclick()
+    const view = page.getByTestId('docker-view')
+    await expect(view.getByTestId('docker-container')).toHaveCount(3)
+    await view.locator('[data-testid="docker-container"][data-name="web"]').click()
+    await expect(view.getByTestId('docker-action-logs')).toBeVisible()
+    await expect(view.getByTestId('docker-action-shell')).toHaveCount(0)
+    await page.getByTestId('docker-nav-images').click()
+    await expect(view.getByTestId('docker-build')).toHaveCount(0)
+    await expect(view.getByTestId('docker-pull')).toBeVisible()
+
+    // Sửa: đổi tên; chứng chỉ đã lưu được giữ (ô để trống, có ghi chú "Saved in the vault").
+    await endpoint.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Edit connection…' }).click()
+    await expect(dialog.getByTestId('docker-tcp-key')).toHaveAttribute(
+      'placeholder',
+      /Saved in the vault/
+    )
+    await expect(dialog.getByTestId('docker-tcp-key')).toHaveValue('')
+    await dialog.getByTestId('docker-tcp-name').fill('legacy-build-2')
+    await dialog.getByTestId('docker-tcp-save').click()
+    await expect(dialog).toHaveCount(0)
+    const renamed = page.locator('[data-testid="docker-endpoint"][data-name="legacy-build-2"]')
+    await expect(renamed).toBeVisible()
+    // Vẫn kết nối được sau khi sửa (chứng chỉ không mất).
+    await renamed.dblclick()
+    await expect(view.getByTestId('docker-container')).toHaveCount(3)
+
+    // Xoá: hỏi lại, rồi biến khỏi thanh bên.
+    await renamed.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Delete engine' }).click()
+    await page
+      .getByTestId('docker-tcp-delete-confirm')
+      .getByRole('button', { name: 'Delete' })
+      .click()
+    await expect(renamed).toHaveCount(0)
+  } finally {
+    await launched.close()
+    await proxy.close()
   }
 })

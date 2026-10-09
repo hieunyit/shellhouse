@@ -7,10 +7,13 @@ import {
   t
 } from '../../registry/renderer-kit'
 import {
+  tcpIdOf,
   wslDistroOf,
   type DockerEndpoint,
   type DockerRegistry,
+  type DockerTcpEndpoint,
   type RegistryInput,
+  type TcpEndpointInput,
   type WslDistroInfo
 } from '../shared/ipc'
 import type { DockerEngineParams, DockerLogsParams } from '../shared/ops'
@@ -32,15 +35,34 @@ export const dockerApi = {
       input
     ),
   deleteRegistry: (id: string) => invokeModule<undefined>('docker', 'deleteRegistry', id),
+  tcpEndpoints: () => invokeModule<DockerTcpEndpoint[]>('docker', 'tcpEndpoints'),
+  saveTcp: (input: TcpEndpointInput) =>
+    invokeModule<{ ok: true; id: string } | { ok: false; message: string }>(
+      'docker',
+      'saveTcp',
+      input
+    ),
+  deleteTcp: (id: string) => invokeModule<undefined>('docker', 'deleteTcp', id),
+  pickPem: (what: 'ca' | 'cert' | 'key') =>
+    invokeModule<{ name: string; content: string } | null>('docker', 'pickPem', what),
   onChanged: (listener: () => void) =>
     onModuleEvent('docker', 'changed', () => {
       listener()
     })
 }
 
-/** Tên nguồn: "This computer", "Ubuntu (WSL)" hoặc nhãn host. */
+/** Tên các engine TCP + TLS (store điền khi tải danh sách) — để `sourceLabel` trả lời ngay. */
+const tcpNames = new Map<string, string>()
+export function rememberTcpNames(list: readonly DockerTcpEndpoint[]): void {
+  tcpNames.clear()
+  for (const e of list) tcpNames.set(e.id, e.name)
+}
+
+/** Tên nguồn: "This computer", "Ubuntu (WSL)", tên engine TCP hoặc nhãn host. */
 export function sourceLabel(hostId: string | null | undefined): string {
   if (!hostId) return t('This computer')
+  const tcp = tcpIdOf(hostId)
+  if (tcp) return tcpNames.get(tcp) ?? t('Server')
   const wsl = wslDistroOf(hostId)
   if (wsl) return `${wsl} (WSL)`
   return savedHost(hostId)?.label ?? t('Server')

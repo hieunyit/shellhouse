@@ -39,6 +39,47 @@ export const RegistryInput = z.object({
 })
 export type RegistryInput = z.infer<typeof RegistryInput>
 
+/** Engine ở địa chỉ TCP + TLS (chứng chỉ trong vault — renderer chỉ thấy tên, địa chỉ, hạn). */
+export interface DockerTcpEndpoint {
+  id: string
+  name: string
+  host: string
+  port: number
+  hasCa: boolean
+  hasCert: boolean
+  hasKey: boolean
+  /** Hạn của chứng chỉ client (ms) — null = không có chứng chỉ client. */
+  certExpires: number | null
+  certSubject: string | null
+}
+
+/** Máy chủ: tên miền, IPv4 hoặc IPv6 trần — không scheme, không cổng, không đường dẫn. */
+const TcpHost = z
+  .string()
+  .trim()
+  .min(1)
+  .max(253)
+  .regex(/^(?:[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?|[0-9A-Fa-f:]+)$/, 'Invalid host')
+
+/** PEM: chuỗi (thay), null (xoá), không có (giữ nguyên khi sửa). */
+const Pem = z
+  .string()
+  .max(64 * 1024)
+  .nullable()
+  .optional()
+
+export const TcpEndpointInput = z.object({
+  /** Có = sửa. */
+  id: z.string().min(1).max(64).optional(),
+  name: z.string().trim().min(1).max(100),
+  host: TcpHost,
+  port: z.number().int().min(1).max(65535),
+  ca: Pem,
+  cert: Pem,
+  key: Pem
+})
+export type TcpEndpointInput = z.infer<typeof TcpEndpointInput>
+
 /** Tham số IPC `module:docker:*`. */
 export const DockerIpc = {
   endpoints: z.tuple([]),
@@ -54,6 +95,11 @@ export const DockerIpc = {
   deleteRegistry: z.tuple([z.string().min(1).max(64)]),
   /** Session Host → main (`fromMain('registryAuth', id)`): thông tin đăng nhập đã giải mã. */
   registryAuthQuery: z.string().min(1).max(64),
+  tcpEndpoints: z.tuple([]),
+  saveTcp: z.tuple([TcpEndpointInput]),
+  deleteTcp: z.tuple([z.string().min(1).max(64)]),
+  /** Hộp thoại chọn một tệp PEM (CA / chứng chỉ / khoá) → nội dung. */
+  pickPem: z.tuple([z.enum(['ca', 'cert', 'key'])]),
   /** Session Host → main (`fromMain('readOnly', hostId)`): cờ chỉ đọc đã lưu. */
   readOnlyQuery: HostId.nullable()
 } as const
@@ -68,6 +114,12 @@ export const WSL_PREFIX = 'wsl:'
 export const wslSource = (distro: string): string => `${WSL_PREFIX}${distro}`
 export const wslDistroOf = (source: string | null | undefined): string | null =>
   source?.startsWith(WSL_PREFIX) ? source.slice(WSL_PREFIX.length) : null
+
+/** Engine TCP + TLS: `tcp:<id>` (id của bản ghi trong docker_tcp). */
+export const TCP_PREFIX = 'tcp:'
+export const tcpSource = (id: string): string => `${TCP_PREFIX}${id}`
+export const tcpIdOf = (source: string | null | undefined): string | null =>
+  source?.startsWith(TCP_PREFIX) ? source.slice(TCP_PREFIX.length) : null
 
 export interface WslDistroInfo {
   name: string

@@ -58,7 +58,7 @@ import {
   toast
 } from '../../registry/renderer-kit'
 import type { ModuleTabProps } from '../../registry/renderer-types'
-import { wslDistroOf } from '../shared/ipc'
+import { tcpIdOf, wslDistroOf } from '../shared/ipc'
 import type {
   BuildSpec,
   ComposeAction,
@@ -351,6 +351,8 @@ export function DockerTab({
   useReportEnvironment(tabId, env?.id)
   const { request, ready } = session
   const readOnly = session.readOnly || env?.readOnly === true
+  /** Engine thêm bằng địa chỉ TCP: chỉ Engine API — không có `docker` CLI (shell, build, Compose). */
+  const noCli = tcpIdOf(hostId ?? null) !== null
   useEffect(
     () => () => {
       if (reloadTimer.current !== null) window.clearTimeout(reloadTimer.current)
@@ -726,7 +728,7 @@ export function DockerTab({
       }
     ]
     // Shell / exec chạy được mọi lệnh trong container → ẩn ở chế độ chỉ đọc (Session Host cũng chặn).
-    if (running && !readOnly) {
+    if (running && !readOnly && !noCli) {
       out.push(
         {
           id: 'shell',
@@ -764,11 +766,14 @@ export function DockerTab({
         secondary: true,
         run: () => {
           const wsl = wslDistroOf(hostId ?? null)
+          const tcp = useDocker.getState().tcp.find((x) => x.id === tcpIdOf(hostId ?? null))
           const endpoint: DockerEndpoint = !hostId
             ? { kind: 'local' }
             : wsl
               ? { kind: 'wsl', distro: wsl }
-              : { kind: 'ssh', address: savedHost(hostId)?.address ?? hostId }
+              : tcp
+                ? { kind: 'tcp', host: tcp.host, port: tcp.port }
+                : { kind: 'ssh', address: savedHost(hostId)?.address ?? hostId }
           showCommands(
             t('{name} as docker commands', { name: c.name }),
             containerCommands(endpoint, {
@@ -1708,16 +1713,18 @@ export function DockerTab({
               setDialog({ kind: 'transfer', mode: 'pull', ref: '' })
             }}
           />
-          <ToolButton
-            icon={<Hammer size={13} />}
-            label={t('Build')}
-            title={t('Build an image from a Dockerfile')}
-            labelAt="2xl"
-            testId="docker-build"
-            onClick={() => {
-              setDialog({ kind: 'build' })
-            }}
-          />
+          {!noCli && (
+            <ToolButton
+              icon={<Hammer size={13} />}
+              label={t('Build')}
+              title={t('Build an image from a Dockerfile')}
+              labelAt="2xl"
+              testId="docker-build"
+              onClick={() => {
+                setDialog({ kind: 'build' })
+              }}
+            />
+          )}
           <ToolButton
             icon={<KeyRound size={13} />}
             label={t('Registries')}

@@ -12,7 +12,10 @@ function q(value: string): string {
 }
 
 export type DockerEndpoint =
-  { kind: 'local' } | { kind: 'ssh'; address: string } | { kind: 'wsl'; distro: string }
+  | { kind: 'local' }
+  | { kind: 'ssh'; address: string }
+  | { kind: 'wsl'; distro: string }
+  | { kind: 'tcp'; host: string; port: number }
 
 /** Tiền tố lệnh docker cho endpoint. */
 export function dockerPrefix(endpoint: DockerEndpoint): string {
@@ -23,6 +26,9 @@ export function dockerPrefix(endpoint: DockerEndpoint): string {
       return `docker -H ssh://${q(endpoint.address)}`
     case 'wsl':
       return `wsl -d ${q(endpoint.distro)} docker`
+    case 'tcp':
+      // Chứng chỉ do `DOCKER_CERT_PATH` / ~/.docker của người chạy lệnh cung cấp.
+      return `docker -H tcp://${q(`${endpoint.host.includes(':') ? `[${endpoint.host}]` : endpoint.host}:${String(endpoint.port)}`)} --tlsverify`
   }
 }
 

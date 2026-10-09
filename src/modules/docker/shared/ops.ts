@@ -592,8 +592,34 @@ export const DockerTerminalParams = z.object({
 })
 export type DockerTerminalParams = z.infer<typeof DockerTerminalParams>
 
-/** Config phiên trên máy này (main phân giải): `wsl` = Docker trong distro WSL đó. */
-export const DockerSessionConfig = z.object({ wsl: z.string().regex(WSL_DISTRO).optional() })
+/** Engine TCP + TLS: địa chỉ và chứng chỉ đã giải mã (chỉ đi main → Session Host, không tới renderer). */
+export const DockerTcpConfig = z.object({
+  id: z.string().min(1).max(64),
+  host: z.string().min(1).max(253),
+  port: z.number().int().min(1).max(65535),
+  ca: z
+    .string()
+    .max(64 * 1024)
+    .optional(),
+  cert: z
+    .string()
+    .max(64 * 1024)
+    .optional(),
+  key: z
+    .string()
+    .max(64 * 1024)
+    .optional()
+})
+export type DockerTcpConfig = z.infer<typeof DockerTcpConfig>
+
+/**
+ * Config phiên trên máy này (main phân giải): `wsl` = Docker trong distro WSL đó, `tcp` = engine ở
+ * địa chỉ TCP + TLS.
+ */
+export const DockerSessionConfig = z.object({
+  wsl: z.string().regex(WSL_DISTRO).optional(),
+  tcp: DockerTcpConfig.optional()
+})
 export type DockerSessionConfig = z.infer<typeof DockerSessionConfig>
 
 /** Config phiên trên máy này (main phân giải). */

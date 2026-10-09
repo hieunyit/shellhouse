@@ -1,6 +1,11 @@
 import { create } from 'zustand'
-import type { DockerEndpoint, DockerRegistry, WslDistroInfo } from '../shared/ipc'
-import { dockerApi } from './api'
+import type {
+  DockerEndpoint,
+  DockerRegistry,
+  DockerTcpEndpoint,
+  WslDistroInfo
+} from '../shared/ipc'
+import { dockerApi, rememberTcpNames } from './api'
 
 interface DockerStore {
   endpoints: DockerEndpoint[]
@@ -8,6 +13,8 @@ interface DockerStore {
   wsl: WslDistroInfo[]
   /** Registry đã lưu (không có mật khẩu). */
   registries: DockerRegistry[]
+  /** Engine TCP + TLS đã lưu (không có chứng chỉ). */
+  tcp: DockerTcpEndpoint[]
   loaded: boolean
   reload: () => Promise<void>
 }
@@ -16,6 +23,7 @@ export const useDocker = create<DockerStore>((set) => ({
   endpoints: [],
   wsl: [],
   registries: [],
+  tcp: [],
   loaded: false,
   reload: async () => {
     // Danh sách WSL (wsl.exe, có thể mất vài giây trên máy chưa cài WSL) không giữ chân thanh bên.
@@ -31,7 +39,10 @@ export const useDocker = create<DockerStore>((set) => ({
       },
       () => undefined
     )
-    set({ endpoints: await dockerApi.endpoints(), loaded: true })
+    // Tên engine TCP phải có trước khi danh sách hiện (nhãn tab / thanh bên).
+    const tcp = await dockerApi.tcpEndpoints().catch(() => [])
+    rememberTcpNames(tcp)
+    set({ tcp, endpoints: await dockerApi.endpoints(), loaded: true })
   }
 }))
 

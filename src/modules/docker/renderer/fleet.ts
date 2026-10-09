@@ -13,7 +13,7 @@ import {
   type FleetItem,
   type FleetStat
 } from '../../registry/renderer-kit'
-import { wslDistroOf, type DockerEndpoint } from '../shared/ipc'
+import { tcpIdOf, wslDistroOf, type DockerEndpoint } from '../shared/ipc'
 import type { ContainerRow, EngineInfo } from '../shared/ops'
 import { dockerApi, openDocker, sourceLabel } from './api'
 
@@ -106,17 +106,20 @@ class EngineMonitor {
     private environment: string | null
   ) {
     const wsl = wslDistroOf(hostId)
+    const tcp = tcpIdOf(hostId)
     this.session = backgroundSession(
       'docker',
       () =>
         wsl
           ? { kind: 'module', sessionKind: 'engine', params: { wsl } }
-          : hostId
-            ? { kind: 'ssh', hostId }
-            : { kind: 'module', sessionKind: 'engine', params: {} },
+          : tcp
+            ? { kind: 'module', sessionKind: 'engine', params: { tcp } }
+            : hostId
+              ? { kind: 'ssh', hostId }
+              : { kind: 'module', sessionKind: 'engine', params: {} },
       {
         ready: async (client) => {
-          const sshHost = hostId && !wsl ? hostId : undefined
+          const sshHost = hostId && !wsl && !tcp ? hostId : undefined
           await client.request({
             op: 'configure',
             readOnly: true,
@@ -215,7 +218,10 @@ class EngineMonitor {
 
   private publish(): void {
     if (this.stopped) return
-    const host = this.hostId && !wslDistroOf(this.hostId) ? savedHost(this.hostId) : undefined
+    const host =
+      this.hostId && !wslDistroOf(this.hostId) && !tcpIdOf(this.hostId)
+        ? savedHost(this.hostId)
+        : undefined
     publishFleet({
       id: this.id,
       module: 'docker',

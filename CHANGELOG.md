@@ -8,6 +8,14 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Added
 
+- **Docker over TCP + TLS:** Docker › Endpoints › Add by address (TLS)… connects to a daemon that
+  listens on `tcp://host:2376` with `--tlsverify`. Give the CA, client certificate and private
+  key (paste or choose the files): Shellhouse checks them (valid PEM, key matches the certificate,
+  no passphrase, not expired), then keeps them encrypted in the vault — they never go back to the
+  window. The server certificate is always verified. Logs, stats, start/stop, files, images and
+  volumes work as everywhere else; Compose, image builds and shell-in-container need the docker
+  command line and are not available for these engines. Certificates are not synced to other
+  devices.
 - **Security scanning with Trivy** (uses the `trivy` you already have; Shellhouse does not ship a
   scanner and asks before it first runs the program):
   - Docker › Images › Scan for vulnerabilities… lists the CVEs of an image by severity, with the
