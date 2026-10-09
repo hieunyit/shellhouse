@@ -1144,6 +1144,8 @@ test('Kubernetes: Connections — khai báo (env) ghép với traffic quan sát:
     await enableK8s(page)
     await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
     const view = page.getByTestId('k8s-view')
+    // Cửa sổ hẹp → thanh Map gom các chế độ xem thành menu (không có nút theo testid).
+    await setWindowSize(launched, 1366, 820)
     // Chi tiết Deployment web › Connections.
     await page.getByTestId('k8s-nav-deployments.apps').click()
     await view.locator('[data-testid="k8s-row"][data-name="shop/web"]').click()
