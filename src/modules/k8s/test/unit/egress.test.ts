@@ -217,7 +217,9 @@ describe('endpointsIn — các ca dễ nhầm', () => {
     const strict = { strict: true }
     expect(endpointsIn('abc.def:1234', 'DB_PASSWORD', strict)).toEqual([])
     expect(endpointsIn('10.0.0.5', 'API_TOKEN', strict)).toEqual([])
-    expect(endpointsIn('see pg.corp:5432 for details', 'NOTE', strict)).toEqual([])
+    // địa chỉ "chắc" (TLD thật) nằm trong văn bản thì nhận — hình dạng giá trị quyết định, không phải tên biến
+    expect(endpointsIn('see pg.corp:5432 for details', 'NOTE', strict)).toHaveLength(1)
+    expect(endpointsIn('see abc.def:1234 for details', 'NOTE', strict)).toEqual([])
     expect(endpointsIn('postgres://u:p@pg.corp:5432/x', 'DSN', strict)).toHaveLength(1)
     expect(endpointsIn('host=pg.corp port=5432', 'conn', strict)).toHaveLength(1)
     expect(endpointsIn('pg.corp', 'DB_HOST', strict)[0]?.host).toBe('pg.corp')
@@ -305,14 +307,15 @@ describe('tên khoá nói về bí mật (lỗi thật: EMAIL_HOST_PASSWORD bị
       expect(endpointsIn(pw, 'EMAIL_HOST_PASSWORD', { strict })).toEqual([])
       expect(endpointsIn('db.internal.corp', 'DB_HOST_PASSWORD', { strict })).toEqual([])
       expect(endpointsIn('10.1.2.3', 'SERVER_TOKEN', { strict })).toEqual([])
-      expect(endpointsIn('smtp.corp:465', 'SMTP_HOST_SECRET', { strict })).toEqual([])
-      expect(endpointsIn('x.example.com:443', 'API_KEY', { strict })).toEqual([])
+      expect(endpointsIn('abc.def:465', 'SMTP_HOST_SECRET', { strict })).toEqual([])
+      expect(endpointsIn('x.mycorp:443', 'API_KEY', { strict })).toEqual([])
     }
   })
   it('từ gợi ý phải đứng cuối tên khoá', () => {
     expect(endpointsIn('smtp.corp', 'EMAIL_HOST')[0]?.host).toBe('smtp.corp')
     expect(endpointsIn('smtp.corp', 'EMAIL_HOST', { strict: true })[0]?.host).toBe('smtp.corp')
-    expect(endpointsIn('smtp.corp', 'HOST_TIMEOUT')).toEqual([])
+    // tên miền có TLD thật tự chứng tỏ là địa chỉ, không cần khoá gợi ý
+    expect(endpointsIn('smtp.corp', 'HOST_TIMEOUT')[0]?.host).toBe('smtp.corp')
     expect(endpointsIn('redis', 'HOSTNAME_PREFIX')).toEqual([])
   })
   it('chuỗi một nhãn trông như token ngẫu nhiên không phải tên máy', () => {
@@ -323,5 +326,41 @@ describe('tên khoá nói về bí mật (lỗi thật: EMAIL_HOST_PASSWORD bị
   })
   it('URL rõ ràng trong khoá bí mật vẫn nhận (DATABASE_URL_SECRET không có trong thực tế, nhưng URL tự chứng tỏ)', () => {
     expect(endpointsIn('https://vault.corp:8200', 'VAULT_TOKEN_URL')).toHaveLength(1)
+  })
+})
+
+describe('nhận diện theo hình dạng giá trị — không phụ thuộc tên biến', () => {
+  const names = ['FOO', 'X', 'REDIS', 'SOME_SETTING', 'ENDPOINT_OVERRIDE', '']
+  it('domain:port và ip:port nhận ở mọi tên biến, kể cả trong Secret', () => {
+    for (const key of names)
+      for (const strict of [false, true]) {
+        expect(hp('cache.corp:6379', key).length).toBe(1)
+        expect(endpointsIn('api.stripe.com:443', key, { strict })[0]).toMatchObject({
+          host: 'api.stripe.com',
+          port: 443
+        })
+        expect(endpointsIn('10.152.3.127:5432', key, { strict })[0]).toMatchObject({ port: 5432 })
+      }
+  })
+  it('tên miền có TLD thật nhận kể cả không có cổng; IP trần cần khoá địa chỉ', () => {
+    expect(hp('api.stripe.com', 'WEBHOOK')).toEqual(['api.stripe.com'])
+    expect(hp('1.2.3.4', 'VERSION')).toEqual([])
+    expect(hp('10.0.0.5', 'DB_HOST')).toEqual(['10.0.0.5'])
+  })
+  it('danh sách phân cách bằng dấu phẩy (Kafka / Mongo / ES)', () => {
+    expect(hp('kafka-1.corp:9092,kafka-2.corp:9092,kafka-3.corp:9092', 'BOOTSTRAP')).toEqual([
+      'kafka-1.corp:9092',
+      'kafka-2.corp:9092',
+      'kafka-3.corp:9092'
+    ])
+  })
+  it('không nhầm: tên file, phiên bản, đuôi lạ, mật khẩu trông như tên miền', () => {
+    for (const v of ['config.yaml', 'package.json', 'v1.2.3', '1.27', 'foo.bar'])
+      expect(hp(v, 'SOMETHING')).toEqual([])
+    // Giá trị lấy từ Secret: dạng yếu (đuôi lạ) không nhận dù khoá vô hại
+    expect(endpointsIn('my.secret:1234', 'SOMETHING', { strict: true })).toEqual([])
+    expect(hp('abc.def:1234', 'DB_PASSWORD')).toEqual([])
+    expect(endpointsIn('abc.def:1234', 'DB_PASSWORD', { strict: true })).toEqual([])
+    expect(endpointsIn('hunter2.zzz:8080', 'ANYTHING', { strict: true })).toEqual([])
   })
 })

@@ -1,4 +1,5 @@
 import type { MapData, MapService } from './map'
+import { hasKnownTld } from './tlds'
 
 /**
  * Kết nối ra ngoài "khai báo" của workload: điểm đến (host / IP + cổng) tìm thấy trong biến môi
@@ -286,28 +287,38 @@ export function endpointsIn(
     if (seen.size > 0) return out
   }
 
-  // 3) host:port (IP, hoặc tên có dấu chấm) nằm trong văn bản — không áp cho Secret, và không áp cho
-  //    giá trị của khoá nói về bí mật (PASSWORD, TOKEN…)
+  // Nhận diện theo HÌNH DẠNG giá trị, không dựa vào tên biến. Tên biến chỉ là tín hiệu phụ cho các
+  // dạng mơ hồ (một nhãn "redis", IP trần không cổng) và để loại giá trị của khoá nói về bí mật.
   const secretish = SECRETISH_KEY.test(keyHint)
-  if (!opts.strict && !secretish)
-    for (const m of rest.matchAll(BARE_RE)) {
-      const hp = parseHostPort(`${m[1] ?? ''}:${m[2] ?? ''}`)
-      if (hp && !FILE_LIKE.test(hp.host))
-        add({ host: hp.host, ...(hp.port !== undefined ? { port: hp.port } : {}) })
-    }
+  /** Địa chỉ "chắc": IPv4 hợp lệ hoặc tên miền có TLD thật — hiếm khi là mật khẩu / tên file. */
+  const strong = (host: string): boolean => ipv4Valid(host) || hasKnownTld(host)
 
-  // 4) cả giá trị là một địa chỉ ("db.internal", "redis:6379", "10.0.0.5")
+  // 3) host:port nằm trong văn bản. Chắc (IP / TLD thật) → luôn nhận; chỉ có dấu chấm (db.prod.myco:5432)
+  //    → nhận trừ khi là Secret hoặc khoá nói về bí mật.
+  for (const m of rest.matchAll(BARE_RE)) {
+    const hp = parseHostPort(`${m[1] ?? ''}:${m[2] ?? ''}`)
+    if (!hp || FILE_LIKE.test(hp.host)) continue
+    if (strong(hp.host) || (!opts.strict && !secretish))
+      add({ host: hp.host, ...(hp.port !== undefined ? { port: hp.port } : {}) })
+  }
+
+  // 4) cả giá trị là địa chỉ hoặc danh sách địa chỉ ("db.corp:5432", "k1:9092,k2:9092", "api.stripe.com")
   const whole = rest.trim().replace(/^["']|["']$/g, '')
-  if (out.length === 0 && whole && !/\s/.test(whole) && !secretish) {
-    const hp = parseHostPort(whole)
-    if (hp && !FILE_LIKE.test(hp.host) && !KEYWORD.test(hp.host) && !looksRandom(hp.host)) {
+  if (out.length === 0 && whole && !/\s/.test(whole)) {
+    for (const token of whole.split(/[,;]/)) {
+      const hp = parseHostPort(token.replace(/^["']|["']$/g, ''))
+      if (!hp || FILE_LIKE.test(hp.host) || KEYWORD.test(hp.host) || looksRandom(hp.host)) continue
       const dotted = hp.host.includes('.')
-      // Tên chỉ một nhãn ("redis") cần khoá chặt; có dấu chấm nhận khoá lỏng hơn; không gợi ý thì
-      // phải là IP / host.có.chấm:cổng (không áp cho Secret).
-      const ok = dotted
-        ? (opts.strict ? STRICT_HOSTY_KEY : HOSTY_KEY).test(keyHint) ||
-          (!opts.strict && (hp.port !== undefined || ipv4Valid(hp.host)))
-        : STRICT_HOSTY_KEY.test(keyHint) && hp.host.length >= 2
+      const hosty = (opts.strict ? STRICT_HOSTY_KEY : HOSTY_KEY).test(keyHint)
+      let ok: boolean
+      if (dotted && strong(hp.host)) {
+        // IP trần (không cổng) giống số phiên bản ("1.2.3.4") → cần khoá địa chỉ; còn lại tự chứng tỏ.
+        ok =
+          hp.port !== undefined || !ipv4Valid(hp.host)
+            ? !secretish || hp.port !== undefined
+            : hosty && !secretish
+      } else if (dotted) ok = !secretish && (hp.port !== undefined ? !opts.strict || hosty : hosty)
+      else ok = !secretish && STRICT_HOSTY_KEY.test(keyHint) && hp.host.length >= 2
       if (ok) add({ host: hp.host, ...(hp.port !== undefined ? { port: hp.port } : {}) })
     }
   }
@@ -347,9 +358,14 @@ export function argEntries(args: readonly string[]): { key: string; value: strin
     const a = args[i] ?? ''
     const eq = /^(--?[A-Za-z][\w.-]*)=(.*)$/s.exec(a)
     if (eq) out.push({ key: (eq[1] ?? '').replace(/^-+/, ''), value: eq[2] ?? '' })
-    else if (/^--?[A-Za-z][\w.-]*$/.test(a) && i + 1 < args.length && !/^-/.test(args[i + 1] ?? ''))
+    else if (
+      /^--?[A-Za-z][\w.-]*$/.test(a) &&
+      i + 1 < args.length &&
+      !/^-/.test(args[i + 1] ?? '')
+    ) {
       out.push({ key: a.replace(/^-+/, ''), value: args[i + 1] ?? '' })
-    else out.push({ key: '', value: a })
+      i++ // giá trị đã đi cùng cờ — không xét lần nữa như đối số rời
+    } else out.push({ key: '', value: a })
   }
   return out
 }
