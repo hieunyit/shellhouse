@@ -385,18 +385,26 @@ export async function startTestSshServer(
             }
           })
           // Không có /bin/sh (Windows CI) → trả lỗi như shell (127), không làm sập tiến trình test.
+          let done = false
+          const finish = (code: number): void => {
+            if (done) return
+            done = true
+            channel.exit(code)
+            channel.end()
+          }
           child.on('error', (error) => {
             channel.stderr.write(`sh: ${error.message}\n`)
-            channel.exit(127)
-            channel.end()
+            finish(127)
           })
           child.stdin.on('error', () => undefined)
           channel.pipe(child.stdin)
-          child.stdout.pipe(channel)
-          child.stderr.pipe(channel.stderr)
-          child.on('exit', (code) => {
-            channel.exit(code ?? 1)
-            channel.end()
+          // Như sshd: gửi exit-status rồi mới đóng kênh. `pipe` mặc định tự end kênh khi stdout
+          // đóng — có thể trước 'exit' của tiến trình → client nhận mã thoát null.
+          child.stdout.pipe(channel, { end: false })
+          child.stderr.pipe(channel.stderr, { end: false })
+          // 'close' (không phải 'exit'): stdout / stderr đã đẩy hết vào kênh.
+          child.on('close', (code) => {
+            finish(code ?? 1)
           })
           // Như sshd: client đóng kênh → lệnh (có thể là vòng lặp vô hạn) không chạy tiếp.
           channel.on('close', () => {
