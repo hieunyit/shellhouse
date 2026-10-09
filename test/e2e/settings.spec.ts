@@ -217,6 +217,7 @@ test('xuất bản sao lưu', async ({ app, page }) => {
 })
 
 test('Network: proxy tự nhập — URL sai không lưu, URL đúng + danh sách bỏ qua được lưu', async ({
+  app,
   page
 }) => {
   await openSettings(page, 'network')
@@ -227,7 +228,21 @@ test('Network: proxy tự nhập — URL sai không lưu, URL đúng + danh sác
   await expect(page.getByTestId('settings-network')).toContainText('socks5://host:port')
   await url.fill('http://proxy.corp:3128')
   await page.getByTestId('setting-no-proxy').fill('.corp.local, 10.0.0.0/8')
-  await page.getByTestId('setting-updates-insecure').check()
+  // Bật bỏ qua chứng chỉ: main hỏi xác nhận — Cancel → không đổi; đồng ý → bật.
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = () => Promise.resolve({ response: 0, checkboxChecked: false })
+  })
+  await page.getByTestId('setting-updates-insecure').click()
+  await expect(page.getByTestId('setting-updates-insecure')).not.toBeChecked()
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = () => Promise.resolve({ response: 1, checkboxChecked: false })
+  })
+  await page.getByTestId('setting-updates-insecure').click()
+  await expect(page.getByTestId('setting-updates-insecure')).toBeChecked()
+  // Renderer không tự bật được qua settings:update.
+  await page.evaluate(() =>
+    window.shellhouse.updateSettings({ network: { updatesInsecure: false } } as never)
+  )
   await url.focus()
   await expect
     .poll(() => page.evaluate(() => window.shellhouse.getSettings().then((s) => s.network)))

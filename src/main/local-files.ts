@@ -1,6 +1,7 @@
 import { readdir, stat } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import type { LocalListing } from '@shared/local-files'
+import { sensitiveTarget } from '../modules/registry/local-paths'
 
 /** Thư mục khổng lồ (node_modules, thư mục log) — chỉ hiện chừng này mục. */
 const MAX_ENTRIES = 5000
@@ -63,4 +64,26 @@ export class ListedDirs {
     const parent = dirname(full)
     return parent !== full && this.dirs.has(parent)
   }
+}
+
+/**
+ * Không đưa vào Thùng rác dù nằm trong thư mục đã liệt kê: chính thư mục home, khoá SSH / GPG,
+ * thông tin đăng nhập đám mây, hồ sơ trình duyệt, dữ liệu của app (vault) — kể cả qua symlink.
+ * Renderer bị chiếm vẫn liệt kê được bất kỳ thư mục nào, nên đây là lớp chặn ở main.
+ */
+export function protectedFromTrash(
+  path: string,
+  ctx: { home: string; appData: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform }
+): boolean {
+  const platform = ctx.platform ?? process.platform
+  const full = resolve(path)
+  const same = (a: string, b: string): boolean =>
+    platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
+  if (same(full, resolve(ctx.home))) return true
+  return sensitiveTarget(full, {
+    home: ctx.home,
+    env: ctx.env ?? process.env,
+    platform,
+    appData: ctx.appData
+  })
 }

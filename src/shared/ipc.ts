@@ -238,6 +238,14 @@ export const invokeContract = {
     args: z.tuple([z.string().max(255), z.string().max(20_000_000)]),
     result: z.string().nullable()
   },
+  /**
+   * Ghi văn bản vào file người dùng VỪA chọn bằng `dialog:saveFile` (chọn chỗ lưu trước, tính nội
+   * dung sau — xuất danh sách bucket). Đường dẫn khác bị từ chối.
+   */
+  'dialog:writeChosen': {
+    args: z.tuple([z.string().min(1).max(4096), z.string().max(50 * 1024 * 1024)]),
+    result: z.null()
+  },
   /** Trạng thái các module (ADR-014). */
   'modules:list': { args: z.tuple([]), result: z.array(ModuleStateSchema) },
   /** Bật / tắt module — có hiệu lực ngay; lỗi bật (migration…) trả về dạng Error. */
@@ -285,6 +293,10 @@ export const invokeContract = {
   'files:chooseEditor': { args: z.tuple([]), result: AppSettings.nullable() },
   /** Bỏ editor đã chọn → ứng dụng mặc định của hệ điều hành. */
   'files:resetEditor': { args: z.tuple([]), result: AppSettings },
+  /** Thư mục ghi log phiên (hộp thoại của main, lưu luôn); null = huỷ. */
+  'logs:chooseFolder': { args: z.tuple([]), result: AppSettings.nullable() },
+  /** Bỏ qua lỗi chứng chỉ khi cập nhật: bật phải xác nhận trong hộp thoại của main; null = huỷ. */
+  'updates:setInsecure': { args: z.tuple([z.boolean()]), result: AppSettings.nullable() },
   /** Chọn thư mục (mở sẵn ở thư mục log hoặc Downloads); null = huỷ. */
   'dialog:pickFolder': {
     args: z.tuple([z.string().max(100), z.enum(['logs', 'downloads'])]),
@@ -461,9 +473,15 @@ export interface ShellhouseApi {
   pickSaveLocation(defaultName: string): Promise<string | null>
   /** Hỏi chỗ lưu rồi ghi văn bản vào đó (UTF-8). Trả đường dẫn đã lưu, null = huỷ. */
   saveTextFile(defaultName: string, text: string): Promise<string | null>
+  /** Ghi văn bản vào file vừa chọn bằng `pickSaveLocation` (main từ chối đường dẫn khác). */
+  writeChosenFile(path: string, text: string): Promise<null>
   /** Chọn editor ngoài (hộp thoại của main, lưu luôn); null = huỷ. */
   chooseEditor(): Promise<AppSettings | null>
   resetEditor(): Promise<AppSettings>
+  /** Chọn thư mục log phiên (hộp thoại của main, lưu luôn); null = huỷ. */
+  chooseLogFolder(): Promise<AppSettings | null>
+  /** Bật / tắt bỏ qua lỗi chứng chỉ khi cập nhật (bật: main hỏi xác nhận); null = huỷ. */
+  setUpdatesInsecure(enabled: boolean): Promise<AppSettings | null>
   listLocal(path: string | null): Promise<LocalListing>
   trashLocal(paths: string[]): Promise<void>
   listSerialPorts(): Promise<SerialPortInfo[]>

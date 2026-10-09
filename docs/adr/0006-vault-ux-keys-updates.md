@@ -13,7 +13,9 @@
   Trên Linux, nếu backend là `basic_text` (không có keyring) thì từ chối bật: khoá chỉ bị che, không
   được mã hoá thật. Khi khởi động, DEK được kiểm tra bằng `dek_check` (migration 0003); sai (keychain
   đổi, DB chép sang máy khác) → xoá khoá lưu và hỏi master password.
-- **Đổi master password:** chỉ bọc lại DEK → khoá lưu trên máy vẫn dùng được.
+- **Đổi master password:** xoay DEK — mọi cột `*_enc` được mã hoá lại bằng DEK mới trong một
+  transaction (từ 2026-10-10; trước đó chỉ bọc lại DEK, nên bản sao lưu cũ + password cũ vẫn đọc
+  được secret hiện tại). Đang "nhớ trên máy" thì keychain nhận DEK mới.
 - **Sao lưu / khôi phục:** xuất bằng SQLite backup API (secret vẫn mã hoá bằng master password).
   Khôi phục chỉ sau khi kiểm tra: đúng file của app, không hỏng, schema không mới hơn, và **master
   password của bản sao lưu** đúng; dữ liệu hiện tại được lưu một bản `pre-restore` trước; app khởi

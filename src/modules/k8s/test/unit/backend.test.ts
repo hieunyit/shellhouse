@@ -10,7 +10,7 @@ import { parseCaretta, trafficRates, type TrafficSample } from '../../shared/tra
 import type { LimitedSpawn } from '../../../registry/host-types'
 
 describe('plugin xác thực (exec): kubeconfig lạ không chạy được lệnh / mã tuỳ ý', () => {
-  it('bỏ biến môi trường nạp mã / đổi PATH, tên biến lạ; giữ biến bình thường', () => {
+  it('chỉ giữ biến trong danh sách cho phép (hồ sơ, region, project…); bỏ nạp mã, PATH, proxy, tắt TLS', () => {
     const { env, dropped } = pluginEnv({
       AWS_PROFILE: 'prod',
       AWS_REGION: 'eu-west-1',
@@ -35,15 +35,28 @@ describe('plugin xác thực (exec): kubeconfig lạ không chạy được lệ
       BOTO_CONFIG: '/tmp/boto',
       // Chỉ trỏ tới file thông tin xác thực / CA — giữ.
       GOOGLE_APPLICATION_CREDENTIALS: '/home/u/sa.json',
-      AWS_CA_BUNDLE: '/etc/ca.pem'
+      AWS_CA_BUNDLE: '/etc/ca.pem',
+      // Proxy + tắt kiểm chứng chỉ → token đi qua máy kẻ tấn công; cho chạy lệnh ngoài; đổi IdP.
+      HTTPS_PROXY: 'http://evil:8080',
+      ALL_PROXY: 'socks5://evil:1080',
+      CLOUDSDK_AUTH_DISABLE_SSL_VALIDATION: 'true',
+      GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES: '1',
+      AZURE_AUTHORITY_HOST: 'https://evil.example',
+      // Chọn project / service principal — giữ.
+      CLOUDSDK_CORE_PROJECT: 'my-project',
+      AAD_SERVICE_PRINCIPAL_CLIENT_ID: 'id'
     })
     expect(env).toEqual({
       AWS_PROFILE: 'prod',
       AWS_REGION: 'eu-west-1',
       GOOGLE_APPLICATION_CREDENTIALS: '/home/u/sa.json',
-      AWS_CA_BUNDLE: '/etc/ca.pem'
+      AWS_CA_BUNDLE: '/etc/ca.pem',
+      CLOUDSDK_CORE_PROJECT: 'my-project',
+      AAD_SERVICE_PRINCIPAL_CLIENT_ID: 'id'
     })
-    expect(dropped).toHaveLength(18)
+    expect(dropped).toHaveLength(23)
+    expect(dropped).toContain('HTTPS_PROXY')
+    expect(dropped).toContain('CLOUDSDK_AUTH_DISABLE_SSL_VALIDATION')
   })
 
   it('chỉ lệnh lấy token: aws eks get-token, kubelogin get-token, gcloud config config-helper', () => {
@@ -91,6 +104,17 @@ describe('plugin xác thực (exec): kubeconfig lạ không chạy được lệ
     expect(() => {
       checkPluginArgs('gke-gcloud-auth-plugin', [])
     }).not.toThrow()
+    // Đổi nơi gửi thông tin xác thực / tắt TLS / nạp tuỳ chọn từ file: ở đâu cũng bị chặn.
+    for (const [binary, args] of [
+      ['aws', ['--endpoint-url', 'https://evil', 'eks', 'get-token']],
+      ['aws', ['eks', 'get-token', '--no-verify-ssl']],
+      ['aws', ['eks', 'get-token', '--ca-bundle=/tmp/ca.pem']],
+      ['gcloud', ['--flags-file=/tmp/f.yaml', 'config', 'config-helper']],
+      ['kubelogin', ['get-token', '--authority-host', 'https://evil']]
+    ] as const)
+      expect(() => {
+        checkPluginArgs(binary, args)
+      }).toThrow(/does not allow/)
   })
 
   it('credentialProvider không chạy plugin khi đối số không phải lệnh lấy token; env đã lọc', async () => {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync } from 'node:fs'
-import { mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Readable } from 'node:stream'
@@ -406,9 +406,6 @@ export class S3Service {
         return this.readText(op.bucket, op.key)
       case 'writeText':
         return this.writeText(op.bucket, op.key, Buffer.from(op.data, 'base64'), op.expectEtag)
-      case 'writeFile':
-        await writeFile(op.localPath, op.content, 'utf8')
-        return null
       case 'syncStart':
         return this.startSync(op)
       case 'syncPoll': {

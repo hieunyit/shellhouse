@@ -1,4 +1,11 @@
-import { readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
@@ -167,5 +174,35 @@ describe('openStore', () => {
     }).toThrow()
     expect(readFileSync(paths.db).equals(before)).toBe(true)
     expect(readdirSync(dirname(paths.db)).some((f) => f.includes('.restore-'))).toBe(false)
+  })
+
+  it('không cất được DB cũ → dừng trước khi xoá WAL (giao dịch chưa checkpoint không mất)', () => {
+    const dir = tempDir()
+    const backup = join(dir, 'backup.db')
+    writeFileSync(backup, 'backup')
+    // DB "không chép được" (thư mục) — giả lập lỗi đĩa ở bước cất bản cũ.
+    const dbPath = join(dir, 'shellhouse.db')
+    mkdirSync(dbPath)
+    writeFileSync(`${dbPath}-wal`, 'giao dịch chưa checkpoint')
+    expect(() => {
+      restoreBackup(backup, dbPath)
+    }).toThrow()
+    expect(readFileSync(`${dbPath}-wal`, 'utf8')).toBe('giao dịch chưa checkpoint')
+  })
+
+  it('bản DB cũ được cất kèm WAL', () => {
+    const dir = tempDir()
+    const backup = join(dir, 'backup.db')
+    writeFileSync(backup, 'backup')
+    const dbPath = join(dir, 'shellhouse.db')
+    writeFileSync(dbPath, 'cũ')
+    writeFileSync(`${dbPath}-wal`, 'wal cũ')
+    restoreBackup(backup, dbPath)
+    expect(readFileSync(dbPath, 'utf8')).toBe('backup')
+    expect(existsSync(`${dbPath}-wal`)).toBe(false)
+    const files = readdirSync(dir)
+    const kept = files.find((f) => f.includes('.corrupt-') && !f.endsWith('-wal'))
+    expect(kept).toBeDefined()
+    expect(readFileSync(join(dir, `${kept ?? ''}-wal`), 'utf8')).toBe('wal cũ')
   })
 })

@@ -1,9 +1,21 @@
 import { setLanguage } from '@shared/i18n'
-import type { HostModule } from '../../registry/host-types'
+import type { HostModule, HostModuleContext } from '../../registry/host-types'
+import { requireEditFile, requireLocalPaths } from '../../registry/local-access'
 import { s3Manifest } from '../manifest'
 import { S3SessionConfig } from '../shared/ipc'
 import { S3Op } from '../shared/ops'
 import { S3Service, type S3Connection } from './service'
+
+/** Đường dẫn trên máy: tải lên = đọc, tải về = ghi (đều phải do người dùng chọn), sửa = file tạm. */
+export async function checkLocalPaths(
+  op: S3Op,
+  ctx: Pick<HostModuleContext, 'localPathGranted' | 'ownsEditFile'>
+): Promise<void> {
+  if (op.op === 'upload') await requireLocalPaths(ctx, [op.localPath], 'read')
+  else if (op.op === 'uploadCheck') await requireLocalPaths(ctx, op.localPaths, 'read')
+  else if (op.op === 'download') await requireLocalPaths(ctx, [op.localPath], 'write')
+  else if (op.op === 'edit') await requireEditFile(ctx, op.localPath)
+}
 
 /** Phần Session Host của S3: một `S3Service` mỗi tab (AWS SDK chạy ở đây, không ở UI). */
 export const s3Host: HostModule = {
@@ -25,7 +37,11 @@ export const s3Host: HostModule = {
     )
     ctx.log('info', `opened ${config.connection.endpoint || 'AWS'}`)
     return {
-      run: (op) => service.run(S3Op.parse(op)),
+      run: async (raw) => {
+        const op = S3Op.parse(raw)
+        await checkLocalPaths(op, ctx)
+        return service.run(op)
+      },
       dispose: () => {
         service.dispose()
       }

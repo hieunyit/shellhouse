@@ -6,6 +6,38 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Security
+
+- **Opening a server file in the local editor never runs it.** Without an editor chosen in
+  Settings › Files, files that the system would run instead of open (`.exe`, `.bat`, `.js`, `.lnk`,
+  `.jar`, `.command`, `.desktop`…) open in Notepad (Windows) or TextEdit (macOS); Linux asks you to
+  choose an editor. Before, double-clicking such a file in SFTP or S3 downloaded and ran it.
+- Installed builds ignore `ELECTRON_RENDERER_URL`: setting it no longer loads a web page into the
+  Shellhouse window with access to the vault and saved hosts.
+- S3 and Docker only read or write the files and folders you picked (file dialogs, drag and drop).
+  The bucket list export is written by the app, only to the file chosen in the Save dialog. S3
+  "Edit in local editor" only uses the app's temporary copy.
+- Kubernetes sign-in plugins (aws, gcloud, kubelogin) only receive allowed environment variables
+  from a kubeconfig (profile, region, project, service principal). Proxy settings, turning off
+  certificate checks, and loading other config files or code are ignored. Options that change
+  where credentials go are refused (`--endpoint-url`, `--no-verify-ssl`, `--ca-bundle`,
+  `--flags-file`, `--log-http`, `--authority-host`).
+- System OpenSSH mode refuses user names with shell characters (OpenSSH runs jump hosts through
+  `sh -c`), and jump host names with `%`.
+- Changing the master password now re-encrypts every secret with a new key: an old backup plus the
+  old password can no longer read current secrets. "Remember on this device" keeps working.
+- "Ignore certificate errors for updates" asks for confirmation in a system dialog. The session log
+  folder can only be set with the folder picker.
+- The local file pane cannot move your home folder, SSH/GPG keys, cloud credentials or the app's
+  data to the Trash.
+
+### Fixed
+
+- Restoring a backup copies the current data aside (with its write-ahead log) before removing
+  anything, so a full disk during a restore loses nothing.
+- After the window reloads (for example after a crash), reopened tabs go back to the same tmux
+  sessions (`shellhouse-1`…) again.
+
 ## [1.2.0-beta.32] - 2026-10-09
 
 ### Added

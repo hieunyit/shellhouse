@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import { PORT_MESSAGE_TYPE, SESSION_PORT_CHANNEL } from '@shared/constants'
+import { DROPPED_PATH_CHANNEL, PORT_MESSAGE_TYPE, SESSION_PORT_CHANNEL } from '@shared/constants'
 import type {
   EventChannel,
   EventPayload,
@@ -92,8 +92,11 @@ const api: ShellhouseApi = {
   pickFilesToUpload: () => invoke('dialog:openFiles'),
   pickSaveLocation: (defaultName) => invoke('dialog:saveFile', defaultName),
   saveTextFile: (defaultName, text) => invoke('dialog:saveText', defaultName, text),
+  writeChosenFile: (path, text) => invoke('dialog:writeChosen', path, text),
   chooseEditor: () => invoke('files:chooseEditor'),
   resetEditor: () => invoke('files:resetEditor'),
+  chooseLogFolder: () => invoke('logs:chooseFolder'),
+  setUpdatesInsecure: (enabled) => invoke('updates:setInsecure', enabled),
   listLocal: (path) => invoke('local:list', path),
   trashLocal: (paths) => invoke('local:trash', paths),
   listSerialPorts: () => invoke('serial:list'),
@@ -111,7 +114,14 @@ const api: ShellhouseApi = {
   openLogFolder: () => invoke('logs:openFolder'),
   prepareRemoteEdit: (remoteName) => invoke('files:prepareEdit', remoteName),
   openInEditor: (localPath) => invoke('files:openInEditor', localPath),
-  pathForFile: (file) => webUtils.getPathForFile(file),
+  pathForFile: (file) => {
+    // Chỉ File thật (kéo thả / chọn file) mới có đường dẫn — báo main để module (S3, Docker) được
+    // đọc đường dẫn đó. Trang bị chiếm không tạo được File mang đường dẫn tuỳ ý. Gửi đồng bộ: main
+    // ghi nhận xong trước khi renderer gửi đường dẫn sang Session Host.
+    const path = webUtils.getPathForFile(file)
+    if (path) ipcRenderer.sendSync(DROPPED_PATH_CHANNEL, path)
+    return path
+  },
   getSettings: () => invoke('settings:get'),
   updateSettings: (patch) => invoke('settings:update', patch),
   onSettingsChanged: (listener) => subscribe('settings:changed', listener),

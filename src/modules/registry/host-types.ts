@@ -87,7 +87,18 @@ export interface HostModuleContext {
   log(level: 'info' | 'warn' | 'error', message: string): void
   /** Hỏi phần main của chính module (`MainModuleApi.onHostRequest`). */
   fromMain(name: string, params: unknown): Promise<unknown>
+  /**
+   * Đường dẫn trên máy (renderer gửi: nơi lưu file tải về, file tải lên) có phải người dùng đã chọn
+   * qua hộp thoại của main / kéo thả không. Không hỏi được main → false.
+   */
+  localPathGranted(path: string, access: 'read' | 'write'): Promise<boolean>
+  /** File tạm "sửa bằng editor trên máy" do main cấp (`files:prepareEdit`). */
+  ownsEditFile(path: string): Promise<boolean>
 }
+
+/** Tên yêu cầu của lõi gửi qua kênh `module:request` (không đụng tên của module). */
+export const CORE_LOCAL_PATH = '$localPath'
+export const CORE_EDIT_FILE = '$editFile'
 
 export interface HostModuleSession {
   /** Một thao tác → kết quả JSON. `op` chưa validate — module parse bằng schema của mình. */

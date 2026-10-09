@@ -154,13 +154,8 @@ export function FilesSection(): React.JSX.Element {
             value={logging.directory}
           />
           <Button
-            onClick={() =>
-              void window.shellhouse
-                .pickFolder(t('Choose a folder for session logs'), 'logs')
-                .then((dir) => {
-                  if (dir) void update({ logging: { directory: dir } })
-                })
-            }
+            data-testid="choose-log-folder"
+            onClick={() => void window.shellhouse.chooseLogFolder()}
           >
             {t('Choose…')}
           </Button>

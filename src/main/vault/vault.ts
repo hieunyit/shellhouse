@@ -240,31 +240,111 @@ export class Vault {
     this.emit()
   }
 
-  /** Chỉ bọc lại DEK — không phải mã hoá lại từng secret. Không đổi trạng thái khoá / mở. */
-  async changePassword(current: Secret, next: Secret): Promise<void> {
+  /**
+   * Đổi master password VÀ xoay DEK: mọi secret trong CSDL được mã hoá lại bằng DEK mới (một
+   * transaction) — bản sao lưu cũ cộng master password cũ (lộ, bị đoán) không còn giải mã được
+   * secret hiện tại. Không đổi trạng thái khoá / mở. `onNewKey` nhận bản sao DEK mới (khoá "nhớ trên
+   * máy" phải lưu lại) — người nhận phải memzero.
+   *
+   * Secret nào không theo quy ước (cột `<x>_enc`, AD = bảng|id|cột) hoặc không giải mã được: KHÔNG
+   * xoay (làm mất dữ liệu đó) — chỉ bọc lại DEK cũ như trước; trả `rotated: false`.
+   */
+  async changePassword(
+    current: Secret,
+    next: Secret,
+    onNewKey?: (dek: Buffer) => void
+  ): Promise<{ rotated: boolean }> {
     if (next.length < MIN_PASSWORD_LENGTH) throw new PasswordTooShortError()
+    let rotated = false
     await this.exclusive(async () => {
-      const dek = await this.unwrap(current)
+      const oldDek = await this.unwrap(current)
       const salt = randomBytes(SALT_BYTES)
       const kek = await deriveKey(next.reveal(), salt, this.kdf)
+      const newDek = randomBytes(KEY_BYTES)
       try {
-        this.db
-          .prepare(
-            `UPDATE vault_meta SET kdf = 'argon2id', kdf_params = ?, salt = ?, wrapped_dek = ?,
-                    dek_check = ? WHERE id = 1`
-          )
-          .run(
-            JSON.stringify(this.kdf),
-            salt,
-            seal(kek, dek, DEK_AD),
-            seal(dek, CHECK_PLAINTEXT, CHECK_AD)
-          )
+        // Đồng bộ từ đây: không thao tác nào khác chen vào giữa lúc mã hoá lại và lúc đổi khoá.
+        this.db.transaction(() => {
+          rotated = this.reencryptAll(oldDek, newDek)
+          const dek = rotated ? newDek : oldDek
+          this.db
+            .prepare(
+              `UPDATE vault_meta SET kdf = 'argon2id', kdf_params = ?, salt = ?, wrapped_dek = ?,
+                      dek_check = ? WHERE id = 1`
+            )
+            .run(
+              JSON.stringify(this.kdf),
+              salt,
+              seal(kek, dek, DEK_AD),
+              seal(dek, CHECK_PLAINTEXT, CHECK_AD)
+            )
+        })()
+        if (rotated) {
+          // Đang mở thì giữ DEK mới; đang khoá thì vẫn khoá.
+          if (this.dek) {
+            memzero(this.dek)
+            this.dek = Buffer.from(newDek)
+          }
+          onNewKey?.(Buffer.from(newDek))
+        }
       } finally {
         memzero(kek)
-        // DEK không đổi: vault đang mở giữ bản đang có; đang khoá thì vẫn khoá.
-        memzero(dek)
+        memzero(oldDek)
+        memzero(newDek)
       }
     })
+    return { rotated }
+  }
+
+  /**
+   * Mã hoá lại mọi cột `<x>_enc` của mọi bảng có cột `id` (quy ước của mọi chỗ gọi encrypt: AD =
+   * bảng|id|cột). Gặp secret không giải mã được bằng DEK cũ / bảng có cột `_enc` mà không có `id`
+   * → false, KHÔNG ghi gì (chỉ ghi khi mọi secret đã mã hoá lại xong).
+   */
+  private reencryptAll(oldDek: Buffer, newDek: Buffer): boolean {
+    const quote = (name: string): string => `"${name.replace(/"/g, '""')}"`
+    const tables = this.db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+      .all() as { name: string }[]
+    const updates: { sql: string; value: Buffer; id: unknown }[] = []
+    try {
+      for (const { name: table } of tables) {
+        const columns = (
+          this.db.prepare(`PRAGMA table_info(${quote(table)})`).all() as { name: string }[]
+        ).map((c) => c.name)
+        const sealed = columns.filter((c) => c.endsWith('_enc'))
+        if (sealed.length === 0) continue
+        if (!columns.includes('id')) return false
+        const rows = this.db
+          .prepare(`SELECT id, ${sealed.map(quote).join(', ')} FROM ${quote(table)}`)
+          .all() as Record<string, unknown>[]
+        for (const row of rows)
+          for (const field of sealed) {
+            const blob = row[field]
+            if (blob === null || blob === undefined) continue
+            if (!Buffer.isBuffer(blob)) return false
+            const ref = { table, id: String(row['id']), field }
+            let plain: Buffer
+            try {
+              plain = open(oldDek, blob, fieldAd(ref))
+            } catch {
+              return false
+            }
+            try {
+              updates.push({
+                sql: `UPDATE ${quote(table)} SET ${quote(field)} = ? WHERE id = ?`,
+                value: seal(newDek, plain, fieldAd(ref)),
+                id: row['id']
+              })
+            } finally {
+              memzero(plain)
+            }
+          }
+      }
+      for (const u of updates) this.db.prepare(u.sql).run(u.value, u.id)
+      return true
+    } finally {
+      updates.length = 0
+    }
   }
 
   encrypt(ref: FieldRef, plaintext: Buffer): Buffer {

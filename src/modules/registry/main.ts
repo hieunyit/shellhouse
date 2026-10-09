@@ -1,4 +1,4 @@
-import type { ZodType } from 'zod'
+import { z, type ZodType } from 'zod'
 import type { AppSettings, ModuleEntry, SettingsPatch } from '@shared/settings'
 import type { Db } from '../../main/store/db'
 import type { Vault } from '../../main/vault/vault'
@@ -10,6 +10,14 @@ import { createModuleDb, migrateModule, removeModuleData } from './main-db'
 import { expandHome, localPathAllowed, sensitiveTarget } from './local-paths'
 import type { MainModule, MainModuleApi, MainModuleContext, ModuleLog } from './main-types'
 import { tablePrefix, type ModuleManifest, type ModuleState } from './types'
+import { CORE_EDIT_FILE, CORE_LOCAL_PATH } from './host-types'
+
+const PathParam = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((p) => !p.includes('\0'))
+const LocalPathRequest = z.object({ path: PathParam, access: z.enum(['read', 'write']) })
 
 /**
  * Registry của main (ADR-014 mục 3.3, 3.9): bật / tắt module lúc chạy, cấp `ctx` hẹp cho từng
@@ -40,6 +48,11 @@ export interface MainRegistryDeps {
   listWslDistros?(): Promise<{ name: string; running: boolean; version: number }[]>
   /** File tạm "sửa trong editor" do main cấp (files:prepareEdit) — module chỉ ghi được vào đó. */
   ownsEditFile?(path: string): boolean
+  /**
+   * Đường dẫn trên máy người dùng đã chọn (hộp thoại của main / kéo thả) cho `access` — module
+   * trong Session Host hỏi trước khi đọc / ghi đường dẫn renderer gửi (`ctx.localPathGranted`).
+   */
+  allowsLocalPath?(path: string, access: 'read' | 'write'): boolean
   /** Cài đặt mạng của app (proxy…) — đọc tại thời điểm gọi. */
   network?(): NetworkSettings
   /** Cho test: home / biến môi trường khi kiểm quyền đọc file. */
@@ -163,6 +176,12 @@ export class MainModuleRegistry {
   async hostRequest(id: string, name: string, params: unknown): Promise<unknown> {
     const active = this.active.get(id)
     if (!active) throw new ModuleNotEnabledError(id)
+    // Yêu cầu chung của lõi (tên bắt đầu bằng "$"), không phải của module.
+    if (name === CORE_LOCAL_PATH) {
+      const { path, access } = LocalPathRequest.parse(params)
+      return this.deps.allowsLocalPath?.(path, access) === true
+    }
+    if (name === CORE_EDIT_FILE) return this.deps.ownsEditFile?.(PathParam.parse(params)) === true
     if (!active.api.onHostRequest) throw new Error(`Module ${id} does not answer host requests`)
     return await active.api.onHostRequest(name, params)
   }

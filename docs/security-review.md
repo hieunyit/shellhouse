@@ -63,6 +63,23 @@ Electronegativity (2026-09-28): 7 cảnh báo, không cảnh báo nào còn tồ
 - `CSP_GLOBAL`: báo nhầm, vì CSP được chèn lúc build (`electron.vite.config.ts`).
 - `OPEN_EXTERNAL`: đã sửa bằng hộp thoại xác nhận (xem trên).
 
+## Rà soát 2026-10-10 (1.2.0-beta.32)
+
+| Mục                                                                                         | Trạng thái | Bằng chứng                                                 |
+| ------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------------------------- |
+| Mở file từ server bằng ứng dụng mặc định không chạy file thực thi (`.exe`, `.bat`, `.jar`…) | 🔧         | `remote-edit.ts` `isExecutableName`; `remote-edit-files`   |
+| Bản đóng gói bỏ qua `ELECTRON_RENDERER_URL` (không nạp trang từ xa có quyền IPC)            | 🔧         | `security-policy.ts` `devRendererUrl`; `security-policy`   |
+| S3 / Docker chỉ đọc / ghi đường dẫn người dùng đã chọn (hộp thoại, kéo thả)                 | 🔧         | `local-path-grants.ts`, `$localPath`; test unit + e2e      |
+| S3 bỏ op `writeFile` (ghi file tuỳ ý); sửa file S3 chỉ trong thư mục tạm                    | 🔧         | `dialog:writeChosen`; `s3/test/unit/local-paths.test.ts`   |
+| Plugin K8s: biến môi trường theo danh sách cho phép; chặn tuỳ chọn đổi đích / tắt TLS       | 🔧         | `auth.ts` `ALLOWED_ENV`, `BLOCKED_ARGS`; `backend.test.ts` |
+| System SSH: user không có ký tự shell, jump host không có `%` (ProxyCommand qua `sh -c`)    | 🔧         | `system-ssh.ts`; `system-ssh.test.ts`                      |
+| Đổi master password xoay DEK (mã hoá lại mọi cột `*_enc`)                                   | 🔧         | `vault.ts` `reencryptAll`; `vault.test.ts`, `host-service` |
+| `logging.directory`, `network.updatesInsecure` chỉ main đặt (hộp thoại / xác nhận)          | 🔧         | `SettingsPatch`; `settings.test.ts`, e2e `settings`, `log` |
+| `local:trash` không nhận home, khoá, dữ liệu app                                            | 🔧         | `local-files.ts` `protectedFromTrash`; `local-guards`      |
+
+Còn mở: `localPath` của SFTP download/upload vẫn do renderer quyết định (khung Local duyệt được mọi
+thư mục, nên chưa áp `LocalPathGrants` được); renderer vẫn nạp bằng `file://` (chưa có `app://`).
+
 ## Việc còn lại
 
 - Chạy ma trận OpenSSH thật (Docker) trước bản 1.0.

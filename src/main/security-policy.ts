@@ -54,3 +54,14 @@ export function isAppUrl(
     return false
   }
 }
+
+/**
+ * URL dev server của electron-vite — CHỈ bản chưa đóng gói. Bản phát hành bỏ qua biến môi trường:
+ * ai đặt được ELECTRON_RENDERER_URL (malware cùng user, shortcut có env) sẽ khiến cửa sổ nạp một
+ * trang từ xa có toàn quyền IPC (vault, host đã lưu) — đúng loại đường vòng mà các fuse
+ * RunAsNode / NODE_OPTIONS đang chặn.
+ */
+export function devRendererUrl(packaged: boolean, env: NodeJS.ProcessEnv): string | undefined {
+  if (packaged) return undefined
+  return env['ELECTRON_RENDERER_URL'] || undefined
+}

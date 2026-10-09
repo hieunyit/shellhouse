@@ -18,6 +18,27 @@ import { tempDir } from './helpers'
 
 const pw = (s: string): Secret => Secret.fromString(s)
 
+/** Một secret lưu trong bảng theo quy ước (`<x>_enc`, AD = bảng|id|cột); trả hàm đọc lại. */
+function storeSecret(
+  db: ReturnType<typeof openDatabase>,
+  vault: Vault,
+  id: string,
+  value: string | null
+): () => string | null {
+  db.exec('CREATE TABLE IF NOT EXISTS t_secrets (id TEXT PRIMARY KEY, value_enc BLOB)')
+  const ref = { table: 't_secrets', id, field: 'value_enc' }
+  db.prepare('INSERT INTO t_secrets (id, value_enc) VALUES (?, ?)').run(
+    id,
+    value === null ? null : vault.encryptString(ref, value)
+  )
+  return () => {
+    const row = db.prepare('SELECT value_enc FROM t_secrets WHERE id = ?').get(id) as {
+      value_enc: Buffer | null
+    }
+    return row.value_enc ? vault.decrypt(ref, row.value_enc).revealString() : null
+  }
+}
+
 async function freshVault(path = ':memory:') {
   const db = openDatabase(path)
   await migrate(db, MIGRATIONS)
@@ -105,19 +126,52 @@ describe('Vault', () => {
     expect(() => vault.encryptString(ref, 'x')).toThrow(VaultLockedError)
   })
 
-  it('đổi master password: dữ liệu cũ vẫn đọc được, password cũ hết hiệu lực', async () => {
-    const { vault } = await freshVault()
+  it('đổi master password: dữ liệu trong CSDL vẫn đọc được, password cũ hết hiệu lực', async () => {
+    const { db, vault } = await freshVault()
     await vault.create(pw('old password'))
-    const ref = { table: 't', id: '1', field: 'f' }
-    const sealed = vault.encryptString(ref, 'giữ nguyên')
+    const read = storeSecret(db, vault, '1', 'giữ nguyên')
     await expect(
       vault.changePassword(pw('not current'), pw('new password'))
     ).rejects.toBeInstanceOf(WrongPasswordError)
-    await vault.changePassword(pw('old password'), pw('new password'))
+    expect(await vault.changePassword(pw('old password'), pw('new password'))).toEqual({
+      rotated: true
+    })
+    expect(read()).toBe('giữ nguyên')
     vault.lock()
     await expect(vault.unlock(pw('old password'))).rejects.toBeInstanceOf(WrongPasswordError)
     await vault.unlock(pw('new password'))
-    expect(vault.decrypt(ref, sealed).revealString()).toBe('giữ nguyên')
+    expect(read()).toBe('giữ nguyên')
+  })
+
+  it('đổi master password xoay DEK: DEK cũ (bản sao lưu cũ + password cũ) không mở được secret hiện tại', async () => {
+    const { db, vault } = await freshVault()
+    await vault.create(pw('old password'))
+    storeSecret(db, vault, '1', 'bí mật')
+    storeSecret(db, vault, '2', null)
+    const oldDek = vault.exportKey()
+    await vault.changePassword(pw('old password'), pw('new password'))
+    const row = db.prepare("SELECT value_enc FROM t_secrets WHERE id = '1'").get() as {
+      value_enc: Buffer
+    }
+    expect(() => open(oldDek, row.value_enc, 't_secrets|1|value_enc|v1')).toThrow(DecryptError)
+    expect(vault.exportKey().equals(oldDek)).toBe(false)
+  })
+
+  it('có secret không theo quy ước / hỏng → không xoay (không mất dữ liệu), password vẫn đổi', async () => {
+    const { db, vault } = await freshVault()
+    await vault.create(pw('old password'))
+    const read = storeSecret(db, vault, '1', 'giữ nguyên')
+    db.prepare("INSERT INTO t_secrets (id, value_enc) VALUES ('bad', ?)").run(Buffer.alloc(64, 1))
+    const oldDek = vault.exportKey()
+    const keys: Buffer[] = []
+    expect(
+      await vault.changePassword(pw('old password'), pw('new password'), (k) => keys.push(k))
+    ).toEqual({ rotated: false })
+    expect(keys).toEqual([])
+    expect(vault.exportKey().equals(oldDek)).toBe(true)
+    vault.lock()
+    await vault.unlock(pw('new password'))
+    expect(read()).toBe('giữ nguyên')
   })
 
   it('mở lại từ file: unlock được, secret không nằm plaintext trong file', async () => {
@@ -169,13 +223,20 @@ describe('Vault: nhớ trên máy (khoá từ keychain)', () => {
     expect(vault.decrypt(ref, sealed).revealString()).toBe('bí mật')
   })
 
-  it('đổi master password: DEK không đổi nên khoá đã lưu trên máy vẫn dùng được', async () => {
+  it('đổi master password: khoá đã lưu trên máy cũ hết hiệu lực, DEK mới (onNewKey) mở được', async () => {
     const { vault } = await freshVault()
     await vault.create(pw('old password'))
     const exported = vault.exportKey()
-    await vault.changePassword(pw('old password'), pw('new password'))
+    const fresh: Buffer[] = []
+    await vault.changePassword(pw('old password'), pw('new password'), (k) => {
+      fresh.push(Buffer.from(k))
+    })
     vault.lock()
-    vault.unlockWithKey(exported)
+    expect(() => {
+      vault.unlockWithKey(exported)
+    }).toThrow(InvalidDeviceKeyError)
+    expect(fresh).toHaveLength(1)
+    vault.unlockWithKey(fresh[0] ?? Buffer.alloc(0))
     expect(vault.state()).toBe('unlocked')
   })
 

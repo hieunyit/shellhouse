@@ -102,7 +102,7 @@ export function NetworkSection(): React.JSX.Element {
         data-testid="setting-updates-insecure"
         checked={network.updatesInsecure}
         onChange={(e) => {
-          save({ updatesInsecure: e.target.checked })
+          void window.shellhouse.setUpdatesInsecure(e.target.checked)
         }}
       />
     </div>

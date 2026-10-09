@@ -165,6 +165,42 @@ describe('HostModuleRegistry', () => {
   })
 })
 
+describe('đường dẫn trên máy / file sửa tạm — hỏi main', () => {
+  it('localPathGranted / ownsEditFile đi qua yêu cầu lõi; lỗi hoặc không có main → false', async () => {
+    const calls: { module: string; name: string; params: unknown }[] = []
+    let fail = false
+    const { module, got } = capture(manifest({}))
+    const registry = new HostModuleRegistry([module], {
+      log: () => undefined,
+      requestProgramGrant: () => Promise.resolve(true),
+      requestMain: (m, name, params) => {
+        calls.push({ module: m, name, params })
+        return fail ? Promise.reject(new Error('main busy')) : Promise.resolve(true)
+      }
+    })
+    registry.setEnabled(['fake'])
+    registry.createSession('fake', 'main', {}, sink)
+    await expect(got.ctx?.localPathGranted('/home/u/a', 'read')).resolves.toBe(true)
+    await expect(got.ctx?.ownsEditFile('/data/edit/x')).resolves.toBe(true)
+    expect(calls).toEqual([
+      { module: 'fake', name: '$localPath', params: { path: '/home/u/a', access: 'read' } },
+      { module: 'fake', name: '$editFile', params: '/data/edit/x' }
+    ])
+    fail = true
+    await expect(got.ctx?.localPathGranted('/home/u/a', 'write')).resolves.toBe(false)
+    await expect(got.ctx?.ownsEditFile('/data/edit/x')).resolves.toBe(false)
+
+    const { module: m2, got: got2 } = capture(manifest({}))
+    const noMain = new HostModuleRegistry([m2], {
+      log: () => undefined,
+      requestProgramGrant: () => Promise.resolve(true)
+    })
+    noMain.setEnabled(['fake'])
+    noMain.createSession('fake', 'main', {}, sink)
+    await expect(got2.ctx?.localPathGranted('/home/u/a', 'read')).resolves.toBe(false)
+  })
+})
+
 describe('shellQuote', () => {
   it('quote an toàn cho sh; giữ nguyên chữ an toàn', () => {
     expect(shellQuote(['docker', 'ps', '--format', '{{json .}}'])).toBe(

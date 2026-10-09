@@ -11,6 +11,7 @@ function logFiles(dir: string): string[] {
 }
 
 test('ghi log phiên: bật trong cài đặt → tab mới ghi output ra file văn bản thường', async ({
+  app,
   page
 }) => {
   const dir = mkdtempSync(join(tmpdir(), 'sh-logs-'))
@@ -19,7 +20,12 @@ test('ghi log phiên: bật trong cài đặt → tab mới ghi output ra file v
     await page.getByTestId('settings-nav-files').click()
     await page.getByTestId('setting-logging-mode').selectOption('all')
     await expect(page.getByTestId('logging-warning')).toBeVisible()
-    await page.evaluate((d) => window.shellhouse.updateSettings({ logging: { directory: d } }), dir)
+    // Thư mục log chỉ đặt qua hộp thoại của main.
+    await app.evaluate(({ dialog }, d) => {
+      dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [d] })
+    }, dir)
+    await page.getByTestId('choose-log-folder').click()
+    await expect(page.getByTestId('setting-logging-directory')).toHaveValue(dir)
     await page.keyboard.press('Escape')
 
     await page.getByTestId('new-tab').click()

@@ -1,7 +1,7 @@
-import { chmodSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { ListedDirs } from '../../src/main/local-files'
+import { ListedDirs, protectedFromTrash } from '../../src/main/local-files'
 import { writePrivateFile } from '../../src/main/private-file'
 import { tempDir } from './helpers'
 
@@ -24,6 +24,25 @@ describe('ListedDirs (local:trash)', () => {
     for (let i = 0; i <= 2000; i++) listed.remember(join(base, String(i)))
     expect(listed.allows(join(base, '0', 'f'))).toBe(false)
     expect(listed.allows(join(base, '2000', 'f'))).toBe(true)
+  })
+})
+
+describe('protectedFromTrash (local:trash)', () => {
+  it('chặn home, khoá SSH, dữ liệu app (kể cả qua symlink); file thường thì được', () => {
+    const home = resolve(tempDir())
+    const appData = join(home, 'appdata')
+    mkdirSync(join(home, '.ssh'), { recursive: true })
+    mkdirSync(appData, { recursive: true })
+    const ctx = { home, appData, env: {}, platform: process.platform }
+    expect(protectedFromTrash(home, ctx)).toBe(true)
+    expect(protectedFromTrash(join(home, '.ssh'), ctx)).toBe(true)
+    expect(protectedFromTrash(join(home, '.ssh', 'id_rsa'), ctx)).toBe(true)
+    expect(protectedFromTrash(appData, ctx)).toBe(true)
+    expect(protectedFromTrash(join(home, 'notes.txt'), ctx)).toBe(false)
+    if (process.platform !== 'win32') {
+      symlinkSync(join(home, '.ssh'), join(home, 'keys'))
+      expect(protectedFromTrash(join(home, 'keys'), ctx)).toBe(true)
+    }
   })
 })
 

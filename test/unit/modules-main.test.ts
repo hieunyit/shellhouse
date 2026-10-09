@@ -428,3 +428,43 @@ describe('ctx.pickFiles / readDir', () => {
     }
   })
 })
+
+describe('MainModuleRegistry — yêu cầu lõi từ Session Host', () => {
+  it('$localPath / $editFile trả lời bằng main, không tới module; tham số sai → lỗi', async () => {
+    const db = openDatabase(':memory:')
+    await migrate(db, MIGRATIONS)
+    const vault = new Vault(db, TEST_KDF)
+    await vault.create(Secret.fromString('master-password'))
+    const asked: string[] = []
+    const registry = new MainModuleRegistry([fakeModule()], {
+      db,
+      vault,
+      settings: new SettingsService(db),
+      emit: () => undefined,
+      onStatesChanged: () => undefined,
+      log: () => undefined,
+      allowsLocalPath: (path, access) => {
+        asked.push(`${access} ${path}`)
+        return path === '/home/u/Downloads'
+      },
+      ownsEditFile: (path) => path.startsWith('/data/edit/')
+    })
+    registry.start()
+    await expect(
+      registry.hostRequest('fake', '$localPath', { path: '/home/u/Downloads', access: 'write' })
+    ).rejects.toThrow(ModuleNotEnabledError)
+    registry.setEnabled('fake', true)
+    await expect(
+      registry.hostRequest('fake', '$localPath', { path: '/home/u/Downloads', access: 'write' })
+    ).resolves.toBe(true)
+    await expect(
+      registry.hostRequest('fake', '$localPath', { path: '/home/u/.bashrc', access: 'write' })
+    ).resolves.toBe(false)
+    await expect(
+      registry.hostRequest('fake', '$localPath', { path: '/x', access: 'exec' })
+    ).rejects.toThrow()
+    await expect(registry.hostRequest('fake', '$editFile', '/data/edit/a')).resolves.toBe(true)
+    await expect(registry.hostRequest('fake', '$editFile', '/etc/hosts')).resolves.toBe(false)
+    expect(asked).toEqual(['write /home/u/Downloads', 'write /home/u/.bashrc'])
+  })
+})

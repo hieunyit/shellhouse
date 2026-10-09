@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isAppUrl, isSafeExternalUrl } from '../../src/main/security-policy'
+import { devRendererUrl, isAppUrl, isSafeExternalUrl } from '../../src/main/security-policy'
 
 describe('isSafeExternalUrl', () => {
   it.each(['https://example.com', 'http://localhost:8080/x'])('cho phép %s', (url) => {
@@ -72,5 +72,21 @@ describe('isAppUrl', () => {
     expect(isAppUrl('http://localhost:5173/index.html', dev, index)).toBe(true)
     expect(isAppUrl('http://localhost:5174/', dev, index)).toBe(false)
     expect(isAppUrl('file:///x', dev, index)).toBe(false)
+  })
+})
+
+describe('devRendererUrl', () => {
+  const env = { ELECTRON_RENDERER_URL: 'https://evil.example' }
+
+  it('bản đóng gói bỏ qua ELECTRON_RENDERER_URL (không nạp trang từ xa)', () => {
+    expect(devRendererUrl(true, env)).toBeUndefined()
+  })
+
+  it('bản dev dùng dev server; rỗng / không có → nạp file build', () => {
+    expect(devRendererUrl(false, { ELECTRON_RENDERER_URL: 'http://localhost:5173' })).toBe(
+      'http://localhost:5173'
+    )
+    expect(devRendererUrl(false, { ELECTRON_RENDERER_URL: '' })).toBeUndefined()
+    expect(devRendererUrl(false, {})).toBeUndefined()
   })
 })

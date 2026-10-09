@@ -12,4 +12,12 @@ describe('phiên tmux theo tab', () => {
     expect(slots.take('a2', 'web')).toBe('shellhouse-1')
     expect(slots.take('d', 'web')).toBe('shellhouse-3')
   })
+
+  it('renderer tải lại: trả hết số — tab mở lại về shellhouse-1 như sau khi mở lại app', () => {
+    const slots = new TmuxSlots()
+    expect(slots.take('a', 'h1')).toBe('shellhouse-1')
+    expect(slots.take('b', 'h1')).toBe('shellhouse-2')
+    slots.releaseAll()
+    expect(slots.take('c', 'h1')).toBe('shellhouse-1')
+  })
 })

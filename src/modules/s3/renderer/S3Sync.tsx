@@ -119,7 +119,7 @@ export function ExportBucketsDialog({
           ? bucketsToCsv(account, rows, options)
           : bucketsToJson(account, rows, options)
       setBusy(t('Saving…'))
-      await run({ op: 'writeFile', localPath: path, content })
+      await window.shellhouse.writeChosenFile(path, content)
       setSaved(path)
     } catch (e) {
       setError(cleanError(e))

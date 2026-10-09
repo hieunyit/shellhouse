@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { openInEditor, RemoteEditFiles } from '../../src/main/remote-edit'
+import { isExecutableName, openInEditor, RemoteEditFiles } from '../../src/main/remote-edit'
 import { tempDir } from './helpers'
 
 describe('RemoteEditFiles', () => {
@@ -75,5 +75,77 @@ describe('openInEditor', () => {
         platform: 'linux'
       })
     ).rejects.toThrow('The editor was not found')
+  })
+})
+
+describe('openInEditor — file chương trình / script do server đặt', () => {
+  const recorder = (platform: NodeJS.Platform) => {
+    const opened: string[] = []
+    const spawned: string[][] = []
+    return {
+      opened,
+      spawned,
+      deps: {
+        platform,
+        openPath: (p: string) => {
+          opened.push(p)
+          return Promise.resolve('')
+        },
+        spawn: (program: string, args: string[]) => {
+          spawned.push([program, ...args])
+          return Promise.resolve()
+        }
+      }
+    }
+  }
+
+  it.each([
+    'setup.exe',
+    'run.BAT',
+    'x.js',
+    'a.lnk',
+    'tool.jar',
+    'go.command',
+    'app.desktop',
+    'i.MSI'
+  ])('nhận ra %s là file chạy được', (name) => {
+    expect(isExecutableName(`/tmp/edit/u/${name}`)).toBe(true)
+    expect(isExecutableName(`C:\\edit\\u\\${name}`)).toBe(true)
+  })
+
+  it.each(['nginx.conf', 'README', '.bashrc', 'app.log', 'exe', 'data.json'])(
+    '%s không phải file chạy được',
+    (name) => {
+      expect(isExecutableName(`/tmp/edit/u/${name}`)).toBe(false)
+    }
+  )
+
+  it('Windows: .exe mở bằng Notepad, không đưa cho ứng dụng mặc định', async () => {
+    const r = recorder('win32')
+    await openInEditor('C:\\edit\\u\\setup.exe', '', r.deps)
+    expect(r.opened).toEqual([])
+    expect(r.spawned).toEqual([['notepad.exe', 'C:\\edit\\u\\setup.exe']])
+  })
+
+  it('macOS: .command mở bằng TextEdit (open -t)', async () => {
+    const r = recorder('darwin')
+    await openInEditor('/tmp/edit/u/go.command', '', r.deps)
+    expect(r.opened).toEqual([])
+    expect(r.spawned).toEqual([['open', '-t', '/tmp/edit/u/go.command']])
+  })
+
+  it('Linux: .desktop báo chọn editor, không mở', async () => {
+    const r = recorder('linux')
+    await expect(openInEditor('/tmp/edit/u/app.desktop', '', r.deps)).rejects.toThrow(
+      'Choose an editor'
+    )
+    expect(r.opened).toEqual([])
+    expect(r.spawned).toEqual([])
+  })
+
+  it('đã chọn editor: file chạy được vẫn mở bằng editor đó', async () => {
+    const r = recorder('win32')
+    await openInEditor('C:\\edit\\u\\run.bat', 'code', r.deps)
+    expect(r.spawned).toEqual([['code', 'C:\\edit\\u\\run.bat']])
   })
 })

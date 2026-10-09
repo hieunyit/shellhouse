@@ -54,6 +54,14 @@ export const main: Readonly<Record<string, string>> = {
   'The vault has not been created': 'Vault chưa được tạo',
   'The editor was not found: {program}': 'Không tìm thấy editor: {program}',
   'Could not start the editor: {error}': 'Không khởi động được editor: {error}',
+  'Choose where to save the file again': 'Chọn lại chỗ lưu file',
+  'Ignore certificate errors': 'Bỏ qua lỗi chứng chỉ',
+  'Ignore certificate errors for updates?': 'Bỏ qua lỗi chứng chỉ khi cập nhật?',
+  'Only turn this on behind a company proxy that inspects TLS with its own certificate. Downloaded installers are still checked against the release signature.':
+    'Chỉ bật khi đứng sau proxy công ty kiểm tra TLS bằng chứng chỉ riêng. Bản cài tải về vẫn được kiểm theo chữ ký phát hành.',
+  'Choose the file or folder on this computer again': 'Chọn lại file hoặc thư mục trên máy',
+  '“{name}” is a program or script. Choose an editor in Settings › Files to open it as text.':
+    '“{name}” là chương trình hoặc script. Chọn editor trong Settings › Files để mở dạng văn bản.',
   'Snippet not found': 'Không tìm thấy snippet',
   'No host column found (expected a column named Hostname, Host, IP or Address)':
     'Không tìm thấy cột host (cần một cột tên Hostname, Host, IP hoặc Address)',

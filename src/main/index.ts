@@ -8,14 +8,16 @@ import {
   BrowserWindow,
   clipboard,
   dialog,
+  ipcMain,
   MessageChannelMain,
   nativeTheme,
   powerMonitor,
   shell as electronShell,
+  type IpcMainEvent,
   type IpcMainInvokeEvent
 } from 'electron'
 import log from 'electron-log/main'
-import { SESSION_PORT_CHANNEL } from '@shared/constants'
+import { DROPPED_PATH_CHANNEL, SESSION_PORT_CHANNEL } from '@shared/constants'
 import type { EventChannel, EventPayload, InvokeResult } from '@shared/ipc'
 import { toForwardSpec } from '@shared/forwards'
 import { checkMainNativeModules } from './diagnostics'
@@ -27,7 +29,8 @@ import { MainModuleRegistry } from '../modules/registry/main'
 import { MAIN_MODULES } from '../modules/registry/all-main'
 import { ModuleProgramGrants } from './module-grants'
 import { showMessageBox, showOpenDialog, showSaveDialog } from './dialogs'
-import { ListedDirs, listLocal } from './local-files'
+import { ListedDirs, listLocal, protectedFromTrash } from './local-files'
+import { LocalPathGrants } from './local-path-grants'
 import { openInEditor, RemoteEditFiles } from './remote-edit'
 import { sessionLogFor } from './session-log-path'
 import { ShellService } from './shells'
@@ -35,7 +38,7 @@ import { installGlobalGuards, secureWebPreferences } from './security'
 import { resolveLanguage, resolveLocale, setLanguage, t, type Language } from '@shared/i18n'
 import { formatDateTime } from '@shared/i18n/format'
 import { DEFAULT_SETTINGS } from '@shared/settings'
-import { isAppUrl } from './security-policy'
+import { devRendererUrl, isAppUrl } from './security-policy'
 import { spawnElectronHost } from './session-host/electron-spawn'
 import { SessionHostSupervisor } from './session-host/supervisor'
 import { CorruptDatabaseError, dailyBackupIfDue, openStore, storePaths, type Db } from './store'
@@ -65,7 +68,7 @@ import linuxIcon from '../../build/icons/256x256.png?asset'
 log.initialize()
 log.transports.file.level = 'info'
 
-const devServerUrl = process.env['ELECTRON_RENDERER_URL']
+const devServerUrl = devRendererUrl(app.isPackaged, process.env)
 /** File renderer của bản build — URL duy nhất (ngoài dev server) được gọi IPC / ở lại cửa sổ. */
 const rendererIndexHtml = join(__dirname, '../renderer/index.html')
 /** Bật các IPC chỉ dành cho test (giết Session Host...). Không bao giờ bật trên bản phát hành. */
@@ -86,6 +89,8 @@ process.on('unhandledRejection', (reason) => {
 })
 
 let mainWindow: BrowserWindow | null = null
+/** Đường dẫn trên máy người dùng đã chọn (hộp thoại / kéo thả) — module chỉ đọc / ghi ở đó. */
+const pathGrants = new LocalPathGrants()
 
 /** User mặc định cho jump host không ghi user (như OpenSSH: user đang đăng nhập). */
 function localUser(): string {
@@ -126,6 +131,8 @@ let knownHosts: KnownHosts | null = null
 let hosts: HostService | null = null
 /** Phiên SSH của host đã lưu đang chờ báo hệ điều hành server (sessionId → hostId). */
 const osSessions = new Map<string, string>()
+/** Số phiên tmux theo tab (tab đóng / renderer tải lại → trả số). */
+const tmuxSlots = new TmuxSlots()
 let snippets: SnippetService | null = null
 let history: CommandHistory | null = null
 let modules: MainModuleRegistry | null = null
@@ -153,7 +160,7 @@ function send<C extends EventChannel>(channel: C, payload: EventPayload<C>): voi
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
 }
 
-function isTrustedSender(event: IpcMainInvokeEvent): boolean {
+function isTrustedSender(event: IpcMainInvokeEvent | IpcMainEvent): boolean {
   const frame = event.senderFrame
   if (!frame || !mainWindow || event.sender !== mainWindow.webContents) return false
   // Chỉ frame gốc; app không dùng iframe nên frame con nào gửi IPC cũng là bất thường.
@@ -318,8 +325,6 @@ function registerIpc(): void {
       ]
     }
   })
-
-  const tmuxSlots = new TmuxSlots()
 
   handle('session:open', isTrustedSender, async (spec) => {
     const window = mainWindow
@@ -590,7 +595,9 @@ function registerIpc(): void {
       properties: ['openFile', 'multiSelections'] as ('openFile' | 'multiSelections')[]
     }
     const result = await showOpenDialog(mainWindow, options)
-    return result.canceled ? [] : result.filePaths
+    if (result.canceled) return []
+    for (const p of result.filePaths) pathGrants.grant(p, ['read'], false)
+    return result.filePaths
   })
   handle('dialog:saveFile', isTrustedSender, async (defaultName) => {
     const options = {
@@ -598,7 +605,14 @@ function registerIpc(): void {
       defaultPath: join(app.getPath('downloads'), defaultName.replace(/[\\/]/g, '_'))
     }
     const result = await showSaveDialog(mainWindow, options)
-    return result.canceled || !result.filePath ? null : result.filePath
+    if (result.canceled || !result.filePath) return null
+    pathGrants.grant(result.filePath, ['write'], false)
+    return result.filePath
+  })
+  handle('dialog:writeChosen', isTrustedSender, async (path, text) => {
+    if (!pathGrants.allows(path, 'write')) throw new Error(t('Choose where to save the file again'))
+    await writeFile(path, text, 'utf8')
+    return null
   })
   handle('dialog:saveText', isTrustedSender, async (defaultName, text) => {
     const result = await showSaveDialog(mainWindow, {
@@ -672,7 +686,9 @@ function registerIpc(): void {
   })
   handle('local:trash', isTrustedSender, async (paths) => {
     // Chỉ mục trong thư mục renderer vừa duyệt; vào Thùng rác (khôi phục được), không xoá hẳn.
-    if (!paths.every((p) => listedDirs.allows(p))) throw new Error(t('This item cannot be moved'))
+    const guard = { home: app.getPath('home'), appData: app.getPath('userData') }
+    if (!paths.every((p) => listedDirs.allows(p) && !protectedFromTrash(p, guard)))
+      throw new Error(t('This item cannot be moved'))
     for (const p of paths) await electronShell.trashItem(p)
   })
   // Editor ngoài là chương trình main sẽ chạy → chỉ đặt qua hộp thoại của main.
@@ -697,7 +713,26 @@ function registerIpc(): void {
       properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[]
     }
     const result = await showOpenDialog(mainWindow, options)
-    return result.canceled ? null : (result.filePaths[0] ?? null)
+    const folder = result.canceled ? null : (result.filePaths[0] ?? null)
+    // Thư mục chọn để lưu file tải về / tải cả thư mục lên: module được đọc / ghi bên trong.
+    if (folder) pathGrants.grant(folder, ['read', 'write'], true)
+    return folder
+  })
+  // Preload báo đường dẫn của File thật (kéo thả / chọn file) — xem preload pathForFile.
+  ipcMain.on(DROPPED_PATH_CHANNEL, (event, path: unknown) => {
+    if (isTrustedSender(event) && typeof path === 'string' && path.length <= 4096)
+      pathGrants.grant(path, ['read'], true)
+    event.returnValue = null
+  })
+  // Thư mục log là nơi main ghi file → chỉ đặt qua hộp thoại của main (renderer không tự đặt).
+  handle('logs:chooseFolder', isTrustedSender, async () => {
+    const result = await showOpenDialog(mainWindow, {
+      title: t('Choose a folder for session logs'),
+      defaultPath: logDirectory(),
+      properties: ['openDirectory', 'createDirectory']
+    })
+    const folder = result.canceled ? null : (result.filePaths[0] ?? null)
+    return folder ? requireSettings().update({ logging: { directory: folder } }) : null
   })
   handle('logs:openFolder', isTrustedSender, async () => {
     const dir = logDirectory()
@@ -751,6 +786,13 @@ function createWindow(): void {
     mainWindow?.show()
   })
 
+  // Renderer nạp (lần đầu, reload sau crash): tab của lần nạp trước đã mất cùng renderer cũ (Session
+  // Host tự đóng phiên khi cổng đóng) — trả số tmux / bỏ phiên chờ báo hệ điều hành của chúng, để
+  // tab mở lại về đúng phiên tmux "shellhouse-1"… như sau khi mở lại app.
+  mainWindow.webContents.on('did-start-loading', () => {
+    tmuxSlots.releaseAll()
+    osSessions.clear()
+  })
   installEditContextMenu(mainWindow)
   installDevToolsShortcut(mainWindow)
   // Renderer chết → tải lại, nhưng không lặp vô hạn nếu nó chết ngay khi nạp (crash loop).
@@ -844,6 +886,7 @@ if (!app.requestSingleInstanceLock()) {
       },
       listWslDistros: wslDistros,
       ownsEditFile: (path) => remoteEdits.owns(path),
+      allowsLocalPath: (path, access) => pathGrants.allows(path, access),
       network: () => settings?.get().network ?? DEFAULT_SETTINGS.network,
       // Cùng thư mục nhà với phần còn lại của app (E2E đổi bằng SHELLHOUSE_HOME).
       home: app.getPath('home'),
@@ -968,6 +1011,25 @@ if (!app.requestSingleInstanceLock()) {
     handle('updates:download', isTrustedSender, () => updaterRef.download())
     handle('updates:install', isTrustedSender, () => {
       updaterRef.install()
+    })
+    // Tắt kiểm chứng chỉ khi tải cập nhật: bật phải xác nhận ở hộp thoại của main (mặc định Cancel).
+    handle('updates:setInsecure', isTrustedSender, async (enabled) => {
+      const settingsRef = settings
+      if (!settingsRef) throw new Error(t('Data is not ready yet'))
+      if (enabled) {
+        const { response } = await showMessageBox(mainWindow, {
+          type: 'warning',
+          buttons: [t('Cancel'), t('Ignore certificate errors')],
+          defaultId: 0,
+          cancelId: 0,
+          message: t('Ignore certificate errors for updates?'),
+          detail: t(
+            'Only turn this on behind a company proxy that inspects TLS with its own certificate. Downloaded installers are still checked against the release signature.'
+          )
+        })
+        if (response !== 1) return null
+      }
+      return settingsRef.update({ network: { updatesInsecure: enabled } })
     })
     if (updaterRef.enabled && settings.get().updates.autoCheck) {
       setTimeout(() => void updaterRef.check(), 10_000).unref()

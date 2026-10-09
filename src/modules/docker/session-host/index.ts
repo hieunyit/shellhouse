@@ -100,6 +100,7 @@ function sshCli(ssh: SshCapability): DockerCli {
 function localService(ctx: HostModuleContext): DockerService {
   const cli = localCli(ctx)
   return new DockerService({
+    localPathGranted: (path, access) => ctx.localPathGranted(path, access),
     cli,
     connect: async (signal): Promise<DockerBackend> => {
       const home = homedir()
@@ -156,6 +157,7 @@ function wslCli(ctx: HostModuleContext, distro: string): DockerCli {
 function wslService(ctx: HostModuleContext, distro: string): DockerService {
   const cli = wslCli(ctx, distro)
   return new DockerService({
+    localPathGranted: (path, access) => ctx.localPathGranted(path, access),
     cli,
     connect: async (signal): Promise<DockerBackend> => {
       if (!ctx.spawn.available('wsl')) throw new Error(t('WSL is not installed on this computer.'))
@@ -205,6 +207,7 @@ function tcpService(ctx: HostModuleContext, cfg: DockerTcpConfig): DockerService
       )
     )
   return new DockerService({
+    localPathGranted: (path, access) => ctx.localPathGranted(path, access),
     cli: { exec: unsupported, spawn: unsupported },
     connect: async (signal): Promise<DockerBackend> => {
       const engine = new EngineClient(() => connectTls(cfg))
@@ -231,6 +234,7 @@ function tcpService(ctx: HostModuleContext, cfg: DockerTcpConfig): DockerService
 function remoteService(ctx: HostModuleContext, ssh: SshCapability): DockerService {
   const cli = sshCli(ssh)
   return new DockerService({
+    localPathGranted: (path, access) => ctx.localPathGranted(path, access),
     cli,
     connect: async (signal): Promise<DockerBackend> => {
       const candidates = ['/var/run/docker.sock', '/run/docker.sock']

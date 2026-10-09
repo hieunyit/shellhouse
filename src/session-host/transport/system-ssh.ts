@@ -8,11 +8,20 @@ function formatHost(host: string): string {
   return host.includes(':') ? `[${host}]` : host
 }
 
-function checkTarget(target: { host: string; username: string }): void {
+/**
+ * User cho `ssh` hệ thống: chặt hơn `Username` chung. OpenSSH đổi `-J` thành ProxyCommand chạy qua
+ * `sh -c` mà không quote user / host của jump host (bản < 9.6 không tự kiểm), và `%r` trong
+ * ProxyCommand / Match exec của ~/.ssh/config cũng chèn user vào lệnh shell — user lấy từ file
+ * import (`a$(curl …)`) không được thành lệnh trên máy này. Như `valid_ruser` của OpenSSH 9.6.
+ */
+const SYSTEM_SSH_USER = /^[A-Za-z0-9._][A-Za-z0-9._-]*$/
+
+function checkTarget(target: { host: string; username: string }, jump = false): void {
   // Kiểm tra lại dù zod đã kiểm ở main: đây là ranh giới cuối trước khi thành tham số dòng lệnh.
-  if (!Hostname.safeParse(target.host).success)
+  // Jump host: "%" bị ProxyCommand hiểu là token (%h, %p…) → không nhận (vd. fe80::1%eth0).
+  if (!Hostname.safeParse(target.host).success || (jump && target.host.includes('%')))
     throw new Error(t('Invalid hostname: {value}', { value: target.host }))
-  if (!Username.safeParse(target.username).success)
+  if (!Username.safeParse(target.username).success || !SYSTEM_SSH_USER.test(target.username))
     throw new Error(t('Invalid username: {value}', { value: target.username }))
 }
 
@@ -32,7 +41,7 @@ export function buildSystemSshArgs(
     args.push('-i', spec.keyFile)
   }
   if (spec.jumps.length > 0) {
-    for (const j of spec.jumps) checkTarget(j)
+    for (const j of spec.jumps) checkTarget(j, true)
     args.push(
       '-J',
       spec.jumps.map((j) => `${j.username}@${formatHost(j.host)}:${j.port}`).join(',')

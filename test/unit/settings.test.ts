@@ -57,6 +57,24 @@ describe('SettingsPatch (renderer → main)', () => {
       '/usr/bin/code'
     )
   })
+
+  it('bỏ logging.directory và network.updatesInsecure (chỉ main đặt qua hộp thoại)', async () => {
+    const { SettingsPatch } = await import('@shared/settings')
+    const patch = SettingsPatch.parse({
+      logging: { directory: '/home/u/.config/autostart', mode: 'all' },
+      network: { updatesInsecure: true, proxyMode: 'none' }
+    })
+    expect(patch).toEqual({ logging: { mode: 'all' }, network: { proxyMode: 'none' } })
+    const next = applyPatch(DEFAULT_SETTINGS, patch)
+    expect(next.logging.directory).toBe('')
+    expect(next.network.updatesInsecure).toBe(false)
+    const byMain = applyPatch(DEFAULT_SETTINGS, {
+      logging: { directory: '/home/u/logs' },
+      network: { updatesInsecure: true }
+    })
+    expect(byMain.logging.directory).toBe('/home/u/logs')
+    expect(byMain.network.updatesInsecure).toBe(true)
+  })
 })
 
 describe('SettingsService', () => {

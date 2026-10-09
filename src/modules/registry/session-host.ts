@@ -11,6 +11,7 @@ import {
 } from '../../session-host/modules/local-programs'
 import { collect } from '../../session-host/modules/ssh-capability'
 import { expandHome, localPathAllowed } from './local-paths'
+import { CORE_EDIT_FILE, CORE_LOCAL_PATH } from './host-types'
 import type {
   HostModule,
   HostModuleContext,
@@ -201,7 +202,18 @@ export class HostModuleRegistry {
       fromMain: (name, params) =>
         this.deps.requestMain
           ? this.deps.requestMain(id, name, params)
-          : Promise.reject(new Error('Not available'))
+          : Promise.reject(new Error('Not available')),
+      // Hỏi lỗi (main bận, module tắt…) = không cho phép.
+      localPathGranted: async (path, access) =>
+        this.deps.requestMain
+          ? (await this.deps
+              .requestMain(id, CORE_LOCAL_PATH, { path, access })
+              .catch(() => false)) === true
+          : false,
+      ownsEditFile: async (path) =>
+        this.deps.requestMain
+          ? (await this.deps.requestMain(id, CORE_EDIT_FILE, path).catch(() => false)) === true
+          : false
     }
   }
 

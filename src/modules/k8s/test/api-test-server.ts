@@ -86,6 +86,8 @@ export interface ApiTestServer {
   seedDemo(): void
   get(plural: string, namespace: string | undefined, name: string): Obj | undefined
   list(plural: string): Obj[]
+  /** Số watch đang mở cho `plural` (server giả không phát lại theo resourceVersion như thật). */
+  watching(plural: string): number
   /** Làm các watch sau nhận 410 Gone. */
   expireWatches(): void
   /** Ngắt các watch đang mở; `n` lần watch tiếp theo trả 503 (mạng / API server chập chờn). */
@@ -2043,6 +2045,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       return store.get(plural)?.get(meta?.namespaced ? `${namespace ?? ''}/${name}` : name)
     },
     list: (plural) => [...(store.get(plural)?.values() ?? [])],
+    watching: (plural) => [...watchers].filter((w) => w.plural === plural).length,
     expireWatches: () => {
       expired = true
       for (const w of watchers) w.res.end()

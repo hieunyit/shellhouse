@@ -78,7 +78,23 @@ export class VaultController {
     this.vault.lock()
   }
 
+  /**
+   * Đổi master password (DEK được xoay — xem Vault.changePassword). Đang "nhớ trên máy": lưu DEK mới
+   * vào keychain, khoá cũ hết hiệu lực.
+   */
   async changePassword(current: Secret, next: Secret): Promise<void> {
-    await this.vault.changePassword(current, next)
+    const remember = this.getSettings().security.rememberOnDevice && this.deviceKeys.has()
+    const { rotated } = await this.vault.changePassword(current, next, (dek) => {
+      try {
+        if (remember) this.deviceKeys.save(dek)
+      } finally {
+        dek.fill(0)
+      }
+    })
+    this.log(
+      rotated
+        ? 'Changed the master password and re-encrypted the vault with a new key'
+        : 'Changed the master password (some secrets could not be re-encrypted; kept the current key)'
+    )
   }
 }

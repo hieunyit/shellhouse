@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { GetObjectCommand, PutObjectCommand, type S3Client } from '@aws-sdk/client-s3'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { S3Bucket, S3BucketInfo, S3SyncProgress } from '../../shared/ops'
+import { S3Op, type S3Bucket, type S3BucketInfo, type S3SyncProgress } from '../../shared/ops'
 import { createS3Client, type S3Connection } from '../../session-host/client'
 import { S3Service } from '../../session-host/service'
 import { tempDir } from '../../../../../test/unit/helpers'
@@ -181,15 +180,15 @@ describe('S3: đồng bộ', () => {
     }
   )
 
-  it('thông tin bucket (dịch vụ không hỗ trợ → null, không lỗi) và ghi file export', async () => {
+  it('thông tin bucket (dịch vụ không hỗ trợ → null, không lỗi); không còn op ghi file tuỳ ý', async () => {
     const { server: a } = await server(['demo'])
     const s = service(a)
     const info = (await s.run({ op: 'bucketInfo', bucket: 'demo' })) as S3BucketInfo
     expect(info).toHaveProperty('versioning')
     expect(info).toHaveProperty('encryption')
-    const dir = tempDir()
-    const file = join(dir, 'buckets.csv')
-    await s.run({ op: 'writeFile', localPath: file, content: 'a,b\r\n' })
-    expect(readFileSync(file, 'utf8')).toBe('a,b\r\n')
+    // File export do main ghi (dialog:writeChosen, chỉ đường dẫn vừa chọn trong hộp Save).
+    expect(
+      S3Op.safeParse({ op: 'writeFile', localPath: join(tempDir(), 'x'), content: 'a' }).success
+    ).toBe(false)
   })
 })

@@ -47,17 +47,18 @@ export function pluginBinary(command: string): ModuleBinary {
 }
 
 /**
- * Biến môi trường từ kubeconfig không được đặt cho plugin: nạp mã vào chương trình (LD_PRELOAD,
- * NODE_OPTIONS, PYTHONSTARTUP, CLOUDSDK_PYTHON_ARGS…), đổi PATH / HOME, hay trỏ sang file cấu
- * hình khác (AWS_CONFIG_FILE → credential_process chạy lệnh tuỳ ý; CLOUDSDK_CONFIG, AZURE_CONFIG_DIR,
- * AZURE_EXTENSION_DIR, BOTO_CONFIG, AWS_DATA_PATH tương tự). Kubeconfig lạ (import, tải về) không
- * được biến plugin xác thực đã cho phép thành chạy mã tuỳ ý.
+ * Biến môi trường từ kubeconfig được đặt cho plugin: DANH SÁCH CHO PHÉP (chọn hồ sơ / region /
+ * project / tài khoản, thông tin service principal). Danh sách chặn trước đây luôn lọt: proxy kèm
+ * tắt kiểm chứng chỉ (`HTTPS_PROXY` + `CLOUDSDK_AUTH_DISABLE_SSL_VALIDATION` → gcloud gửi refresh
+ * token qua máy của kẻ tấn công), `GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES` (chạy lệnh), file cấu
+ * hình khác (`AWS_CONFIG_FILE` → credential_process), nạp mã (`LD_PRELOAD`, `NODE_OPTIONS`…).
+ * Kubeconfig lạ (import, tải về) không được biến plugin đã cho phép thành công cụ của người khác.
+ * Biến môi trường của chính người dùng (proxy công ty…) vẫn được plugin kế thừa như thường.
  */
-const BLOCKED_ENV =
-  /^(LD_|DYLD_|PYTHON|PERL|RUBY|NODE_|BASH_FUNC_|GIT_|CLOUDSDK_PYTHON|JAVA_|_JAVA_|JDK_JAVA_|MALLOC_|GCONV_|LUA_|ELECTRON_)|^(BASH_ENV|ENV|PATH|PATHEXT|HOME|USERPROFILE|SHELL|SHELLOPTS|BASHOPTS|IFS|PS4|PROMPT_COMMAND|COMSPEC|TMPDIR|TMP|TEMP|KUBERNETES_EXEC_INFO|SSLKEYLOGFILE|AWS_CONFIG_FILE|AWS_SHARED_CREDENTIALS_FILE|AWS_DATA_PATH|CLOUDSDK_CONFIG|AZURE_CONFIG_DIR|AZURE_EXTENSION_DIR|BOTO_CONFIG)$/i
-const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+const ALLOWED_ENV =
+  /^(AWS_(PROFILE|DEFAULT_PROFILE|REGION|DEFAULT_REGION|STS_REGIONAL_ENDPOINTS|SDK_LOAD_CONFIG|CA_BUNDLE|ROLE_SESSION_NAME)|CLOUDSDK_CORE_(PROJECT|ACCOUNT)|CLOUDSDK_ACTIVE_CONFIG_NAME|CLOUDSDK_COMPUTE_(REGION|ZONE)|USE_GKE_GCLOUD_AUTH_PLUGIN|GOOGLE_APPLICATION_CREDENTIALS|AAD_(LOGIN_METHOD|SERVICE_PRINCIPAL_CLIENT_ID|SERVICE_PRINCIPAL_CLIENT_SECRET|SERVICE_PRINCIPAL_CLIENT_CERTIFICATE|SERVICE_PRINCIPAL_CLIENT_CERTIFICATE_PASSWORD|USER_PRINCIPAL_NAME|USER_PRINCIPAL_PASSWORD)|AZURE_(CLIENT_ID|TENANT_ID|CLIENT_SECRET|FEDERATED_TOKEN_FILE|ENVIRONMENT))$/
 
-/** Biến môi trường an toàn cho plugin (bỏ biến nguy hiểm / tên lạ); trả kèm tên đã bỏ. */
+/** Biến môi trường an toàn cho plugin (chỉ biến trong danh sách cho phép); trả kèm tên đã bỏ. */
 export function pluginEnv(env: Record<string, string>): {
   env: Record<string, string>
   dropped: string[]
@@ -65,10 +66,20 @@ export function pluginEnv(env: Record<string, string>): {
   const out: Record<string, string> = {}
   const dropped: string[] = []
   for (const [k, v] of Object.entries(env)) {
-    if (!ENV_NAME.test(k) || BLOCKED_ENV.test(k) || v.includes('\0')) dropped.push(k)
+    if (!ALLOWED_ENV.test(k) || v.includes('\0')) dropped.push(k)
     else out[k] = v
   }
   return { env: out, dropped }
+}
+
+/**
+ * Tuỳ chọn đổi nơi gửi thông tin xác thực / tắt kiểm chứng chỉ / nạp thêm tuỳ chọn từ file — không
+ * nhận từ kubeconfig (ở bất kỳ vị trí nào, dạng `--x v` hay `--x=v`).
+ */
+const BLOCKED_ARGS: Partial<Record<ModuleBinary, readonly string[]>> = {
+  aws: ['--endpoint-url', '--no-verify-ssl', '--ca-bundle'],
+  gcloud: ['--flags-file', '--log-http'],
+  kubelogin: ['--authority-host']
 }
 
 /**
@@ -107,6 +118,12 @@ export function checkPluginArgs(binary: ModuleBinary, args: readonly string[]): 
         : binary === 'gcloud'
           ? leadingSubcommand(args, ['config', 'config-helper'])
           : true
+  const blocked = BLOCKED_ARGS[binary] ?? []
+  const bad = args.find((a) => blocked.some((o) => a === o || a.startsWith(`${o}=`)))
+  if (bad !== undefined)
+    throw new Error(
+      `This context runs “${binary}” with “${bad.split('=')[0] ?? bad}”, which Shellhouse does not allow for sign-in commands.`
+    )
   if (!ok || args.some((a) => a.includes('\0')))
     throw new Error(
       `This context runs “${binary} ${args.slice(0, 4).join(' ')}”, which is not a sign-in command — Shellhouse only runs ${

@@ -20,4 +20,9 @@ export class TmuxSlots {
   release(sessionId: string): void {
     this.slots.delete(sessionId)
   }
+
+  /** Renderer tải lại (crash, reload): mọi tab cũ đã mất — trả hết số. */
+  releaseAll(): void {
+    this.slots.clear()
+  }
 }

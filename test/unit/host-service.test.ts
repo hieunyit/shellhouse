@@ -89,6 +89,31 @@ describe('HostService', () => {
     db.close() // Windows không cho xoá file DB đang mở khi dọn thư mục tạm
   })
 
+  it('đổi master password (xoay DEK): mật khẩu host, private key + passphrase vẫn đọc được', async () => {
+    const { vault, service } = await setup()
+    const id = service.saveHost({ ...base, auth: 'password', password: 'PW-ROTATE-1' })
+    const key = service.generateKey({
+      name: 'k',
+      type: 'ed25519',
+      passphrase: 'pass-phrase',
+      comment: 'k@test'
+    })
+    const pemBefore = service.privateKeyPem(key.id)
+    const before = pemBefore.revealString()
+    pemBefore.dispose()
+    const { rotated } = await vault.changePassword(
+      Secret.fromString('master-password'),
+      Secret.fromString('new-master-password')
+    )
+    expect(rotated).toBe(true)
+    vault.lock()
+    await vault.unlock(Secret.fromString('new-master-password'))
+    expect(service.resolveForConnect(id).credentials.password).toBe('PW-ROTATE-1')
+    const pemAfter = service.privateKeyPem(key.id)
+    expect(pemAfter.revealString()).toBe(before)
+    pemAfter.dispose()
+  })
+
   it('vault khoá → không lưu được mật khẩu, không giải mã được', async () => {
     const { vault, service } = await setup()
     const id = service.saveHost({ ...base, auth: 'password', password: 'x' })

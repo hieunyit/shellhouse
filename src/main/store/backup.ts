@@ -76,12 +76,17 @@ export async function dailyBackupIfDue(
  * đĩa → nguyên tử): lỗi giữa chừng (đĩa đầy, file sao lưu không đọc được) không để lại DB dở dang.
  */
 export function restoreBackup(backupPath: string, dbPath: string): void {
-  const temp = `${dbPath}.restore-${stamp(Date.now())}`
+  const now = stamp(Date.now())
+  const temp = `${dbPath}.restore-${now}`
   try {
     copyFileSync(backupPath, temp)
+    // Cất DB cũ (kèm WAL — giao dịch chưa checkpoint nằm ở đó) TRƯỚC khi xoá gì: chép lỗi (đĩa
+    // đầy…) thì dừng, DB cũ và WAL của nó còn nguyên.
+    const kept = `${dbPath}.corrupt-${now}`
+    if (existsSync(dbPath)) copyFileSync(dbPath, kept)
+    if (existsSync(`${dbPath}-wal`)) copyFileSync(`${dbPath}-wal`, `${kept}-wal`)
     // WAL / SHM thuộc DB cũ — để lại cạnh DB mới thì SQLite sẽ áp nhầm vào.
     for (const suffix of ['-wal', '-shm']) rmSync(dbPath + suffix, { force: true })
-    if (existsSync(dbPath)) copyFileSync(dbPath, `${dbPath}.corrupt-${stamp(Date.now())}`)
     renameSync(temp, dbPath)
   } finally {
     rmSync(temp, { force: true })

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { lstat, stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { t } from '@shared/i18n'
+import { requireLocalPaths } from '../../registry/local-access'
 import type { HostModuleSession, TerminalSize } from '../../registry/host-types'
 import type { Transport, TransportCallbacks } from '../../../session-host/transport/types'
 import {
@@ -56,6 +57,11 @@ export interface DockerServiceDeps {
   reprobeCli?: boolean
   /** Thông tin đăng nhập registry đã lưu (main giải mã từ vault). */
   registryAuth?(id: string): Promise<RegistryAuth>
+  /**
+   * Đường dẫn trên máy (thư mục lưu file tải về, file tải lên) có phải người dùng đã chọn qua hộp
+   * thoại của main / kéo thả không (`ctx.localPathGranted`). Không có = từ chối mọi đường dẫn.
+   */
+  localPathGranted?(path: string, access: 'read' | 'write'): Promise<boolean>
 }
 
 /** Liệt kê qua archive (container không có shell): đọc tối đa chừng này rồi dừng. */
@@ -229,6 +235,12 @@ export class DockerService implements HostModuleSession {
     }
     if (isMutating(op) && (await this.isReadOnly()))
       throw new Error(t('Read-only mode is on for this Docker — turn it off to make changes'))
+    const local = {
+      localPathGranted: (path: string, access: 'read' | 'write') =>
+        this.deps.localPathGranted?.(path, access) ?? Promise.resolve(false)
+    }
+    if (op.op === 'files.download') await requireLocalPaths(local, [op.localDir], 'write')
+    if (op.op === 'files.upload') await requireLocalPaths(local, op.localPaths, 'read')
     const backend = await this.getBackend(signal)
     try {
       return await this.runOp(op, backend, signal)

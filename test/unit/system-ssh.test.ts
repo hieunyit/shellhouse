@@ -52,4 +52,25 @@ describe('buildSystemSshArgs', () => {
     ]
     for (const spec of bad) expect(() => buildSystemSshArgs(spec)).toThrow()
   })
+
+  it('user có ký tự shell (jump host thành ProxyCommand qua sh -c) / "%" ở jump host bị chặn', () => {
+    const bad = [
+      { target, jumps: [{ host: 'bastion', port: 22, username: 'a$(touch /tmp/pwn)' }] },
+      { target, jumps: [{ host: 'bastion', port: 22, username: 'a;id' }] },
+      { target, jumps: [{ host: 'bastion', port: 22, username: 'a`id`' }] },
+      { target, jumps: [{ host: 'bastion', port: 22, username: "o'brien" }] },
+      { target, jumps: [{ host: 'fe80::1%eth0', port: 22, username: 'a' }] },
+      { target: { ...target, username: 'x|y' }, jumps: [] }
+    ]
+    for (const spec of bad)
+      expect(() => buildSystemSshArgs({ ...spec, keyFile: null })).toThrow(/Invalid/)
+    // User / host bình thường vẫn được; "%" ở đích (không qua ProxyCommand) vẫn được.
+    expect(() =>
+      buildSystemSshArgs({
+        target: { host: 'fe80::1%eth0', port: 22, username: 'first.last_1' },
+        jumps: [{ host: 'bastion-1.corp', port: 22, username: 'svc-deploy' }],
+        keyFile: null
+      })
+    ).not.toThrow()
+  })
 })

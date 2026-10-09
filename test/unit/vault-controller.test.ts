@@ -56,6 +56,29 @@ describe('VaultController', () => {
     expect(vault.state()).toBe('locked')
   })
 
+  it('đổi master password khi đang nhớ trên máy: keychain giữ DEK mới, tự mở vẫn được', async () => {
+    const { vault, store, controller } = await setup({ rememberOnDevice: true })
+    controller.enableRemember()
+    const before = store.load()
+    await controller.changePassword(
+      Secret.fromString('master-password'),
+      Secret.fromString('new-password')
+    )
+    const after = store.load()
+    expect(after && before && after.equals(before)).toBe(false)
+    vault.lock()
+    expect(controller.tryAutoUnlock()).toBe(true)
+  })
+
+  it('đổi master password khi không nhớ trên máy: không lưu gì vào keychain', async () => {
+    const { store, controller } = await setup()
+    await controller.changePassword(
+      Secret.fromString('master-password'),
+      Secret.fromString('new-password')
+    )
+    expect(store.has()).toBe(false)
+  })
+
   it('không tự mở nếu cài đặt tắt, dù có khoá lưu', async () => {
     const { vault, controller, setSettings } = await setup({ rememberOnDevice: true })
     controller.enableRemember()

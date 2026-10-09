@@ -74,6 +74,8 @@ function service(deps: Partial<DockerServiceDeps> & Pick<DockerServiceDeps, 'con
       const r = (REGISTRIES as Record<string, RegistryAuth | undefined>)[id]
       return r ? Promise.resolve(r) : Promise.reject(new Error('The registry no longer exists'))
     },
+    // Main cấp: test coi mọi đường dẫn là người dùng đã chọn (test riêng kiểm phần từ chối).
+    localPathGranted: () => Promise.resolve(true),
     ...deps
   })
   cleanups.push(() => {
@@ -498,6 +500,62 @@ function fakeCli(
   }
   return { cli, calls, temp }
 }
+
+describe('tab Files: đường dẫn trên máy phải do người dùng chọn', () => {
+  it('tải về / tải lên với đường dẫn main không cấp → từ chối, không ghi / đọc gì', async () => {
+    const server = await engine()
+    const asked: { path: string; access: string }[] = []
+    const dir = tempDir('sh-docker-deny-')
+    const { run } = apiService(server, {
+      localPathGranted: (path, access) => {
+        asked.push({ path, access })
+        return Promise.resolve(path.startsWith(dir))
+      }
+    })
+    const web = nth(server.containers, 0).Id
+    const outside = tempDir('sh-docker-outside-')
+    await expect(
+      run({ op: 'files.download', id: web, paths: ['/etc/hosts'], localDir: outside })
+    ).rejects.toThrow('Choose the file or folder on this computer again')
+    expect(existsSync(join(outside, 'hosts'))).toBe(false)
+    await expect(
+      run({ op: 'files.upload', id: web, dir: '/tmp', localPaths: [join(dir, 'a'), '/etc/passwd'] })
+    ).rejects.toThrow('Choose the file or folder on this computer again')
+    expect(asked).toEqual([
+      { path: outside, access: 'write' },
+      { path: join(dir, 'a'), access: 'read' },
+      { path: '/etc/passwd', access: 'read' }
+    ])
+    // Đường dẫn đã cấp thì chạy bình thường.
+    await run({ op: 'files.download', id: web, paths: ['/etc/hosts'], localDir: dir })
+    expect(existsSync(join(dir, 'hosts'))).toBe(true)
+  })
+
+  it('không có cách hỏi main (thiếu localPathGranted) → từ chối', async () => {
+    const server = await engine()
+    const svc = new DockerService({
+      cli: noCli,
+      openPty: () => Promise.reject(new Error('no pty')),
+      emit: () => undefined,
+      log: () => undefined,
+      connect: () => Promise.resolve(new ApiBackend(new EngineClient(socketTo(server.path))))
+    })
+    cleanups.push(() => {
+      svc.dispose()
+    })
+    await expect(
+      svc.run(
+        {
+          op: 'files.download',
+          id: nth(server.containers, 0).Id,
+          paths: ['/etc/hosts'],
+          localDir: tempDir('sh-docker-nodep-')
+        },
+        new AbortController().signal
+      )
+    ).rejects.toThrow('Choose the file or folder on this computer again')
+  })
+})
 
 describe('CLI dự phòng: thao tác mới', () => {
   it('pull / push riêng tư: login --password-stdin vào --config tạm, xoá ngay sau đó', async () => {

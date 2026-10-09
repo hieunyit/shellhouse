@@ -228,8 +228,10 @@ export function parseSettings(raw: unknown): AppSettings {
 
 /**
  * Patch sâu 1 cấp cho các nhóm cài đặt — dạng renderer được gửi qua `settings:update`. Không có
- * `files.editor` (chương trình main sẽ chạy: chỉ đặt qua hộp thoại của main, `files:chooseEditor`)
- * và `security.rememberOnDevice` (bật/tắt qua `vault:setRemember` để khoá trên máy luôn khớp).
+ * `files.editor` (chương trình main sẽ chạy: chỉ đặt qua hộp thoại của main, `files:chooseEditor`),
+ * `security.rememberOnDevice` (bật/tắt qua `vault:setRemember` để khoá trên máy luôn khớp),
+ * `logging.directory` (nơi main ghi file: chỉ qua hộp thoại, `logs:chooseFolder`) và
+ * `network.updatesInsecure` (tắt kiểm chứng chỉ: main hỏi xác nhận, `updates:setInsecure`).
  * Trường lạ bị zod bỏ đi, không báo lỗi.
  */
 export const SettingsPatch = z.object({
@@ -237,9 +239,9 @@ export const SettingsPatch = z.object({
   terminal: TerminalSettings.partial().optional(),
   security: SecuritySettings.omit({ rememberOnDevice: true }).partial().optional(),
   updates: UpdateSettings.partial().optional(),
-  network: NetworkSettings.partial().optional(),
+  network: NetworkSettings.omit({ updatesInsecure: true }).partial().optional(),
   files: FileSettings.omit({ editor: true }).partial().optional(),
-  logging: LoggingSettings.partial().optional(),
+  logging: LoggingSettings.omit({ directory: true }).partial().optional(),
   keybindings: z.record(z.string().max(64), z.string().max(64)).optional(),
   customThemes: z.array(TerminalTheme).max(100).optional(),
   workspaces: z.array(Workspace).max(50).optional(),
@@ -256,9 +258,14 @@ export const SettingsPatch = z.object({
 export type SettingsPatch = z.infer<typeof SettingsPatch>
 
 /** Patch chỉ main dùng: thêm các trường renderer không được tự đặt. */
-export type MainSettingsPatch = Omit<SettingsPatch, 'security' | 'files'> & {
+export type MainSettingsPatch = Omit<
+  SettingsPatch,
+  'security' | 'files' | 'network' | 'logging'
+> & {
   security?: Partial<AppSettings['security']> | undefined
   files?: Partial<AppSettings['files']> | undefined
+  network?: Partial<AppSettings['network']> | undefined
+  logging?: Partial<AppSettings['logging']> | undefined
 }
 
 export function applyPatch(current: AppSettings, patch: MainSettingsPatch): AppSettings {

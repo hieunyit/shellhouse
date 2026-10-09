@@ -294,12 +294,6 @@ export const S3Op = z.discriminatedUnion('op', [
   z.object({ op: z.literal('listBucketsOf'), accountId: z.string().min(1).max(64) }),
   /** Region, versioning, mã hoá của một bucket (lỗi / không hỗ trợ → null). */
   z.object({ op: z.literal('bucketInfo'), bucket: Bucket }),
-  /** Ghi file người dùng vừa chọn trong hộp Save (export danh sách bucket). */
-  z.object({
-    op: z.literal('writeFile'),
-    localPath: LocalPath,
-    content: z.string().max(50 * 1024 * 1024)
-  }),
   /**
    * Đồng bộ `bucket/prefix` → `dest` (cùng hoặc khác tài khoản). Chạy nền; `dryRun` chỉ quét và
    * lập kế hoạch. Hỏi tiến độ bằng `syncPoll`, dừng bằng `syncStop`.

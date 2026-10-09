@@ -114,6 +114,9 @@ describe('Timeline + ghi event về máy', () => {
     // Bật ghi: event có sẵn (list) vào kho; event mới (watch) cũng vào.
     await run({ op: 'events.record', on: true })
     await until(() => stored().includes('BackOff'))
+    // Event mới phải tới SAU khi watch đã mở: server giả không phát lại theo resourceVersion (máy bận
+    // thì watch mở chậm hơn lần upsert → event bị lỡ, test chập chờn).
+    await until(() => server.watching('events') > 0)
     server.upsert('events', {
       apiVersion: 'v1',
       kind: 'Event',

@@ -58,34 +58,135 @@ export interface OpenDeps {
   /** shell.openPath của Electron: trả về '' nếu mở được, không thì thông báo lỗi. */
   openPath(path: string): Promise<string>
   platform: NodeJS.Platform
+  /** Cho test; mặc định chạy chương trình tách rời, không qua shell. */
+  spawn?: (program: string, args: string[]) => Promise<void>
+}
+
+/**
+ * Đuôi file mà "mở bằng ứng dụng mặc định" sẽ CHẠY thay vì mở để sửa: chương trình / script /
+ * shortcut / trình cài đặt của Windows, macOS, Linux. Tên do server đặt (không tin cậy) — kiểm theo
+ * mọi hệ điều hành, không phân biệt hoa thường.
+ */
+const EXECUTABLE_EXT = new Set([
+  // Windows
+  'exe',
+  'com',
+  'bat',
+  'cmd',
+  'pif',
+  'scr',
+  'cpl',
+  'msi',
+  'msp',
+  'mst',
+  'msc',
+  'hta',
+  'lnk',
+  'url',
+  'reg',
+  'inf',
+  'scf',
+  'chm',
+  'vb',
+  'vbs',
+  'vbe',
+  'js',
+  'jse',
+  'ws',
+  'wsc',
+  'wsf',
+  'wsh',
+  'ps1',
+  'psm1',
+  'psd1',
+  'appref-ms',
+  'application',
+  'gadget',
+  'settingcontent-ms',
+  'library-ms',
+  'search-ms',
+  'searchconnector-ms',
+  'diagcab',
+  'xll',
+  'appx',
+  'appxbundle',
+  'msix',
+  'msixbundle',
+  'jar',
+  'jnlp',
+  // macOS
+  'command',
+  'tool',
+  'terminal',
+  'app',
+  'pkg',
+  'mpkg',
+  'dmg',
+  'workflow',
+  'action',
+  'scpt',
+  'applescript',
+  'webloc',
+  'inetloc',
+  'fileloc',
+  // Linux
+  'desktop',
+  'appimage',
+  'run',
+  'flatpakref'
+])
+
+/** Tên file mà ứng dụng mặc định của hệ điều hành sẽ chạy (không phải mở để sửa). */
+export function isExecutableName(path: string): boolean {
+  const name = basename(path.replace(/\\/g, '/'))
+  const dot = name.lastIndexOf('.')
+  return dot >= 0 && EXECUTABLE_EXT.has(name.slice(dot + 1).toLowerCase())
+}
+
+/** Chạy chương trình tách rời (không qua shell — tên file do server đặt không thành lệnh). */
+function spawnDetached(program: string, args: string[]): Promise<void> {
+  return new Promise<void>((resolveSpawn, reject) => {
+    const child = spawn(program, args, { detached: true, stdio: 'ignore', shell: false })
+    child.once('error', (error) => {
+      reject(new Error(t('Could not start the editor: {error}', { error: error.message })))
+    })
+    child.once('spawn', () => {
+      child.unref()
+      resolveSpawn()
+    })
+  })
 }
 
 /**
  * Mở file bằng editor người dùng chọn, hoặc ứng dụng mặc định. Windows: file không có ứng dụng
  * liên kết (.conf, .service…) → Notepad thay vì báo lỗi.
+ *
+ * Chưa chọn editor mà file là chương trình / script (`.exe`, `.bat`, `.jar`, `.command`, `.desktop`…):
+ * KHÔNG đưa cho ứng dụng mặc định (sẽ chạy file do server đặt trên máy này) — Windows mở bằng
+ * Notepad, macOS bằng TextEdit (`open -t`), Linux báo chọn editor.
  */
 export async function openInEditor(path: string, editor: string, deps: OpenDeps): Promise<void> {
   const program = editor.trim()
   if (program) {
     if (!existsSync(program) && isAbsolute(program))
       throw new Error(t('The editor was not found: {program}', { program }))
-    await new Promise<void>((resolveSpawn, reject) => {
-      // Không qua shell: đường dẫn file (tên do server đặt) không bao giờ bị hiểu thành lệnh.
-      const child = spawn(program, [path], { detached: true, stdio: 'ignore', shell: false })
-      child.once('error', (error) => {
-        reject(new Error(t('Could not start the editor: {error}', { error: error.message })))
-      })
-      child.once('spawn', () => {
-        child.unref()
-        resolveSpawn()
-      })
-    })
+    await (deps.spawn ?? spawnDetached)(program, [path])
     return
+  }
+  if (isExecutableName(path)) {
+    if (deps.platform === 'win32') return (deps.spawn ?? spawnDetached)('notepad.exe', [path])
+    if (deps.platform === 'darwin') return (deps.spawn ?? spawnDetached)('open', ['-t', path])
+    throw new Error(
+      t(
+        '“{name}” is a program or script. Choose an editor in Settings › Files to open it as text.',
+        { name: basename(path) }
+      )
+    )
   }
   const error = await deps.openPath(path)
   if (!error) return
   if (deps.platform === 'win32') {
-    await openInEditor(path, 'notepad.exe', deps)
+    await (deps.spawn ?? spawnDetached)('notepad.exe', [path])
     return
   }
   throw new Error(error)
