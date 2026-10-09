@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.31] - 2026-10-09
+
 ### Added
 
 - **Runbooks** (new module, off by default — Settings › Modules): save the checks you run after a
