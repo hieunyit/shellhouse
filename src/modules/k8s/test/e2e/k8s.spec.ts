@@ -1117,7 +1117,7 @@ test('Kubernetes: Connections — khai báo (env) ghép với traffic quan sát:
   const server = await startApiTestServer()
   server.enableHubble()
   // web khai báo: api.stripe.com (có traffic), 203.0.113.99:9042 (không bao giờ thấy).
-  const web = server.get('deployments', 'shop', 'web') as {
+  const web = server.get('deployments', 'shop', 'web') as unknown as {
     spec: { template: { spec: { containers: { env?: unknown[] }[] } } }
   }
   const container = web.spec.template.spec.containers[0]
