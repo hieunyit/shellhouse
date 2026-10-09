@@ -159,6 +159,19 @@ describe('xác nhận thao tác nguy hiểm', () => {
     expect(confirmFor('kill', [row('web')], false)?.danger).toBe(true)
   })
 
+  it('Production: stop / restart / pause luôn hỏi và là thao tác nguy hiểm (gõ tên); start thì không', () => {
+    for (const action of ['stop', 'restart', 'pause'] as const) {
+      const c = confirmFor(action, [row('web')], false, true)
+      expect(c?.danger).toBe(true)
+    }
+    expect(confirmFor('stop', [row('web')], false, true)?.title).toBe('Stop web?')
+    expect(confirmFor('start', [row('web')], false, true)).toBeNull()
+    expect(confirmFor('unpause', [row('web')], false, true)).toBeNull()
+    // Không phải Production: như cũ (phím tắt hỏi thường, nút thì không hỏi).
+    expect(confirmFor('stop', [row('web')], true, false)?.danger).toBe(false)
+    expect(confirmFor('pause', [row('web')], false, false)).toBeNull()
+  })
+
   it('danh sách tên dài được rút gọn', () => {
     expect(namesText(['a', 'b'])).toBe('a, b')
     expect(namesText(['a', 'b', 'c', 'd', 'e'])).toBe('a, b, c and 2 more')

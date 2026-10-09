@@ -1289,5 +1289,14 @@ export const k8s: Readonly<Record<string, string>> = {
     '{error} — nếu tin API server này, bật “Bỏ qua kiểm tra chứng chỉ” trong cài đặt của context',
   'Scan configuration…': 'Quét cấu hình…',
   'Configuration issues in {name}': 'Vấn đề cấu hình của {name}',
-  'Secrets are not scanned.': 'Không quét Secret.'
+  'Secrets are not scanned.': 'Không quét Secret.',
+  // Production: pause rollout, chạy / tắt CronJob phải gõ tên
+  'Pause the rollout of {name}?': 'Tạm dừng rollout của {name}?',
+  'No new pods are rolled out until the rollout is resumed.':
+    'Không pod mới nào được triển khai cho tới khi rollout chạy tiếp.',
+  'Run a job from {name} now?': 'Chạy ngay một job từ {name}?',
+  'A job starts right away, outside the schedule.': 'Một job chạy ngay lập tức, ngoài lịch.',
+  'Suspend {name}?': 'Tạm ngưng lịch {name}?',
+  'No jobs are started from this schedule until it is resumed.':
+    'Không job nào được chạy theo lịch này cho tới khi bật lại.'
 }

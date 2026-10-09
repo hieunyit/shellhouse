@@ -288,7 +288,13 @@ export function containerPlan(
     description: containerDescription(kind),
     action: containerBulkLabel(kind),
     noun: 'container',
-    danger: kind === 'remove' || kind === 'kill' || kind === 'stop',
+    // Làm gián đoạn dịch vụ → Production phải gõ cụm đếm (start / resume thì không).
+    danger:
+      kind === 'remove' ||
+      kind === 'kill' ||
+      kind === 'stop' ||
+      kind === 'restart' ||
+      kind === 'pause',
     removes: kind === 'remove',
     targets: targets.map((c) => ({ key: c.name, label: c.name, note: stateLabel(c.state) })),
     skipped: skipped.map((c) => ({ label: c.name, note: stateLabel(c.state) })),

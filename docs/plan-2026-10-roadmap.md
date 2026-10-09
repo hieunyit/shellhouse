@@ -102,3 +102,19 @@ bước che bí mật, hỗ trợ mô hình cục bộ.
 Rủi ro: (a) Trivy tải CSDL lần đầu chậm / cần mạng — hiển thị tiến trình và lỗi rõ; (b) TLS: lưu khoá
 client là dữ liệu nhạy cảm — chỉ vault, không log, không đồng bộ rõ; (c) quét image trên server SSH
 phụ thuộc server có Trivy — chấp nhận, báo rõ.
+
+## 7. Rà soát lại (2026-10-09) — lỗ hổng bảng mục 0 bỏ sót, đã sửa
+
+Bảng mục 0 ghi "Docker: stop / kill / remove một container — gõ lại tên ✅", nhưng chỉ đúng với
+kill / remove. Đối chiếu từng chỗ gọi thao tác thay đổi (Docker `isMutating`, K8s `isMutating`):
+
+| Thao tác trên Production                                      | Trước                    | Sau          |
+| ------------------------------------------------------------- | ------------------------ | ------------ |
+| Docker: stop / restart / pause một container (nút, menu)      | Chạy ngay, không hỏi     | Gõ tên       |
+| Docker: restart / pause hàng loạt                             | Chỉ bấm xác nhận         | Gõ cụm đếm   |
+| Docker: Compose restart / up                                  | Chạy ngay                | Gõ tên dự án |
+| Docker: ngắt container khỏi network                           | Hộp xác nhận thường      | Gõ tên       |
+| K8s: form Create trùng tên (server-side apply sửa đè)         | Hộp xác nhận thường      | Gõ tên       |
+| K8s: chạy CronJob ngay / tạm ngưng lịch / tạm dừng rollout    | Chạy ngay                | Gõ tên       |
+
+Chiều đảo ngược (start, resume, uncordon…) không hỏi thêm. Ưu tiên 4 (AI) vẫn chưa làm.

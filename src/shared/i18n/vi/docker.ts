@@ -732,5 +732,16 @@ export const docker: Readonly<Record<string, string>> = {
   Builder: 'Builder',
   'Several platforms need a builder with the docker-container driver (docker buildx create --use). Empty = the current builder.':
     'Nhiều nền tảng cần builder dùng driver docker-container (docker buildx create --use). Để trống = builder hiện tại.',
-  'Current builder': 'Builder hiện tại'
+  'Current builder': 'Builder hiện tại',
+  // Production: stop / restart / pause, Compose restart / up phải gõ tên
+  'Restart the Compose project {name}?': 'Khởi động lại dự án Compose {name}?',
+  'Bring up the Compose project {name}?': 'Dựng lại dự án Compose {name}?',
+  'Every container of {name} restarts; its services are briefly unavailable.':
+    'Mọi container của {name} khởi động lại; dịch vụ của nó gián đoạn trong chốc lát.',
+  'Containers of {name} whose configuration or image changed are recreated (docker compose up -d).':
+    'Các container của {name} có cấu hình hoặc image đã đổi sẽ được tạo lại (docker compose up -d).',
+  'Bring up': 'Dựng lại',
+  'Pause {name}?': 'Tạm dừng {name}?',
+  '{names} is frozen; whatever it serves stops answering until it is resumed.':
+    '{names} bị đóng băng; dịch vụ của nó không trả lời cho tới khi chạy tiếp.'
 }

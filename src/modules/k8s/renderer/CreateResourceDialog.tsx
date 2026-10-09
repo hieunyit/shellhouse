@@ -26,6 +26,8 @@ import {
 } from '../shared/forms'
 import type { ApplyResult } from '../shared/ops'
 import { KindIcon } from './icons'
+import { useClusterGuard } from './confirm'
+import { yamlTypedName } from '../shared/yamlTyped'
 import { type Request, groups, WORKLOAD_KINDS, type AnyForm, initial, build } from './create/model'
 import { lookupCache, useLookups, existingObjects } from './create/useLookups'
 import { Section, F, invalid, Grid, KVEditor, NamespaceSelect, NameInput, Pick } from './create/kit'
@@ -57,6 +59,7 @@ export function CreateResourceDialog({
   /** Chuyển sang trình sửa YAML với nội dung đã sinh. */
   onEditYaml: (yaml: string) => void
 }): React.JSX.Element {
+  const { production, guard } = useClusterGuard()
   const [form, setForm] = useState<AnyForm>(() => initial(initialKind, defaultNamespace))
   const [showErrors, setShowErrors] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -120,7 +123,7 @@ export function CreateResourceDialog({
     // Server-side apply sửa đè đối tượng cùng tên → hỏi trước khi "tạo" mà thật ra là cập nhật.
     const existing = await existingObjects(request, docs, ns || defaultNamespace)
     if (existing.length) {
-      const ok = await confirmAction({
+      const ask = {
         title: tn(existing.length, 'Already exists', '{n} objects already exist'),
         message: tn(
           existing.length,
@@ -129,9 +132,12 @@ export function CreateResourceDialog({
           { objects: existing.join(', ') }
         ),
         confirmLabel: t('Update existing'),
-        danger: true,
-        testId: 'k8s-create-exists'
-      })
+        danger: true
+      }
+      // Production: sửa đè đối tượng đang chạy → gõ lại tên như khi lưu YAML.
+      const ok = production
+        ? await guard({ ...ask, name: yamlTypedName(yaml) })
+        : await confirmAction({ ...ask, testId: 'k8s-create-exists' })
       if (!ok) {
         setBusy(false)
         return

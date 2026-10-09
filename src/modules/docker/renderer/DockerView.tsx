@@ -561,7 +561,7 @@ export function DockerTab({
         )
       )
     }
-    const ask = confirmFor(action, items, viaShortcut)
+    const ask = confirmFor(action, items, viaShortcut, env?.confirm === 'type')
     if (!ask) {
       go(false)
       return
@@ -612,7 +612,11 @@ export function DockerTab({
         t('Compose {action}: {project}', { action: label, project: p.name })
       )
     }
-    if (action !== 'down' && action !== 'stop') {
+    const production = env?.confirm === 'type'
+    // Production: restart / up (tạo lại container đã đổi) cũng gián đoạn dịch vụ → gõ tên dự án.
+    const disrupts =
+      action === 'down' || action === 'stop' || action === 'restart' || action === 'up'
+    if (!disrupts || (!production && action !== 'down' && action !== 'stop')) {
       go()
       return
     }
@@ -620,16 +624,36 @@ export function DockerTab({
       title:
         action === 'down'
           ? t('Take down the Compose project {name}?', { name: p.name })
-          : t('Stop the Compose project {name}?', { name: p.name }),
+          : action === 'stop'
+            ? t('Stop the Compose project {name}?', { name: p.name })
+            : action === 'restart'
+              ? t('Restart the Compose project {name}?', { name: p.name })
+              : t('Bring up the Compose project {name}?', { name: p.name }),
       message:
         action === 'down'
           ? t(
               'Every container of {name} is stopped and removed, with its networks (docker compose down). Volumes are kept.',
               { name: p.name }
             )
-          : t('Every container of {name} is stopped.', { name: p.name }),
-      confirmLabel: action === 'down' ? t('Take down') : t('Stop'),
-      danger: action === 'down',
+          : action === 'stop'
+            ? t('Every container of {name} is stopped.', { name: p.name })
+            : action === 'restart'
+              ? t('Every container of {name} restarts; its services are briefly unavailable.', {
+                  name: p.name
+                })
+              : t(
+                  'Containers of {name} whose configuration or image changed are recreated (docker compose up -d).',
+                  { name: p.name }
+                ),
+      confirmLabel:
+        action === 'down'
+          ? t('Take down')
+          : action === 'stop'
+            ? t('Stop')
+            : action === 'restart'
+              ? t('Restart')
+              : t('Bring up'),
+      danger: action === 'down' || production,
       typeName: p.name,
       onConfirm: go
     })
@@ -707,6 +731,7 @@ export function DockerTab({
       }),
       confirmLabel: t('Disconnect'),
       danger: true,
+      typeName: c.name,
       onConfirm: () => {
         void run(
           t('Disconnect failed'),

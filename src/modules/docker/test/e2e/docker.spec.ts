@@ -556,6 +556,20 @@ test('Docker trên Production: xoá hàng loạt và dọn dẹp phải gõ lạ
     await expect(view.getByTestId('docker-container')).toHaveCount(3)
     const deletes = (): number => engine.requests.filter((r) => r.startsWith('DELETE')).length
 
+    // Stop một container (bấm từ menu, không phải phím tắt) cũng phải gõ tên trên Production.
+    const stops = (): number => engine.requests.filter((r) => r.includes('/stop')).length
+    await view.getByTestId('docker-container').filter({ hasText: 'web' }).first().click()
+    await view.getByTestId('docker-action-stop').click()
+    const stopOk = page.getByTestId('docker-confirm-ok')
+    await expect(stopOk).toBeDisabled()
+    await page.getByTestId('docker-confirm-typed').fill('we')
+    await expect(stopOk).toBeDisabled()
+    await page.getByTestId('docker-confirm-typed').fill('web')
+    await expect(stopOk).toBeEnabled()
+    expect(stops()).toBe(0)
+    await stopOk.click()
+    await expect.poll(stops).toBe(1)
+
     // Xoá hàng loạt: nút bị khoá tới khi gõ đúng "3 containers"; dán không được.
     await view.getByTestId('docker-select-all').click()
     await view.getByTestId('docker-bulk-remove').click()

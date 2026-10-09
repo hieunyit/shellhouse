@@ -1572,6 +1572,21 @@ test('Kubernetes trên Production: lưu YAML sửa và Apply phải gõ lại t�
     await ok.click()
     await expect(editor).toHaveCount(0)
     expect(writes()).toBeGreaterThan(before)
+
+    // Form "Create" trùng tên đối tượng đang chạy (server-side apply sửa đè) → cũng gõ lại tên.
+    await view.getByTestId('k8s-create').click()
+    const form = page.getByTestId('k8s-create-dialog')
+    await form.getByTestId('k8s-form-name').fill('web')
+    await form.getByTestId('k8s-form-image').fill('nginx:1.27')
+    const beforeCreate = writes()
+    await form.getByTestId('k8s-create-submit').click()
+    await expect(page.getByTestId('k8s-confirm')).toContainText('Deployment shop/web')
+    await expect(page.getByTestId('k8s-create-exists')).toHaveCount(0)
+    await expect(page.getByTestId('k8s-confirm-ok')).toBeDisabled()
+    await page.getByTestId('k8s-confirm-typed').fill('web')
+    await page.getByTestId('k8s-confirm-ok').click()
+    await expect(form).toHaveCount(0)
+    expect(writes()).toBeGreaterThan(beforeCreate)
   } finally {
     await launched.close()
     await server.close()

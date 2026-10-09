@@ -184,12 +184,14 @@ export interface ActionConfirm {
 
 /**
  * Thao tác cần hỏi lại: xoá / kill luôn hỏi; stop / restart hỏi khi bấm phím tắt một chữ (gõ
- * nhầm phím không được dừng dịch vụ). null = chạy luôn.
+ * nhầm phím không được dừng dịch vụ). Production: stop / restart / pause luôn hỏi và là thao tác
+ * nguy hiểm (gõ lại tên — như scale về 0 / restart bên Kubernetes). null = chạy luôn.
  */
 export function confirmFor(
   action: ContainerAction,
   items: readonly ContainerRow[],
-  viaShortcut: boolean
+  viaShortcut: boolean,
+  production = false
 ): ActionConfirm | null {
   const names = namesText(items.map((c) => c.name))
   const plural = items.length > 1
@@ -234,7 +236,17 @@ export function confirmFor(
       danger: true,
       volumesOption: false
     }
-  if (viaShortcut && (action === 'stop' || action === 'restart'))
+  if (production && action === 'pause')
+    return {
+      title: t('Pause {name}?', { name: names }),
+      message: t('{names} is frozen; whatever it serves stops answering until it is resumed.', {
+        names
+      }),
+      confirmLabel: t('Pause'),
+      danger: true,
+      volumesOption: false
+    }
+  if ((viaShortcut || production) && (action === 'stop' || action === 'restart'))
     return {
       title:
         action === 'stop'
@@ -247,7 +259,7 @@ export function confirmFor(
             })
           : t('{names} restarts; whatever it serves is briefly unavailable.', { names }),
       confirmLabel: action === 'stop' ? t('Stop') : t('Restart'),
-      danger: false,
+      danger: production,
       volumesOption: false
     }
   return null

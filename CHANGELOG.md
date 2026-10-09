@@ -60,6 +60,15 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   Kubernetes. Bulk and prune ask for the count ("3 containers", "12 images"); YAML asks for the
   object name (or "N objects").
 
+### Fixed
+
+- **Production — gaps in "type the name to confirm":** on a Production Docker endpoint, stopping,
+  restarting or pausing a single container ran at once from the buttons and menus; restart / pause
+  of several containers, Compose restart / up and disconnecting a container from a network only
+  asked for a click. On a Production Kubernetes context, the Create form could overwrite an
+  existing object with a plain confirmation, and running a CronJob now, suspending it or pausing
+  a rollout did not ask. All of these now ask you to type the name (resume / start do not).
+
 ## [1.2.0-beta.30] - 2026-10-09
 
 ### Added

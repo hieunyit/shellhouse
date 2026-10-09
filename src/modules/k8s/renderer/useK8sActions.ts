@@ -245,26 +245,40 @@ export function useK8sActions({
     },
     pause: (obj, paused) => {
       const name = obj.metadata.name
-      run(
-        paused
-          ? {
-              loading: t('Pausing the rollout of {name}…', { name }),
-              success: t('Rollout of {name} paused', { name }),
-              error: t('Could not pause the rollout of {name}', { name })
-            }
-          : {
-              loading: t('Resuming the rollout of {name}…', { name }),
-              success: t('Rollout of {name} resumed', { name }),
-              error: t('Could not resume the rollout of {name}', { name })
-            },
-        () =>
-          request({
-            op: 'rolloutPause',
-            namespace: obj.metadata.namespace ?? '',
-            name: obj.metadata.name,
-            paused
-          })
-      )
+      void (async () => {
+        // Production: dừng giữa chừng một lần deploy → gõ tên (tiếp tục thì không hỏi).
+        if (
+          paused &&
+          !(await guard({
+            title: t('Pause the rollout of {name}?', { name }),
+            message: t('No new pods are rolled out until the rollout is resumed.'),
+            confirmLabel: t('Pause'),
+            name,
+            onlyProduction: true
+          }))
+        )
+          return
+        run(
+          paused
+            ? {
+                loading: t('Pausing the rollout of {name}…', { name }),
+                success: t('Rollout of {name} paused', { name }),
+                error: t('Could not pause the rollout of {name}', { name })
+              }
+            : {
+                loading: t('Resuming the rollout of {name}…', { name }),
+                success: t('Rollout of {name} resumed', { name }),
+                error: t('Could not resume the rollout of {name}', { name })
+              },
+          () =>
+            request({
+              op: 'rolloutPause',
+              namespace: obj.metadata.namespace ?? '',
+              name: obj.metadata.name,
+              paused
+            })
+        )
+      })()
     },
     history: (obj) => {
       setDialog({ kind: 'history', obj })
@@ -309,26 +323,40 @@ export function useK8sActions({
       setDialog({ kind: 'drain', obj })
     },
     trigger: (obj) => {
-      void toast
-        .promise(
-          request<string>({
-            op: 'cronTrigger',
-            namespace: obj.metadata.namespace ?? '',
-            name: obj.metadata.name
-          }),
-          {
-            loading: t('Starting a job from {name}…', { name: obj.metadata.name }),
-            success: (job) => t('Started job {job}', { job }),
-            error: t('Could not start a job from {name}', { name: obj.metadata.name }),
-            action: (job) => ({
-              label: t('Show job'),
-              run: () => {
-                openRef('jobs.batch', obj.metadata.namespace, job)
-              }
-            })
-          }
+      void (async () => {
+        const name = obj.metadata.name
+        // Production: chạy ngay một job (migration, batch…) ngoài lịch → gõ tên CronJob.
+        if (
+          !(await guard({
+            title: t('Run a job from {name} now?', { name }),
+            message: t('A job starts right away, outside the schedule.'),
+            confirmLabel: t('Run now'),
+            name,
+            onlyProduction: true
+          }))
         )
-        .catch(() => undefined)
+          return
+        void toast
+          .promise(
+            request<string>({
+              op: 'cronTrigger',
+              namespace: obj.metadata.namespace ?? '',
+              name: obj.metadata.name
+            }),
+            {
+              loading: t('Starting a job from {name}…', { name: obj.metadata.name }),
+              success: (job) => t('Started job {job}', { job }),
+              error: t('Could not start a job from {name}', { name: obj.metadata.name }),
+              action: (job) => ({
+                label: t('Show job'),
+                run: () => {
+                  openRef('jobs.batch', obj.metadata.namespace, job)
+                }
+              })
+            }
+          )
+          .catch(() => undefined)
+      })()
     },
     argoSync: (obj, prune) => {
       void (async () => {
@@ -382,26 +410,40 @@ export function useK8sActions({
     },
     suspend: (obj, suspend) => {
       const name = obj.metadata.name
-      run(
-        suspend
-          ? {
-              loading: t('Suspending {name}…', { name }),
-              success: t('Schedule of {name} suspended', { name }),
-              error: t('Could not suspend {name}', { name })
-            }
-          : {
-              loading: t('Resuming {name}…', { name }),
-              success: t('Schedule of {name} resumed', { name }),
-              error: t('Could not resume {name}', { name })
-            },
-        () =>
-          request({
-            op: 'cronSuspend',
-            namespace: obj.metadata.namespace ?? '',
-            name: obj.metadata.name,
-            suspend
-          })
-      )
+      void (async () => {
+        // Production: tắt lịch (backup, dọn dẹp…) → gõ tên (bật lại thì không hỏi).
+        if (
+          suspend &&
+          !(await guard({
+            title: t('Suspend {name}?', { name }),
+            message: t('No jobs are started from this schedule until it is resumed.'),
+            confirmLabel: t('Suspend'),
+            name,
+            onlyProduction: true
+          }))
+        )
+          return
+        run(
+          suspend
+            ? {
+                loading: t('Suspending {name}…', { name }),
+                success: t('Schedule of {name} suspended', { name }),
+                error: t('Could not suspend {name}', { name })
+              }
+            : {
+                loading: t('Resuming {name}…', { name }),
+                success: t('Schedule of {name} resumed', { name }),
+                error: t('Could not resume {name}', { name })
+              },
+          () =>
+            request({
+              op: 'cronSuspend',
+              namespace: obj.metadata.namespace ?? '',
+              name: obj.metadata.name,
+              suspend
+            })
+        )
+      })()
     }
   }
 }
