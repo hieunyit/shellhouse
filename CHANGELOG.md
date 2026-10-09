@@ -24,14 +24,19 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   volumes work as everywhere else; Compose, image builds and shell-in-container need the docker
   command line and are not available for these engines. Certificates are not synced to other
   devices.
+- **Kubernetes › Connections** (Map › Connections, and a Connections tab on every workload) replaces
+  Outbound. It joins where a workload is configured to connect (env, arguments, ConfigMaps, Secrets)
+  with the traffic that was actually seen (Caretta or Hubble), and labels each destination Active,
+  Idle, Not seen, Can't tell, Not measured or Undeclared. Secrets are still read (on by default).
+- Declared host names are matched to observed IPs with DNS lookups from this computer (public names
+  only; an option adds internal names), and IPs are grouped by CIDR.
+- The Topology Outbound lane shows each connection's status, including traffic seen but declared
+  nowhere.
 
-### Security
+### Changed
 
-- Production safety: on an environment that asks you to type the name, three more actions now do
-  the same instead of a single click — bulk actions in Docker (remove, kill… on several
-  containers, images, volumes or networks), Docker clean-up (prune), and saving or applying YAML in
-  Kubernetes. Bulk and prune ask for the count ("3 containers", "12 images"); YAML asks for the
-  object name (or "N objects").
+- The Traffic tab lists outgoing peers only for past windows (Prometheus); the live window points to
+  Connections.
 
 ### Fixed
 
@@ -47,22 +52,6 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   found", and with a non-default context the command could go to the wrong engine. The throw-away
   sign-in folder now keeps pointing at your builders and current context; only the registry
   credentials stay in it.
-
-## [1.2.0-beta.30] - 2026-10-09
-
-### Added
-
-- **Kubernetes › Connections** (Map › Connections, and a Connections tab on every workload) replaces
-  Outbound. It joins where a workload is configured to connect (env, arguments, ConfigMaps, Secrets)
-  with the traffic that was actually seen (Caretta or Hubble), and labels each destination Active,
-  Idle, Not seen, Can't tell, Not measured or Undeclared. Secrets are still read (on by default).
-- Declared host names are matched to observed IPs with DNS lookups from this computer (public names
-  only; an option adds internal names), and IPs are grouped by CIDR.
-- The Topology Outbound lane shows each connection's status, including traffic seen but declared
-  nowhere.
-
-### Fixed
-
 - Kubernetes: a Secret value (for example a password) could be shown as an "Unresolved name" host in
   beta.29. Destinations are now recognised by the shape of the value (host:port, URL, domain), not by
   the variable name.
@@ -71,10 +60,13 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - Kubernetes and Docker: text in every tab (events, IPs, values…) can be selected and copied; before,
   nothing could be highlighted.
 
-### Changed
+### Security
 
-- The Traffic tab lists outgoing peers only for past windows (Prometheus); the live window points to
-  Connections.
+- Production safety: on an environment that asks you to type the name, three more actions now do
+  the same instead of a single click — bulk actions in Docker (remove, kill… on several
+  containers, images, volumes or networks), Docker clean-up (prune), and saving or applying YAML in
+  Kubernetes. Bulk and prune ask for the count ("3 containers", "12 images"); YAML asks for the
+  object name (or "N objects").
 
 ## [1.2.0-beta.29] - 2026-10-09
 
