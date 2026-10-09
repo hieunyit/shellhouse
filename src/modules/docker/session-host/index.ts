@@ -122,15 +122,8 @@ function sshCli(ssh: SshCapability): DockerCli {
 
 function localService(ctx: HostModuleContext): DockerService {
   const cli = localCli(ctx)
-  /** Socket của Engine đang dùng — Trivy phải đọc image từ đúng Engine này (Colima, OrbStack…). */
-  let socket: string | null = null
   return new DockerService({
     cli,
-    scanner: (args, options) =>
-      ctx.spawn.exec('trivy', args, {
-        ...options,
-        ...(socket ? { env: { DOCKER_HOST: `unix://${socket}` } } : {})
-      }),
     connect: async (signal): Promise<DockerBackend> => {
       const home = homedir()
       const candidates = localSocketCandidates().map((p) =>
@@ -143,7 +136,6 @@ function localService(ctx: HostModuleContext): DockerService {
       )
       if ('engine' in found) {
         ctx.log('info', `local engine at ${found.path}`)
-        socket = found.path.startsWith('/') ? found.path : null
         return new ApiBackend(found.engine)
       }
       if (!ctx.spawn.available('docker'))
@@ -188,8 +180,6 @@ function wslService(ctx: HostModuleContext, distro: string): DockerService {
   const cli = wslCli(ctx, distro)
   return new DockerService({
     cli,
-    scanner: (args, options) =>
-      ctx.spawn.exec('wsl', ['-d', distro, '-e', 'trivy', ...args], options),
     connect: async (signal): Promise<DockerBackend> => {
       if (!ctx.spawn.available('wsl')) throw new Error(t('WSL is not installed on this computer.'))
       const backend = new CliBackend(cli)
@@ -265,7 +255,6 @@ function remoteService(ctx: HostModuleContext, ssh: SshCapability): DockerServic
   const cli = sshCli(ssh)
   return new DockerService({
     cli,
-    scanner: (args, options) => ssh.exec(['trivy', ...args], options),
     connect: async (signal): Promise<DockerBackend> => {
       const candidates = ['/var/run/docker.sock', '/run/docker.sock']
       let found = await firstWorking(candidates, (path) => () => ssh.openUnixSocket(path), signal)

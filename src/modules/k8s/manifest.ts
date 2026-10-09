@@ -43,7 +43,6 @@ export const k8sManifest: ModuleManifest = {
     { kind: 'run-program', binary: 'gcloud' },
     { kind: 'run-program', binary: 'gke-gcloud-auth-plugin' },
     { kind: 'run-program', binary: 'kubelogin' },
-    { kind: 'run-program', binary: 'trivy' },
     { kind: 'ssh-tunnel' },
     { kind: 'secrets', detail: 'Stores kubeconfigs you import encrypted in the vault' }
   ],
@@ -52,7 +51,7 @@ export const k8sManifest: ModuleManifest = {
   version: 1,
   icon: 'kubernetes',
   enabledByDefault: false,
-  binaries: ['aws', 'gcloud', 'gke-gcloud-auth-plugin', 'kubelogin', 'trivy'],
+  binaries: ['aws', 'gcloud', 'gke-gcloud-auth-plugin', 'kubelogin'],
   contributes: {
     sidebarSection: true,
     tabKinds: ['cluster', 'logs'],

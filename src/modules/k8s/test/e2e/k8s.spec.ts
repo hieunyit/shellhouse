@@ -1,5 +1,5 @@
 import { connect } from 'node:net'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Page } from '@playwright/test'
@@ -1591,88 +1591,5 @@ test('Kubernetes trên Production: lưu YAML sửa và Apply phải gõ lại t�
     await launched.close()
     await server.close()
     rmSync(dir, { recursive: true, force: true })
-  }
-})
-
-test('Kubernetes: quét cấu hình bằng Trivy — YAML đối tượng → bảng phát hiện; Secret không có mục quét', async () => {
-  test.setTimeout(60_000)
-  test.skip(process.platform === 'win32', 'Trivy giả là script sh')
-  const server = await startApiTestServer()
-  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
-  const bin = mkdtempSync(join(tmpdir(), 'sh-trivy-'))
-  const file = join(dir, 'config')
-  writeFileSync(file, kubeconfig(server))
-  const report = JSON.stringify({
-    ArtifactName: '/tmp/random-dir',
-    Results: [
-      {
-        Target: 'resource.yaml',
-        Class: 'config',
-        Misconfigurations: [
-          {
-            ID: 'KSV014',
-            AVDID: 'AVD-KSV-0014',
-            Title: 'Root file system is not read-only',
-            Message: 'Container web should set readOnlyRootFilesystem to true',
-            Resolution: 'Change readOnlyRootFilesystem to true.',
-            Severity: 'HIGH',
-            Status: 'FAIL',
-            CauseMetadata: { StartLine: 12 }
-          },
-          { ID: 'KSV001', Title: 'ok', Severity: 'MEDIUM', Status: 'PASS' }
-        ]
-      }
-    ]
-  })
-  writeFileSync(join(bin, 'report.json'), report)
-  // Trivy giả: chép YAML nhận được để kiểm, rồi in báo cáo.
-  writeFileSync(
-    join(bin, 'trivy'),
-    `#!/bin/sh\nfor last; do :; done\ncp "$last/resource.yaml" '${join(bin, 'seen.yaml')}'\ncat '${join(bin, 'report.json')}'\n`
-  )
-  chmodSync(join(bin, 'trivy'), 0o755)
-  const launched = await launchApp({
-    KUBECONFIG: file,
-    PATH: `${bin}:${process.env['PATH'] ?? ''}`
-  })
-  const { page, app } = launched
-  try {
-    await app.evaluate(({ dialog }) => {
-      dialog.showMessageBox = () => Promise.resolve({ response: 0, checkboxChecked: false })
-    })
-    await enableK8s(page)
-    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
-    const view = page.getByTestId('k8s-view')
-    await setWindowSize(launched, 1366, 820)
-    await page.getByTestId('k8s-nav-deployments.apps').click()
-    const row = view.locator('[data-testid="k8s-row"][data-name="shop/web"]')
-    await row.click({ button: 'right' })
-    await page.getByRole('menuitem', { name: 'Scan configuration…' }).click()
-    const dialog = page.getByTestId('scan-dialog')
-    await expect(dialog.getByTestId('scan-target')).toHaveText('Deployment shop/web')
-    await expect(dialog.getByTestId('scan-sev-HIGH')).toHaveAttribute('data-count', '1')
-    // Chỉ luật FAIL; có gợi ý khắc phục và dòng.
-    await expect(dialog.getByTestId('scan-row')).toHaveCount(1)
-    await expect(dialog.getByTestId('scan-row')).toContainText('Change readOnlyRootFilesystem')
-    await expect(dialog.getByTestId('scan-row')).toContainText('line 12')
-    await page.keyboard.press('Escape')
-    await expect(dialog).toHaveCount(0)
-    // Trivy nhận đúng YAML của Deployment.
-    const seen = readFileSync(join(bin, 'seen.yaml'), 'utf8')
-    expect(seen).toContain('kind: Deployment')
-    expect(seen).toContain('name: web')
-
-    // Secret: không có mục quét trong menu.
-    await page.getByTestId('k8s-nav-group-Config').click()
-    await page.getByTestId('k8s-nav-secrets').click()
-    const secret = view.getByTestId('k8s-row').first()
-    await secret.click({ button: 'right' })
-    await expect(page.getByRole('menuitem', { name: 'View YAML' })).toBeVisible()
-    await expect(page.getByRole('menuitem', { name: 'Scan configuration…' })).toHaveCount(0)
-  } finally {
-    await launched.close()
-    await server.close()
-    rmSync(dir, { recursive: true, force: true })
-    rmSync(bin, { recursive: true, force: true })
   }
 })

@@ -949,34 +949,5 @@ export const core: Readonly<Record<string, string>> = {
   'Terminal: command suggestion diagnostics': 'Terminal: chẩn đoán gợi ý lệnh',
   'Open a terminal tab first': 'Hãy mở một tab terminal trước',
   'Command suggestion diagnostics copied': 'Đã chép chẩn đoán gợi ý lệnh',
-  'Paste it into your bug report.': 'Dán vào nội dung báo lỗi.',
-  Critical: 'Nghiêm trọng',
-  High: 'Cao',
-  Low: 'Thấp',
-  Unknown: 'Không rõ',
-  'Copied {n} rows as CSV': 'Đã chép {n} dòng dạng CSV',
-  'Copy as CSV': 'Chép dạng CSV',
-  'Scanning with Trivy…': 'Đang quét bằng Trivy…',
-  'The first scan downloads Trivy’s vulnerability database, which can take a few minutes. Closing this window cancels the scan.':
-    'Lần quét đầu Trivy tải cơ sở dữ liệu lỗ hổng, có thể mất vài phút. Đóng cửa sổ này sẽ huỷ lần quét.',
-  'Nothing found.': 'Không tìm thấy gì.',
-  Severity: 'Mức độ',
-  Package: 'Gói',
-  Rule: 'Luật',
-  Installed: 'Đang cài',
-  'Fixed in': 'Sửa ở bản',
-  'no fix yet': 'chưa có bản sửa',
-  'line {n}': 'dòng {n}',
-  'The list is cut — the counts above are complete.':
-    'Danh sách bị cắt bớt — số liệu ở trên là đầy đủ.',
-  '{n} has a fix': '{n} có bản sửa',
-  '{n} have a fix': '{n} có bản sửa',
-  '{n} finding': '{n} phát hiện',
-  '{n} findings': '{n} phát hiện',
-  'Trivy is not installed here. Install it from https://trivy.dev and try again.':
-    'Chưa cài Trivy ở đây. Cài từ https://trivy.dev rồi thử lại.',
-  'This Trivy is too old (it has no --scanners). Update Trivy and try again.':
-    'Trivy này quá cũ (không có --scanners). Hãy cập nhật Trivy rồi thử lại.',
-  'Trivy failed: {message}': 'Trivy báo lỗi: {message}',
-  'Trivy failed (exit code {code})': 'Trivy báo lỗi (mã thoát {code})'
+  'Paste it into your bug report.': 'Dán vào nội dung báo lỗi.'
 }

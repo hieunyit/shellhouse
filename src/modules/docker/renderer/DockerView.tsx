@@ -21,7 +21,6 @@ import {
   RefreshCw,
   RotateCw,
   Search,
-  ShieldCheck,
   Square,
   SquareTerminal,
   Tag,
@@ -41,7 +40,6 @@ import type { SortState } from '../../../renderer/src/components/SortMenu'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { EnvLabel } from '../../../renderer/src/ds'
 import { useEndpointEnvironment } from './DockerSection'
-import type { ScanResult } from '@shared/trivy'
 import { containerCommands, type DockerEndpoint } from '../shared/commands'
 import {
   ConnectionPrompt,
@@ -52,7 +50,6 @@ import {
   formatBytes,
   formatDateTime,
   formatPercent,
-  ScanDialog,
   t,
   tn,
   toast
@@ -204,7 +201,6 @@ type Dialog =
   | { kind: 'network' }
   | { kind: 'connect'; container?: ContainerRow; network?: NetworkRow }
   | { kind: 'tag'; image: ImageRow }
-  | { kind: 'scan'; image: ImageRow }
   | { kind: 'registries' }
   | { kind: 'build' }
   | { kind: 'bulk'; plan: BulkPlan }
@@ -1002,20 +998,6 @@ export function DockerTab({
         inspect('image', i.id, imageName(i))
       }
     },
-    // Trivy chạy cạnh Engine (máy này / WSL / server SSH) — engine TCP không có chỗ chạy.
-    ...(noCli
-      ? []
-      : [
-          {
-            id: 'scan',
-            label: t('Scan for vulnerabilities…'),
-            icon: <ShieldCheck size={14} />,
-            key: 's',
-            run: () => {
-              setDialog({ kind: 'scan', image: i })
-            }
-          }
-        ]),
     {
       id: 'copy-id',
       label: t('Copy ID'),
@@ -2520,20 +2502,6 @@ export function DockerTab({
               )
               setReloadKey((n) => n + 1)
             })
-          }}
-        />
-      )}
-      {dialog?.kind === 'scan' && (
-        <ScanDialog
-          title={t('Vulnerabilities in {name}', { name: imageName(dialog.image) })}
-          run={(signal) =>
-            request<ScanResult>(
-              { op: 'image.scan', ref: dialog.image.tags[0] ?? dialog.image.id },
-              signal
-            )
-          }
-          onClose={() => {
-            setDialog(null)
           }}
         />
       )}

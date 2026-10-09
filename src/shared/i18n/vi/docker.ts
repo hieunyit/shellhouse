@@ -661,9 +661,6 @@ export const docker: Readonly<Record<string, string>> = {
   'Unhealthy — the last check failed': 'Unhealthy — lần kiểm tra gần nhất bị lỗi',
   'Unhealthy — the last {n} checks failed': 'Unhealthy — {n} lần kiểm tra gần nhất bị lỗi',
   'build cache': 'build cache',
-  'Scan for vulnerabilities…': 'Quét lỗ hổng…',
-  'Vulnerabilities in {name}': 'Lỗ hổng trong {name}',
-  'Scanning is not available for this Docker source.': 'Nguồn Docker này không quét được.',
   'The Docker engines you add by TCP address': 'Các engine Docker bạn thêm bằng địa chỉ TCP',
   'Reads the CA, client certificate and key files you choose when you add an engine by TCP address':
     'Đọc tệp CA, chứng chỉ client và khoá bạn chọn khi thêm engine bằng địa chỉ TCP',

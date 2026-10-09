@@ -25,8 +25,6 @@ export type ModuleBinary =
   | 'gcloud'
   | 'kubelogin'
   | 'gke-gcloud-auth-plugin'
-  /** Quét lỗ hổng image / cấu hình manifest — chỉ gọi, không tự viết engine quét. */
-  | 'trivy'
   /** Windows: chạy lệnh trong một bản phân phối WSL (`wsl.exe -d <distro> -e …`). */
   | 'wsl'
 

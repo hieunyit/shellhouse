@@ -57,7 +57,6 @@ export const dockerManifest: ModuleManifest = {
         'Reads the CA, client certificate and key files you choose when you add an engine by TCP address'
     },
     { kind: 'run-program', binary: 'docker' },
-    { kind: 'run-program', binary: 'trivy' },
     {
       kind: 'secrets',
       detail: 'Stores registry passwords and access tokens encrypted in the vault'
@@ -75,7 +74,7 @@ export const dockerManifest: ModuleManifest = {
   version: 1,
   icon: 'container',
   enabledByDefault: false,
-  binaries: ['docker', 'trivy', 'wsl'],
+  binaries: ['docker', 'wsl'],
   contributes: {
     sidebarSection: true,
     tabKinds: ['engine', 'logs'],

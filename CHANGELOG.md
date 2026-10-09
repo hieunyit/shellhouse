@@ -6,6 +6,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Removed
+
+- **Security scanning with Trivy** (Docker › Images › Scan for vulnerabilities…, Kubernetes › Scan
+  configuration…). It needed `trivy` installed on each computer or server and only scanned one
+  image or one workload at a time; it is taken out rather than kept half-done.
+
 ## [1.2.0-beta.31] - 2026-10-09
 
 ### Added

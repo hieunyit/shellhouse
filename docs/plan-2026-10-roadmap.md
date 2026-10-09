@@ -1,4 +1,4 @@
-# Kế hoạch: an toàn production, quét bảo mật, Docker TLS (2026-10)
+# Kế hoạch: an toàn production, Docker TLS, buildx (2026-10)
 
 Nguồn: bản đề xuất ưu tiên 1–4 của người dùng. Kế hoạch này đã đối chiếu với code hiện tại — phần
 nào đã có thì ghi rõ, không làm lại.
@@ -23,7 +23,7 @@ Kết luận: Ưu tiên 1 không phải làm từ đầu — chỉ còn ba lỗ 
 Không làm trong đợt này: ép buộc ở Session Host (phía renderer vẫn là lớp bảo vệ duy nhất cho
 "gõ tên"). Chế độ chỉ đọc đã được Session Host kiểm riêng (không tin cờ renderer) — giữ nguyên.
 
-## 1. Ưu tiên 1 — đóng ba lỗ hổng xác nhận (làm trước) — XONG (3fbc448)
+## 1. Ưu tiên 1 — đóng ba lỗ hổng xác nhận (làm trước)
 
 Quy tắc chung: chỉ khi môi trường của đích có `confirm === 'type'` và thao tác nguy hiểm. Chuỗi phải
 gõ:
@@ -48,25 +48,12 @@ Việc làm:
 Tiêu chí xong: trên Production không còn đường nào xoá / ghi hàng loạt chỉ bằng một cú bấm; e2e xanh
 trên cả ba hệ điều hành.
 
-## 2. Ưu tiên 2a — quét bằng Trivy (không tự viết engine quét) — XONG
+## 2. Ưu tiên 2a — quét bằng Trivy — ĐÃ GỠ (sau 1.2.0-beta.31)
 
-Nguyên tắc: gọi `trivy` nếu máy có; hiển thị kết quả. Không tải, không cài, không tự cập nhật CSDL
-ngoài những gì Trivy tự làm.
-
-- Quyền: thêm `trivy` vào `ModuleBinary` + `run-program` trong manifest Docker và K8s → lần đầu có
-  hộp thoại xin phép như `docker` / `aws`.
-- Docker, quét image: op `image.scan { ref }` → `trivy image --quiet --format json --scanners vuln
-<ref>` chạy trên máy này (endpoint local / WSL). Endpoint SSH: chạy qua `ssh-exec` nếu server có
-  `trivy`, không thì báo rõ "server chưa cài Trivy" — không kéo image về máy này.
-- K8s, misconfig: lấy YAML của workload đang xem → ghi file tạm → `trivy config --format json`
-  → xoá file tạm. Không đưa kubeconfig / token cho Trivy; không dùng `trivy k8s`.
-- Giao diện: nút "Scan" ở chi tiết image (Docker) và chi tiết workload (K8s). Bảng kết quả: mức độ
-  (CRITICAL…LOW), gói / luật, phiên bản, bản sửa, lọc "có bản sửa", chọn / copy (xem commit chọn văn
-  bản), xuất CSV. Tóm tắt số theo mức độ ở đầu.
-- An toàn: giới hạn thời gian (10 phút) + dung lượng JSON; huỷ được; lỗi Trivy hiện nguyên văn;
-  không gửi gì ra ngoài ngoài những gì Trivy tự tải (CSDL lỗ hổng) — nói rõ trong hộp xin quyền.
-- Test: parser JSON Trivy bằng fixture; tích hợp bằng trivy giả (script in JSON) qua `LimitedSpawn`;
-  e2e hiển thị kết quả.
+Đã làm (`c13f990`: gọi `trivy` trên máy cho image Docker và cấu hình từng workload K8s) rồi gỡ: cần
+cài Trivy trên từng máy / server, mỗi lần chỉ quét một image hoặc một workload, không có CVE của
+image đang chạy trong cluster. Hướng đầy đủ hơn (đọc báo cáo của Trivy Operator trong cluster) cần
+cài operator ở từng cluster — chưa làm. Làm lại thì bắt đầu từ `c13f990`.
 
 ## 3. Ưu tiên 2b — Docker qua TCP + TLS — XONG (chỉ Engine API; không Compose / build / shell)
 
@@ -96,25 +83,22 @@ bước che bí mật, hỗ trợ mô hình cục bộ.
 
 ## 6. Thứ tự và rủi ro
 
-1 → 2a → 2b → 3. Mỗi mục: một nhánh commit riêng, CI xanh trước mục tiếp theo, CHANGELOG theo mục.
+1 → 2a (đã gỡ) → 2b → 3. Mỗi mục: một nhánh commit riêng, CI xanh trước mục tiếp theo, CHANGELOG theo mục.
 
-Rủi ro: (a) Trivy tải CSDL lần đầu chậm / cần mạng — hiển thị tiến trình và lỗi rõ; (b) TLS: lưu khoá
-client là dữ liệu nhạy cảm — chỉ vault, không log, không đồng bộ rõ; (c) quét image trên server SSH
-phụ thuộc server có Trivy — chấp nhận, báo rõ.
+Rủi ro: TLS — lưu khoá client là dữ liệu nhạy cảm: chỉ vault, không log, không đồng bộ rõ.
 
 ## 7. Rà soát lại (2026-10-09) — lỗ hổng bảng mục 0 bỏ sót, đã sửa
 
 Bảng mục 0 ghi "Docker: stop / kill / remove một container — gõ lại tên ✅", nhưng chỉ đúng với
 kill / remove. Đối chiếu từng chỗ gọi thao tác thay đổi (Docker `isMutating`, K8s `isMutating`):
 
-| Thao tác trên Production                                      | Trước                    | Sau          |
-| ------------------------------------------------------------- | ------------------------ | ------------ |
-| Docker: stop / restart / pause một container (nút, menu)      | Chạy ngay, không hỏi     | Gõ tên       |
-| Docker: restart / pause hàng loạt                             | Chỉ bấm xác nhận         | Gõ cụm đếm   |
-| Docker: Compose restart / up                                  | Chạy ngay                | Gõ tên dự án |
-| Docker: ngắt container khỏi network                           | Hộp xác nhận thường      | Gõ tên       |
-| K8s: form Create trùng tên (server-side apply sửa đè)         | Hộp xác nhận thường      | Gõ tên       |
-| K8s: chạy CronJob ngay / tạm ngưng lịch / tạm dừng rollout    | Chạy ngay                | Gõ tên       |
-| Docker: menu "Scan" trên engine TCP (không có chỗ chạy Trivy) | Hiện rồi báo lỗi khi bấm | Ẩn           |
+| Thao tác trên Production                                   | Trước                | Sau          |
+| ---------------------------------------------------------- | -------------------- | ------------ |
+| Docker: stop / restart / pause một container (nút, menu)   | Chạy ngay, không hỏi | Gõ tên       |
+| Docker: restart / pause hàng loạt                          | Chỉ bấm xác nhận     | Gõ cụm đếm   |
+| Docker: Compose restart / up                               | Chạy ngay            | Gõ tên dự án |
+| Docker: ngắt container khỏi network                        | Hộp xác nhận thường  | Gõ tên       |
+| K8s: form Create trùng tên (server-side apply sửa đè)      | Hộp xác nhận thường  | Gõ tên       |
+| K8s: chạy CronJob ngay / tạm ngưng lịch / tạm dừng rollout | Chạy ngay            | Gõ tên       |
 
 Chiều đảo ngược (start, resume, uncordon…) không hỏi thêm. Ưu tiên 4 (AI) vẫn chưa làm.

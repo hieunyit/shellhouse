@@ -283,9 +283,6 @@ export function useK8sActions({
     history: (obj) => {
       setDialog({ kind: 'history', obj })
     },
-    scan: (obj) => {
-      setDialog({ kind: 'scan', obj })
-    },
     remove: (obj, force) => {
       setDialog({ kind: 'delete', obj, force })
     },

@@ -1287,9 +1287,6 @@ export const k8s: Readonly<Record<string, string>> = {
     'Cho API server dùng chứng chỉ tự ký, hoặc đi qua proxy có kiểm tra TLS. Proxy lấy từ proxy-url trong kubeconfig, nếu không có thì theo Cài đặt › Network.',
   '{error} — if you trust this API server, turn on “Skip certificate verification” in the context settings':
     '{error} — nếu tin API server này, bật “Bỏ qua kiểm tra chứng chỉ” trong cài đặt của context',
-  'Scan configuration…': 'Quét cấu hình…',
-  'Configuration issues in {name}': 'Vấn đề cấu hình của {name}',
-  'Secrets are not scanned.': 'Không quét Secret.',
   // Production: pause rollout, chạy / tắt CronJob phải gõ tên
   'Pause the rollout of {name}?': 'Tạm dừng rollout của {name}?',
   'No new pods are rolled out until the rollout is resumed.':
