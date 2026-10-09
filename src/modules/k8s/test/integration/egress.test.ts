@@ -1,7 +1,7 @@
 import { connect, type Socket } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { LimitedSpawn } from '../../../registry/host-types'
-import { egressRows, type EgressResult } from '../../shared/egress'
+import { egressRows, withExtraServices, type EgressResult } from '../../shared/egress'
 import type { MapData } from '../../shared/map'
 import { K8sService, type ResolvedClusterConfig } from '../../session-host/service'
 import { startApiTestServer, TEST_CA, TOKEN, type ApiTestServer } from '../api-test-server'
@@ -183,6 +183,49 @@ describe('Điểm đến khai báo (egress)', () => {
     const kinds = Object.fromEntries(rows.map((x) => [x.dest.host, x.dest.kind]))
     expect(kinds['api.stripe.com']).toBe('external')
     expect(kinds['mysql.prod.corp']).toBe('external')
+  })
+
+  it('Map: Service ở namespace ngoài phạm vi mà cấu hình nhắc tới vẫn được nhận ra', async () => {
+    const { server, run } = await setup()
+    server.upsert('services', {
+      apiVersion: 'v1',
+      kind: 'Service',
+      metadata: { name: 'pg', namespace: 'data' },
+      spec: { selector: { app: 'pg' }, ports: [{ port: 5432 }], clusterIP: '10.0.0.9' }
+    })
+    server.upsert('deployments', {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: { name: 'cross', namespace: 'shop' },
+      spec: {
+        selector: { matchLabels: { app: 'cross' } },
+        template: {
+          metadata: { labels: { app: 'cross' } },
+          spec: {
+            containers: [
+              {
+                name: 'app',
+                image: 'nginx',
+                env: [{ name: 'DB', value: 'pg.data.svc.cluster.local:5432' }]
+              }
+            ]
+          }
+        }
+      }
+    })
+    const [map, r] = await Promise.all([
+      run<MapData>({ op: 'map', namespaces: ['shop'] }),
+      run<EgressResult>({ op: 'egress', namespaces: ['shop'], secrets: false })
+    ])
+    expect(r.services?.map((x) => `${x.ns}/${x.name}`)).toEqual(['data/pg'])
+    const rows = egressRows(r.items, withExtraServices(map, r.services)).filter(
+      (x) => x.workload.name === 'cross'
+    )
+    expect(rows.map((x) => x.dest.kind)).toEqual(['service'])
+    // Không có phần bổ sung thì đúng là chưa nhận ra — test này giữ cho lỗi cũ không quay lại.
+    expect(egressRows(r.items, map).find((x) => x.workload.name === 'cross')?.dest.kind).not.toBe(
+      'service'
+    )
   })
 
   it('chế độ một workload: chỉ GET workload đó, kèm Service để phân loại', async () => {

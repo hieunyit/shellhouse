@@ -4,7 +4,11 @@ import { cx } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { formatDateTime, formatTime, t } from '../../registry/renderer-kit'
 import { filterMapData, groupingKeys, parseLabelSelector, type MapData } from '../shared/map'
-import { egressRows as buildEgressRows, type EgressResult } from '../shared/egress'
+import {
+  egressRows as buildEgressRows,
+  withExtraServices,
+  type EgressResult
+} from '../shared/egress'
 import { NodesView } from './NodesView'
 import { ConnectionsView } from './ConnectionsView'
 import { useConnections } from './useConnections'
@@ -219,16 +223,21 @@ export function MapView({
     egressLoaded.secrets === options.egressSecrets
       ? egressLoaded.result
       : null
+  // Service của namespace ngoài phạm vi mà cấu hình nhắc tới (postgres.data.svc…) — Map không có.
+  const classifyData = useMemo(
+    () => (data ? withExtraServices(data, egressResult?.services) : data),
+    [data, egressResult]
+  )
   const egressRows = useMemo(
-    () => (egressResult && data ? buildEgressRows(egressResult.items, data) : null),
-    [egressResult, data]
+    () => (egressResult && classifyData ? buildEgressRows(egressResult.items, classifyData) : null),
+    [egressResult, classifyData]
   )
 
   // Connections: khai báo ghép với traffic quan sát (cùng luồng đọc Caretta / Hubble với Traffic).
   const connections = useConnections({
     request,
     declared: egressRows,
-    data,
+    data: classifyData,
     active: active && view === 'connections',
     internalDns: options.internalDns
   })

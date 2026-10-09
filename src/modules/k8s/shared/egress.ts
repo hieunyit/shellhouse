@@ -45,7 +45,7 @@ export interface EgressResult {
   readSecrets: boolean
   /** Số loại workload không list được (thiếu quyền) — danh sách có thể thiếu. */
   listDenied?: number
-  /** Chế độ một workload: Service của cluster (để phân loại điểm đến). */
+  /** Service ngoài phạm vi Map mà cấu hình nhắc tới (hoặc, ở chế độ một workload, mọi Service cần để phân loại). */
   services?: { ns: string; name: string; type: string; clusterIP?: string; externalName?: string }[]
 }
 
@@ -533,4 +533,25 @@ export function egressRows(
 /** "host:port" để hiện. */
 export function destLabel(d: Pick<EgressDest, 'host' | 'port'>): string {
   return d.port !== undefined ? `${d.host}:${String(d.port)}` : d.host
+}
+
+/** Gộp Service bổ sung (namespace ngoài phạm vi Map) vào dữ liệu Map để phân loại đích. */
+export function withExtraServices<T extends Pick<MapData, 'services'>>(
+  data: T,
+  extra: EgressResult['services']
+): T {
+  if (!extra?.length) return data
+  const have = new Set(data.services.map((s) => `${s.ns}/${s.name}`))
+  const add = extra
+    .filter((s) => !have.has(`${s.ns}/${s.name}`))
+    .map((s) => ({
+      ns: s.ns,
+      name: s.name,
+      type: s.type,
+      selector: {},
+      ports: '',
+      ...(s.clusterIP ? { clusterIP: s.clusterIP } : {}),
+      ...(s.externalName ? { externalName: s.externalName } : {})
+    }))
+  return add.length ? { ...data, services: [...data.services, ...add] } : data
 }

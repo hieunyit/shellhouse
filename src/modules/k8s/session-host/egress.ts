@@ -319,16 +319,21 @@ export async function egressData(
     readSecrets,
     listDenied
   }
-  if (only) {
-    // Phân loại điểm đến cần Service: namespace của workload + namespace xuất hiện trong tên DNS
-    // (name.ns.svc) — không list Service của cả cluster.
-    const need = new Set(namespaces)
+  // Phân loại điểm đến cần Service. Workload đơn: namespace của nó + namespace xuất hiện trong tên
+  // DNS (name.ns.svc). Cả Map: Map đã có Service của phạm vi đang chọn — chỉ bổ sung namespace
+  // ngoài phạm vi mà cấu hình nhắc tới (không thì "postgres.data.svc" thành "Unresolved name").
+  // Không list Service của cả cluster.
+  {
+    const need = new Set(only ? namespaces : [])
+    const inScope = new Set(namespaces)
     for (const it of unique) {
       const m = /^(?:[a-z0-9-]+\.)?[a-z0-9-]+\.([a-z0-9-]+)\.svc(?:\.|$)/.exec(it.host)
       const two = /^[a-z0-9-]+\.([a-z0-9-]+)$/.exec(it.host)
-      if (m?.[1]) need.add(m[1])
-      else if (two?.[1] && !it.host.includes(':')) need.add(two[1])
+      // Dạng hai nhãn (name.ns) chỉ đáng tin khi đã biết workload — ở Map nó thường là tên miền thật.
+      const ns = m?.[1] ?? (only && two?.[1] && !it.host.includes(':') ? two[1] : undefined)
+      if (ns && (only || (inScope.size > 0 && !inScope.has(ns)))) need.add(ns)
     }
+    if (need.size === 0) return result
     const svcs = await listAll(client, '/api/v1', 'services', [...need].slice(0, 16), signal)
     result.services = svcs.items.map((x) => {
       const spec = o((x as unknown as Obj)['spec'])
