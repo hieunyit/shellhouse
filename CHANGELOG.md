@@ -68,6 +68,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   asked for a click. On a Production Kubernetes context, the Create form could overwrite an
   existing object with a plain confirmation, and running a CronJob now, suspending it or pausing
   a rollout did not ask. All of these now ask you to type the name (resume / start do not).
+- Docker: "Scan for vulnerabilities…" is no longer offered for engines added by TCP address, where
+  there is nowhere to run Trivy (it only showed an error).
 
 ## [1.2.0-beta.30] - 2026-10-09
 

@@ -1002,15 +1002,20 @@ export function DockerTab({
         inspect('image', i.id, imageName(i))
       }
     },
-    {
-      id: 'scan',
-      label: t('Scan for vulnerabilities…'),
-      icon: <ShieldCheck size={14} />,
-      key: 's',
-      run: () => {
-        setDialog({ kind: 'scan', image: i })
-      }
-    },
+    // Trivy chạy cạnh Engine (máy này / WSL / server SSH) — engine TCP không có chỗ chạy.
+    ...(noCli
+      ? []
+      : [
+          {
+            id: 'scan',
+            label: t('Scan for vulnerabilities…'),
+            icon: <ShieldCheck size={14} />,
+            key: 's',
+            run: () => {
+              setDialog({ kind: 'scan', image: i })
+            }
+          }
+        ]),
     {
       id: 'copy-id',
       label: t('Copy ID'),

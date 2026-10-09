@@ -116,5 +116,6 @@ kill / remove. Đối chiếu từng chỗ gọi thao tác thay đổi (Docker `
 | Docker: ngắt container khỏi network                           | Hộp xác nhận thường      | Gõ tên       |
 | K8s: form Create trùng tên (server-side apply sửa đè)         | Hộp xác nhận thường      | Gõ tên       |
 | K8s: chạy CronJob ngay / tạm ngưng lịch / tạm dừng rollout    | Chạy ngay                | Gõ tên       |
+| Docker: menu "Scan" trên engine TCP (không có chỗ chạy Trivy) | Hiện rồi báo lỗi khi bấm | Ẩn           |
 
 Chiều đảo ngược (start, resume, uncordon…) không hỏi thêm. Ưu tiên 4 (AI) vẫn chưa làm.
