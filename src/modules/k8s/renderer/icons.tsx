@@ -125,10 +125,6 @@ const KIND_ICON: Record<string, string> = {
   resourcequotas: quota
 }
 
-export function hasKindIcon(kind: string): boolean {
-  return kind in KIND_ICON
-}
-
 /** Icon Kubernetes theo id loại (pods, deployments.apps…); loại lạ → icon pod mờ. */
 export function KindIcon({
   kind,

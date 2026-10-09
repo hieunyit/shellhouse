@@ -33,13 +33,6 @@ const VALUE_TONE: Record<FleetTone, string> = {
   danger: 'text-ds-danger'
 }
 
-/** Số mục đang theo dõi (0 khi tắt). */
-export function useInfraCount(): number {
-  const enabled = useSettings((s) => s.settings.appearance.homeMonitor)
-  const n = useFleet((s) => Object.keys(s.items).length)
-  return enabled ? n : 0
-}
-
 /** "2 phút trước" tự cập nhật mỗi phút. */
 function useMinuteTick(): number {
   const [now, setNow] = useState(() => Date.now())

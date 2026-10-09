@@ -553,12 +553,6 @@ export interface RegistryAuth {
   password: string
 }
 
-/** Sự kiện 'build': một mảnh output của `docker build`. */
-export interface BuildEvent {
-  subscription: string
-  text: string
-}
-
 /** Mẫu CPU / RAM / mạng từ /containers/{id}/stats. */
 export interface StatsSample {
   at: number
@@ -575,15 +569,6 @@ export interface LogsEvent {
   subscription: string
   stream: 'stdout' | 'stderr'
   text: string
-}
-
-export interface PullEvent {
-  subscription: string
-  status: string
-  /** Tiến độ theo layer (0–1), null = không rõ. */
-  progress: number | null
-  done: boolean
-  error?: string
 }
 
 /** Tham số phiên / terminal. */

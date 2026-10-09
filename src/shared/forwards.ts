@@ -96,12 +96,3 @@ export function forwardEndpoints(
   if (f.kind === 'D') return { bind, dest: null }
   return { bind, dest: `${f.destHost ?? '?'}:${f.destPort ?? '?'}` }
 }
-
-export function describeForward(
-  f: Pick<ForwardSpec, 'kind' | 'bindAddr' | 'bindPort' | 'destHost' | 'destPort'>,
-  actualPort?: number | null
-): string {
-  const { bind, dest } = forwardEndpoints(f, actualPort)
-  if (f.kind === 'D' || dest === null) return `SOCKS5 ${bind}`
-  return f.kind === 'L' ? `${bind} → ${dest}` : `server ${bind} → ${dest}`
-}

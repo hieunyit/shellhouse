@@ -26,8 +26,6 @@ export interface PromptReply {
   answers: string[]
 }
 
-export type HostKeyDecision = 'accept' | 'reject'
-
 /** Những gì transport cần từ session (UI) và từ main (known_hosts). */
 export interface TransportContext {
   status(phase: ConnectionPhase, detail: string): void

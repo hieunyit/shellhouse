@@ -167,10 +167,6 @@ export function registerRendererModules(modules: readonly RendererModule[]): voi
   registered = modules
 }
 
-export function rendererModules(): readonly RendererModule[] {
-  return registered
-}
-
 export function rendererModule(id: string): RendererModule | undefined {
   return registered.find((m) => m.manifest.id === id)
 }
@@ -379,15 +375,6 @@ export function onModuleEvent(
 
 export function moduleTab(module: string, tab: string): ModuleTabDef | null {
   return rendererModule(module)?.tabs?.[tab] ?? null
-}
-
-/** Tiêu đề cho tab module; tham số hỏng → tên module. */
-export function moduleTabTitle(module: string, tab: string, params: unknown): string {
-  const def = moduleTab(module, tab)
-  const parsed = def?.params.safeParse(params)
-  return def && parsed?.success
-    ? def.title(parsed.data)
-    : (rendererModule(module)?.manifest.name ?? module)
 }
 
 /** Mở tab của module (module phải đang bật). Trả về id tab, null nếu không mở được. */

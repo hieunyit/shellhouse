@@ -1,9 +1,5 @@
 import { t } from '../../../registry/renderer-kit'
 import type { TopoLane } from '../../shared/appTopology'
-import { formatRate } from '../../shared/traffic'
-
-/** Tốc độ traffic theo locale; dưới 1 B/s ghi "idle". */
-export const trafficText = formatRate
 
 /** Tên làn (dịch lúc render). */
 export function laneTitle(lane: TopoLane): string {

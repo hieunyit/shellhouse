@@ -209,10 +209,6 @@ export const BUILTIN_KINDS: readonly ResourceKind[] = [
   k('', 'v1', 'events', 'Event', 'Events', 'Cluster')
 ]
 
-export function builtinKind(id: string): ResourceKind | undefined {
-  return BUILTIN_KINDS.find((x) => x.id === id)
-}
-
 /** Đường dẫn API của một loại (và một đối tượng / subresource nếu có). */
 export function resourcePath(
   kind: Pick<ResourceKind, 'group' | 'version' | 'plural' | 'namespaced'>,

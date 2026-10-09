@@ -82,10 +82,6 @@ export function savedHostForPassword(
   )
 }
 
-export function vaultUnlocked(): boolean {
-  return useVault.getState().state === 'unlocked'
-}
-
 /** Server hỏi lại cùng tài khoản trong cùng tab → lần trước gõ sai: bỏ cái đang chờ lưu. */
 export function dropPending(tabId: string, kind: Kind, key: string): void {
   pending.delete(slot(tabId, kind, key))

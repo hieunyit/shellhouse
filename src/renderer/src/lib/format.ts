@@ -1,4 +1,4 @@
-import { formatBytes, formatDateTime, formatRelative, nameCollator } from '@shared/i18n/format'
+import { formatBytes, formatRelative, nameCollator } from '@shared/i18n/format'
 
 /** Dung lượng dễ đọc: 1000 B, 12.3 KB, 4.5 MB, 1.25 GB… (dấu thập phân theo locale). */
 export function formatSize(n: number): string {
@@ -11,11 +11,6 @@ export function cleanError(e: unknown): string {
     /^Error invoking remote method '[^']+': (Error: )?/,
     ''
   )
-}
-
-/** Ngày giờ dạng số theo locale giao diện (17/08/2026, 22:44 · 08/17/2026, 10:44 PM). */
-export const dateFormat = {
-  format: (value: number | Date): string => formatDateTime(value)
 }
 
 /** Thứ tự tên tự nhiên theo locale giao diện: file2 < file10, không phân biệt hoa thường. */
