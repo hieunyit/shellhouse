@@ -2449,6 +2449,7 @@ export function DockerTab({
           onClose={() => {
             setDialog(null)
           }}
+          production={env?.confirm === 'type'}
           onConfirm={() => {
             const { what, all } = dialog
             setDialog(null)
@@ -2472,6 +2473,7 @@ export function DockerTab({
       {dialog?.kind === 'bulk' && (
         <BulkDialog
           plan={dialog.plan}
+          production={env?.confirm === 'type'}
           onClose={() => {
             setDialog(null)
           }}

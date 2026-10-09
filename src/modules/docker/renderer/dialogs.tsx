@@ -14,6 +14,7 @@ import { formatBytes, t, tn } from '../../registry/renderer-kit'
 import { registryFor, registryOf, type DockerRegistry } from '../shared/ipc'
 import { type ContainerRow, type PruneResult, type PruneTarget, type RunSpec } from '../shared/ops'
 import { trySplitShellWords } from '../shared/shell-words'
+import { nounText } from './Bulk'
 
 /**
  * Hộp xác nhận (thay `window.confirm`): nói rõ hậu quả, nút nguy hiểm màu đỏ; tuỳ chọn một ô đánh
@@ -122,11 +123,28 @@ function pruneTitle(what: PruneTarget, all: boolean): string {
  * Xem trước rồi mới dọn (container dừng, image dangling / không dùng, volume / network không dùng,
  * build cache).
  */
+/** Cụm phải gõ lại để dọn dẹp trên Production: số lượng theo bản xem trước ("12 images"). */
+function pruneTypedPhrase(what: PruneTarget, count: number): string {
+  switch (what) {
+    case 'images':
+      return nounText('image', count)
+    case 'volumes':
+      return nounText('volume', count)
+    case 'networks':
+      return nounText('network', count)
+    case 'containers':
+      return nounText('container', count)
+    case 'buildCache':
+      return t('build cache')
+  }
+}
+
 export function PruneDialog({
   what,
   all,
   preview,
   error,
+  production = false,
   onAllChange,
   onClose,
   onConfirm
@@ -136,12 +154,17 @@ export function PruneDialog({
   all: boolean
   preview: PruneResult | null
   error: string | null
+  /** Môi trường đòi gõ lại tên (Production). */
+  production?: boolean
   onAllChange: (all: boolean) => void
   onClose: () => void
   onConfirm: () => void
 }): React.JSX.Element {
   const count = preview ? (preview.count ?? preview.items.length) : 0
   const empty = preview !== null && count === 0 && preview.reclaimed === 0
+  const [typed, setTyped] = useState('')
+  const need = production && preview && !empty ? pruneTypedPhrase(what, count) : undefined
+  const typedOk = need === undefined || typed === need
   return (
     <Modal
       title={pruneTitle(what, all)}
@@ -155,7 +178,7 @@ export function PruneDialog({
           <Button
             variant="danger"
             data-testid="docker-prune-confirm"
-            disabled={!preview || empty}
+            disabled={!preview || empty || !typedOk}
             onClick={onConfirm}
           >
             {preview && count > 0 ? t('Remove {n}', { n: count }) : t('Remove')}
@@ -243,6 +266,21 @@ export function PruneDialog({
                 </li>
               ))}
             </ul>
+          )}
+          {need !== undefined && (
+            <Field label={t('Type {name} to confirm', { name: need })}>
+              <Input
+                mono
+                value={typed}
+                data-testid="docker-prune-typed"
+                onPaste={(e) => {
+                  e.preventDefault()
+                }}
+                onChange={(e) => {
+                  setTyped(e.target.value)
+                }}
+              />
+            </Field>
           )}
         </div>
       )}

@@ -538,3 +538,52 @@ test('Docker trong WSL (Windows): gợi ý, distro đang chạy hiện ở thanh
     await launched.close()
   }
 })
+
+test('Docker trên Production: xoá hàng loạt và dọn dẹp phải gõ lại cụm đếm, gõ sai thì không chạy', async () => {
+  test.setTimeout(60_000)
+  test.skip(isWindows, 'Engine giả dùng unix socket')
+  const engine = await startEngineTestServer()
+  const launched = await launchApp({ DOCKER_HOST: `unix://${engine.path}` })
+  const { page } = launched
+  try {
+    await enableDocker(page)
+    const local = page.locator('[data-testid="docker-endpoint"][data-name="This computer"]')
+    await local.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Production' }).click()
+    await local.dblclick()
+    const view = page.getByTestId('docker-view')
+    await expect(view.getByTestId('docker-container')).toHaveCount(3)
+    const deletes = (): number => engine.requests.filter((r) => r.startsWith('DELETE')).length
+
+    // Xoá hàng loạt: nút bị khoá tới khi gõ đúng "3 containers"; dán không được.
+    await view.getByTestId('docker-select-all').click()
+    await view.getByTestId('docker-bulk-remove').click()
+    const ok = page.getByTestId('docker-bulk-ok')
+    const typed = page.getByTestId('docker-bulk-typed')
+    await expect(ok).toBeDisabled()
+    await typed.fill('3 container')
+    await expect(ok).toBeDisabled()
+    await typed.fill('3 containers')
+    await expect(ok).toBeEnabled()
+    expect(deletes()).toBe(0)
+    await ok.click()
+    await expect(view.getByTestId('docker-container')).toHaveCount(0)
+    expect(deletes()).toBe(3)
+
+    // Dọn image dangling: cũng phải gõ lại ("1 image").
+    await page.getByTestId('docker-nav-images').click()
+    await expect(view.getByTestId('docker-image')).toHaveCount(3)
+    await view.getByTestId('docker-prune').click()
+    await expect(page.getByTestId('docker-prune-list')).toContainText('dangling1')
+    const confirm = page.getByTestId('docker-prune-confirm')
+    await expect(confirm).toBeDisabled()
+    await page.getByTestId('docker-prune-typed').fill('1 images')
+    await expect(confirm).toBeDisabled()
+    await page.getByTestId('docker-prune-typed').fill('1 image')
+    await expect(confirm).toBeEnabled()
+    await confirm.click()
+    await expect(view.getByTestId('docker-image')).toHaveCount(2)
+  } finally {
+    await launched.close()
+  }
+})

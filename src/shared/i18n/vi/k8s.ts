@@ -457,6 +457,9 @@ export const k8s: Readonly<Record<string, string>> = {
   'Saving…': 'Đang lưu…',
   'Applying…': 'Đang apply…',
   Save: 'Lưu',
+  'Save {title}?': 'Lưu {title}?',
+  'Apply this YAML?': 'Áp dụng YAML này?',
+  'This changes the live cluster right away.': 'Thay đổi này ghi thẳng lên cluster đang chạy.',
   Apply: 'Áp dụng',
   'Server-side apply: creates new objects and updates existing ones. Separate several objects with “---”. Objects without a namespace go to {namespace}.':
     'Server-side apply: tạo object mới và cập nhật object đã có. Ngăn cách nhiều object bằng “---”. Object không ghi namespace sẽ vào {namespace}.',

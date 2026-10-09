@@ -1519,3 +1519,62 @@ test('Kubernetes: tạo Deployment + Service bằng form (kiểu Rancher / Lens)
     await server.close()
   }
 })
+
+test('Kubernetes trên Production: lưu YAML sửa và Apply phải gõ lại tên đối tượng', async () => {
+  test.setTimeout(60_000)
+  const server = await startApiTestServer()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await enableK8s(page)
+    const context = page.locator('[data-testid="k8s-context"][data-name="test"]')
+    await context.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Context settings…' }).click()
+    await page.getByTestId('k8s-env-prod').click()
+    await page.getByTestId('k8s-context-save').click()
+    await context.dblclick()
+    const view = page.getByTestId('k8s-view')
+    await setWindowSize(launched, 1366, 820)
+    const writes = (): number =>
+      server.requests.filter((r) => /^(PUT|PATCH|POST) /.test(r) && !/dryRun/.test(r)).length
+
+    // Sửa YAML Deployment: xem diff xong, bước ghi bị chặn tới khi gõ đúng tên.
+    await page.getByTestId('k8s-nav-deployments.apps').click()
+    const row = view.locator('[data-testid="k8s-row"][data-name="shop/web"]')
+    await row.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Edit YAML' }).click()
+    const editor = page.getByTestId('k8s-yaml-editor')
+    const code = editor.getByTestId('k8s-yaml-text').locator('.cm-content')
+    await expect(code).toContainText('name: web')
+    // Thêm một annotation thật (comment không tạo khác biệt nên không có gì để lưu).
+    const original = await code.innerText()
+    const changed = original.replace(
+      /^(\s*)(deployment\.kubernetes\.io\/revision:.*)$/m,
+      '$1$2\n$1team: sre'
+    )
+    expect(changed).not.toBe(original)
+    await code.click()
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.insertText(changed)
+    await editor.getByTestId('k8s-yaml-apply').click()
+    await expect(editor.getByTestId('k8s-yaml-preview')).toBeVisible()
+    const before = writes()
+    await editor.getByTestId('k8s-yaml-apply').click()
+    const ok = page.getByTestId('k8s-confirm-ok')
+    await expect(ok).toBeDisabled()
+    await page.getByTestId('k8s-confirm-typed').fill('web-x')
+    await expect(ok).toBeDisabled()
+    expect(writes()).toBe(before)
+    await page.getByTestId('k8s-confirm-typed').fill('web')
+    await ok.click()
+    await expect(editor).toHaveCount(0)
+    expect(writes()).toBeGreaterThan(before)
+  } finally {
+    await launched.close()
+    await server.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

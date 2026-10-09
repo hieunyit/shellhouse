@@ -6,6 +6,14 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+### Security
+
+- Production safety: on an environment that asks you to type the name, three more actions now do
+  the same instead of a single click — bulk actions in Docker (remove, kill… on several
+  containers, images, volumes or networks), Docker clean-up (prune), and saving or applying YAML in
+  Kubernetes. Bulk and prune ask for the count ("3 containers", "12 images"); YAML asks for the
+  object name (or "N objects").
+
 ## [1.2.0-beta.30] - 2026-10-09
 
 ### Added

@@ -659,5 +659,6 @@ export const docker: Readonly<Record<string, string>> = {
   'No limit': 'Không giới hạn',
   'Since start: {in} in · {out} out': 'Từ lúc chạy: nhận {in} · gửi {out}',
   'Unhealthy — the last check failed': 'Unhealthy — lần kiểm tra gần nhất bị lỗi',
-  'Unhealthy — the last {n} checks failed': 'Unhealthy — {n} lần kiểm tra gần nhất bị lỗi'
+  'Unhealthy — the last {n} checks failed': 'Unhealthy — {n} lần kiểm tra gần nhất bị lỗi',
+  'build cache': 'build cache'
 }

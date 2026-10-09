@@ -14,6 +14,8 @@ import {
   type CodeEditorHandle
 } from '../../registry/renderer-kit'
 import type { ApplyResult, DiffItem, K8sOp } from '../shared/ops'
+import { useClusterGuard } from './confirm'
+import { yamlTypedName } from '../shared/yamlTyped'
 import { DiffView } from './DiffView'
 import { loadYamlSupport } from './yamlLanguage'
 
@@ -155,6 +157,7 @@ export function YamlEditor({
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   const readOnly = mode === 'view'
+  const { production, guard } = useClusterGuard()
 
   useEffect(() => {
     let cancelled = false
@@ -227,10 +230,31 @@ export function YamlEditor({
     }, fail)
   }
 
-  /** Bước 2: ghi thật. */
+  /** Bước 2: ghi thật — production: gõ lại tên đối tượng (sau khi đã xem diff). */
   const commit = (): void => {
     const text = textNow()
     if (busyRef.current || readOnly || !text.trim()) return
+    if (!production) {
+      write(text)
+      return
+    }
+    setBusyBoth(true)
+    void guard({
+      title: mode === 'edit' ? t('Save {title}?', { title }) : t('Apply this YAML?'),
+      message: t('This changes the live cluster right away.'),
+      confirmLabel: mode === 'edit' ? t('Save') : t('Apply'),
+      danger: true,
+      name: yamlTypedName(text)
+    }).then((ok) => {
+      if (!ok) {
+        setBusyBoth(false)
+        return
+      }
+      write(text)
+    })
+  }
+
+  const write = (text: string): void => {
     setBusyBoth(true)
     setError(null)
     if (mode === 'edit') {

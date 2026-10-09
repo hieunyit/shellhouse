@@ -1,6 +1,14 @@
 import { useRef, useState } from 'react'
 import { Check, Minus, X } from 'lucide-react'
-import { Button, Checkbox, cx, Modal, Notice } from '../../../renderer/src/components/ui'
+import {
+  Button,
+  Checkbox,
+  cx,
+  Field,
+  Input,
+  Modal,
+  Notice
+} from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { formatNumber, t, tn, toast } from '../../registry/renderer-kit'
 import {
@@ -402,25 +410,30 @@ export function networkRemovePlan(items: readonly NetworkRow[], request: Request
 /** Hộp xác nhận + tiến độ + kết quả của một thao tác hàng loạt. */
 export function BulkDialog({
   plan,
+  production = false,
   onClose,
   onFinished
 }: {
   plan: BulkPlan
+  /** Môi trường đòi gõ lại tên (Production): thao tác nguy hiểm phải gõ cụm đếm ("3 containers"). */
+  production?: boolean
   onClose: () => void
   /** Chạy xong (kể cả có lỗi): khoá các mục thành công / lỗi. */
   onFinished: (results: BulkResult[]) => void
 }): React.JSX.Element {
   const [option, setOption] = useState(false)
+  const [typed, setTyped] = useState('')
   const [phase, setPhase] = useState<'confirm' | 'running' | 'done'>('confirm')
   const [results, setResults] = useState<BulkResult[]>([])
   const cancelled = useRef(false)
   const n = plan.targets.length
+  const need = production && plan.danger && n > 0 ? nounText(plan.noun, n) : undefined
   const failed = results.filter((r) => !r.ok)
   const shown = plan.targets.slice(0, 12)
   const labelOf = new Map(plan.targets.map((x) => [x.key, x.label]))
 
   const run = (): void => {
-    if (phase !== 'confirm' || n === 0) return
+    if (phase !== 'confirm' || n === 0 || (need !== undefined && typed !== need)) return
     setPhase('running')
     cancelled.current = false
     void runBulk(plan.targets, {
@@ -465,7 +478,7 @@ export function BulkDialog({
             <Button
               variant={plan.danger ? 'danger' : 'primary'}
               autoFocus={!plan.danger}
-              disabled={n === 0}
+              disabled={n === 0 || (need !== undefined && typed !== need)}
               data-testid="docker-bulk-ok"
               onClick={run}
             >
@@ -525,6 +538,25 @@ export function BulkDialog({
               </div>
             )}
             {plan.warning && <Notice tone="warning">{plan.warning}</Notice>}
+            {need !== undefined && (
+              <Field label={t('Type {name} to confirm', { name: need })}>
+                <Input
+                  autoFocus
+                  mono
+                  value={typed}
+                  data-testid="docker-bulk-typed"
+                  onPaste={(e) => {
+                    e.preventDefault()
+                  }}
+                  onChange={(e) => {
+                    setTyped(e.target.value)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && typed === need) run()
+                  }}
+                />
+              </Field>
+            )}
             {plan.option && n > 0 && (
               <Checkbox
                 label={plan.option.label}
