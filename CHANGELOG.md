@@ -6,21 +6,7 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
-### Fixed
-
-- **Docker › Build (buildx) and image push / pull with a saved registry** lost your buildx builders
-  and your docker context while signed in: a multi-platform push with a builder you created
-  (`docker buildx create`) failed with "no builder found", and on Docker Desktop the build could go
-  to the wrong engine. The throw-away sign-in folder now keeps pointing at your builders and current
-  context; only the registry credentials stay in it.
-
-### Removed
-
-- **Security scanning with Trivy** (Docker › Images › Scan for vulnerabilities…, Kubernetes › Scan
-  configuration…). It needed `trivy` installed on each computer or server and only scanned one
-  image or one workload at a time; it is taken out rather than kept half-done.
-
-## [1.2.0-beta.31] - 2026-10-09
+## [1.2.0-beta.32] - 2026-10-09
 
 ### Added
 
@@ -38,14 +24,6 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   volumes work as everywhere else; Compose, image builds and shell-in-container need the docker
   command line and are not available for these engines. Certificates are not synced to other
   devices.
-- **Security scanning with Trivy** (uses the `trivy` you already have; Shellhouse does not ship a
-  scanner and asks before it first runs the program):
-  - Docker › Images › Scan for vulnerabilities… lists the CVEs of an image by severity, with the
-    installed and fixed versions, a "has a fix" filter, search and Copy as CSV. It runs where Docker
-    runs: this computer, a WSL distribution, or an SSH server (Trivy must be installed there).
-  - Kubernetes › Scan configuration… checks a workload's live YAML against Trivy's misconfiguration
-    rules (root file system, privileges…) with the suggested fix and the YAML line. Secrets are
-    never scanned, and no cluster credentials are handed to Trivy.
 
 ### Security
 
@@ -63,8 +41,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
   asked for a click. On a Production Kubernetes context, the Create form could overwrite an
   existing object with a plain confirmation, and running a CronJob now, suspending it or pausing
   a rollout did not ask. All of these now ask you to type the name (resume / start do not).
-- Docker: "Scan for vulnerabilities…" is no longer offered for engines added by TCP address, where
-  there is nowhere to run Trivy (it only showed an error).
+- **Docker: pushing or pulling with a saved registry** (Docker in WSL or on an SSH server, and
+  Build › push) lost your buildx builders and your docker context while signed in: a
+  multi-platform push with a builder you created (`docker buildx create`) failed with "no builder
+  found", and with a non-default context the command could go to the wrong engine. The throw-away
+  sign-in folder now keeps pointing at your builders and current context; only the registry
+  credentials stay in it.
 
 ## [1.2.0-beta.30] - 2026-10-09
 

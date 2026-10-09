@@ -84,7 +84,8 @@ dạng văn bản để dán vào ticket.
 ## 8. Quyết định (2026-10-09): không làm
 
 Đã cài đặt thành module `runbook` (commit `b8c3eee`: bốn loại bước, header bí mật trong vault, dùng
-chung phiên theo đích, xuất / nhập) rồi revert trước khi phát hành 1.2.0-beta.31. Lý do:
+chung phiên theo đích, xuất / nhập) rồi revert trước khi phát hành (1.2.0-beta.31 chỉ là bản build
+nháp, không phát hành; bản phát hành là 1.2.0-beta.32). Lý do:
 
 - Không thiết yếu: nhóm có CI/CD đã có smoke test sau deploy, `kubectl rollout status` trong
   pipeline và giám sát uptime; từng mảnh lẻ app đã có (snippet + gõ vào nhiều terminal, trạng thái

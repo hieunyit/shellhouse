@@ -48,7 +48,7 @@ Việc làm:
 Tiêu chí xong: trên Production không còn đường nào xoá / ghi hàng loạt chỉ bằng một cú bấm; e2e xanh
 trên cả ba hệ điều hành.
 
-## 2. Ưu tiên 2a — quét bằng Trivy — ĐÃ GỠ (sau 1.2.0-beta.31)
+## 2. Ưu tiên 2a — quét bằng Trivy — ĐÃ GỠ (trước khi phát hành 1.2.0-beta.32)
 
 Đã làm (`c13f990`: gọi `trivy` trên máy cho image Docker và cấu hình từng workload K8s) rồi gỡ: cần
 cài Trivy trên từng máy / server, mỗi lần chỉ quét một image hoặc một workload, không có CVE của
@@ -73,7 +73,7 @@ cài operator ở từng cluster — chưa làm. Làm lại thì bắt đầu t�
 
 - Buildx / đa nền tảng (XONG): mở rộng `BuildSpec` (`platforms[]`, builder, push / load) — chỉ khi `docker
 buildx` có trên máy; hiện tiến trình từng nền tảng.
-- Runbook gắn môi trường (KHÔNG LÀM — đã cài đặt rồi gỡ trước 1.2.0-beta.31, lý do ở
+- Runbook gắn môi trường (KHÔNG LÀM — đã cài đặt rồi gỡ trước khi phát hành 1.2.0-beta.32, lý do ở
   `docs/adr/0016-runbooks.md` mục 8).
 
 ## 5. Ưu tiên 4 — chưa làm
