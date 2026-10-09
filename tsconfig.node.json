@@ -17,6 +17,7 @@
     "src/modules/registry/all-main.ts",
     "src/modules/registry/all-host.ts",
     "src/modules/registry/host-types.ts",
+    "src/modules/registry/renderer-session.ts",
     "src/modules/registry/session-host.ts",
     "src/modules/registry/local-paths.ts",
     "src/modules/*/manifest.ts",

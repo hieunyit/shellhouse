@@ -8,6 +8,27 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Added
 
+- **Runbooks** (new module, off by default — Settings › Modules): save the checks you run after a
+  deploy and run them in one click. Each step has its own target: an HTTP check (status code,
+  optional text in the response), a command on an SSH server (exit code 0, optional text in the
+  output), a Kubernetes Deployment / StatefulSet / DaemonSet that must be ready, or a Docker
+  container that must be running / healthy (these two appear when the Kubernetes / Docker modules
+  are on). Steps run in order and stop at the first failure unless a step says "keep going";
+  `{{name}}` asks for a value at each run. If any target is in a Production environment you type
+  the runbook name first; commands never run on a read-only environment (the read-only checks
+  still do). Steps on the same server, cluster or Docker engine share one connection per run, so
+  you sign in once. Results show per step with the last lines of output (secrets masked, JSON
+  included), "Run failed steps again" and "Copy results" for a ticket; steps fold to their result
+  line when you only want to run. The last 5 runs are kept on this computer — open one to see
+  each step's result and output again.
+  - HTTP checks can use GET, HEAD or POST (with a body), send headers, and keep a header value
+    (a token, a password) secret: it is stored encrypted in the vault, sent only when the check
+    runs, never shown again and dropped when a redirect leads to another site. Checks go through
+    the proxy of Settings › Network; "Skip certificate verification" is there for self-signed
+    internal servers.
+  - Duplicate a runbook, export one or all to a `.runbook.json` file and import it on another
+    computer: secret header values are never in the file, and the SSH servers of the steps are
+    matched by name and address on the computer that imports.
 - **Docker › Build for several platforms (buildx):** the Build dialog lists the platforms of your
   buildx builder (amd64, arm64…), builds with `docker buildx build --platform …` and can load the
   result into the engine (one platform), push it (several) or only check that it builds. Pushing

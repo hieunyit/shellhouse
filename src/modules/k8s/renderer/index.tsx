@@ -4,6 +4,7 @@ import { lazyModuleComponent, t } from '../../registry/renderer-kit'
 import { k8sManifest } from '../manifest'
 import { K8sClusterParams, K8sLogsParams } from '../shared/ops'
 import { k8sApi } from './api'
+import { rolloutStep } from './runbook'
 
 /** Phần renderer của Kubernetes: thanh bên, tab cluster, tab log pod, cài đặt. */
 export const k8sRenderer: RendererModule = {
@@ -40,6 +41,8 @@ export const k8sRenderer: RendererModule = {
     }
   ],
   SettingsPage: lazyModuleComponent(() => import('./K8sSettings').then((m) => m.K8sSettings)),
+  // Bước kiểm tra cho module Runbook (chỉ đọc).
+  runbookSteps: { rollout: rolloutStep },
   // Theo dõi nền cho Home (chunk riêng — chỉ nạp khi module bật).
   background: () => {
     let stop: (() => void) | null = null

@@ -10,6 +10,7 @@
     "src/modules/*/test/e2e/**/*",
     "src/modules/*/test/*-server.ts",
     "src/modules/*/shared/**/*",
+    "src/modules/registry/renderer-session.ts",
     "src/modules/docker/session-host/tar.ts",
     "src/modules/k8s/session-host/protobuf.ts",
     "src/modules/k8s/test/hubble-flows.ts",

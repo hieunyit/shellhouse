@@ -86,9 +86,9 @@ ngoài những gì Trivy tự làm.
 
 - Buildx / đa nền tảng (XONG): mở rộng `BuildSpec` (`platforms[]`, builder, push / load) — chỉ khi `docker
 buildx` có trên máy; hiện tiến trình từng nền tảng.
-- Runbook gắn môi trường (ĐANG CHỜ CHỌN PHẠM VI — xem `docs/adr/0016-runbooks.md`): chuỗi lệnh kiểm tra theo host / cluster / endpoint; chạy một cú nhấp; kết quả
-  theo bước. Cần thiết kế riêng (lưu ở đâu, chạy lệnh nào ở K8s / Docker, xác nhận khi chạy trên
-  Production) — viết ADR trước khi code.
+- Runbook gắn môi trường (XONG — module `runbook`, xem `docs/adr/0016-runbooks.md`): bước HTTP /
+  lệnh SSH / rollout K8s / container Docker, mỗi bước một đích; Production gõ tên runbook, môi
+  trường chỉ đọc chặn bước lệnh; header bí mật trong vault; xuất / nhập, nhân bản, lịch sử.
 
 ## 5. Ưu tiên 4 — chưa làm
 

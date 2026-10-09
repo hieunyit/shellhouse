@@ -4,6 +4,7 @@ import { lazyModuleComponent, t } from '../../registry/renderer-kit'
 import { dockerManifest } from '../manifest'
 import { DockerEngineParams, DockerLogsParams } from '../shared/ops'
 import { openDocker } from './api'
+import { containerStep } from './runbook'
 
 /** Phần renderer của Docker: thanh bên, tab Docker, tab log, menu host, lệnh, cài đặt. */
 export const dockerRenderer: RendererModule = {
@@ -46,6 +47,8 @@ export const dockerRenderer: RendererModule = {
     }
   ],
   SettingsPage: lazyModuleComponent(() => import('./DockerSettings').then((m) => m.DockerSettings)),
+  // Bước kiểm tra cho module Runbook (chỉ đọc).
+  runbookSteps: { container: containerStep },
   // Theo dõi nền cho Home (chunk riêng — chỉ nạp khi module bật).
   background: () => {
     let stop: (() => void) | null = null
