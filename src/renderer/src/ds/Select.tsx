@@ -1,14 +1,14 @@
-import { useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as SelectPrimitive from '@radix-ui/react-select'
 import * as PopoverPrimitive from '@radix-ui/react-popover'
 import { Check, ChevronDown } from 'lucide-react'
 import { t } from '@shared/i18n'
-import { bestScore } from '@shared/fuzzy'
+import { pickResults, type Pickable } from './select-logic'
 import { floatingSurface } from './Popover'
 import { usePortalContainer } from './provider'
 import { cx, focusRing, ICON_SM, transition } from './utils'
 
-export interface SelectOption<T extends string> {
+export interface SelectOption<T extends string> extends Pickable {
   value: T
   label: string
   /** Chữ phụ bên phải (mờ). */
@@ -117,8 +117,10 @@ export function Combobox<T extends string>({
   placeholder,
   label,
   emptyText,
+  limit,
   className,
-  'data-testid': testId
+  'data-testid': testId,
+  optionTestId
 }: {
   value: T | undefined
   onValueChange: (value: T) => void
@@ -126,8 +128,12 @@ export function Combobox<T extends string>({
   placeholder?: string
   label: string
   emptyText?: string
+  /** Hiện tối đa chừng này mục (danh sách dài: gõ để thu hẹp, cuối danh sách báo số còn ẩn). */
+  limit?: number
   className?: string
   'data-testid'?: string
+  /** data-testid của từng mục trong danh sách (mục có `data-name` = nhãn). */
+  optionTestId?: string
 }): React.JSX.Element {
   const container = usePortalContainer()
   const id = useId()
@@ -136,15 +142,10 @@ export function Combobox<T extends string>({
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
   const selected = options.find((o) => o.value === value)
-  const filtered = useMemo(() => {
-    const q = query.trim()
-    if (!q) return options
-    return options
-      .map((o) => ({ o, score: bestScore(q, [o.label, o.value, o.hint ?? '']) }))
-      .filter((r): r is { o: SelectOption<T>; score: number } => r.score !== null)
-      .sort((a, b) => b.score - a.score)
-      .map((r) => r.o)
-  }, [options, query])
+  const { shown: filtered, more } = useMemo(
+    () => pickResults(options, query, limit),
+    [options, query, limit]
+  )
   const activeIndex = Math.min(cursor, filtered.length - 1)
   const active = filtered[activeIndex]
 
@@ -235,45 +236,298 @@ export function Combobox<T extends string>({
             'max-h-72 w-(--radix-popover-trigger-width) min-w-48 overflow-auto p-1'
           )}
         >
-          <div id={`${id}-list`} role="listbox" aria-label={label}>
-            {filtered.map((o, i) => (
-              <div
-                key={o.value}
-                id={`${id}-opt-${String(i)}`}
-                role="option"
-                aria-selected={o.value === value}
-                aria-disabled={o.disabled || undefined}
-                data-highlighted={o === active ? '' : undefined}
-                className={cx(itemClass, o.disabled && 'text-ds-fg-disabled')}
-                onMouseMove={() => {
-                  if (i !== cursor) setCursor(i)
-                }}
-                onMouseDown={(e) => {
-                  // Giữ focus ở ô nhập.
-                  e.preventDefault()
-                }}
-                onClick={() => {
-                  commit(o)
-                }}
-              >
-                {o.value === value && (
-                  <span className="absolute left-2 flex text-ds-accent-text">
-                    <Check {...ICON_SM} aria-hidden />
-                  </span>
-                )}
-                {o.icon}
-                <span className="truncate">{o.label}</span>
-                {o.hint && <span className="ml-auto pl-4 text-ds-sm text-ds-fg-3">{o.hint}</span>}
-              </div>
-            ))}
-            {filtered.length === 0 && (
-              <div className="px-2 py-3 text-center text-ds-sm text-ds-fg-3">
-                {emptyText ?? t('No matches')}
-              </div>
-            )}
-          </div>
+          <OptionList
+            id={id}
+            label={label}
+            options={filtered}
+            more={more}
+            value={value}
+            active={active}
+            emptyText={emptyText}
+            {...(optionTestId ? { optionTestId } : {})}
+            onHover={(i) => {
+              if (i !== cursor) setCursor(i)
+            }}
+            onPick={commit}
+          />
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>
+  )
+}
+
+/** Danh sách lựa chọn dùng chung của Combobox / SearchList: tiêu đề nhóm, dấu chọn, "còn N mục". */
+function OptionList<T extends string>({
+  id,
+  label,
+  options,
+  more,
+  value,
+  active,
+  emptyText,
+  optionTestId,
+  onHover,
+  onPick
+}: {
+  id: string
+  label: string
+  options: readonly SelectOption<T>[]
+  more: number
+  value: T | undefined
+  active: SelectOption<T> | undefined
+  emptyText: string | undefined
+  optionTestId?: string
+  onHover: (index: number) => void
+  onPick: (option: SelectOption<T>) => void
+}): React.JSX.Element {
+  return (
+    <div id={`${id}-list`} role="listbox" aria-label={label}>
+      {options.map((o, i) => (
+        <div key={o.value} role="presentation">
+          {o.group !== undefined && o.group !== options[i - 1]?.group && (
+            <div
+              role="presentation"
+              className="px-2 pt-1.5 pb-0.5 text-ds-xs font-medium text-ds-fg-3 select-none"
+            >
+              {o.group}
+            </div>
+          )}
+          <div
+            id={`${id}-opt-${String(i)}`}
+            role="option"
+            aria-selected={o.value === value}
+            aria-disabled={o.disabled || undefined}
+            data-highlighted={o === active ? '' : undefined}
+            data-testid={optionTestId}
+            data-name={o.label}
+            className={cx(itemClass, o.disabled && 'text-ds-fg-disabled')}
+            onMouseMove={() => {
+              onHover(i)
+            }}
+            onMouseDown={(e) => {
+              // Giữ focus ở ô nhập.
+              e.preventDefault()
+            }}
+            onClick={() => {
+              onPick(o)
+            }}
+          >
+            {o.value === value && (
+              <span className="absolute left-2 flex text-ds-accent-text">
+                <Check {...ICON_SM} aria-hidden />
+              </span>
+            )}
+            {o.icon}
+            <span className="truncate">{o.label}</span>
+            {o.hint && (
+              <span className="ml-auto truncate pl-4 text-ds-sm text-ds-fg-3">{o.hint}</span>
+            )}
+          </div>
+        </div>
+      ))}
+      {options.length === 0 && (
+        <div className="px-2 py-3 text-center text-ds-sm text-ds-fg-3">
+          {emptyText ?? t('No matches')}
+        </div>
+      )}
+      {more > 0 && (
+        <div className="px-2 py-1.5 text-center text-ds-sm text-ds-fg-3" data-more={more}>
+          {t('{n} more — type to search', { n: more })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Ô tìm + danh sách NẰM SẴN (không thả xuống) — cho menu dài trong popover (thêm server Docker…):
+ * focus ở ô tìm, ↑↓ chọn, Enter nhận. Chỉ hiện `limit` mục đầu; gõ để tìm trong cả danh sách.
+ */
+export function SearchList<T extends string>({
+  options,
+  onPick,
+  label,
+  placeholder,
+  emptyText,
+  limit,
+  autoFocus = true,
+  className,
+  onEscape,
+  'data-testid': testId,
+  optionTestId
+}: {
+  options: readonly SelectOption<T>[]
+  onPick: (value: T) => void
+  /** Esc trong ô tìm (đã chặn lan ra ngoài — không đóng luôn hộp thoại chứa nó). */
+  onEscape?: () => void
+  label: string
+  placeholder?: string
+  emptyText?: string
+  limit?: number
+  autoFocus?: boolean
+  className?: string
+  'data-testid'?: string
+  optionTestId?: string
+}): React.JSX.Element {
+  const id = useId()
+  const [query, setQuery] = useState('')
+  const [cursor, setCursor] = useState(0)
+  const { shown, more } = useMemo(() => pickResults(options, query, limit), [options, query, limit])
+  const activeIndex = Math.min(cursor, shown.length - 1)
+  const active = shown[activeIndex]
+  const commit = (option: SelectOption<T> | undefined): void => {
+    if (!option || option.disabled) return
+    onPick(option.value)
+  }
+  return (
+    <div className={cx('flex min-h-0 flex-col', className)}>
+      <input
+        role="combobox"
+        aria-label={label}
+        aria-expanded
+        aria-controls={`${id}-list`}
+        aria-autocomplete="list"
+        aria-activedescendant={active ? `${id}-opt-${String(activeIndex)}` : undefined}
+        data-testid={testId}
+        autoFocus={autoFocus}
+        spellCheck={false}
+        placeholder={placeholder ?? t('Search…')}
+        className={cx(
+          'mb-1 h-ds-ctl w-full shrink-0 rounded-ds-md border border-ds-border-control bg-ds-surface-1 px-2.5 text-ds-base text-ds-fg outline-none placeholder:text-ds-fg-3',
+          'focus:border-ds-accent focus:ring-3 focus:ring-ds-accent-soft',
+          transition
+        )}
+        value={query}
+        onChange={(e) => {
+          setQuery(e.target.value)
+          setCursor(0)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault()
+            const delta = e.key === 'ArrowDown' ? 1 : -1
+            setCursor((c) => (c + delta + shown.length) % Math.max(1, shown.length))
+          } else if (e.key === 'Enter') {
+            e.preventDefault()
+            commit(active)
+          } else if (e.key === 'Escape' && onEscape) {
+            e.preventDefault()
+            e.stopPropagation()
+            onEscape()
+          }
+        }}
+      />
+      <div className="min-h-0 overflow-auto">
+        <OptionList
+          id={id}
+          label={label}
+          options={shown}
+          more={more}
+          value={undefined}
+          active={active}
+          emptyText={emptyText}
+          {...(optionTestId ? { optionTestId } : {})}
+          onHover={(i) => {
+            if (i !== cursor) setCursor(i)
+          }}
+          onPick={commit}
+        />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Nút giống ô chọn ("Add a jump host…") mở ô tìm + danh sách NGAY BÊN DƯỚI (không portal — dùng được
+ * trong hộp thoại có bẫy focus). Chọn xong thì đóng; Esc / bấm ra ngoài đóng, focus về nút.
+ */
+export function SearchPicker<T extends string>({
+  placeholder,
+  options,
+  onPick,
+  label,
+  searchPlaceholder,
+  emptyText,
+  limit = 12,
+  'data-testid': testId,
+  optionTestId
+}: {
+  /** Chữ trên nút. */
+  placeholder: string
+  options: readonly SelectOption<T>[]
+  onPick: (value: T) => void
+  label: string
+  searchPlaceholder?: string
+  emptyText?: string
+  limit?: number
+  'data-testid'?: string
+  optionTestId?: string
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    // Form cuộn được: kéo danh sách vào tầm nhìn nếu nó tràn xuống dưới.
+    panelRef.current?.scrollIntoView({ block: 'nearest' })
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+    }
+  }, [open])
+  const close = (): void => {
+    setOpen(false)
+    triggerRef.current?.focus()
+  }
+  return (
+    <div ref={rootRef} className="relative" data-capture-keys={open || undefined}>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        data-testid={testId}
+        className={cx(
+          'flex h-ds-ctl w-full items-center gap-2 rounded-ds-md border border-ds-border-control bg-ds-surface-1 pr-1.5 pl-2.5 text-left text-ds-base text-ds-fg-2',
+          'hover:border-ds-border-strong',
+          focusRing,
+          transition
+        )}
+        onClick={() => {
+          setOpen(!open)
+        }}
+      >
+        <span className="min-w-0 flex-1 truncate">{placeholder}</span>
+        <ChevronDown {...ICON_SM} aria-hidden className="shrink-0 text-ds-fg-3" />
+      </button>
+      {open && (
+        <div
+          ref={panelRef}
+          className={cx(
+            floatingSurface,
+            'absolute inset-x-0 top-full z-20 mt-1 flex max-h-80 flex-col p-1.5'
+          )}
+        >
+          <SearchList
+            options={options}
+            label={label}
+            {...(searchPlaceholder ? { placeholder: searchPlaceholder } : {})}
+            {...(emptyText ? { emptyText } : {})}
+            limit={limit}
+            data-testid={testId ? `${testId}-search` : undefined}
+            {...(optionTestId ? { optionTestId } : {})}
+            onEscape={close}
+            onPick={(value) => {
+              onPick(value)
+              close()
+            }}
+          />
+        </div>
+      )}
+    </div>
   )
 }

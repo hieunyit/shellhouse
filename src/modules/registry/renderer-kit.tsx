@@ -134,6 +134,8 @@ export {
 } from '../../renderer/src/components/CollapsibleNav'
 /** Ô mật khẩu có nút hiện / ẩn và cảnh báo Caps Lock. */
 export { PasswordInput } from '../../renderer/src/components/PasswordInput'
+/** Lựa chọn host cho ô tìm (host gắn tag ưu tiên lên đầu) — dùng với SearchList / SearchPicker. */
+export { hostOptions } from '../../renderer/src/lib/host-pick'
 /** Hộp thoại xác nhận của app (thay window.confirm) — xem stores/confirm. */
 export {
   confirmAction,
@@ -279,6 +281,8 @@ export interface SavedHostInfo {
   /** user@hostname */
   address: string
   protocol: string
+  /** Tag của host (module ưu tiên host gắn tag liên quan, vd. "docker"). */
+  tags: readonly string[]
 }
 
 /** Host đã lưu (để module chọn server chạy trên đó). */
@@ -290,7 +294,8 @@ export function useSavedHosts(): SavedHostInfo[] {
         id: h.id,
         label: h.label,
         address: `${h.username}@${h.hostname}`,
-        protocol: h.protocol
+        protocol: h.protocol,
+        tags: h.tags
       })),
     [hosts]
   )
@@ -299,7 +304,13 @@ export function useSavedHosts(): SavedHostInfo[] {
 export function savedHost(id: string): SavedHostInfo | undefined {
   const h = useHosts.getState().tree.hosts.find((x) => x.id === id)
   return h
-    ? { id: h.id, label: h.label, address: `${h.username}@${h.hostname}`, protocol: h.protocol }
+    ? {
+        id: h.id,
+        label: h.label,
+        address: `${h.username}@${h.hostname}`,
+        protocol: h.protocol,
+        tags: h.tags
+      }
     : undefined
 }
 

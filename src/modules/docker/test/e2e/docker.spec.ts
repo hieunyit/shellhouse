@@ -524,7 +524,7 @@ test('Docker trong WSL (Windows): gợi ý, distro đang chạy hiện ở thanh
     await page.getByRole('menuitem', { name: 'Hide from Docker' }).click()
     await expect(ubuntu).toHaveCount(0)
     await page.getByTestId('docker-add-server').click()
-    await page.getByRole('menuitem', { name: /Ubuntu \(WSL\)/ }).click()
+    await page.locator('[data-testid="docker-add-wsl"][data-name="Ubuntu (WSL)"]').click()
     await expect(ubuntu).toBeVisible()
 
     await ubuntu.dblclick()
@@ -603,6 +603,55 @@ test('Docker trên Production: xoá hàng loạt và dọn dẹp phải gõ lạ
   }
 })
 
+test('Docker: thêm server — nhiều host vẫn thấy "Add by address (TLS)…"; tìm, host tag docker lên đầu', async () => {
+  const launched = await launchApp()
+  const { page } = launched
+  try {
+    // 60 host như danh sách VM thật; một host gắn tag docker nằm cuối bảng chữ cái.
+    await page.evaluate(async () => {
+      const base = {
+        groupId: null,
+        port: 22,
+        username: 'u',
+        auth: 'auto' as const,
+        keyId: null,
+        keyFile: null,
+        proxyJump: null,
+        jumpHostIds: [],
+        mode: 'builtin' as const,
+        color: null
+      }
+      for (let i = 0; i < 60; i++)
+        await window.shellhouse.saveHost({
+          ...base,
+          label: `vm-${String(i).padStart(2, '0')}`,
+          hostname: `10.2.4.${String(i)}`,
+          tags: []
+        })
+      await window.shellhouse.saveHost({
+        ...base,
+        label: 'zz-registry',
+        hostname: '10.9.9.9',
+        tags: ['docker']
+      })
+    })
+    await enableDocker(page)
+    await page.getByTestId('docker-add-server').click()
+    // Thao tác cố định ở đầu, không bị danh sách host đẩy xuống.
+    await expect(page.getByTestId('docker-add-tcp')).toBeInViewport()
+    const options = page.getByTestId('docker-add-option')
+    await expect(options).toHaveCount(12)
+    await expect(options.first()).toHaveAttribute('data-name', 'zz-registry')
+    await page.getByTestId('docker-add-search').fill('10.2.4.33')
+    await expect(options).toHaveCount(1)
+    await page.getByTestId('docker-add-search').press('Enter')
+    await expect(page.locator('[data-testid="docker-endpoint"][data-name="vm-33"]')).toBeVisible()
+    await expect(page.getByTestId('docker-add-search')).toHaveCount(0)
+  } finally {
+    await launched.close()
+  }
+})
+
 test('Docker qua TCP + TLS: thêm engine bằng địa chỉ + chứng chỉ, kết nối mTLS, sửa, xoá', async () => {
   test.setTimeout(60_000)
   test.skip(isWindows, 'Engine giả dùng unix socket')
@@ -613,7 +662,7 @@ test('Docker qua TCP + TLS: thêm engine bằng địa chỉ + chứng chỉ, k�
   try {
     await enableDocker(page)
     await page.getByTestId('docker-add-server').click()
-    await page.getByRole('menuitem', { name: 'Add by address (TLS)…' }).click()
+    await page.getByTestId('docker-add-tcp').click()
     const dialog = page.getByTestId('docker-tcp-dialog')
     await dialog.getByTestId('docker-tcp-name').fill('legacy-build')
     await dialog.getByTestId('docker-tcp-host').fill('127.0.0.1')

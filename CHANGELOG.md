@@ -33,6 +33,12 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Changed
 
+- **Adding a Docker server with many saved hosts:** the + menu of Docker › Endpoints is now a small
+  panel. "Add by address (TLS)…" and WSL distributions stay at the top, where they used to be pushed
+  off the screen by hundreds of hosts. Below them is a search box (name, address, tag) that shows
+  the first 12 hosts, with hosts tagged "docker" first.
+- **Jump hosts:** "Add a jump host…" (host and group forms) has a search box and shows hosts tagged
+  "jump" or "bastion" first, instead of a plain list of every host.
 - Faster start in English: the Vietnamese dictionary (~290 KB) is only loaded when the interface is
   in Vietnamese, and Quick Connect no longer pulls in the YAML library (~100 KB). The startup
   script is 25% smaller (1.72 MB → 1.30 MB).

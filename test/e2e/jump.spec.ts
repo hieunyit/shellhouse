@@ -32,11 +32,9 @@ async function createHost(
     await form.getByTestId('host-password').fill(opts.password)
   }
   if (opts.jumpLabel) {
-    const option = form
-      .getByTestId('jump-add')
-      .locator('option', { hasText: `${opts.jumpLabel} (` })
-    const value = await option.getAttribute('value')
-    await form.getByTestId('jump-add').selectOption(value ?? '')
+    await form.getByTestId('jump-add').click()
+    await form.getByTestId('jump-add-search').fill(opts.jumpLabel)
+    await form.locator(`[data-testid="jump-option"][data-name="${opts.jumpLabel}"]`).click()
     await expect(form.getByTestId('jump-list')).toContainText(opts.jumpLabel)
   }
   if (opts.system) {

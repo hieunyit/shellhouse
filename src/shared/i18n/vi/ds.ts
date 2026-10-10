@@ -148,5 +148,6 @@ export const ds: Readonly<Record<string, string>> = {
   '{n} event': '{n} event',
   '{n} events': '{n} event',
   'Delete {n} pod?': 'Xoá {n} pod?',
-  'Delete {n} pods?': 'Xoá {n} pod?'
+  'Delete {n} pods?': 'Xoá {n} pod?',
+  '{n} more — type to search': 'Còn {n} mục — gõ để tìm'
 }

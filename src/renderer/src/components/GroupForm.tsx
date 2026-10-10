@@ -10,6 +10,8 @@ import { groupOwnEnvironment, useEnvironments } from '../stores/environments'
 import { useShell } from '../shell/store'
 import { GroupSelect } from './GroupSelect'
 import { EnvironmentPicker } from './EnvironmentPicker'
+import { SearchPicker } from '../ds'
+import { hostOptions, JUMP_TAGS } from '../lib/host-pick'
 import { Button, Field, IconButton, Input, Modal, Notice, Select } from './ui'
 
 /** Giá trị kế thừa kèm nguồn: "deploy (from Production)". */
@@ -317,22 +319,29 @@ export function GroupForm({
                 </p>
               )}
               {jumps.length < MAX_JUMPS && (
-                <Select
-                  value=""
+                <SearchPicker
+                  placeholder={t('Add a jump host…')}
+                  label={t('Jump host')}
+                  searchPlaceholder={t('Search hosts, addresses, tags')}
+                  emptyText={t('No matching hosts')}
                   data-testid="group-jump-add"
-                  onChange={(e) => {
-                    if (e.target.value) setJumps([...jumps, e.target.value])
+                  optionTestId="jump-option"
+                  options={hostOptions(
+                    hosts
+                      .filter((h) => !jumps.includes(h.id))
+                      .map((h) => ({
+                        id: h.id,
+                        label: h.label,
+                        address: h.hostname,
+                        tags: h.tags
+                      })),
+                    JUMP_TAGS,
+                    { preferred: t('Jump hosts'), others: t('Other hosts') }
+                  )}
+                  onPick={(id) => {
+                    setJumps([...jumps, id])
                   }}
-                >
-                  <option value="">{t('Add a jump host…')}</option>
-                  {hosts
-                    .filter((h) => !jumps.includes(h.id))
-                    .map((h) => (
-                      <option key={h.id} value={h.id}>
-                        {h.label} ({h.hostname})
-                      </option>
-                    ))}
-                </Select>
+                />
               )}
             </div>
             <div className="flex flex-col gap-1.5">

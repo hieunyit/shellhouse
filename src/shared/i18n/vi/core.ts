@@ -949,5 +949,8 @@ export const core: Readonly<Record<string, string>> = {
   'Terminal: command suggestion diagnostics': 'Terminal: chẩn đoán gợi ý lệnh',
   'Open a terminal tab first': 'Hãy mở một tab terminal trước',
   'Command suggestion diagnostics copied': 'Đã chép chẩn đoán gợi ý lệnh',
-  'Paste it into your bug report.': 'Dán vào nội dung báo lỗi.'
+  'Paste it into your bug report.': 'Dán vào nội dung báo lỗi.',
+  'Search hosts, addresses, tags': 'Tìm host, địa chỉ, tag',
+  'No matching hosts': 'Không có host nào khớp',
+  'Other hosts': 'Host khác'
 }

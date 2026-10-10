@@ -50,6 +50,8 @@ import {
   Select
 } from './ui'
 import { importKey as importKeyFile } from './accounts/ImportKeyDialog'
+import { SearchPicker } from '../ds'
+import { hostOptions, JUMP_TAGS } from '../lib/host-pick'
 
 /** Port gõ tay: trống = mặc định / kế thừa; có giá trị thì phải là số nguyên 1–65535. */
 export function portProblem(raw: string): string | null {
@@ -208,6 +210,16 @@ export function HostForm({
 
   const hostLabel = (id: string): string => hosts.find((h) => h.id === id)?.label ?? t('(deleted)')
   const jumpChoices = hosts.filter((h) => h.id !== host?.id && !jumpHostIds.includes(h.id))
+  // Host có tag "jump" / "bastion" lên đầu; danh sách dài thì gõ để tìm.
+  const jumpOptions = useMemo(
+    () =>
+      hostOptions(
+        jumpChoices.map((h) => ({ id: h.id, label: h.label, address: h.hostname, tags: h.tags })),
+        JUMP_TAGS,
+        { preferred: t('Jump hosts'), others: t('Other hosts') }
+      ),
+    [jumpChoices]
+  )
 
   const importKey = async (): Promise<void> => {
     const id = await importKeyFile()
@@ -884,20 +896,18 @@ export function HostForm({
                 <p className="text-xs text-faint">{t('Direct connection.')}</p>
               )}
               {jumpHostIds.length < MAX_JUMPS && jumpChoices.length > 0 && (
-                <Select
-                  value=""
+                <SearchPicker
+                  placeholder={t('Add a jump host…')}
+                  label={t('Jump host')}
+                  searchPlaceholder={t('Search hosts, addresses, tags')}
+                  emptyText={t('No matching hosts')}
                   data-testid="jump-add"
-                  onChange={(e) => {
-                    if (e.target.value) setJumpHostIds([...jumpHostIds, e.target.value])
+                  optionTestId="jump-option"
+                  options={jumpOptions}
+                  onPick={(id) => {
+                    setJumpHostIds([...jumpHostIds, id])
                   }}
-                >
-                  <option value="">{t('Add a jump host…')}</option>
-                  {jumpChoices.map((h) => (
-                    <option key={h.id} value={h.id}>
-                      {h.label} ({h.hostname})
-                    </option>
-                  ))}
-                </Select>
+                />
               )}
             </div>
           </>

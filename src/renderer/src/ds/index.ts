@@ -6,7 +6,7 @@
 export { DsProvider, useDensity, type Density } from './provider'
 export { Button, IconButton, type ButtonProps, type ButtonVariant, type ButtonSize } from './Button'
 export { Input, SearchInput, Field, type InputProps } from './Input'
-export { Select, Combobox, type SelectOption } from './Select'
+export { Select, Combobox, SearchList, SearchPicker, type SelectOption } from './Select'
 export { Checkbox, Switch, type CheckedState } from './Checkbox'
 export { SegmentedControl, type SegmentedOption } from './Segmented'
 export { Tabs, TabPanel, type TabItem } from './Tabs'

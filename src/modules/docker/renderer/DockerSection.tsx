@@ -27,9 +27,10 @@ import {
   useSavedHosts,
   useHostEnvironmentId,
   useSourceEnvironment,
-  useSourceEnvironmentMap
+  useSourceEnvironmentMap,
+  hostOptions
 } from '../../registry/renderer-kit'
-import { EnvLabel } from '../../../renderer/src/ds'
+import { EnvLabel, Popover, SearchList } from '../../../renderer/src/ds'
 import { tcpIdOf, wslDistroOf, wslSource, type DockerTcpEndpoint } from '../shared/ipc'
 import { dockerApi, openDocker, sourceLabel } from './api'
 import { TcpEndpointDialog } from './TcpEndpointDialog'
@@ -47,6 +48,8 @@ export function DockerSection(): React.JSX.Element {
   const [open, setOpen] = useState(true)
   /** Hộp thoại thêm / sửa engine TCP + TLS (`true` = thêm mới). */
   const [tcpDialog, setTcpDialog] = useState<DockerTcpEndpoint | true | null>(null)
+  /** Popover "thêm server" đang mở. */
+  const [adding, setAdding] = useState(false)
   const { menu, open: openMenu } = useContextMenu()
 
   useEffect(() => {
@@ -185,55 +188,72 @@ export function DockerSection(): React.JSX.Element {
         >
           <RefreshCw size={12} />
         </IconButton>
-        <IconButton
+        <Popover
+          open={adding}
+          onOpenChange={setAdding}
           label={t('Add a server')}
-          size="sm"
-          data-testid="docker-add-server"
-          onClick={(e) => {
-            const entries: MenuEntry[] = [
-              ...addableWsl.map((d) => ({
-                id: `docker-add-wsl-${d.name}`,
-                label: `${d.name} (WSL)`,
-                hint: d.running ? t('running') : t('stopped'),
-                icon: <SquareTerminal size={14} />,
-                onSelect: () => {
-                  void dockerApi.add(wslSource(d.name))
-                }
-              })),
-              ...(addableWsl.length ? ['separator' as const] : []),
-              ...(addable.length === 0
-                ? [
-                    {
-                      id: 'none',
-                      label: t('Save an SSH host first'),
-                      disabled: true,
-                      onSelect: () => undefined
-                    }
-                  ]
-                : addable.map((h) => ({
-                    id: `docker-add-${h.id}`,
-                    label: h.label,
-                    hint: h.address,
-                    icon: <Server size={14} />,
-                    onSelect: () => {
-                      void dockerApi.add(h.id)
-                    }
-                  }))),
-              'separator' as const,
-              {
-                id: 'docker-add-tcp',
-                label: t('Add by address (TLS)…'),
-                icon: <Network size={14} />,
-                onSelect: () => {
-                  setTcpDialog(true)
-                }
-              }
-            ]
-            openMenu(e, entries)
-          }}
+          align="end"
+          className="flex max-h-[min(28rem,70vh)] w-80 flex-col p-2"
+          trigger={
+            <IconButton label={t('Add a server')} size="sm" data-testid="docker-add-server">
+              <Plus size={13} />
+            </IconButton>
+          }
         >
-          <Plus size={13} />
-        </IconButton>
+          {/* Thao tác cố định ở trên — không bị danh sách host dài đẩy ra khỏi màn hình. */}
+          <div className="mb-1.5 flex flex-col gap-0.5 border-b border-ds-border pb-1.5">
+            <AddRow
+              testId="docker-add-tcp"
+              icon={<Network size={14} />}
+              label={t('Add by address (TLS)…')}
+              hint="tcp://host:2376"
+              onClick={() => {
+                setAdding(false)
+                setTcpDialog(true)
+              }}
+            />
+            {addableWsl.map((d) => (
+              <AddRow
+                key={d.name}
+                testId="docker-add-wsl"
+                name={`${d.name} (WSL)`}
+                icon={<SquareTerminal size={14} />}
+                label={`${d.name} (WSL)`}
+                hint={d.running ? t('running') : t('stopped')}
+                onClick={() => {
+                  setAdding(false)
+                  void dockerApi.add(wslSource(d.name))
+                }}
+              />
+            ))}
+          </div>
+          <div className="px-1 pb-1 text-ds-xs font-medium text-ds-fg-3">
+            {t('Docker on an SSH host')}
+          </div>
+          {addable.length === 0 ? (
+            <p className="px-1 py-2 text-ds-sm text-ds-fg-3">{t('Save an SSH host first')}</p>
+          ) : (
+            <SearchList
+              options={hostOptions(addable, ['docker'], {
+                preferred: t('Tagged “docker”'),
+                others: t('Other hosts')
+              })}
+              label={t('SSH host')}
+              placeholder={t('Search hosts, addresses, tags')}
+              emptyText={t('No matching hosts')}
+              limit={12}
+              data-testid="docker-add-search"
+              optionTestId="docker-add-option"
+              onEscape={() => {
+                setAdding(false)
+              }}
+              onPick={(id) => {
+                setAdding(false)
+                void dockerApi.add(id)
+              }}
+            />
+          )}
+        </Popover>
       </div>
       {open &&
         rows.map((r) => (
@@ -319,4 +339,35 @@ export function useEndpointEnvironment(
 function EndpointEnv({ hostId }: { hostId: string | null }): React.JSX.Element | null {
   const env = useEndpointEnvironment(hostId)
   return env ? <EnvLabel env={env} /> : null
+}
+
+/** Một thao tác ở đầu popover "thêm server" (engine TLS, distro WSL). */
+function AddRow({
+  testId,
+  name,
+  icon,
+  label,
+  hint,
+  onClick
+}: {
+  testId: string
+  name?: string
+  icon: React.ReactNode
+  label: string
+  hint?: string
+  onClick: () => void
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      data-name={name}
+      className="flex h-ds-menu-item items-center gap-2 rounded-ds-md px-2 text-left text-ds-base text-ds-fg outline-none hover:bg-ds-active focus-visible:bg-ds-active [&_svg]:text-ds-fg-2"
+      onClick={onClick}
+    >
+      {icon}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {hint && <span className="shrink-0 text-ds-sm text-ds-fg-3">{hint}</span>}
+    </button>
+  )
 }

@@ -740,5 +740,7 @@ export const docker: Readonly<Record<string, string>> = {
   'Bring up': 'Dựng lại',
   'Pause {name}?': 'Tạm dừng {name}?',
   '{names} is frozen; whatever it serves stops answering until it is resumed.':
-    '{names} bị đóng băng; dịch vụ của nó không trả lời cho tới khi chạy tiếp.'
+    '{names} bị đóng băng; dịch vụ của nó không trả lời cho tới khi chạy tiếp.',
+  'Docker on an SSH host': 'Docker trên host SSH',
+  'Tagged “docker”': 'Có tag “docker”'
 }
