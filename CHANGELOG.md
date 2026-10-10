@@ -6,6 +6,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.33] - 2026-10-10
+
 ### Security
 
 - **Opening a server file in the local editor never runs it.** Without an editor chosen in
