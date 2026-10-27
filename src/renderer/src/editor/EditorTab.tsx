@@ -57,6 +57,7 @@ export function EditorTabView({
   const [generation, setGeneration] = useState(0)
   const version = useRef<EditorVersion | null>(null)
   const dirtyRef = useRef(false)
+  const savingRef = useRef(false)
 
   const markDirty = (v: boolean): void => {
     dirtyRef.current = v
@@ -138,13 +139,16 @@ export function EditorTabView({
 
   const save = useCallback(
     async (force = false) => {
-      if (!doc || !editor.current || saving) return
+      if (!doc || !editor.current || savingRef.current) return
+      const currentEditor = editor.current
+      savingRef.current = true
       setSaving(true)
-      const text = editor.current.text()
+      const text = currentEditor.text()
       try {
         const next = await doc.write(new TextEncoder().encode(text), force ? null : version.current)
         version.current = next
-        markDirty(false)
+        // Vẫn cho gõ trong lúc ghi: chỉ bản chụp `text` đã lưu, phần gõ thêm vẫn chưa lưu.
+        markDirty(currentEditor.text() !== text)
         setConflict(false)
         toast.success(t('Saved {name}', { name: doc.name }), {
           group: `editor-save:${docKey}`,
@@ -157,10 +161,11 @@ export function EditorTabView({
             description: cleanError(e)
           })
       } finally {
+        savingRef.current = false
         setSaving(false)
       }
     },
-    [doc, docKey, saving]
+    [doc, docKey]
   )
 
   if (!doc) {

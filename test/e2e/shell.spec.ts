@@ -44,6 +44,53 @@ async function saveHost(page: Page, label: string, groupId: string | null): Prom
   return r.id
 }
 
+test('Docker and SFTP inherit nested SSH groups and follow group renames', async ({ page }) => {
+  const parent = await saveGroup(page, 'Production')
+  const child = await page.evaluate(
+    (parentId) =>
+      window.shellhouse.saveGroup({
+        parentId,
+        name: 'Database',
+        defaults: {}
+      }),
+    parent
+  )
+  if (!child.ok) throw new Error(child.message)
+  const host = await saveHost(page, 'db-one', child.id)
+  await page.evaluate(async (id) => {
+    await window.shellhouse.setModuleEnabled('docker', true)
+    await window.shellhouse.invokeModule('docker', 'add', [id])
+  }, host)
+  await openArea(page, 'docker')
+  const docker = page.getByTestId('docker-section')
+  const group = docker.locator(`[data-host-group="${parent}"] [data-host-group="${child.id}"]`)
+  await expect(group.getByTestId('docker-endpoint')).toHaveAttribute('data-name', 'db-one')
+  await group.locator('summary').click()
+  await expect(group.getByTestId('docker-endpoint')).toBeHidden()
+  await group.locator('summary').click()
+  await expect(group.getByTestId('docker-endpoint')).toBeVisible()
+  await openArea(page, 'files')
+  const files = page.getByTestId('explorer')
+  await expect(
+    files
+      .locator(`[data-host-group="${parent}"] [data-host-group="${child.id}"]`)
+      .getByTestId('explorer-files-host')
+  ).toHaveText('db-one')
+  await page.evaluate(
+    ({ id, parentId }) =>
+      window.shellhouse.saveGroup({
+        id,
+        parentId,
+        name: 'Storage',
+        defaults: {}
+      }),
+    { id: child.id, parentId: parent }
+  )
+  await expect(files.locator(`[data-host-group="${child.id}"] > summary`)).toHaveText('Storage')
+  await openArea(page, 'docker')
+  await expect(docker.locator(`[data-host-group="${child.id}"] > summary`)).toHaveText('Storage')
+})
+
 test('khu vực: Home / Hosts / Settings / Transfers; ← / → theo lịch sử; bấm lại ẩn Explorer', async ({
   page
 }) => {

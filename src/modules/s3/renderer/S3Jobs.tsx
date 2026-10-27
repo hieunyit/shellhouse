@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { RefreshCw, Square } from 'lucide-react'
 import type { S3BulkJob, S3JobProgress, S3Op } from '../shared/ops'
 import { cx } from '../../../renderer/src/components/ui'
@@ -51,7 +51,8 @@ function doneText(verb: string, done: number, total: number | null): string {
  */
 export function useBulkJobs(
   run: (op: S3Op) => Promise<unknown>,
-  onFinished: (job: RunningJob, progress: S3JobProgress) => void
+  onFinished: (job: RunningJob, progress: S3JobProgress) => void,
+  connection = 0
 ): {
   jobs: RunningJob[]
   start: (job: S3BulkJob, label: string, verb: string) => Promise<void>
@@ -59,6 +60,10 @@ export function useBulkJobs(
 } {
   const [jobs, setJobs] = useState<RunningJob[]>([])
   const alive = useRef(true)
+  const epoch = useRef(connection)
+  useLayoutEffect(() => {
+    epoch.current = connection
+  }, [connection])
   const isAlive = (): boolean => alive.current
   const finished = useRef(onFinished)
   useEffect(() => {
@@ -74,15 +79,18 @@ export function useBulkJobs(
 
   const start = useCallback(
     async (spec: S3BulkJob, label: string, verb: string): Promise<void> => {
+      const started = epoch.current
+      const current = (): boolean => isAlive() && epoch.current === started
       const id = (await run({ op: 'jobStart', job: spec })) as string
+      if (!current()) return
       const entry: RunningJob = { id, label, verb, progress: null }
       setJobs((all) => [...all, entry])
       try {
         for (let wait = 100; ; wait = Math.min(400, wait * 2)) {
           await sleep(wait)
-          if (!isAlive()) return
+          if (!current()) return
           const p = (await run({ op: 'jobPoll', id })) as S3JobProgress
-          if (!isAlive()) return
+          if (!current()) return
           setJobs((all) => all.map((j) => (j.id === id ? { ...j, progress: p } : j)))
           if (p.phase !== 'running') {
             finished.current(entry, p)
@@ -90,7 +98,7 @@ export function useBulkJobs(
           }
         }
       } catch (e) {
-        if (isAlive())
+        if (current())
           finished.current(entry, {
             phase: 'error',
             found: 0,

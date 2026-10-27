@@ -145,6 +145,8 @@ export class Session {
   private readonly prompts = new Map<number, (reply: PromptReply) => void>()
   /** Phím gõ trong lúc SSH đang kết nối — gửi khi shell mở, thay vì bỏ âm thầm. */
   private pendingInput = ''
+  /** Resize khi còn chờ SSH/xác thực: giữ kích thước mới nhất tới khi PTY sẵn sàng. */
+  private pendingSize: { cols: number; rows: number } | null = null
   /** Người chờ kết nối SSH tích hợp (null = session kết thúc trước khi có). */
   private sshWaiters: ((ssh: SshShell | null) => void)[] = []
 
@@ -220,6 +222,7 @@ export class Session {
           }
         }
         this.transport = new LocalPty(launch, this.spec.cols, this.spec.rows, timed)
+        this.flushPendingInput()
         this.deps.log('info', `Session ${this.id}: started ${launch.file}`)
       } else if (this.spec.kind === 'module') {
         const { module, sessionKind } = this.spec
@@ -311,6 +314,7 @@ export class Session {
           callbacks
         )
         this.deps.log('info', `Session ${this.id}: system ssh → ${this.spec.target.host}`)
+        this.flushPendingInput()
       } else {
         const destination: HopConfig = {
           target: this.spec.target,
@@ -379,7 +383,12 @@ export class Session {
   }
 
   private flushPendingInput(): void {
-    if (!this.transport || !this.pendingInput) return
+    if (!this.transport) return
+    if (this.pendingSize) {
+      this.transport.resize(this.pendingSize.cols, this.pendingSize.rows)
+      this.pendingSize = null
+    }
+    if (!this.pendingInput) return
     this.transport.write(this.pendingInput)
     this.pendingInput = ''
   }
@@ -788,7 +797,8 @@ export class Session {
         }
         break
       case 'resize':
-        this.transport?.resize(message.cols, message.rows)
+        if (this.transport) this.transport.resize(message.cols, message.rows)
+        else this.pendingSize = { cols: message.cols, rows: message.rows }
         break
       case 'ack':
         this.pump.ack(message.n)

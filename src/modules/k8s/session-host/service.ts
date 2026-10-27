@@ -254,6 +254,8 @@ export class K8sService implements HostModuleSession {
   private cluster: ResolvedClusterConfig | null = null
   /** Khoá context đang kết nối (`source#context`). */
   private refKey: string | null = null
+  private connectionGeneration = 0
+  private connectedGeneration = 0
   /** Đang ghi event của cluster về máy (theo dõi ở Home). */
   private recorder: AbortController | null = null
   /** Prometheus có metric gì (dò lại sau PROM_RETRY_MS). */
@@ -278,8 +280,14 @@ export class K8sService implements HostModuleSession {
     this.hostResolver = new HostResolver(deps.lookup)
   }
 
-  private async connect(ref: ContextRef): Promise<KubeClient> {
+  private async connect(
+    ref: ContextRef,
+    signal?: AbortSignal
+  ): Promise<{ client: KubeClient; generation: number }> {
+    const generation = ++this.connectionGeneration
     const cluster: ResolvedClusterConfig = ResolvedClusterSchema.parse(await this.deps.resolve(ref))
+    if (this.disposed || signal?.aborted || generation !== this.connectionGeneration)
+      throw new Error(t('The connection changed'))
     // Kết nối lại (đổi chế độ chỉ đọc…): đóng kết nối giữ lại của client cũ (watch / log / forward
     // đang chạy giữ kết nối riêng, không ảnh hưởng).
     this.client?.close()
@@ -289,7 +297,7 @@ export class K8sService implements HostModuleSession {
     // Có proxy: mọi kết nối tới API server mở đường hầm qua proxy (proxy đi thẳng, hoặc qua bastion).
     const raw = this.deps.rawConnect
     const proxyUrl = cluster.proxyUrl
-    this.client = new KubeClient(
+    const client = new KubeClient(
       cluster,
       proxyUrl ? (host, port) => openTunnel(proxyUrl, host, port, raw) : raw,
       credentialProvider(cluster.auth, this.deps.spawn, cluster.server, Date.now, {
@@ -308,8 +316,11 @@ export class K8sService implements HostModuleSession {
         }
       })
     )
+    this.client = client
+    this.connectedGeneration = generation
+    this.refKey = contextKey(ref)
     this.deps.log('info', `context ${cluster.name} → ${cluster.server}`)
-    return this.client
+    return { client, generation }
   }
 
   /** Chỉ đọc: renderer bật, HOẶC cài đặt của context trong main bật (renderer không tắt được). */
@@ -318,7 +329,8 @@ export class K8sService implements HostModuleSession {
   }
 
   private require(): KubeClient {
-    if (!this.client) throw new Error('Not connected to a cluster')
+    if (this.disposed || !this.client || this.connectedGeneration !== this.connectionGeneration)
+      throw new Error('Not connected to a cluster')
     return this.client
   }
 
@@ -368,8 +380,7 @@ export class K8sService implements HostModuleSession {
       this.readOnly = op.readOnly
       // Đổi context: bộ ghi event của cluster cũ dừng (renderer bật lại nếu cần).
       if (this.refKey !== contextKey(op.ref)) this.stopRecorder()
-      const client = await this.connect(op.ref)
-      this.refKey = contextKey(op.ref)
+      const { client, generation } = await this.connect(op.ref, signal)
       const version = await client
         .json<{ gitVersion?: string }>('GET', '/version', { signal })
         .catch((error: unknown) => {
@@ -384,12 +395,17 @@ export class K8sService implements HostModuleSession {
             )
           throw error
         })
+      if (this.disposed || signal.aborted || generation !== this.connectionGeneration)
+        throw new Error(t('The connection changed'))
       return {
+        connection: generation,
         version: version.gitVersion ?? '',
         namespace: this.cluster?.namespace ?? 'default',
         readOnly: this.locked
       }
     }
+    if (op.connection !== undefined && op.connection !== this.connectionGeneration)
+      throw new Error(t('The connection changed'))
     if (this.locked && isMutating(op))
       throw new Error(t('Read-only mode is on for this context — turn it off to make changes'))
     const client = this.require()
@@ -1672,7 +1688,7 @@ export class K8sService implements HostModuleSession {
   /** Shell vào pod: exec qua WebSocket (kênh v4), TTY đổi kích thước theo terminal. */
   async openTerminal(raw: unknown, size: TerminalSize, cb: TransportCallbacks): Promise<Transport> {
     const params = K8sTerminalParams.parse(raw)
-    const client = this.client ?? (await this.connect(params.ref))
+    const client = this.client ? this.require() : (await this.connect(params.ref)).client
     // Shell vào pod làm được mọi thứ → chặn ở chế độ chỉ đọc (như thao tác thay đổi).
     if (this.locked)
       throw new Error(t('Read-only mode is on for this context — turn it off to open a shell'))
@@ -1733,6 +1749,7 @@ export class K8sService implements HostModuleSession {
 
   dispose(): void {
     this.disposed = true
+    this.connectionGeneration++
     this.stopProbe()
     this.stopRecorder()
     disposeTrafficCache(this.trafficCache)

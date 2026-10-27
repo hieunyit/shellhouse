@@ -10,6 +10,7 @@ import {
   isWindows,
   launchApp,
   openArea,
+  setWindowSize,
   test,
   waitForText
 } from '../../../../../test/e2e/fixtures'
@@ -143,6 +144,41 @@ test('Docker trên máy này (Engine giả qua DOCKER_HOST): danh sách, stats, 
     await expect(view.locator('[data-testid="docker-project"][data-name="shop"]')).toContainText(
       '2/2 running'
     )
+  } finally {
+    await launched.close()
+    await engine.close()
+  }
+})
+
+test('Docker: active log tab stays visible when the window shrinks', async () => {
+  test.setTimeout(60_000)
+  test.skip(isWindows, 'Engine giả dùng unix socket')
+  const engine = await startEngineTestServer()
+  for (const [i, container] of engine.containers.entries())
+    container.Names = [`/service-with-a-long-container-name-${String(i)}`]
+  const launched = await launchApp({ DOCKER_HOST: `unix://${engine.path}` })
+  const { page } = launched
+  try {
+    await enableDocker(page)
+    await page.locator('[data-testid="docker-endpoint"][data-name="This computer"]').dblclick()
+    const engineTab = page.getByTestId('tab').filter({ hasText: 'Docker · This computer' })
+    const rows = page.getByTestId('docker-view').getByTestId('docker-container')
+    await expect(rows).toHaveCount(3)
+    for (let i = 0; i < 3; i++) {
+      await engineTab.click()
+      await rows.nth(i).getByTestId('docker-row-logs').click()
+    }
+    const visible = (): Promise<boolean> =>
+      page.getByTestId('stage-tabs-m:docker').evaluate((strip) => {
+        const tab = strip.querySelector('[aria-selected="true"]')
+        if (!tab) return false
+        const bounds = tab.getBoundingClientRect()
+        const viewport = strip.getBoundingClientRect()
+        return bounds.left >= viewport.left - 1 && bounds.right <= viewport.right + 1
+      })
+    await expect.poll(visible).toBe(true)
+    await setWindowSize(launched, 900, 600)
+    await expect.poll(visible).toBe(true)
   } finally {
     await launched.close()
     await engine.close()
@@ -407,10 +443,18 @@ test('Docker qua SSH: menu host "Docker…", socket qua streamlocal, shell vào 
   const launched = await launchApp()
   const { page } = launched
   try {
+    const group = await page.evaluate(() =>
+      window.shellhouse.saveGroup({
+        parentId: null,
+        name: 'Production',
+        defaults: { environment: 'prod' }
+      })
+    )
+    if (!group.ok) throw new Error(group.message)
     const saved = await page.evaluate(
-      (port) =>
+      ({ port, groupId }) =>
         window.shellhouse.saveHost({
-          groupId: null,
+          groupId,
           label: 'docker-box',
           hostname: '127.0.0.1',
           port,
@@ -424,7 +468,7 @@ test('Docker qua SSH: menu host "Docker…", socket qua streamlocal, shell vào 
           tags: [],
           color: null
         }),
-      ssh.port
+      { port: ssh.port, groupId: group.id }
     )
     if (!saved.ok) throw new Error(saved.message)
     await enableDocker(page)
@@ -455,6 +499,14 @@ test('Docker qua SSH: menu host "Docker…", socket qua streamlocal, shell vào 
     await page.getByTestId('prompt-submit').click()
     const tab = await activeTab(page)
     await waitForText(page, tab, 'inside container web-')
+    const header = page.locator(`[data-testid="tab"][data-tab-id="${tab}"]`)
+    await expect(header).toContainText('docker-box · web (shell)')
+    await expect(header).toHaveAttribute('title', /Production \/ docker-box/)
+    await expect(page.getByTestId('hosts-header')).toHaveAttribute('data-env', 'prod')
+    await expect(page.getByTestId('main')).toHaveAttribute('data-env', 'prod')
+    await page.getByTestId('focus-mode').click()
+    await expect(page.getByTestId('focus-pill')).toContainText('Prod')
+    await page.getByTestId('focus-exit').click()
     await page.evaluate((id) => {
       // Server test chạy lệnh qua pipe (không có PTY thật đổi \r thành \n) → gửi \n.
       window.__shellhouseTest.sendInput(id, 'echo ok-$((40+2))\n')

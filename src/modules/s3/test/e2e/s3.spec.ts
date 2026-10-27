@@ -2,7 +2,14 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startS3TestServer, type S3TestServer } from '../s3-test-server'
-import { expect, expectActiveTab, openArea, test } from '../../../../../test/e2e/fixtures'
+import {
+  activeTab,
+  expect,
+  expectActiveTab,
+  openArea,
+  test,
+  waitForText
+} from '../../../../../test/e2e/fixtures'
 
 let server: S3TestServer | null = null
 test.afterEach(async () => {
@@ -455,4 +462,37 @@ test('S3: bảng chi tiết (tag, metadata, địa chỉ), cài đặt bucket (C
   } finally {
     client.destroy()
   }
+})
+
+test('S3 tự kết nối lại sau khi Session Host chết, giữ vị trí đang xem và tiếp tục thao tác', async ({
+  page
+}) => {
+  const local = await activeTab(page)
+  server = await startS3TestServer(['demo'])
+  await openArea(page, 's3')
+  await page.getByTestId('s3-add-account').click()
+  const form = page.getByTestId('s3-account-form')
+  await form.getByTestId('s3-account-name').fill('Restart S3')
+  await form.getByTestId('s3-account-endpoint').fill(server.endpoint)
+  await form.getByTestId('s3-account-key').fill(server.accessKeyId)
+  await form.getByTestId('s3-account-secret').fill(server.secretAccessKey)
+  await form.getByTestId('s3-account-path-style').check()
+  await form.getByTestId('s3-account-save').click()
+  await page.locator('[data-testid="s3-account"][data-name="Restart S3"]').dblclick()
+  const view = page.getByTestId('s3-view')
+  await view.locator('[data-testid="s3-bucket"][data-name="demo"]').dblclick()
+  await view.getByTestId('s3-mkdir').click()
+  await page.getByTestId('s3-dialog-input').fill('reports')
+  await page.getByTestId('s3-dialog-submit').click()
+  await view.locator('[data-testid="s3-entry"][data-name="reports"]').dblclick()
+  await expect(view.getByTestId('s3-path')).toContainText('reports')
+  await page.evaluate(() => window.shellhouse.crashSessionHostForTest())
+  await waitForText(page, local, '— new session —')
+  await expect(view.getByTestId('s3-mkdir')).toBeEnabled()
+  await expect(view.getByTestId('s3-path')).toContainText('reports')
+  await view.getByTestId('s3-mkdir').click()
+  await page.getByTestId('s3-dialog-input').fill('after-restart')
+  await page.getByTestId('s3-dialog-submit').click()
+  await expect(view.locator('[data-testid="s3-entry"][data-name="after-restart"]')).toBeVisible()
+  await expect(view.getByText('The tab is closed', { exact: true })).toHaveCount(0)
 })

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync } from 'node:fs'
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
+import { readdir, rename, rm, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { Readable } from 'node:stream'
@@ -60,13 +60,13 @@ import { BulkJob, countObjects, deleteErrorSummary, lastName, type BulkEnv } fro
 import * as manage from './manage'
 import { S3Edits } from './edit'
 import { SyncJob } from './sync'
+import { downloadParent, downloadRoot } from './safe-download'
 
 export type { S3Connection } from './client'
 
 /** Tải cả thư mục về máy: tối đa chừng này file mỗi lần (mỗi file là một dòng trong Transfers). */
 const MAX_TREE = 10_000
 
-const PART_SUFFIX = '.shellhouse-part'
 const PROGRESS_MS = 250
 /** Mặc định (chỉnh trong Settings → Files): request cùng lúc khi quét / copy / xoá, file cùng lúc. */
 export const DEFAULT_S3_LIMITS = { requests: 16, transfers: 6 } as const
@@ -1076,19 +1076,22 @@ export class S3Service {
     versionId?: string
   ): Promise<number> {
     if (!key.endsWith('/')) {
+      const root = await downloadRoot(intoFolder ? localPath : dirname(localPath))
       // Tên file từ key (không tin tên renderer ghép: "..\\..\\x.exe" trên Windows). Tải nhiều
       // object vào cùng thư mục: tên an toàn trùng với lượt tải đang chờ / đang chạy → thêm " (2)"
       // (hai lượt ghi chung một file .part sẽ hỏng cả hai).
       const target = intoFolder ? this.freeDownloadTarget(localPath, lastName(key)) : localPath
       if (!overwrite && existsSync(target))
         throw new Error(t('The destination file already exists'))
+      const canonicalTarget = join(root, relative(intoFolder ? localPath : dirname(target), target))
       this.add('download', target, `s3://${bucket}/${key}`, async (job) => {
-        await this.download(job, bucket, key, target, versionId)
+        await this.download(job, bucket, key, canonicalTarget, versionId, root)
       })
       return 1
     }
     const folderName = safeFileName(basename(key.replace(/\/$/, '')) || bucket, NAME_OPTIONS)
-    const root = join(localPath, folderName)
+    const base = await downloadRoot(localPath)
+    const root = join(base, folderName)
     if (existsSync(root) && !overwrite)
       throw new Error(t('A folder with this name already exists at the destination'))
     const objects = await this.allKeys(bucket, key)
@@ -1103,10 +1106,10 @@ export class S3Service {
       files.map((o) => o.key.slice(key.length))
     )
     const targets = files.map((o, i) => ({ key: o.key, target: planned[i] ?? '' }))
-    await mkdir(root, { recursive: true })
+    await downloadParent(base, join(root, '.placeholder'))
     for (const t of targets)
       this.add('download', t.target, `s3://${bucket}/${t.key}`, async (job) => {
-        await this.download(job, bucket, t.key, t.target)
+        await this.download(job, bucket, t.key, t.target, undefined, base)
       })
     return targets.length
   }
@@ -1187,25 +1190,37 @@ export class S3Service {
     bucket: string,
     key: string,
     localPath: string,
-    versionId?: string
+    versionId?: string,
+    root?: string
   ): Promise<{ etag: string | null; attributes: ObjectAttributes }> {
-    await mkdir(dirname(localPath), { recursive: true })
+    const base = root ?? (await downloadRoot(dirname(localPath)))
+    localPath = join(base, relative(root ?? dirname(localPath), localPath))
+    await downloadParent(base, localPath)
     const out = await (
       await this.clientFor(bucket)
     ).send(new GetObjectCommand({ Bucket: bucket, Key: key, VersionId: versionId }), {
       abortSignal: job.abort.signal
     })
     job.status.size = out.ContentLength ?? 0
-    const part = localPath + PART_SUFFIX
+    // Exclusive, private temporary file: existing .part symlinks cannot redirect writes.
+    const part = join(dirname(localPath), `.shellhouse-${randomUUID()}.part`)
     const meter = this.meter(job)
     let loaded = 0
+    const temporary = { created: false }
     const body = out.Body as Readable
-    body.on('data', (chunk: Buffer) => {
-      loaded += chunk.length
-      meter(loaded)
-    })
     try {
-      await pipeline(body, createWriteStream(part), { signal: job.abort.signal })
+      await downloadParent(base, localPath)
+      const output = createWriteStream(part, { flags: 'wx', mode: 0o600 })
+      output.once('open', () => {
+        temporary.created = true
+      })
+      body.on('data', (chunk: Buffer) => {
+        loaded += chunk.length
+        meter(loaded)
+      })
+      await pipeline(body, output, {
+        signal: job.abort.signal
+      })
       const written = (await stat(part)).size
       if (out.ContentLength !== undefined && written !== out.ContentLength)
         throw new Error(
@@ -1214,9 +1229,11 @@ export class S3Service {
             expected: out.ContentLength
           })
         )
+      await downloadParent(base, localPath)
       await rename(part, localPath)
     } catch (error) {
-      await rm(part, { force: true })
+      body.destroy()
+      if (temporary.created) await rm(part, { force: true })
       throw error
     }
     return { etag: out.ETag ?? null, attributes: preservedAttributes(out) }

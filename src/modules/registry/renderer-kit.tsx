@@ -73,6 +73,7 @@ export function whenHostRunning(timeoutMs = 15_000): Promise<void> {
 
 /** Thông báo nổi (toast) của app — module dùng để báo kết quả thao tác. */
 export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
+export { HostGroups } from '../../renderer/src/components/HostGroups'
 export { usePublishTransfers } from '../../renderer/src/stores/transfers'
 export { usePublishAttention, type AttentionItem } from '../../renderer/src/stores/attention'
 export {

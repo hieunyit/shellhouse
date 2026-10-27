@@ -23,17 +23,20 @@ function sftpOpen(
   sftp: SFTPWrapper,
   guard: LossGuard,
   path: string,
-  flags: 'r' | 'r+' | 'w'
+  flags: 'r' | 'r+' | 'w',
+  mode?: number
 ): Promise<Buffer> {
   const lost = guard.isLost()
   if (lost) return Promise.reject(lost)
   return new Promise((resolve, reject) => {
     const off = guard.onLost(reject)
-    sftp.open(path, flags, (err, handle) => {
+    const opened = (err: Error | undefined, handle: Buffer): void => {
       off()
       if (err) reject(err)
       else resolve(handle)
-    })
+    }
+    if (mode === undefined) sftp.open(path, flags, opened)
+    else sftp.open(path, flags, { mode }, opened)
   })
 }
 
@@ -195,9 +198,18 @@ export async function pipelinedUpload(
   size: number,
   control: PipelineControl
 ): Promise<void> {
-  const handle = await sftpOpen(sftp, guard, remotePath, offset > 0 ? 'r+' : 'w')
+  const handle = await sftpOpen(sftp, guard, remotePath, offset > 0 ? 'r+' : 'w', 0o600)
   let offLost = (): void => undefined
   try {
+    // Part resume có thể do bản cũ tạo với quyền rộng. Thu hẹp TRƯỚC khi ghi byte bí mật.
+    await new Promise<void>((resolve, reject) => {
+      const off = guard.onLost(reject)
+      sftp.fchmod(handle, 0o600, (err) => {
+        off()
+        if (err) reject(err)
+        else resolve()
+      })
+    })
     await new Promise<void>((resolve, reject) => {
       offLost = guard.onLost((error) => {
         fail(error)

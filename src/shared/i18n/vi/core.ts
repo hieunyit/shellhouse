@@ -636,6 +636,8 @@ export const core: Readonly<Record<string, string>> = {
   'Show menu': 'Hiện menu',
   'Copy / paste (PuTTY style)': 'Sao chép / dán (kiểu PuTTY)',
   'Copy on select': 'Sao chép khi bôi đen',
+  'In tmux or mouse-enabled programs, hold Shift while dragging to select terminal text.':
+    'Trong tmux hoặc chương trình bắt chuột, giữ Shift khi kéo để bôi đen chữ trong terminal.',
   'Warn before pasting multiple lines': 'Cảnh báo trước khi dán nhiều dòng',
   'Asks first when pasted text contains line breaks and the program does not use bracketed paste — each line would run as a command.':
     'Hỏi trước khi văn bản dán vào có xuống dòng mà chương trình không dùng bracketed paste — mỗi dòng sẽ chạy như một lệnh.',

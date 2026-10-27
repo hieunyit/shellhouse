@@ -202,6 +202,10 @@ export function TerminalSection(): React.JSX.Element {
         </Field>
         <Checkbox
           label={t('Copy on select')}
+          description={t(
+            'In tmux or mouse-enabled programs, hold Shift while dragging to select terminal text.'
+          )}
+          data-testid="setting-copy-on-select"
           checked={term.copyOnSelect}
           onChange={(e) => void update({ terminal: { copyOnSelect: e.target.checked } })}
         />

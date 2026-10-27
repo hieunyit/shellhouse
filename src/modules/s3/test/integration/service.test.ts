@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -86,6 +86,78 @@ async function statsOf(s: S3Service, bucket: string, prefix: string): Promise<S3
 }
 
 describe('S3', () => {
+  it.each(['site/config', 'site'])(
+    'không tải qua symlink thư mục %s ra ngoài nơi đã chọn',
+    async (link) => {
+      const { s, settled } = await setup()
+      const chosen = tempDir()
+      const outside = tempDir()
+      if (link !== 'site') mkdirSync(join(chosen, 'site'))
+      symlinkSync(outside, join(chosen, link), process.platform === 'win32' ? 'junction' : 'dir')
+      writeFileSync(join(outside, 'secret.env'), 'ORIGINAL')
+      const client = rawClient()
+      try {
+        await client.send(
+          new PutObjectCommand({ Bucket: 'demo', Key: 'site/config/secret.env', Body: 'FROM S3' })
+        )
+        if (link === 'site') {
+          await expect(
+            s.run({
+              op: 'download',
+              bucket: 'demo',
+              key: 'site/',
+              localPath: chosen,
+              overwrite: true
+            })
+          ).rejects.toThrow('Unsafe download destination')
+        } else {
+          await s.run({
+            op: 'download',
+            bucket: 'demo',
+            key: 'site/',
+            localPath: chosen,
+            overwrite: true
+          })
+          const transfers = await settled()
+          expect(transfers).toHaveLength(1)
+          expect(transfers[0]?.state).toBe('error')
+          expect(transfers[0]?.error).toContain('Unsafe download destination')
+        }
+        expect(readFileSync(join(outside, 'secret.env'), 'utf8')).toBe('ORIGINAL')
+        expect(existsSync(join(outside, 'config', 'secret.env'))).toBe(false)
+      } finally {
+        client.destroy()
+      }
+    }
+  )
+
+  it('không ghi qua symlink file .part đã tồn tại và vẫn tải đúng file', async () => {
+    const { s, settled } = await setup()
+    const chosen = tempDir()
+    const outside = join(tempDir(), 'secret.env')
+    writeFileSync(outside, 'ORIGINAL')
+    const target = join(chosen, 'file.txt')
+    symlinkSync(outside, `${target}.shellhouse-part`)
+    const client = rawClient()
+    try {
+      await client.send(
+        new PutObjectCommand({ Bucket: 'demo', Key: 'file.txt', Body: 'DOWNLOADED' })
+      )
+      await s.run({
+        op: 'download',
+        bucket: 'demo',
+        key: 'file.txt',
+        localPath: target,
+        overwrite: true
+      })
+      expect(await settled()).toEqual([expect.objectContaining({ state: 'done' })])
+      expect(readFileSync(target, 'utf8')).toBe('DOWNLOADED')
+      expect(readFileSync(outside, 'utf8')).toBe('ORIGINAL')
+    } finally {
+      client.destroy()
+    }
+  })
+
   it(
     'bucket, thư mục, tải lên/về file và cả thư mục (multipart cho file lớn), xoá đệ quy',
     { timeout: 60_000 },

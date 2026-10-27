@@ -11,11 +11,24 @@ type Cb = (err: Error | null) => void
 function fakeServer(): { sftp: SFTPWrapper; written: () => number; closed: () => boolean } {
   let bytes = 0
   let closed = false
+  let privateMode = false
   const sftp = {
-    open: (_p: string, _f: string, cb: (err: Error | null, h: Buffer) => void) => {
+    open: (
+      _p: string,
+      _f: string,
+      attrs: { mode: number },
+      cb: (err: Error | null, h: Buffer) => void
+    ) => {
+      expect(attrs.mode).toBe(0o600)
       cb(null, Buffer.from('h'))
     },
+    fchmod: (_h: Buffer, mode: number, cb: Cb) => {
+      expect(mode).toBe(0o600)
+      privateMode = true
+      cb(null)
+    },
     write: (_h: Buffer, _b: Buffer, _o: number, length: number, _pos: number, cb: Cb) => {
+      expect(privateMode).toBe(true)
       setImmediate(() => {
         if (closed) {
           cb(new Error('write after close'))

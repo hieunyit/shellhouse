@@ -84,6 +84,50 @@ async function setup() {
 }
 
 describe.skipIf(!findSftpServer())('SFTP (OpenSSH sftp-server thật)', () => {
+  it('xếp tuần tự các lượt tải về cùng đích, kể cả đường dẫn có dấu chấm', async () => {
+    const { localRoot, remoteRoot, queue } = await setup()
+    const target = join(localRoot, 'same.bin')
+    const sources = ['a', 'b'].map((name) => {
+      const path = join(remoteRoot, name)
+      const data = Buffer.alloc(192 * 1024, name)
+      writeFileSync(path, data)
+      return { path, data }
+    })
+    const jobs = sources.map((source, index) => {
+      const destination = index === 0 ? target : `${localRoot}/./same.bin`
+      const id = queue.enqueue('download', destination, source.path, true)
+      return queue.settled(id).then((result) => {
+        expect(result.state).toBe('done')
+        expect(sha(readFileSync(target))).toBe(sha(source.data))
+      })
+    })
+    await Promise.all(jobs)
+    expect(readFileSync(target)).toEqual(sources[1]?.data)
+    expect(readdirSync(localRoot)).toEqual(['same.bin'])
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'upload giữ quyền file đích và quyền thực thi của file mới',
+    async () => {
+      const { localRoot, remoteRoot, queue } = await setup()
+      const source = join(localRoot, 'run.sh')
+      const existing = join(remoteRoot, 'secret.env')
+      writeFileSync(source, '#!/bin/sh\necho ok\n')
+      chmodSync(source, 0o755)
+      writeFileSync(existing, 'OLD=1')
+      chmodSync(existing, 0o600)
+      expect((await queue.settled(queue.enqueue('upload', source, existing, true))).state).toBe(
+        'done'
+      )
+      expect(statSync(existing).mode & 0o777).toBe(0o600)
+      const fresh = join(remoteRoot, 'run.sh')
+      expect((await queue.settled(queue.enqueue('upload', source, fresh, false))).state).toBe(
+        'done'
+      )
+      expect(statSync(fresh).mode & 0o777).toBe(0o755)
+    }
+  )
+
   it('liệt kê: thư mục trước, link tới thư mục được nhận diện, quyền đúng', async () => {
     const { remoteRoot, sftp } = await setup()
     mkdirSync(join(remoteRoot, 'b-dir'))

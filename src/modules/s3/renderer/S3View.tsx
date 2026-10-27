@@ -91,7 +91,8 @@ import {
   activateTab,
   showCommands,
   usePublishTransfers,
-  useReportEnvironment
+  useReportEnvironment,
+  whenHostRunning
 } from '../../registry/renderer-kit'
 import { objectCommands } from '../shared/commands'
 import { EnvLabel } from '../../../renderer/src/ds'
@@ -205,7 +206,9 @@ export function S3View({
   const env = useAccountEnvironment(accountId)
   useReportEnvironment(tabId, env?.id)
   const clientRef = useRef<S3SessionClient | null>(null)
-  const [ready, setReady] = useState(false)
+  const [connectionAttempt, setConnectionAttempt] = useState(0)
+  const [connected, setConnected] = useState<{ accountId: string; attempt: number } | null>(null)
+  const ready = connected?.accountId === accountId && connected.attempt === connectionAttempt
   const [buckets, setBuckets] = useState<S3Bucket[] | null>(null)
   /** null = bảng bucket (cấp gốc). */
   const [bucket, setBucket] = useState<string | null>(null)
@@ -294,6 +297,7 @@ export function S3View({
           setDetailsVersion(null)
         }
         here.current = `${b}/${p}`
+        firstLocation.current = { bucket: b, prefix: p }
         setListing(result)
         setBucket(b)
         setPrefix(p)
@@ -388,6 +392,7 @@ export function S3View({
   const goRoot = useCallback(() => {
     loadSeq.current++
     here.current = null
+    firstLocation.current = undefined
     setBucket(null)
     setPrefix('')
     setListing(null)
@@ -402,19 +407,45 @@ export function S3View({
   // Mở phiên S3 (Session Host) cho tab; đóng khi tab đóng.
   useEffect(() => {
     let cancelled = false
+    let disconnected = false
     setTabState(tabId, 'connecting')
-    void S3SessionClient.open(accountId, setTransfers).then(
+    const reconnect = (): void => {
+      if (cancelled || disconnected) return
+      disconnected = true
+      loadSeq.current++
+      clientRef.current?.close()
+      clientRef.current = null
+      setConnected(null)
+      setError(null)
+      setLoading(false)
+      setLoadingMore(false)
+      stopCalc.current = true
+      setCalculating(false)
+      setStats(null)
+      setTool(null)
+      setTabState(tabId, 'disconnected')
+      void whenHostRunning().then(
+        () => {
+          if (!cancelled) setConnectionAttempt((attempt) => attempt + 1)
+        },
+        (e: unknown) => {
+          if (!cancelled) setError(cleanError(e))
+        }
+      )
+    }
+    void S3SessionClient.open(accountId, setTransfers, reconnect).then(
       (client) => {
-        if (cancelled) {
+        if (cancelled || disconnected) {
           client.close()
           return
         }
         clientRef.current = client
-        setReady(true)
+        setConnected({ accountId, attempt: connectionAttempt })
+        setError(null)
         setTabState(tabId, 'connected')
         void client.request({ op: 'listBuckets' }).then(
           (list) => {
-            if (cancelled) return
+            if (cancelled || disconnected) return
             setBuckets(list as S3Bucket[])
             // Explorer liệt kê bucket dưới tài khoản (cùng danh sách, không đọc lại).
             useS3.getState().setBuckets(
@@ -426,14 +457,14 @@ export function S3View({
             if (start) void load(start.bucket, start.prefix)
           },
           (e: unknown) => {
-            if (cancelled) return
+            if (cancelled || disconnected) return
             setBuckets([])
             setError(cleanError(e))
           }
         )
       },
       (e: unknown) => {
-        if (cancelled) return
+        if (cancelled || disconnected) return
         setError(cleanError(e))
         setTabState(tabId, 'disconnected')
       }
@@ -445,7 +476,7 @@ export function S3View({
       clientRef.current = null
       setTabState(tabId, null)
     }
-  }, [accountId, tabId, load])
+  }, [accountId, tabId, load, connectionAttempt])
 
   const loadBuckets = useCallback(async () => {
     setError(null)
@@ -463,6 +494,11 @@ export function S3View({
   }, [run, accountId])
 
   const refresh = (): void => {
+    if (!clientRef.current) {
+      setError(null)
+      setConnectionAttempt((attempt) => attempt + 1)
+      return
+    }
     if (bucket === null) void loadBuckets()
     else {
       void load(bucket, prefix)
@@ -517,7 +553,7 @@ export function S3View({
     if (problem) setError(problem)
     if (p.done > 0 || p.phase === 'done') refreshHere.current()
   }
-  const bulk = useBulkJobs(run, onJobFinished)
+  const bulk = useBulkJobs(run, onJobFinished, connectionAttempt)
   const startJob = (job: S3BulkJob, label: string, verb: string): void => {
     void bulk.start(job, label, verb).catch((e: unknown) => {
       setError(cleanError(e))
@@ -1354,7 +1390,7 @@ export function S3View({
             <Pin size={14} className={herePinned ? 'text-accent' : ''} />
           </IconButton>
         )}
-        <IconButton label={t('Refresh')} disabled={!ready} onClick={refresh}>
+        <IconButton label={t('Refresh')} disabled={!ready && !error} onClick={refresh}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
         </IconButton>
       </div>
@@ -1786,7 +1822,7 @@ export function S3View({
                         size="sm"
                         icon={<RefreshCw size={13} />}
                         data-testid="s3-retry"
-                        onClick={() => void load(bucket, prefix)}
+                        onClick={refresh}
                       >
                         {t('Try again')}
                       </Button>

@@ -62,6 +62,7 @@ export function useK8sSession(
   const liveSeq = useRef(0)
   /** (context, phiên) của seq đang dùng — chỉ đổi một trong hai mới cần seq mới. */
   const liveFor = useRef('')
+  const connection = useRef<number | undefined>(undefined)
 
   useEffect(() => {
     let cancelled = false
@@ -134,18 +135,22 @@ export function useK8sSession(
   // Kết nối tới context (và lại khi đổi chế độ chỉ đọc — Session Host cũng chặn thao tác thay đổi).
   useEffect(() => {
     if (transportId === null) return
-    let cancelled = false
+    const abort = new AbortController()
     const client = clientRef.current
     if (!client) return
     client
-      .request<{ version: string; namespace: string; readOnly?: boolean }>({
-        op: 'connect',
-        ref: { source: ref.source, context: ref.context },
-        readOnly
-      })
+      .request<{ version: string; namespace: string; readOnly?: boolean; connection: number }>(
+        {
+          op: 'connect',
+          ref: { source: ref.source, context: ref.context },
+          readOnly
+        },
+        abort.signal
+      )
       .then(
         (info) => {
-          if (cancelled) return
+          if (abort.signal.aborted) return
+          connection.current = info.connection
           // Kết nối lại cùng context, cùng phiên (chỉ đổi chế độ chỉ đọc): giữ seq → `request` giữ
           // nguyên, danh sách đang xem không bị xoá rồi tải lại (watch giữ kết nối riêng, vẫn chạy).
           const conn = `${String(transportId)}|${refKey}`
@@ -158,13 +163,13 @@ export function useK8sSession(
           setTabState(tabId, 'connected')
         },
         (e: unknown) => {
-          if (cancelled) return
+          if (abort.signal.aborted) return
           setError(e instanceof Error ? e.message : String(e))
           setTabState(tabId, 'disconnected')
         }
       )
     return () => {
-      cancelled = true
+      abort.abort()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refKey đại diện cho ref
   }, [transportId, refKey, readOnly, tabId])
@@ -181,7 +186,13 @@ export function useK8sSession(
         // huỷ đăng ký (dọn watch / log của effect cũ).
         if (seq !== liveSeq.current && op.op !== 'unsubscribe')
           return Promise.reject(new Error(t('The connection changed')))
-        return client.request<T>(op, signal)
+        return client.request<T>(
+          {
+            ...op,
+            ...(connection.current === undefined ? {} : { connection: connection.current })
+          },
+          signal
+        )
       },
     [seq]
   )

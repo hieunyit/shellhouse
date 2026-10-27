@@ -1,5 +1,5 @@
 import { promises as fs } from 'node:fs'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, posix, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { t } from '@shared/i18n'
 import {
@@ -143,6 +143,7 @@ async function localExists(path: string): Promise<boolean> {
  */
 export class TransferQueue {
   private readonly jobs = new Map<string, Job>()
+  private readonly writing = new Set<string>()
   private running = 0
   private notifyTimer: NodeJS.Timeout | null = null
   private notifyDue = 0
@@ -278,13 +279,20 @@ export class TransferQueue {
       if (other.status === status) continue
       const { state } = other.status
       if (state !== 'queued' && state !== 'running') continue
-      if (other.status.direction !== status.direction) continue
-      if (status.direction === 'download' && other.status.localPath === status.localPath)
-        return true
-      if (status.direction === 'upload' && other.status.remotePath === status.remotePath)
-        return true
+      if (this.destination(other.status) === this.destination(status)) return true
     }
     return false
+  }
+
+  private destination(
+    status: Pick<TransferStatus, 'direction' | 'localPath' | 'remotePath'>
+  ): string {
+    if (status.direction === 'upload') {
+      // Server có thể dùng filesystem không phân biệt hoa/thường: tuần tự cả hai dạng tên.
+      return `remote:${posix.normalize(status.remotePath).toLowerCase()}`
+    }
+    const path = resolve(status.localPath)
+    return `local:${process.platform === 'linux' ? path : path.toLowerCase()}`
   }
 
   dispose(): void {
@@ -318,12 +326,16 @@ export class TransferQueue {
     for (const job of this.jobs.values()) {
       if (this.running >= this.maxParallel) return
       if (job.status.state !== 'queued') continue
+      const target = this.destination(job.status)
+      if (this.writing.has(target)) continue
+      this.writing.add(target)
       this.running++
       job.status.state = 'running'
       this.notify(true)
       const run = this.run(job).finally(() => {
         this.running--
         this.active.delete(run)
+        this.writing.delete(target)
         this.pump()
       })
       this.active.add(run)
@@ -497,7 +509,9 @@ export class TransferQueue {
     const written = (await this.sftp.stat(part)).size
     if (written !== size)
       throw new Error(t('Size mismatch after upload ({written}/{size})', { written, size }))
-    if (job.mode !== null) await this.sftp.chmod(part, job.mode)
+    // Rename thay inode: upload thường cũng phải giữ quyền đích, hoặc quyền nguồn nếu file mới.
+    const mode = job.mode ?? (existing?.mode ?? local.mode) & 0o777
+    await this.sftp.chmod(part, mode)
     await this.sftp.rename(part, remotePath, job.overwrite)
     if (resumable) await this.sftp.unlinkIfExists(metaPath)
   }

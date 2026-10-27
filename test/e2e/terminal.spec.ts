@@ -1,4 +1,97 @@
 import { activeTab, echoComputed, expect, isWindows, sendLine, test, waitForText } from './fixtures'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+for (const editor of ['vim', 'nano']) {
+  test(`${editor}: short file keeps footer visible after scrolling and resizing`, async ({
+    app,
+    page
+  }) => {
+    test.skip(
+      isWindows || spawnSync(editor, ['--version']).status !== 0,
+      `${editor} is unavailable`
+    )
+    const dir = mkdtempSync(join(tmpdir(), 'shellhouse-editor-'))
+    const file = join(dir, 'short-file.txt')
+    writeFileSync(file, 'SHORT-FILE-LINE-1\nline two\nline three\n')
+    const tab = await activeTab(page)
+    try {
+      await sendLine(
+        page,
+        tab,
+        editor === 'vim'
+          ? `vim -Nu NONE -n -i NONE -c 'set laststatus=2 statusline=%f' '${file}'`
+          : `nano -I '${file}'`
+      )
+      await waitForText(page, tab, 'SHORT-FILE-LINE-1')
+      const screen = page.locator(`[data-testid="terminal-${tab}"] .xterm-screen`)
+      await screen.hover()
+      await page.mouse.wheel(0, 1200)
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(900, 600))
+      await page.waitForTimeout(400)
+      await screen.hover()
+      await page.mouse.wheel(0, 1200)
+      await page.waitForTimeout(150)
+      const text = await page.evaluate((id) => window.__shellhouseTest.bufferText(id), tab)
+      expect(text).toContain('SHORT-FILE-LINE-1')
+      expect(text.split('\n').slice(-3).join('\n')).toContain(
+        editor === 'nano' ? '^X' : 'short-file.txt'
+      )
+      const host = await page.getByTestId(`terminal-${tab}`).boundingBox()
+      const bounds = await screen.boundingBox()
+      if (!host || !bounds) throw new Error('terminal missing')
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(host.y + host.height)
+      if (editor === 'vim') {
+        await page.keyboard.press('Escape')
+        await page.keyboard.type(':q!')
+        await page.keyboard.press('Enter')
+      } else await page.keyboard.press('Control+X')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+}
+
+test('active tab stays fully visible when many tabs overflow and the window shrinks', async ({
+  app,
+  page
+}) => {
+  for (let i = 0; i < 6; i++) await page.getByTestId('new-tab').click()
+  const visible = (): Promise<boolean> =>
+    page.evaluate(() => {
+      const tab = document.querySelector(
+        '.dv-tabs-container [data-testid="tab"][aria-selected="true"]'
+      )
+      const strip = tab?.closest('.dv-tabs-container')
+      if (!tab || !strip) return false
+      const bounds = tab.getBoundingClientRect()
+      const viewport = strip.getBoundingClientRect()
+      return bounds.left >= viewport.left - 1 && bounds.right <= viewport.right + 1
+    })
+  await expect.poll(visible).toBe(true)
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(900, 600))
+  await expect.poll(visible).toBe(true)
+  const previous = await activeTab(page)
+  await page.keyboard.press('Control+Shift+Tab')
+  await expect.poll(() => activeTab(page)).not.toBe(previous)
+  await expect.poll(visible).toBe(true)
+})
+
+test('full-screen erase clears footer even with a restricted scrolling region', async ({
+  page
+}) => {
+  test.skip(isWindows, 'printf test uses a POSIX shell')
+  const tab = await activeTab(page)
+  await sendLine(page, tab, "printf '\\033[?1049h\\033[2J\\033[H' ")
+  await sendLine(page, tab, "printf '\\033[20;1HSTALE-FOOTER\\033[2;10r\\033[2J\\033[HREDRAW-OK'")
+  await waitForText(page, tab, 'REDRAW-OK')
+  expect(await page.evaluate((id) => window.__shellhouseTest.bufferText(id), tab)).not.toContain(
+    'STALE-FOOTER'
+  )
+  await sendLine(page, tab, "printf '\\033[r\\033[?1049l'")
+})
 
 test('mở sẵn một tab, shell chạy lệnh và trả kết quả', async ({ page }) => {
   await expect(page.getByTestId('tab')).toHaveCount(1)

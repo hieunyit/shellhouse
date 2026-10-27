@@ -1,5 +1,6 @@
 import type { ElectronApplication, Page } from '@playwright/test'
-import { activeTab, expect, sendLine, test, waitForText } from './fixtures'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { activeTab, expect, isWindows, sendLine, test, waitForText } from './fixtures'
 
 const setClipboard = (app: ElectronApplication, text: string): Promise<void> =>
   app.evaluate(({ clipboard }, t) => {
@@ -10,6 +11,73 @@ const getClipboard = (app: ElectronApplication): Promise<string> =>
 
 const terminal = (page: Page, tab: string) =>
   page.locator(`[data-testid="terminal-${tab}"] .xterm-screen`)
+
+test('real tmux copy-mode sends selected text to the system clipboard', async ({ app, page }) => {
+  test.skip(isWindows || spawnSync('tmux', ['-V']).status !== 0, 'tmux is unavailable')
+  const socket = `shellhouse-copy-${process.pid}-${Date.now()}`
+  const tmux = (...args: string[]): void => {
+    execFileSync('tmux', ['-L', socket, ...args])
+  }
+  const tab = await activeTab(page)
+  try {
+    await setClipboard(app, 'before-tmux')
+    await sendLine(
+      page,
+      tab,
+      `tmux -L ${socket} -f /dev/null new-session -s copy "printf 'TMUX-SELECTED-TEXT\\n'; sleep 60"`
+    )
+    await waitForText(page, tab, 'TMUX-SELECTED-TEXT')
+    // Vùng chọn do tmux quản lý, hoàn toàn không có selection của xterm.
+    tmux('copy-mode', '-t', 'copy')
+    tmux('send-keys', '-t', 'copy', '-X', 'history-top')
+    tmux('send-keys', '-t', 'copy', '-X', 'select-line')
+    tmux('send-keys', '-t', 'copy', '-X', 'copy-selection-and-cancel')
+    await expect.poll(() => getClipboard(app)).toContain('TMUX-SELECTED-TEXT')
+  } finally {
+    spawnSync('tmux', ['-L', socket, 'kill-server'])
+  }
+})
+
+test('tmux OSC 52 copies UTF-8 to the system clipboard without a local selection', async ({
+  app,
+  page
+}) => {
+  test.skip(isWindows, 'printf test uses a POSIX shell')
+  const tab = await activeTab(page)
+  const value = 'tmux: nội dung đã chọn\nsecond line'
+  const payload = Buffer.from(value).toString('base64')
+  await setClipboard(app, 'before-copy')
+  await sendLine(page, tab, `printf '\\033]52;c;${payload}\\007'`)
+  await expect.poll(() => getClipboard(app)).toBe(value)
+  await sendLine(page, tab, "printf '\\033]52;c;?\\007'")
+  await page.waitForTimeout(200)
+  expect(await getClipboard(app)).toBe(value)
+})
+
+test('Shift-drag selects and auto-copies while an application captures the mouse', async ({
+  app,
+  page
+}) => {
+  test.skip(isWindows, 'printf test uses a POSIX shell')
+  const tab = await activeTab(page)
+  await page.evaluate(() => window.shellhouse.updateSettings({ terminal: { copyOnSelect: true } }))
+  await setClipboard(app, 'before-selection')
+  await sendLine(page, tab, "printf '\\033[2J\\033[HSELECT-ME\\r\\n\\033[?1000h\\033[?1006h'")
+  await expect(page.locator(`[data-testid="terminal-${tab}"] .xterm`)).toHaveClass(
+    /enable-mouse-events/
+  )
+  const box = await terminal(page, tab).boundingBox()
+  const size = await page.evaluate((id) => window.__shellhouseTest.size(id), tab)
+  if (!box || !size) throw new Error('terminal missing')
+  await page.keyboard.down('Shift')
+  await page.mouse.move(box.x + 1, box.y + 4)
+  await page.mouse.down()
+  await page.mouse.move(box.x + (box.width / size.cols) * 9, box.y + 4, { steps: 5 })
+  await page.mouse.up()
+  await page.keyboard.up('Shift')
+  await expect.poll(() => getClipboard(app)).toBe('SELECT-ME')
+  await sendLine(page, tab, "printf '\\033[?1000l\\033[?1006l'")
+})
 
 test('chuột phải trong terminal: menu Copy / Paste / Select all / Clear', async ({ app, page }) => {
   const tab = await activeTab(page)

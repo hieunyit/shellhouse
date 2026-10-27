@@ -33,7 +33,7 @@ export function contextKey(ref: ContextRef): string {
   return `${ref.source}#${ref.context}`
 }
 
-export const K8sOp = z.discriminatedUnion('op', [
+const K8sAction = z.discriminatedUnion('op', [
   /** Kết nối tới cluster của context (qua bastion nếu phiên gắn vào SSH). */
   z.object({ op: z.literal('connect'), ref: ContextRef, readOnly: z.boolean() }),
   z.object({ op: z.literal('namespaces') }),
@@ -353,6 +353,12 @@ export const K8sOp = z.discriminatedUnion('op', [
   }),
   z.object({ op: z.literal('unsubscribe'), subscription: Subscription })
 ])
+export const K8sOp = K8sAction.and(
+  z.object({
+    /** Lần connect đã cấp cho renderer: lệnh của phiên/context cũ phải bị từ chối. */
+    connection: z.number().int().min(1).optional()
+  })
+)
 export type K8sOp = z.infer<typeof K8sOp>
 
 /**

@@ -182,6 +182,8 @@ body {
  */
 .sh-term-host .xterm {
   padding: 8px 4px 4px 12px;
+  height: 100%;
+  overflow: hidden;
 }
 /* Viewport phủ cả vùng padding: để trong suốt cho lộ nền theme của khung (không thành viền đen). */
 .sh-term-host .xterm-viewport {
@@ -426,19 +428,25 @@ select option {
 .dockview-theme-shellhouse .dv-tab:hover {
   background: var(--ds-hover);
 }
-/* Tab phiên đang mở (thiết kế v0.5 .wtab): nền surface-2 + viền trong 1px; sáng: surface-0. */
+/* Tab đang chọn: viền và gạch chân accent để dễ nhận ra giữa nhiều phiên. */
 .dockview-theme-shellhouse .dv-groupview.dv-active-group .dv-tab.dv-active-tab {
-  background: var(--ds-surface-2);
-  box-shadow: inset 0 0 0 1px var(--ds-border);
-}
-[data-theme='light']
-  .dockview-theme-shellhouse
-  .dv-groupview.dv-active-group
-  .dv-tab.dv-active-tab {
-  background: var(--ds-surface-0);
+  background: var(--ds-accent-soft);
+  box-shadow:
+    inset 0 0 0 1px var(--ds-accent),
+    inset 0 -3px var(--ds-accent);
+  font-weight: 600;
 }
 .dockview-theme-shellhouse .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab {
   background: var(--ds-hover);
+  box-shadow: inset 0 -2px var(--ds-border);
+}
+
+.sh-stage-tab[aria-selected='true'] {
+  background: var(--ds-accent-soft);
+  box-shadow:
+    inset 0 0 0 1px var(--ds-accent),
+    inset 0 -3px var(--ds-accent);
+  font-weight: 600;
 }
 
 /* Gợi ý lệnh từ lịch sử: chữ mờ ngay sau con trỏ (→ để nhận), không nhận chuột. */

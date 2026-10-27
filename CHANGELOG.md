@@ -6,6 +6,34 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.34] - 2026-10-27
+
+### Changed
+
+- New terminal settings enable copy on select by default. In tmux or other programs that capture
+  the mouse, hold Shift while dragging to select terminal text. Copying from tmux copy-mode also
+  writes the selection to the system clipboard.
+- Docker endpoints and SFTP hosts follow the nested groups of saved SSH hosts. Container shell
+  and log tabs show their source host, with the full group path in the tooltip.
+- The selected tab has an accent border and stays visible when tabs overflow or the window shrinks.
+
+### Fixed
+
+- Vim, nano and tmux redraw without pushing the screen into scrollback or hiding the last row.
+- Resizing while SSH is connecting applies the latest terminal size as soon as the shell opens.
+- Container shells inherit the source host's environment label and top line, including in focus mode.
+- Clicking a short module tab selects it reliably; its close button stays at the right edge.
+- Switching Kubernetes contexts ignores late connections and rejects requests from an older context.
+- The editor keeps unsaved changes and its close warning when you type while a save is pending.
+- SFTP serializes transfers to the same destination. Uploads use private temporary files and
+  preserve destination permissions, or source permissions for a new file.
+- S3 folder downloads reject directory symlinks and junctions below the selected folder; downloads
+  use exclusive private temporary files.
+- Locking the screen or suspending the computer also cancels an in-progress vault unlock or creation.
+- MultiExec excludes editor and Remote Desktop tabs.
+- S3 tabs reconnect after the Session Host restarts, restore the current folder and stop transfers
+  and background jobs belonging to the old session.
+
 ## [1.2.0-beta.33] - 2026-10-10
 
 ### Security

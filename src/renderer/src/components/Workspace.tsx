@@ -29,6 +29,7 @@ import { useTabs, type TabTarget } from '../stores/tabs'
 import { ModuleTabView, TabIcon } from './ModuleTabView'
 import { layoutToItems, type WorkspaceItem } from '@shared/workspaces'
 import { inDockview } from '../shell/areas'
+import { tabHostId } from '../lib/tab-host'
 
 interface PanelParams {
   tabId: string
@@ -79,8 +80,39 @@ export function panelContent(
 
 /** Tab trong thanh tab của dockview (giữ data-testid cũ cho E2E). */
 function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Element {
+  const headerRef = useRef<HTMLDivElement>(null)
   const [title, setTitle] = useState(props.api.title ?? '')
   const [active, setActive] = useState(props.api.isActive)
+  useEffect(() => {
+    if (!active) return
+    const header = headerRef.current
+    if (!header) return
+    // Dockview chọn tab trước khi React render xong nhãn: lần cuộn nội bộ dùng chiều
+    // rộng cũ. Cuộn lại sau layout và khi vùng nút / cửa sổ đổi kích thước.
+    let observer: ResizeObserver | undefined
+    // Tab renderer có thể mount trước khi Dockview gắn nó vào dải tab.
+    let frame = requestAnimationFrame(() => {
+      const strip = header.closest<HTMLElement>('.dv-tabs-container')
+      if (!strip) return
+      const reveal = (): void => {
+        cancelAnimationFrame(frame)
+        frame = requestAnimationFrame(() => {
+          const tab = header.getBoundingClientRect()
+          const viewport = strip.getBoundingClientRect()
+          if (tab.right > viewport.right) strip.scrollLeft += tab.right - viewport.right
+          else if (tab.left < viewport.left) strip.scrollLeft -= viewport.left - tab.left
+        })
+      }
+      observer = new ResizeObserver(reveal)
+      observer.observe(strip)
+      observer.observe(header)
+      reveal()
+    })
+    return () => {
+      observer?.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  }, [active, title])
   useEffect(() => {
     const a = props.api.onDidTitleChange((e) => {
       setTitle(e.title)
@@ -99,13 +131,19 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
   const state = useTabStatus((s) => s.byTab[tabId] ?? 'idle')
   const hostId = useTabs((s) => {
     const found = s.tabs.find((x) => x.id === tabId)?.target
-    return found?.kind === 'host' || found?.kind === 'rdp' ? found.hostId : null
+    return tabHostId(found)
   })
   const envColor = useHosts((s) => (hostId ? (s.effective.get(hostId)?.color ?? null) : null))
   const env = useHostEnvironment(hostId)
   const hostLabel = useHosts((s) =>
     hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.label ?? null) : null
   )
+  const hostPath = useHosts((s) => {
+    const host = s.tree.hosts.find((h) => h.id === hostId)
+    return host
+      ? [...(host.groupId ? s.groupTree.path(host.groupId) : []), host.label].join(' / ')
+      : ''
+  })
   const hostOs = useHosts((s) =>
     hostId ? (s.tree.hosts.find((h) => h.id === hostId)?.os ?? null) : null
   )
@@ -206,12 +244,13 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
     <>
       {menu}
       <div
+        ref={headerRef}
         role="tab"
         aria-selected={active}
         data-testid="tab"
         data-tab-id={tabId}
         data-tab-state={state}
-        title={`${title} — ${connectionLabel[state]}`}
+        title={`${hostPath ? `${hostPath} — ` : ''}${title} — ${connectionLabel[state]}`}
         data-env-color={envColor ?? ''}
         className="group relative flex h-full max-w-60 min-w-28 items-center gap-2 pr-1 pl-2.5 text-xs"
         onContextMenu={onContextMenu}
@@ -224,7 +263,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
         }}
       >
         <span className="relative flex shrink-0">
-          {hostLabel ? (
+          {hostLabel && kind !== 'module-terminal' ? (
             <HostAvatar
               host={{ label: hostLabel, color: envColor, os: hostOs }}
               size={16}
@@ -245,7 +284,7 @@ function TabHeader(props: IDockviewPanelHeaderProps<PanelParams>): React.JSX.Ele
           )}
         </span>
         <span className={cx('min-w-0 flex-1 truncate', active ? 'text-fg' : 'text-muted')}>
-          {title}
+          {kind === 'module-terminal' && hostLabel ? `${hostLabel} · ${title}` : title}
         </span>
         {/* Phiên PROD: một chấm magenta 5px (thiết kế v0.5) — môi trường khác không tô. */}
         {env?.highlight && (

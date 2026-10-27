@@ -42,6 +42,41 @@ describe('idleLockDue', () => {
 })
 
 describe('VaultController', () => {
+  it.each(['suspend', 'lock-screen'] as const)('huỷ unlock đang chạy khi có %s', async (event) => {
+    const { db, vault, controller } = await setup({ lockOnSuspend: true })
+    const password = Secret.fromString('master-password')
+    try {
+      vault.lock()
+      const pending = vault.unlock(password)
+      expect(controller.onPowerEvent(event)).toBe(true)
+      await expect(pending).rejects.toThrow('The vault was locked while it was being unlocked')
+      expect(vault.state()).toBe('locked')
+    } finally {
+      vault.lock()
+      password.dispose()
+      db.close()
+    }
+  })
+
+  it('huỷ tạo vault đang chạy khi màn hình bị khoá', async () => {
+    const db = openDatabase(':memory:')
+    await migrate(db, MIGRATIONS)
+    const vault = new Vault(db, TEST_KDF)
+    const store = new DeviceKeyStore(db, fakeProtector({ ok: true, key: 0x5a }))
+    const controller = new VaultController(vault, store, () => DEFAULT_SETTINGS)
+    const password = Secret.fromString('master-password')
+    try {
+      const pending = vault.create(password)
+      expect(controller.onPowerEvent('lock-screen')).toBe(true)
+      await pending
+      expect(vault.state()).not.toBe('unlocked')
+    } finally {
+      vault.lock()
+      password.dispose()
+      db.close()
+    }
+  })
+
   it('nhớ trên máy: khởi động lại thì tự mở; tắt thì khoá lưu bị xoá', async () => {
     const { vault, store, controller } = await setup({ rememberOnDevice: true })
     controller.enableRemember()

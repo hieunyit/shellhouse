@@ -1,6 +1,7 @@
 import type { TransferStatus } from '@shared/sftp'
 import { ModuleSessionClient } from '../../registry/renderer-kit'
 import type { S3Op, S3TransferDelta } from '../shared/ops'
+import { t } from '@shared/i18n'
 
 /** Đầu renderer của một phiên S3 (phiên module `s3/browser`): gửi thao tác, nhận kết quả. */
 export class S3SessionClient {
@@ -11,15 +12,35 @@ export class S3SessionClient {
 
   static async open(
     accountId: string,
-    onTransfers: (list: TransferStatus[]) => void
+    onTransfers: (list: TransferStatus[]) => void,
+    onDisconnect: () => void = () => undefined
   ): Promise<S3SessionClient> {
     // Session Host chỉ gửi phần thay đổi; ghép lại thành danh sách đầy đủ (giữ thứ tự thêm vào).
     const transfers = new Map<string, TransferStatus>()
+    let disconnected = false
+    const lost = (): void => {
+      if (disconnected) return
+      disconnected = true
+      for (const [id, transfer] of transfers) {
+        if (transfer.state !== 'running' && transfer.state !== 'queued') continue
+        transfers.set(id, {
+          ...transfer,
+          state: 'error',
+          bytesPerSecond: 0,
+          error: t('The connection changed')
+        })
+      }
+      onTransfers([...transfers.values()])
+      onDisconnect()
+    }
     const client = await ModuleSessionClient.open(
       's3',
       { kind: 'module', sessionKind: 'browser', params: { accountId } },
       {
+        onHostRestart: lost,
+        onExit: lost,
         onEvent: (event, data) => {
+          if (disconnected) return
           if (event !== 'transfers') return
           const delta = data as S3TransferDelta
           for (const id of delta.remove) transfers.delete(id)

@@ -169,6 +169,7 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
 
     // Shell vào pod → tab terminal (exec qua WebSocket).
     await page.getByTestId('tab').filter({ hasText: 'test' }).first().click()
+    await expectActiveTab(page, 'test')
     await web1.click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'Open shell' }).click()
     await expectActiveTab(page, 'web-1/app (shell)')

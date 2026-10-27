@@ -85,13 +85,106 @@ function service(config: ResolvedClusterConfig) {
 const ref = { source: 'file:~/.kube/config', context: 'test' }
 
 describe('Kubernetes qua API server giả (HTTPS, chứng chỉ test)', () => {
+  it('connect cũ hoàn tất muộn không đổi cluster và từ chối lệnh mang connection cũ', async () => {
+    const a = await api()
+    const b = await api()
+    let release!: (config: ResolvedClusterConfig) => void
+    const slow = new Promise<ResolvedClusterConfig>((resolve) => {
+      release = resolve
+    })
+    const s = new K8sService({
+      resolve: (target) => (target.context === 'a' ? slow : Promise.resolve(cluster(b))),
+      rawConnect: (host, port) =>
+        new Promise((resolve, reject) => {
+          const socket = connect({ host, port })
+          socket.once('connect', () => {
+            resolve(socket)
+          })
+          socket.once('error', reject)
+        }),
+      spawn: noSpawn,
+      emit: () => undefined,
+      log: () => undefined
+    })
+    cleanups.push(() => {
+      s.dispose()
+    })
+    const signal = new AbortController().signal
+    const old = s.run({ op: 'connect', ref: { ...ref, context: 'a' }, readOnly: false }, signal)
+    const rejected = expect(old).rejects.toThrow('The connection changed')
+    const current = (await s.run(
+      { op: 'connect', ref: { ...ref, context: 'b' }, readOnly: false },
+      signal
+    )) as { connection: number }
+    release(cluster(a))
+    await rejected
+    a.requests.length = 0
+    b.requests.length = 0
+    await expect(
+      s.run(
+        {
+          op: 'delete',
+          kind: 'pods',
+          namespace: 'shop',
+          name: 'web-1',
+          connection: current.connection - 1
+        },
+        signal
+      )
+    ).rejects.toThrow('The connection changed')
+    expect(a.requests).toEqual([])
+    expect(b.requests).toEqual([])
+    await s.run(
+      {
+        op: 'delete',
+        kind: 'pods',
+        namespace: 'shop',
+        name: 'web-1',
+        connection: current.connection
+      },
+      signal
+    )
+    expect(a.requests.some((r) => r.startsWith('DELETE'))).toBe(false)
+    expect(b.requests.some((r) => r.startsWith('DELETE'))).toBe(true)
+  })
+
+  it.each(['abort', 'dispose'] as const)(
+    'không cài client sau khi connect bị %s',
+    async (action) => {
+      const server = await api()
+      let release!: (config: ResolvedClusterConfig) => void
+      const slow = new Promise<ResolvedClusterConfig>((resolve) => {
+        release = resolve
+      })
+      const s = new K8sService({
+        resolve: () => slow,
+        rawConnect: () => Promise.reject(new Error('unused')),
+        spawn: noSpawn,
+        emit: () => undefined,
+        log: () => undefined
+      })
+      cleanups.push(() => {
+        s.dispose()
+      })
+      const abort = new AbortController()
+      const pending = s.run({ op: 'connect', ref, readOnly: false }, abort.signal)
+      const rejected = expect(pending).rejects.toThrow('The connection changed')
+      if (action === 'abort') abort.abort()
+      else s.dispose()
+      release(cluster(server))
+      await rejected
+      expect(server.requests).toEqual([])
+    }
+  )
+
   it('TLS kiểm theo CA của kubeconfig: CA đúng → được; không có CA → từ chối; insecure-skip → được', async () => {
     const server = await api()
     const good = service(cluster(server))
     expect(await good.run({ op: 'connect', ref, readOnly: false })).toEqual({
       version: 'v1.31.2',
       namespace: 'shop',
-      readOnly: false
+      readOnly: false,
+      connection: 1
     })
     const noCa = service(cluster(server, { ca: undefined }))
     await expect(noCa.run({ op: 'connect', ref, readOnly: false })).rejects.toThrow(/certificate/i)

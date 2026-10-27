@@ -19,6 +19,8 @@ import { IconButton } from '../ds'
 import { cx, ICON_SM } from '../ds/utils'
 import { Sidebar } from '../components/Sidebar'
 import { HostAvatar } from '../components/HostAvatar'
+import { HostGroups } from '../components/HostGroups'
+import { tabHostId } from '../lib/tab-host'
 import { SETTINGS_NAV, settingsDescription } from '../components/settings/settings-sections'
 import { connect } from '../components/sidebar/actions'
 import {
@@ -265,18 +267,20 @@ function FilesExplorer(): React.JSX.Element {
         )}
         {open.length > 0 && !results && (
           <ExplorerGroup title={t('Open')}>
-            {open.map((x) => (
-              <ExplorerItem
-                key={x.id}
-                testId="explorer-files-tab"
-                icon={<FolderOpen {...ICON_SM} />}
-                label={x.title.replace(/ \(SFTP\)$/, '')}
-                current={!filesLocal && x.id === activeId}
-                onClick={() => {
-                  useTabs.getState().activate(x.id)
-                }}
-              />
-            ))}
+            <HostGroups items={open} hostId={(x) => tabHostId(x.target)} itemKey={(x) => x.id}>
+              {(x) => (
+                <ExplorerItem
+                  key={x.id}
+                  testId="explorer-files-tab"
+                  icon={<FolderOpen {...ICON_SM} />}
+                  label={x.title.replace(/ \(SFTP\)$/, '')}
+                  current={!filesLocal && x.id === activeId}
+                  onClick={() => {
+                    useTabs.getState().activate(x.id)
+                  }}
+                />
+              )}
+            </HostGroups>
           </ExplorerGroup>
         )}
         <ExplorerGroup title={t('Remote (SFTP)')}>
@@ -285,9 +289,13 @@ function FilesExplorer(): React.JSX.Element {
               {results ? t('No matching hosts.') : t('Saved SSH hosts show up here.')}
             </p>
           ) : (
-            (results ?? ssh)
-              .filter((h) => h.protocol === 'ssh')
-              .map((h) => <HostItem key={h.id} host={h} testId="explorer-files-host" files />)
+            <HostGroups
+              items={(results ?? ssh).filter((h) => h.protocol === 'ssh')}
+              hostId={(h) => h.id}
+              itemKey={(h) => h.id}
+            >
+              {(h) => <HostItem host={h} testId="explorer-files-host" files />}
+            </HostGroups>
           )}
         </ExplorerGroup>
       </div>

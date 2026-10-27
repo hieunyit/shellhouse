@@ -63,6 +63,22 @@ function lastPrompt(port: FakePort): Extract<ServerMessage, { t: 'prompt' }> | u
 }
 
 describe('Session (SSH qua MessagePort)', () => {
+  it('giữ resize mới nhất trong lúc chờ xác thực và áp dụng trước phím gõ sớm', async () => {
+    const server = await startTestSshServer([{ username: 'alice', password: 'pw' }])
+    cleanups.push(() => server.close())
+    const { port } = sshSession(server, hostKeys({ status: 'match' }))
+    await port.until(() => lastPrompt(port)?.prompt.kind === 'password')
+    port.deliver({ t: 'resize', cols: 100, rows: 40 })
+    port.deliver({ t: 'resize', cols: 90, rows: 18 })
+    port.deliver({ t: 'input', d: 'echo resized\r' })
+    port.deliver({ t: 'prompt-reply', id: lastPrompt(port)?.id ?? -1, ok: true, answers: ['pw'] })
+    await port.until(() => port.text().includes('resized\r\n'))
+    expect(server.events.windowChanges).toEqual([{ cols: 90, rows: 18 }])
+    port.deliver({ t: 'resize', cols: 120, rows: 30 })
+    await port.until(() => server.events.windowChanges.length === 2)
+    expect(server.events.windowChanges.at(-1)).toEqual({ cols: 120, rows: 30 })
+  })
+
   it('host mới: prompt host key → tin → prompt mật khẩu → shell; phím gõ sớm không bị mất', async () => {
     const server = await startTestSshServer([{ username: 'alice', password: 'pw' }])
     cleanups.push(() => server.close())

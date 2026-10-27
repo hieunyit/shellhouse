@@ -31,6 +31,7 @@ import { choose } from '../stores/confirm'
 import { t, tn } from '@shared/i18n'
 import { isMultiline, joinPasteLines, pasteLines } from './paste'
 import { createElement } from 'react'
+import { decodeClipboardSequence } from './clipboard'
 
 export interface ActivePrompt {
   id: number
@@ -85,9 +86,9 @@ export function terminalOptions(settings: AppSettings, dark: boolean): ITerminal
     cursorBlink: t.cursorBlink,
     scrollback: t.scrollback,
     screenReaderMode: t.screenReaderMode,
-    // Lệnh xoá màn hình (ED2) đẩy nội dung đang hiện lên scrollback thay vì xoá mất — như Windows
-    // Terminal / GNOME. Quan trọng trên Windows: ConPTY xoá màn hình mỗi khi phiên mới bắt đầu.
-    scrollOnEraseInDisplay: true,
+    // TUI dùng ED2 để vẽ lại màn hình, đôi khi trong vùng cuộn giới hạn. Đẩy ED2 vào
+    // scrollback làm dịch nội dung/status của vim, nano và tmux khi chúng vẽ lại.
+    scrollOnEraseInDisplay: false,
     // Theme sáng: chương trình hay tô màu RGB chọn cho nền tối (TUI, vault, k9s…) — nâng tương phản
     // tối thiểu lên mức đọc được (WCAG AA) thay vì chữ xanh nhạt trên nền trắng. Theme tối giữ
     // nguyên màu gốc.
@@ -261,6 +262,15 @@ export class TerminalController {
     })
 
     term.attachCustomKeyEventHandler((event) => this.handleKey(event))
+    // tmux copy-mode gửi vùng chọn bằng OSC 52, không tạo selection trong xterm.
+    // Chỉ nhận ghi clipboard; không trả lời truy vấn đọc clipboard từ máy từ xa.
+    this.disposables.push(
+      term.parser.registerOscHandler(52, (data) => {
+        const text = decodeClipboardSequence(data)
+        if (text !== null) void window.shellhouse.writeClipboard(text)
+        return true
+      })
+    )
     this.disposables.push(
       term.onData((data) => {
         this.handleInput(data)
@@ -332,11 +342,12 @@ export class TerminalController {
     let copyTimer: number | null = null
     this.disposables.push(
       this.term.onSelectionChange(() => {
-        if (!useSettings.getState().settings.terminal.copyOnSelect) return
         if (copyTimer !== null) window.clearTimeout(copyTimer)
+        copyTimer = null
+        if (!useSettings.getState().settings.terminal.copyOnSelect) return
         copyTimer = window.setTimeout(() => {
           copyTimer = null
-          if (this.disposed) return
+          if (this.disposed || !useSettings.getState().settings.terminal.copyOnSelect) return
           const text = this.term.getSelection()
           if (text) void window.shellhouse.writeClipboard(text)
         }, 150)
@@ -1093,6 +1104,8 @@ export class TerminalController {
           this.events.onLatency?.(ms)
         }
       })
+      // Fit có thể đổi trong lúc main mở phiên; onResize khi chưa có client không gửi được.
+      this.client.resize(this.term.cols, this.term.rows)
       // Local: có shell ngay. SSH: chờ status 'connected' (đã xác thực) mới coi là kết nối.
       if (this.target.kind === 'local') this.setState('connected')
       this.statsOn = false

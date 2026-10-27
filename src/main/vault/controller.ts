@@ -67,8 +67,9 @@ export class VaultController {
   }
 
   onPowerEvent(event: 'suspend' | 'lock-screen'): boolean {
-    if (this.vault.state() !== 'unlocked' || !this.getSettings().security.lockOnSuspend)
-      return false
+    if (!this.getSettings().security.lockOnSuspend) return false
+    // Argon2 đang chạy thì state vẫn là locked/uninitialized. Lock vẫn phải tăng generation
+    // để kết quả mở/tạo vault đang chờ không mở lại kho sau sự kiện khoá máy.
     this.lock(event)
     return true
   }

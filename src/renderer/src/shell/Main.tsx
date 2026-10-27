@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo } from 'react'
+import { memo, useEffect, useMemo, useRef } from 'react'
 import {
   ChevronDown,
   Maximize2,
@@ -44,6 +44,7 @@ import { displayKeybinding, isMac } from '../lib/keybindings'
 import { TransfersPage } from './TransfersPage'
 import { LocalFilesPage } from './LocalFilesPage'
 import { inDockview, sharesDockview, tabArea, useShell, type Area } from './store'
+import { tabHostId } from '../lib/tab-host'
 
 /** Lớp trong vùng chính: lớp không hiện vẫn sống (terminal giữ phiên) nhưng ẩn và không nhận focus. */
 function Layer({
@@ -89,8 +90,7 @@ function useActiveSessionTab(): Tab | undefined {
 function HostsHeader({ onSnippets }: { onSnippets: () => void }): React.JSX.Element {
   const tab = useActiveSessionTab()
   const area = useShell((s) => s.area)
-  const hostId =
-    tab && (tab.target.kind === 'host' || tab.target.kind === 'rdp') ? tab.target.hostId : null
+  const hostId = tabHostId(tab?.target)
   const host = useHosts((s) => (hostId ? s.tree.hosts.find((h) => h.id === hostId) : undefined))
   const env = useHostEnvironment(hostId)
   const groupTree = useHosts((s) => s.groupTree)
@@ -346,10 +346,37 @@ function ModuleEmpty({ id }: { id: string }): React.JSX.Element {
 
 /** Dải tab của khu vực module (Docker, K8s…): luôn hiện khi có tab, để tab đơn cũng có nút đóng. */
 function StageTabs({ area, tabs }: { area: Area; tabs: Tab[] }): React.JSX.Element | null {
+  const stripRef = useRef<HTMLDivElement>(null)
   const activeId = useTabs((s) => s.activeId)
+  const hosts = useHosts((s) => s.tree.hosts)
+  const tree = useHosts((s) => s.groupTree)
+  useEffect(() => {
+    const strip = stripRef.current
+    const selected = strip?.querySelector<HTMLElement>('[aria-selected="true"]')
+    if (!strip || !selected) return
+    let frame = 0
+    const reveal = (): void => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const tab = selected.getBoundingClientRect()
+        const viewport = strip.getBoundingClientRect()
+        if (tab.right > viewport.right) strip.scrollLeft += tab.right - viewport.right
+        else if (tab.left < viewport.left) strip.scrollLeft -= viewport.left - tab.left
+      })
+    }
+    const observer = new ResizeObserver(reveal)
+    observer.observe(strip)
+    observer.observe(selected)
+    reveal()
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  }, [activeId, area, tabs])
   if (tabs.length === 0) return null
   return (
     <div
+      ref={stripRef}
       role="tablist"
       aria-label={t('Tabs')}
       className="flex h-ds-tab shrink-0 items-center gap-1 overflow-x-auto border-b border-ds-border-subtle px-2 [scrollbar-width:none]"
@@ -357,6 +384,10 @@ function StageTabs({ area, tabs }: { area: Area; tabs: Tab[] }): React.JSX.Eleme
     >
       {tabs.map((tab) => {
         const selected = tab.id === activeId
+        const host = hosts.find((h) => h.id === tabHostId(tab.target))
+        const path = host
+          ? [...(host.groupId ? tree.path(host.groupId) : []), host.label].join(' / ')
+          : ''
         return (
           <div
             key={tab.id}
@@ -364,8 +395,12 @@ function StageTabs({ area, tabs }: { area: Area; tabs: Tab[] }): React.JSX.Eleme
             aria-selected={selected}
             data-testid="tab"
             data-tab-id={tab.id}
+            onClick={() => {
+              useTabs.getState().activate(tab.id)
+            }}
+            title={path ? `${path} — ${tab.title}` : tab.title}
             className={cx(
-              'group flex h-7 max-w-56 min-w-0 shrink-0 items-center gap-1.5 rounded-ds-md pr-1 pl-2.5 text-ds-sm',
+              'sh-stage-tab group flex h-7 max-w-72 min-w-28 shrink-0 items-center gap-1.5 rounded-ds-md pr-1 pl-2.5 text-ds-sm',
               selected
                 ? 'bg-ds-active text-ds-fg'
                 : 'text-ds-fg-2 hover:bg-ds-hover hover:text-ds-fg'
@@ -379,13 +414,14 @@ function StageTabs({ area, tabs }: { area: Area; tabs: Tab[] }): React.JSX.Eleme
           >
             <button
               type="button"
-              className="flex min-w-0 items-center gap-1.5 outline-none focus-visible:shadow-ds-focus"
-              onClick={() => {
-                useTabs.getState().activate(tab.id)
-              }}
+              className="flex min-w-0 flex-1 items-center gap-1.5 outline-none focus-visible:shadow-ds-focus"
             >
               <TabIcon target={tab.target} size={13} className="shrink-0 text-ds-fg-3" />
-              <span className="truncate">{tab.title}</span>
+              <span className="truncate">
+                {host && tab.target.kind === 'module' && tab.target.tab !== 'engine'
+                  ? `${host.label} · ${tab.title}`
+                  : tab.title}
+              </span>
             </button>
             <button
               type="button"
@@ -395,7 +431,8 @@ function StageTabs({ area, tabs }: { area: Area; tabs: Tab[] }): React.JSX.Eleme
                 'flex size-5 shrink-0 items-center justify-center rounded-ds-sm text-ds-fg-3 hover:bg-ds-hover hover:text-ds-fg focus-visible:opacity-100',
                 selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
               )}
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation()
                 useTabs.getState().close(tab.id)
               }}
             >
@@ -437,8 +474,7 @@ const StageTab = memo(function StageTab({
  */
 function FocusPill(): React.JSX.Element {
   const tab = useActiveSessionTab()
-  const hostId =
-    tab && (tab.target.kind === 'host' || tab.target.kind === 'rdp') ? tab.target.hostId : null
+  const hostId = tabHostId(tab?.target)
   const env = useHostEnvironment(hostId)
   const overrides = useSettings((s) => s.settings.keybindings)
   const keys = kbdKeys('view.focus', overrides)
@@ -504,12 +540,7 @@ function useMainEnv(area: Area, stageTab: string | null): EnvironmentDef | undef
   // Files › This computer: file trên máy này, không thuộc môi trường của phiên nào.
   const filesLocal = useShell((s) => s.filesLocal)
   const hostId =
-    sharesDockview(area) &&
-    !(area === 'files' && filesLocal) &&
-    tab &&
-    (tab.target.kind === 'host' || tab.target.kind === 'rdp')
-      ? tab.target.hostId
-      : null
+    sharesDockview(area) && !(area === 'files' && filesLocal) ? tabHostId(tab?.target) : null
   const hostEnv = useHostEnvironment(hostId)
   const reported = useShell((s) => (stageTab ? (s.envByTab[stageTab] ?? null) : null))
   const moduleEnv = useEnvironment(reported)
