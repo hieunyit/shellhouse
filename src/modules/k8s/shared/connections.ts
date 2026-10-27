@@ -71,6 +71,7 @@ export interface ConnectionsInput {
   /** null = cluster không có nguồn traffic (Caretta / Hubble): không biết quan sát. */
   observed: readonly TrafficRate[] | null
   unit?: TrafficUnit | undefined
+  partial?: boolean | undefined
   /** Tên máy → các IP (phân giải từ máy này). Thiếu tên = chưa / không phân giải được. */
   resolved?: ReadonlyMap<string, readonly string[]>
   /** Service → workload phía sau; thiếu → không ghép được đích kiểu Service bằng workload. */
@@ -81,7 +82,7 @@ export interface ConnectionsInput {
 
 const SYSTEM_NS = new Set(['kube-system', 'kube-public', 'kube-node-lease'])
 /** Dưới mức này là "idle": 1 B/s · 0,01 kết nối/s (cùng ngưỡng với bản đồ traffic). */
-const idleBelow = (unit: TrafficUnit | undefined): number => (unit === 'connections' ? 0.01 : 1)
+const idleBelow = (unit: TrafficUnit | undefined): number => (unit && unit !== 'bytes' ? 0.01 : 1)
 /** Gom từ chừng này IP chỉ-quan-sát cùng dải. */
 export const GROUP_FROM = 3
 
@@ -216,8 +217,10 @@ export function buildConnections(input: ConnectionsInput): ConnectionRow[] {
       hit.forEach((i) => used.add(i))
       const matched = hit.map((i) => links[i] as Link)
       let status: ConnStatus
-      if (observed === null) status = 'unmeasured'
-      else if (matched.length > 0) status = sumRate(matched) >= idleBelow(unit) ? 'active' : 'idle'
+      if (observed === null || (input.partial && matched.length === 0)) status = 'unmeasured'
+      else if (matched.length > 0)
+        status =
+          sumRate(matched) >= idleBelow(unit) ? 'active' : input.partial ? 'unmeasured' : 'idle'
       else if (
         r.dest.kind !== 'service' &&
         !isIp(r.dest.host) &&

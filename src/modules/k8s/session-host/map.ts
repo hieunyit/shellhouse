@@ -1,6 +1,7 @@
-import { detectTech, workloadKindLabel } from '../shared/map'
+import { detectTech } from '../shared/map'
 import type {
   MapContainerPort,
+  MapCoverage,
   MapData,
   MapGateway,
   MapRouteRule,
@@ -58,6 +59,7 @@ interface Listed {
   denied?: boolean
   /** API không có (404) — vd. cluster cũ không có EndpointSlice. */
   missing?: boolean
+  coverage?: Omit<MapCoverage, 'kind'>[]
 }
 
 /**
@@ -78,10 +80,12 @@ export async function listAll(
   let truncated = false
   let denied = false
   let missing = false
+  const coverage: Omit<MapCoverage, 'kind'>[] = []
   for (const ns of scopes) {
     if (items.length >= MAX_PER_KIND) {
       // Còn namespace chưa đọc.
       truncated = true
+      coverage.push({ reason: 'truncated', ...(ns ? { namespace: ns } : {}) })
       break
     }
     const path = `${api}${ns ? `/namespaces/${encodeURIComponent(ns)}` : ''}/${plural}`
@@ -99,19 +103,34 @@ export async function listAll(
         })
         for (const it of r.items ?? []) items.push(it)
         cont = r.metadata?.continue || undefined
-        if (cont && items.length >= MAX_PER_KIND) truncated = true
+        if (cont && items.length >= MAX_PER_KIND) {
+          truncated = true
+          coverage.push({ reason: 'truncated', ...(ns ? { namespace: ns } : {}) })
+        }
       } while (cont && !truncated)
     } catch (error) {
       if (error instanceof KubeError && (error.status === 403 || error.status === 404)) {
         if (error.status === 403) denied = true
         else missing = true
+        coverage.push({
+          reason: error.status === 403 ? 'forbidden' : 'missing-api',
+          ...(ns ? { namespace: ns } : {})
+        })
         continue
       }
       throw error
     }
     if (truncated) break
   }
-  return { items, truncated, ...(denied ? { denied } : {}), ...(missing ? { missing } : {}) }
+  return {
+    items,
+    truncated,
+    coverage: truncated
+      ? [...coverage.filter((c) => c.reason !== 'truncated'), { reason: 'truncated' }]
+      : coverage,
+    ...(denied ? { denied } : {}),
+    ...(missing ? { missing } : {})
+  }
 }
 
 export function templateOf(kind: string, w: K8sObject): Obj {
@@ -151,15 +170,22 @@ export function templateRefs(tpl: Obj): {
     if (name) set.add(name)
   }
   for (const v of a(spec['volumes'])) {
-    add(cms, o(v['configMap'])['name'])
-    add(secrets, o(v['secret'])['secretName'])
+    const cm = o(v['configMap'])
+    const secret = o(v['secret'])
+    if (cm['optional'] !== true) add(cms, cm['name'])
+    if (secret['optional'] !== true) add(secrets, secret['secretName'])
     for (const src of a(o(v['projected'])['sources'])) {
-      add(cms, o(src['configMap'])['name'])
-      add(secrets, o(src['secret'])['name'])
+      const cm = o(src['configMap'])
+      const secret = o(src['secret'])
+      if (cm['optional'] !== true) add(cms, cm['name'])
+      if (secret['optional'] !== true) add(secrets, secret['name'])
     }
   }
   const ports: MapContainerPort[] = []
-  for (const c of [...a(spec['initContainers']), ...a(spec['containers'])]) {
+  const containers = a(spec['containers'])
+  const init = a(spec['initContainers'])
+  const serving = new Set([...containers, ...init.filter((c) => c['restartPolicy'] === 'Always')])
+  for (const c of [...init, ...containers]) {
     for (const e of a(c['env'])) {
       const from = o(e['valueFrom'])
       // optional: true → thiếu cũng chạy được, không tính là phụ thuộc bắt buộc.
@@ -174,7 +200,7 @@ export function templateRefs(tpl: Obj): {
       const sr = o(e['secretRef'])
       if (sr['optional'] !== true) add(secrets, sr['name'])
     }
-    for (const p of a(c['ports'])) {
+    for (const p of serving.has(c) ? a(c['ports']) : []) {
       const port = num(p['containerPort'])
       if (!port) continue
       ports.push({
@@ -415,7 +441,10 @@ export async function mapData(
             : `${ready}/${desired} ready`
       const tpl = templateOf(k.id, w)
       const labels = (o(tpl['metadata'])['labels'] ?? {}) as Record<string, string>
-      const images = a(o(tpl['spec'])['containers']).map((c) => s(c['image']))
+      const images = [
+        ...a(o(tpl['spec'])['initContainers']),
+        ...a(o(tpl['spec'])['containers'])
+      ].map((c) => s(c['image']))
       const refs = templateRefs(tpl)
       const tech = detectTech(images, { ...(w.metadata.labels ?? {}), ...labels }, w.metadata.name)
       const meta = w.metadata.labels ?? {}
@@ -425,6 +454,7 @@ export async function mapData(
         ns: w.metadata.namespace ?? '',
         name: w.metadata.name,
         labels,
+        images,
         ...(tech ? { tech } : {}),
         ...(helm ? { helm } : {}),
         ready,
@@ -446,16 +476,11 @@ export async function mapData(
     }
   })
 
-  // Workload có thẻ trên bản đồ — pod của owner khác (ReplicaSet lẻ, controller lạ) giữ nhãn.
-  const workloadKeys = new Set(
-    workloads.map((w) => `${w.ns}|${workloadKindLabel(w.kind)}|${w.name}`)
-  )
   const mapPods: MapPod[] = pods.items.map((p) => {
     const st = podStatus(p)
     const statuses = a(o(p.status)['containerStatuses'])
     const owner = topOwner(p)
     const ns = p.metadata.namespace ?? ''
-    const orphan = !owner || !workloadKeys.has(`${ns}|${owner.kind}|${owner.name}`)
     const notReady =
       st.text === 'Running' && statuses.length > 0 && statuses.some((c) => c['ready'] !== true)
     const req = podRequests(p)
@@ -476,12 +501,24 @@ export async function mapData(
       ...(Number.isFinite(started) ? { startedAt: started } : {}),
       ...(used ? { usage: used } : {}),
       ...(notReady ? { notReady } : {}),
-      ...(orphan && p.metadata.labels ? { labels: p.metadata.labels } : {})
+      labels: p.metadata.labels ?? {},
+      ports: templateRefs({ spec: p.spec }).ports,
+      ready: a(status['conditions']).some((c) => c['type'] === 'Ready' && c['status'] === 'True'),
+      ...(p.metadata.deletionTimestamp ? { terminating: true } : {})
     }
   })
 
   const endpoints =
     slices.denied || slices.missing || slices.truncated ? null : endpointCounts(slices.items)
+  const sliceNames = new Map<string, string[]>()
+  for (const slice of slices.items) {
+    const service = slice.metadata.labels?.['kubernetes.io/service-name']
+    if (!service) continue
+    const key = `${slice.metadata.namespace ?? ''}/${service}`
+    const names = sliceNames.get(key) ?? []
+    names.push(slice.metadata.name)
+    sliceNames.set(key, names)
+  }
   const mapServices: MapService[] = services.items.map((svc) => {
     const spec = o(svc.spec)
     const ns = svc.metadata.namespace ?? ''
@@ -519,7 +556,10 @@ export async function mapData(
       ...(s(spec['externalName']) ? { externalName: s(spec['externalName']) } : {}),
       ...(external.length ? { external } : {}),
       ...(endpoints && type !== 'ExternalName'
-        ? { endpoints: ep ?? { ready: 0, notReady: 0 } }
+        ? {
+            endpoints: ep ?? { ready: 0, notReady: 0 },
+            endpointSlices: sliceNames.get(`${ns}/${svc.metadata.name}`) ?? []
+          }
         : {})
     }
   })
@@ -546,7 +586,8 @@ export async function mapData(
         for (const p of a(o(r['http'])['paths']))
           add(p['backend'], `${s(r['host'])}${s(p['path']) || '/'}`, {
             host: s(r['host']),
-            path: s(p['path']) || '/'
+            path: s(p['path']) || '/',
+            pathType: s(p['pathType']) || 'ImplementationSpecific'
           })
       const tls = a(spec['tls'])
         .map((t) => ({
@@ -599,13 +640,18 @@ export async function mapData(
             })
             .filter(Boolean)
           for (const b of a(rule['backendRefs']))
-            if ((s(b['kind']) || 'Service') === 'Service' && s(b['name'])) {
-              backends.add(s(b['name']))
+            if ((s(b['kind']) || 'Service') === 'Service' && !s(b['group']) && s(b['name'])) {
+              const backendNs = s(b['namespace']) || r.metadata.namespace || ''
+              backends.add(
+                backendNs === r.metadata.namespace ? s(b['name']) : `${backendNs}/${s(b['name'])}`
+              )
               for (const path of paths.length ? paths : ['/'])
                 rules.push({
                   host: hostnames[0] ?? '',
                   path,
                   service: s(b['name']),
+                  ...(backendNs !== r.metadata.namespace ? { namespace: backendNs } : {}),
+                  ...(typeof b['weight'] === 'number' ? { weight: b['weight'] } : {}),
                   ...(num(b['port']) ? { port: String(num(b['port'])) } : {})
                 })
             }
@@ -670,7 +716,8 @@ export async function mapData(
       selector: spec['podSelector'] ?? {},
       types,
       ingressRules: ingress,
-      egressRules: egress
+      egressRules: egress,
+      rules: { ingress: spec['ingress'] ?? [], egress: spec['egress'] ?? [] }
     }
   })
 
@@ -789,6 +836,42 @@ export async function mapData(
     signal
   )
 
+  const reads: [string, Listed][] = [
+    ['namespaces', nsList],
+    ['nodes', nodes],
+    ['pods', pods],
+    ['replicasets.apps', rs],
+    ['services', services],
+    ['ingresses.networking.k8s.io', ingresses],
+    ['httproutes.gateway.networking.k8s.io', httpRoutes],
+    ['grpcroutes.gateway.networking.k8s.io', grpcRoutes],
+    ['persistentvolumeclaims', pvcs],
+    ['horizontalpodautoscalers.autoscaling', hpas],
+    ['networkpolicies.networking.k8s.io', policies],
+    ['gateways.gateway.networking.k8s.io', gateways],
+    ['endpointslices.discovery.k8s.io', slices],
+    ['configmaps', configMapList],
+    ['secrets', secretList],
+    ['ingressclasses.networking.k8s.io', ingressClassList],
+    ['poddisruptionbudgets.policy', pdbList],
+    ...WORKLOAD_KINDS.flatMap((k, i): [string, Listed][] => {
+      const list = workloadLists[i]
+      return list ? [[k.id, list]] : []
+    })
+  ]
+  const coverage: MapCoverage[] = reads.flatMap(([kind, l]) =>
+    (l.coverage?.length
+      ? l.coverage
+      : l.denied
+        ? [{ reason: 'error' as const }]
+        : l.missing
+          ? [{ reason: 'missing-api' as const }]
+          : l.truncated
+            ? [{ reason: 'truncated' as const }]
+            : []
+    ).map((issue) => ({ kind, ...issue }))
+  )
+
   return {
     namespaces: nsList.items.map((n) => ({
       name: n.metadata.name,
@@ -803,9 +886,11 @@ export async function mapData(
     hpas: mapHpas,
     policies: mapPolicies,
     gateways: mapGateways,
-    nodes: { total: nodes.items.length, ready: nodeReady },
-    nodeList,
-    truncated: [pods, rs, services, ...workloadLists].some((l) => l.truncated),
+    nodes: { total: nodes.items.length, ready: nodeReady, known: known(nodes) },
+    ...(known(nodes) ? { nodeList } : {}),
+    truncated: reads.some(([, l]) => l.truncated),
+    coverage,
+    scope: [...namespaces].sort(),
     ...(configMaps ? { configMaps } : {}),
     ...(secrets ? { secrets } : {}),
     ...(ingressClasses ? { ingressClasses } : {}),

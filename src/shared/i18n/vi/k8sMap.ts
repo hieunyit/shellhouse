@@ -570,5 +570,118 @@ export const k8sMap: Readonly<Record<string, string>> = {
   '{n} Secret not read (reading Secrets is off).': '{n} Secret chưa đọc (đang tắt đọc Secret).',
   '{n} Secrets not read (reading Secrets is off).': '{n} Secret chưa đọc (đang tắt đọc Secret).',
   '+{n} more destination': '+{n} điểm đến khác',
-  '+{n} more destinations': '+{n} điểm đến khác'
+  '+{n} more destinations': '+{n} điểm đến khác',
+  DNS: 'DNS',
+  // Chẩn đoán đường đi, snapshot và chất lượng số liệu.
+  'Diagnose request path': 'Chẩn đoán đường đi request',
+  'Topology snapshots': 'Snapshot topology',
+  'Diagnostic target': 'Đối tượng chẩn đoán',
+  'Run diagnosis': 'Chạy chẩn đoán',
+  'Reading…': 'Đang đọc…',
+  'Snapshot name': 'Tên snapshot',
+  'Before deployment': 'Trước khi deploy',
+  'Save baseline': 'Lưu mốc so sánh',
+  Baseline: 'Mốc so sánh',
+  'Select baseline': 'Chọn mốc so sánh',
+  'Compare with current': 'So sánh với hiện tại',
+  'Delete baseline': 'Xóa mốc',
+  'Select a target to diagnose.': 'Chọn đối tượng cần chẩn đoán.',
+  'Checks reported configuration and readiness; it does not send application requests.':
+    'Kiểm tra cấu hình và trạng thái Ready được báo cáo; không gửi request tới ứng dụng.',
+  'Save a baseline before deployment, then compare with a fresh read. Stored locally on this device; Secret values are excluded. Up to 8 snapshots per cluster.':
+    'Lưu mốc trước khi deploy, sau đó so sánh với dữ liệu đọc mới. Lưu cục bộ trên thiết bị này, không lưu giá trị Secret. Tối đa 8 snapshot mỗi cluster.',
+  'Baseline read at {time}': 'Mốc được đọc lúc {time}',
+  'Read at {time}': 'Đọc lúc {time}',
+  Confirmed: 'Đã xác nhận',
+  Problem: 'Có vấn đề',
+  Warning: 'Cảnh báo',
+  Unknown: 'Chưa xác định',
+  Added: 'Đã thêm',
+  Removed: 'Đã xóa',
+  Changed: 'Đã thay đổi',
+  '{n} resource changes': '{n} tài nguyên thay đổi',
+  'No configuration changes in the captured fields.':
+    'Không có thay đổi cấu hình trong các trường đã lưu.',
+  'Some resource lists are incomplete. Unknown changes cannot be treated as additions or deletions.':
+    'Một số danh sách tài nguyên chưa đầy đủ. Không thể coi thay đổi chưa xác định là thêm hoặc xóa.',
+  'Incomplete map data; unreadable resources are unknown, not missing.':
+    'Dữ liệu map chưa đầy đủ; tài nguyên không đọc được có trạng thái chưa xác định, không phải bị mất.',
+  'Incomplete map data': 'Dữ liệu map chưa đầy đủ',
+  forbidden: 'không có quyền',
+  truncated: 'chỉ đọc được một phần',
+  error: 'lỗi',
+  'missing-api': 'API chưa có',
+  'Service {name} was not found in {ns}.': 'Không tìm thấy Service {name} trong {ns}.',
+  'Service data is incomplete in {ns}.': 'Dữ liệu Service trong {ns} chưa đầy đủ.',
+  'ExternalName points to {host}; DNS resolution and connectivity have not been tested.':
+    'ExternalName trỏ tới {host}; chưa kiểm tra DNS và khả năng kết nối.',
+  'Service port': 'Cổng Service',
+  'The requested Service port is not present: {port}': 'Không có cổng Service được yêu cầu: {port}',
+  'Pod selector': 'Pod selector',
+  'This Service has no selector; EndpointSlices are managed separately.':
+    'Service không có selector; các EndpointSlice được quản lý riêng.',
+  '{n} matching pods': '{n} pod khớp selector',
+  'Pod data is incomplete': 'Dữ liệu Pod chưa đầy đủ',
+  'Pod readiness': 'Trạng thái Ready của Pod',
+  '{ready}/{total} selected pods are ready and not terminating.':
+    '{ready}/{total} pod được chọn đang Ready và chưa bị xóa.',
+  '{ready} ready endpoints, {notReady} not ready.':
+    '{ready} endpoint Ready, {notReady} chưa Ready.',
+  'EndpointSlice data could not be read completely; endpoint health is unknown.':
+    'Không đọc được đầy đủ EndpointSlice; chưa xác định được trạng thái endpoint.',
+  'Target port': 'Target port',
+  'No complete Pod port declarations are available.': 'Chưa có đầy đủ khai báo cổng của Pod.',
+  'Named targetPort {port} is absent from Pods: {pods}':
+    'Không có targetPort tên {port} trong các Pod: {pods}',
+  'Numeric targetPort {port} is not declared on every selected Pod. A process may still listen on that port; a network test is required.':
+    'targetPort số {port} chưa được khai báo trên mọi Pod được chọn. Tiến trình vẫn có thể lắng nghe cổng này; cần kiểm tra kết nối thực tế.',
+  'targetPort {port} matches the selected Pod declarations; listening sockets have not been tested.':
+    'targetPort {port} khớp khai báo của các Pod được chọn; chưa kiểm tra socket đang lắng nghe.',
+  'No published address': 'Chưa có địa chỉ công bố',
+  'Controller availability has not been tested.': 'Chưa kiểm tra hoạt động của controller.',
+  'IngressClass or controller could not be confirmed.':
+    'Chưa xác nhận được IngressClass hoặc controller.',
+  'No matching TLS entry; the controller may use a default certificate.':
+    'Không có mục TLS khớp; controller có thể dùng chứng chỉ mặc định.',
+  'TLS Secret {name} is missing.': 'Thiếu TLS Secret {name}.',
+  'Default certificate': 'Chứng chỉ mặc định',
+  'Certificate expiry is unknown': 'Chưa xác định hạn chứng chỉ',
+  'Expires {date}': 'Hết hạn {date}',
+  'Certificate hostname, trust chain and handshake have not been tested.':
+    'Chưa kiểm tra hostname của chứng chỉ, chuỗi tin cậy và bắt tay TLS.',
+  Route: 'Luật định tuyến',
+  'Ingress could not be found in the current scope.':
+    'Không tìm thấy Ingress trong phạm vi hiện tại.',
+  'Enter an absolute HTTP or HTTPS URL.': 'Nhập URL HTTP hoặc HTTPS đầy đủ.',
+  'No matching Ingress rule in this scope. Check other namespaces, Gateway API routes and controller defaults.':
+    'Không có luật Ingress khớp trong phạm vi này. Kiểm tra namespace khác, route Gateway API và cấu hình mặc định của controller.',
+  'Route selection': 'Chọn luật định tuyến',
+  'Several rules match with equal precedence; controller and IngressClass determine the active route.':
+    'Nhiều luật khớp có cùng độ ưu tiên; controller và IngressClass quyết định route được sử dụng.',
+  'Path matching': 'Khớp đường dẫn',
+  'ImplementationSpecific path matching depends on the ingress controller.':
+    'Cách khớp đường dẫn ImplementationSpecific phụ thuộc ingress controller.',
+  'Network reachability': 'Khả năng kết nối mạng',
+  'This checks configuration and reported readiness. DNS, NetworkPolicy enforcement, ingress controller, TLS handshake and application responses require a real network test.':
+    'Đây là kiểm tra cấu hình và trạng thái Ready được báo cáo. DNS, hiệu lực NetworkPolicy, ingress controller, bắt tay TLS và phản hồi ứng dụng cần được kiểm tra bằng kết nối thực tế.',
+  'Hubble counts TCP SYN and UDP observations, not successful connections or bytes. A packet can appear at multiple observation points.':
+    'Hubble đếm bản ghi quan sát TCP SYN và UDP, không phải số kết nối thành công hay byte. Một gói có thể xuất hiện ở nhiều điểm quan sát.',
+  'Prometheus Hubble history counts TCP SYN flags only; it is not equivalent to live TCP/UDP observations or successful connections.':
+    'Lịch sử Hubble từ Prometheus chỉ đếm cờ TCP SYN; khác với số quan sát TCP/UDP trực tiếp và số kết nối thành công.',
+  'Partial traffic data: absence of an observation does not prove absence of traffic.':
+    'Dữ liệu traffic chưa đầy đủ: không thấy bản ghi không chứng minh là không có traffic.',
+  '{n} lost events': '{n} sự kiện bị mất',
+  agents: 'agent',
+  'Hubble reported lost events': 'Hubble báo mất sự kiện',
+  'Some Hubble nodes are unavailable': 'Một số node Hubble không khả dụng',
+  'Hubble link limit reached': 'Đã chạm giới hạn số cạnh Hubble',
+  'Hubble stream was interrupted; part of the interval was not observed':
+    'Luồng Hubble bị gián đoạn; một phần khoảng đo không được quan sát',
+  'Caretta agent discovery was truncated': 'Danh sách agent Caretta chỉ đọc được một phần',
+  'Caretta agent read limit reached': 'Đã chạm giới hạn đọc agent Caretta',
+  'Some Caretta agents did not answer': 'Một số agent Caretta không phản hồi',
+  'Hubble observations · average over the last minute':
+    'Quan sát Hubble · trung bình trong phút vừa qua',
+  'No matching pods were returned; check list permissions and selector':
+    'Chưa đọc được Pod khớp selector; kiểm tra quyền list và selector'
 }

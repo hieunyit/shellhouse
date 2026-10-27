@@ -1133,6 +1133,13 @@ export const k8s: Readonly<Record<string, string>> = {
     'Không có pod nào trong phạm vi đang xem — chọn All namespaces để kiểm tra cả cluster',
   'Needs attention': 'Cần xem',
   'None in view: {kinds}': 'Không có trong phạm vi đang xem: {kinds}',
+  'Some overview data is unavailable:': 'Một số dữ liệu tổng quan chưa đọc được:',
+  'Some data could not be checked — cluster health is incomplete.':
+    'Chưa kiểm tra được một số dữ liệu — đánh giá sức khỏe cluster chưa đầy đủ.',
+  'Could not load data': 'Không tải được dữ liệu',
+  'Warning events could not be loaded.': 'Không tải được sự kiện cảnh báo.',
+  'Node capacity is unavailable — only requests are shown.':
+    'Chưa có dung lượng node — chỉ hiển thị tài nguyên yêu cầu.',
   'Recent warning events ({n})': 'Sự kiện cảnh báo gần đây ({n})',
   'and {n} more': 'và {n} mục khác',
   'Cannot reload this object': 'Không tải lại được object này',

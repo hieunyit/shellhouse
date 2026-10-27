@@ -98,10 +98,16 @@ describe('Topology tĩnh — từ API server tới bố cục', () => {
       ]
     })
     expect(store?.rules).toEqual([
-      { host: 'shop.example.com', path: '/', service: 'web', port: '80' },
-      { host: 'shop.example.com', path: '/api', service: 'api', port: 'http' },
-      { host: 'shop.example.com', path: '/legacy', service: 'legacy-api', port: '80' },
-      { host: 'admin.example.com', path: '/', service: 'admin', port: '80' }
+      { host: 'shop.example.com', path: '/', pathType: 'Prefix', service: 'web', port: '80' },
+      { host: 'shop.example.com', path: '/api', pathType: 'Prefix', service: 'api', port: 'http' },
+      {
+        host: 'shop.example.com',
+        path: '/legacy',
+        pathType: 'Prefix',
+        service: 'legacy-api',
+        port: '80'
+      },
+      { host: 'admin.example.com', path: '/', pathType: 'Prefix', service: 'admin', port: '80' }
     ])
     // IngressClass, PDB, hạn chứng chỉ của Secret TLS (chỉ ngày — không giữ nội dung).
     expect(d.ingressClasses).toEqual([{ name: 'nginx', default: true }])

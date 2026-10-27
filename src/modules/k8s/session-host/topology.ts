@@ -228,7 +228,7 @@ class Builder {
   readonly edges = new Map<string, TopologyEdge>()
   readonly notes = new Set<string>()
   private readonly lists = new Map<string, Promise<Listed>>()
-  private readonly gets = new Map<string, Promise<K8sObject | null>>()
+  private readonly unknownRefs = new Set<string>()
   private readonly lookups = new Map<string, Promise<Lookup>>()
 
   constructor(
@@ -290,20 +290,14 @@ class Builder {
     return 'error' in l ? [] : l.items
   }
 
-  get(kind: string, ns: string | undefined, name: string): Promise<K8sObject | null> {
-    const key = nodeId(kind, ns, name)
-    let p = this.gets.get(key)
-    if (!p) {
-      p = this.client
-        .json<K8sObject>(
-          'GET',
-          this.path(kind, ns, name),
-          this.signal ? { signal: this.signal } : {}
-        )
-        .catch(() => null)
-      this.gets.set(key, p)
+  async get(kind: string, ns: string | undefined, name: string): Promise<K8sObject | null> {
+    const result = await this.lookup(kind, ns, name)
+    if ('obj' in result) return result.obj
+    if ('unknown' in result) {
+      this.unknownRefs.add(nodeId(kind, ns, name))
+      this.notes.add(result.unknown)
     }
-    return p
+    return null
   }
 
   /**
@@ -392,9 +386,9 @@ class Builder {
         kindLabel: KINDS[kind]?.label ?? kind,
         name,
         ...(ns ? { namespace: ns } : {}),
-        summary: why,
-        tone: 'bad',
-        missing: true
+        summary: this.unknownRefs.has(id) ? t('Unknown') : why,
+        tone: this.unknownRefs.has(id) ? 'muted' : 'bad',
+        ...(this.unknownRefs.has(id) ? {} : { missing: true })
       })
     return id
   }
@@ -1079,7 +1073,7 @@ async function serviceGraph(b: Builder, svc: K8sObject): Promise<string> {
   if (loose.length > PODS_PER_OWNER)
     b.link(root, b.more(root, loose.length - PODS_PER_OWNER, 'Pods'), 'selects')
   if (!workloads.length && !pods.length)
-    b.notes.add(t('No pods match the selector — the service has no endpoints'))
+    b.notes.add(t('No matching pods were returned; check list permissions and selector'))
   return root
 }
 

@@ -561,7 +561,9 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
         backends: ['api'],
         paths: { api: ['api.example.com/'] },
         // Từng luật host + path → service (Topology: mỗi luật một dòng có đường nối riêng).
-        rules: [{ host: 'api.example.com', path: '/', service: 'api' }]
+        rules: [
+          { host: 'api.example.com', path: '/', pathType: 'ImplementationSpecific', service: 'api' }
+        ]
       },
       {
         kind: 'httproutes.gateway.networking.k8s.io',
@@ -677,7 +679,7 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     expect(JSON.stringify(g)).not.toContain(Buffer.from('s3cr3t').toString('base64'))
   })
 
-  it('traffic (Hubble): có Relay → dùng Hubble thay Caretta; đếm kết nối mới theo cặp, tên miền đích ngoài', async () => {
+  it('traffic (Hubble): có Relay → dùng Hubble thay Caretta; đếm quan sát theo cặp, tên miền đích ngoài', async () => {
     const { server, run, until } = await setup()
     server.enableHubble()
     // Có cả Caretta: Hubble được ưu tiên (biết từng pod, có tên miền).
@@ -696,7 +698,7 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     )
     // Lượt đầu mở luồng GetFlows (chưa có số) — các lượt sau đọc bộ đếm.
     const first = await run<TrafficSample>({ op: 'traffic' })
-    expect(first).toMatchObject({ status: 'ok', source: 'hubble', unit: 'connections' })
+    expect(first).toMatchObject({ status: 'connecting', source: 'hubble', unit: 'observations' })
     await until(() => server.hubbleStreams() === 1)
     server.emitFlow(
       hubbleFlow({
@@ -739,7 +741,7 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     expect(pairs['ingress-nginx-controller>Deployment/web:8080']).toBe(1)
   })
 
-  it('traffic (Caretta): không cài → unavailable; không được đọc → lý do; có → link, Service quy về Deployment', async () => {
+  it('traffic (Caretta): không cài → unavailable; không được đọc → lý do; có → link, giữ số đo của Service', async () => {
     const { server, run } = await setup()
     const none = await run<TrafficSample>({ op: 'traffic' })
     expect(none).toMatchObject({
@@ -761,10 +763,10 @@ describe('K8s — thao tác kiểu k9s / Lens', () => {
     const pairs = s.links.map(
       (l) => `${l.client.kind}/${l.client.name}>${l.server.kind}/${l.server.name}:${l.port}`
     )
-    // Internet → Service web → quy về Deployment web (selector app=web).
+    // Internet → Service web: selector không chứng minh workload nhận byte.
     expect(pairs.sort()).toEqual(
       [
-        'external/203.0.113.7>Deployment/web:80',
+        'external/203.0.113.7>Service/web:80',
         'Deployment/web>Pod/tool:8080',
         'Deployment/web>external/db.example.com:5432'
       ].sort()

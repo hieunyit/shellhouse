@@ -124,12 +124,22 @@ export function useConnections({
             declared,
             observed: measured ? traffic.rates : null,
             unit: traffic.unit,
+            partial: traffic.quality?.partial,
             resolved: resolved.map,
             data: data ?? undefined,
             only
           })
         : null,
-    [declared, measured, traffic.rates, traffic.unit, resolved.map, data, only]
+    [
+      declared,
+      measured,
+      traffic.rates,
+      traffic.unit,
+      traffic.quality?.partial,
+      resolved.map,
+      data,
+      only
+    ]
   )
   return { rows, traffic, measured, resolving: resolved.loading }
 }

@@ -35,6 +35,7 @@ interface Obj {
     resourceVersion: string
     creationTimestamp: string
     labels?: Record<string, string>
+    deletionTimestamp?: string
   }
   spec?: Record<string, unknown>
   status?: Record<string, unknown>
@@ -77,6 +78,8 @@ export interface ApiTestServer {
   emitFlow(flow: Uint8Array): void
   /** Số luồng GetFlows đang mở. */
   hubbleStreams(): number
+  endHubbleStreams(): void
+  emitHubbleResponse(response: Uint8Array): void
   /**
    * Cluster mẫu giống thật cho ảnh chụp (Topology / Map): nhiều namespace, Ingress nhiều host / path /
    * TLS, Service đủ loại (ClusterIP, headless, NodePort, LoadBalancer, ExternalName, không endpoint),
@@ -104,6 +107,8 @@ export interface ApiTestServer {
   forbid(path: RegExp | null): void
   /** `n` lần evict tiếp theo bị PodDisruptionBudget chặn (429). */
   blockEvictions(n: number): void
+  /** Eviction được chấp nhận nhưng pod còn Terminating tới khi hết độ trễ. */
+  delayEvictions(ms: number): void
   /** Header Accept của các request (kiểm list chỉ metadata). */
   accepts: string[]
   close(): Promise<void>
@@ -316,6 +321,8 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       ])
     ],
     ['jobs', new Map()],
+    ['statefulsets', new Map()],
+    ['daemonsets', new Map()],
     [
       'configmaps',
       new Map([
@@ -454,6 +461,8 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
   let stalled: RegExp | null = null
   let forbidden: RegExp | null = null
   let blockedEvictions = 0
+  let evictionDelay = 0
+  const evictionTimers = new Set<NodeJS.Timeout>()
   let failingWatches = 0
   const logStreams = new Set<ServerResponse>()
   const watchers = new Set<{ plural: string; namespace: string | undefined; res: ServerResponse }>()
@@ -1013,8 +1022,26 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
             )
           )
         }
-        table.delete(k)
-        notify(plural, 'DELETED', current)
+        const body = (await readBody(req)) as {
+          deleteOptions?: { preconditions?: { uid?: string } }
+        }
+        const uid = body.deleteOptions?.preconditions?.uid
+        if (uid && uid !== current.metadata.uid)
+          return json(res, 409, statusBody(409, 'Conflict', 'UID precondition failed'))
+        const remove = (): void => {
+          if (table.get(k)?.metadata.uid !== current.metadata.uid) return
+          table.delete(k)
+          notify(plural, 'DELETED', current)
+        }
+        if (evictionDelay) {
+          current.metadata.deletionTimestamp = new Date().toISOString()
+          notify(plural, 'MODIFIED', current)
+          const timer = setTimeout(() => {
+            evictionTimers.delete(timer)
+            remove()
+          }, evictionDelay)
+          evictionTimers.add(timer)
+        } else remove()
         return json(res, 201, { kind: 'Status', status: 'Success' })
       }
       // Server-side apply: tạo nếu chưa có, không thì gộp.
@@ -1919,6 +1946,9 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
     blockEvictions: (n) => {
       blockedEvictions = n
     },
+    delayEvictions: (ms) => {
+      evictionDelay = ms
+    },
     upsert: (plural, partial) => {
       const table = store.get(plural)
       const meta = kindOf[plural]
@@ -2003,6 +2033,12 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       for (const st of hubbleOpen) st.write(flowFrame(flow))
     },
     hubbleStreams: () => hubbleOpen.size,
+    endHubbleStreams: () => {
+      for (const st of hubbleOpen) st.end()
+    },
+    emitHubbleResponse: (response) => {
+      for (const st of hubbleOpen) st.write(grpcFrame(response))
+    },
     enableCaretta: (options = {}) => {
       caretta = {
         forbidden: options.forbidden ?? false,
@@ -2061,6 +2097,7 @@ export async function startApiTestServer(options: { tls?: boolean } = {}): Promi
       for (const w of watchers) w.res.end()
     },
     close: async () => {
+      for (const timer of evictionTimers) clearTimeout(timer)
       for (const st of hubbleOpen) st.destroy()
       for (const ses of hubbleSessions) ses.destroy()
       for (const sock of hubbleSockets) sock.destroy()

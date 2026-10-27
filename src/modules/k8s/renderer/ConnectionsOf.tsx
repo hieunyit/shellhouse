@@ -9,6 +9,7 @@ import type { K8sObject } from '../shared/resources'
 import { CopyButton, kindLabel, ObservedText, StatusPill } from './ConnectionBits'
 import { loadOptions, saveOptions, type Request } from './mapModel'
 import { sourceName } from './trafficUnit'
+import { TrafficQualityNote } from './TrafficQualityNote'
 import { useConnections } from './useConnections'
 
 /**
@@ -129,6 +130,7 @@ export function ConnectionsOf({
 
   return (
     <div className="flex flex-col gap-3" data-testid="k8s-detail-connections">
+      <TrafficQualityNote traffic={conn.traffic} />
       <p className="text-xs text-faint">
         {t(
           'Where this workload is configured to connect (env, arguments, ConfigMaps, Secrets), next to the traffic that was actually seen.'

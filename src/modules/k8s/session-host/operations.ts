@@ -144,37 +144,46 @@ export async function overview(
 ): Promise<OverviewResult> {
   const opts = { signal }
   const none = { items: [] as K8sObject[], truncated: false }
-  // Không list được node (thiếu quyền) ≠ "0 node": báo `known: false` để giao diện không vẽ 0/0.
-  const access = { nodes: true }
+  const unavailable: NonNullable<OverviewResult['unavailable']> = []
+  const missing =
+    (resource: (typeof unavailable)[number]['resource']) =>
+    (error: unknown): typeof none => {
+      if (signal?.aborted) throw error
+      unavailable.push({
+        resource,
+        reason: error instanceof KubeError && error.status === 403 ? 'forbidden' : 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+      return none
+    }
+  const known = (resource: (typeof unavailable)[number]['resource']): boolean =>
+    !unavailable.some((u) => u.resource === resource)
   const [version, nodeList, podList, deployList, setList, daemonList, eventList, usage, pvcList] =
     await Promise.all([
       client.json<{ gitVersion?: string }>('GET', '/version', opts),
-      listPaged(client, '/api/v1/nodes', opts).catch(() => {
-        access.nodes = false
-        return none
-      }),
+      listPaged(client, '/api/v1/nodes', opts).catch(missing('nodes')),
       listIn(client, (n) => `/api/v1${n ? ns(n) : ''}/pods`, namespaces, opts),
       listIn(client, (n) => `/apis/apps/v1${n ? ns(n) : ''}/deployments`, namespaces, opts).catch(
-        () => none
+        missing('deployments')
       ),
       listIn(client, (n) => `/apis/apps/v1${n ? ns(n) : ''}/statefulsets`, namespaces, opts).catch(
-        () => none
+        missing('statefulsets')
       ),
       listIn(client, (n) => `/apis/apps/v1${n ? ns(n) : ''}/daemonsets`, namespaces, opts).catch(
-        () => none
+        missing('daemonsets')
       ),
       // Chỉ cảnh báo (lọc ở server) — cluster lớn có hàng chục nghìn event Normal.
       listIn(client, (n) => `/api/v1${n ? ns(n) : ''}/events`, namespaces, {
         ...opts,
         query: { fieldSelector: 'type=Warning' },
         max: 5000
-      }).catch(() => none),
+      }).catch(missing('events')),
       metrics(client, 'nodes', undefined, signal).catch(() => ({ available: false, items: {} })),
       // PVC chờ bound — chỉ để liệt kê vấn đề; không đọc được (thiếu quyền) thì bỏ qua.
       listIn(client, (n) => `/api/v1${n ? ns(n) : ''}/persistentvolumeclaims`, namespaces, {
         ...opts,
         max: 5000
-      }).catch(() => none)
+      }).catch(missing('pvcs'))
     ])
   const nodes = nodeList
   const pods = podList.items
@@ -249,7 +258,7 @@ export async function overview(
     .slice(0, 50)
   return {
     version: version.gitVersion ?? '',
-    nodes: { total: nodes.items.length, ready, cordoned, known: access.nodes },
+    nodes: { total: nodes.items.length, ready, cordoned, known: known('nodes') },
     capacity,
     requests,
     usage: usageSum,
@@ -257,6 +266,7 @@ export async function overview(
     workloads: [
       {
         kind: 'Deployments',
+        ...(!known('deployments') ? { known: false } : {}),
         total: deploys.length,
         ready: readyCount(
           deploys,
@@ -266,6 +276,7 @@ export async function overview(
       },
       {
         kind: 'StatefulSets',
+        ...(!known('statefulsets') ? { known: false } : {}),
         total: sets.length,
         ready: readyCount(
           sets,
@@ -275,6 +286,7 @@ export async function overview(
       },
       {
         kind: 'DaemonSets',
+        ...(!known('daemonsets') ? { known: false } : {}),
         total: daemons.length,
         ready: readyCount(
           daemons,
@@ -284,8 +296,11 @@ export async function overview(
       }
     ],
     warnings,
+    ...(unavailable.length ? { unavailable } : {}),
     problems: findProblems(nodes.items, pods, pvcList.items),
-    ...([nodeList, podList, deployList, setList, daemonList].some((l) => l.truncated)
+    ...([nodeList, podList, deployList, setList, daemonList, eventList, pvcList].some(
+      (l) => l.truncated
+    )
       ? { truncated: true }
       : {})
   }
@@ -541,7 +556,7 @@ export interface DrainOptions {
 }
 
 /** Thời gian chờ giữa các lần thử evict bị PDB chặn (test rút ngắn được). */
-export const drainRetry = { ms: 5000 }
+export const drainRetry = { ms: 5000, pollMs: 1000 }
 
 const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -564,7 +579,7 @@ const sleep = (ms: number, signal?: AbortSignal): Promise<void> =>
  * Drain như `kubectl drain --ignore-daemonsets`: cordon, rồi evict pod (tối đa 8 cùng lúc). Bỏ qua
  * pod DaemonSet / static pod / đã xong. Pod không có controller hoặc dùng emptyDir chặn cả lượt
  * (không evict gì) trừ khi bật force / deleteEmptyDirData. PDB chặn (429) → thử lại mỗi 5 giây tới
- * hết `timeoutSeconds`.
+ * hết `timeoutSeconds`. Chỉ thành công khi UID pod cũ đã biến mất, kể cả pod đang Terminating.
  */
 export async function drain(
   client: KubeClient,
@@ -572,11 +587,28 @@ export async function drain(
   options: DrainOptions = {},
   signal?: AbortSignal
 ): Promise<DrainResult> {
-  await cordon(client, node, true, signal)
-  const { items: pods } = await listPaged(client, '/api/v1/pods', {
-    query: { fieldSelector: `spec.nodeName=${node}` },
-    signal
-  })
+  const seconds = options.timeoutSeconds ?? 300
+  const timeout = AbortSignal.timeout(seconds * 1000)
+  const drainSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
+  // Bounded cả lúc client đang mở TCP/TLS (chưa gắn listener huỷ request).
+  const bounded = <T>(work: Promise<T>): Promise<T> =>
+    new Promise((resolve, reject) => {
+      const abort = (): void => {
+        reject(new Error(timeout.aborted ? 'Drain timed out' : 'Cancelled'))
+      }
+      drainSignal.addEventListener('abort', abort, { once: true })
+      if (drainSignal.aborted) abort()
+      void work.then(resolve, reject).finally(() => {
+        drainSignal.removeEventListener('abort', abort)
+      })
+    })
+  await bounded(cordon(client, node, true, drainSignal))
+  const { items: pods } = await bounded(
+    listPaged(client, '/api/v1/pods', {
+      query: { fieldSelector: `spec.nodeName=${node}` },
+      signal: drainSignal
+    })
+  )
   const result: DrainResult = { evicted: [], skipped: [], failed: [] }
   const blocked: string[] = []
   const targets: K8sObject[] = []
@@ -588,14 +620,13 @@ export async function drain(
     if (
       owners.some((o) => o.kind === 'DaemonSet') ||
       mirror ||
-      phase === 'Succeeded' ||
-      phase === 'Failed' ||
-      p.metadata.deletionTimestamp
+      (!p.metadata.deletionTimestamp && (phase === 'Succeeded' || phase === 'Failed'))
     ) {
       result.skipped.push(key)
       continue
     }
-    if (!owners.some((o) => o.controller === true) && !options.force)
+    if (p.metadata.deletionTimestamp) targets.push(p)
+    else if (!owners.some((o) => o.controller === true) && !options.force)
       blocked.push(`${key}: not managed by a controller (it would not come back) — use force`)
     else if (
       !options.deleteEmptyDirData &&
@@ -610,55 +641,61 @@ export async function drain(
     result.blocked = blocked.map((b) => b.slice(0, b.indexOf(':')))
     return result
   }
-  const deadline = Date.now() + (options.timeoutSeconds ?? 300) * 1000
   await pool(targets, 8, async (p) => {
     const key = `${p.metadata.namespace ?? ''}/${p.metadata.name}`
-    for (;;) {
-      try {
-        await client.json(
-          'POST',
-          `/api/v1${ns(p.metadata.namespace ?? 'default')}/pods/${encodeURIComponent(p.metadata.name)}/eviction`,
-          {
-            body: {
-              apiVersion: 'policy/v1',
-              kind: 'Eviction',
-              metadata: { name: p.metadata.name, namespace: p.metadata.namespace },
-              ...(options.gracePeriodSeconds !== undefined
-                ? { deleteOptions: { gracePeriodSeconds: options.gracePeriodSeconds } }
-                : {})
-            },
-            ...(signal ? { signal } : {})
+    const path = `/api/v1${ns(p.metadata.namespace ?? 'default')}/pods/${encodeURIComponent(p.metadata.name)}`
+    const state = { waitingForPdb: false }
+    try {
+      if (!p.metadata.deletionTimestamp)
+        for (;;) {
+          drainSignal.throwIfAborted()
+          try {
+            await bounded(
+              client.json('POST', `${path}/eviction`, {
+                body: {
+                  apiVersion: 'policy/v1',
+                  kind: 'Eviction',
+                  metadata: { name: p.metadata.name, namespace: p.metadata.namespace },
+                  deleteOptions: {
+                    ...(options.gracePeriodSeconds !== undefined
+                      ? { gracePeriodSeconds: options.gracePeriodSeconds }
+                      : {}),
+                    ...(p.metadata.uid ? { preconditions: { uid: p.metadata.uid } } : {})
+                  }
+                },
+                signal: drainSignal
+              })
+            )
+            state.waitingForPdb = false
+            break
+          } catch (error) {
+            if (!(error instanceof KubeError && error.status === 429)) throw error
+            state.waitingForPdb = true
+            await sleep(drainRetry.ms, drainSignal)
           }
-        )
-        result.evicted.push(key)
-        return
-      } catch (error) {
-        if (error instanceof KubeError && error.status === 404) {
-          // Đã bị xoá trong lúc drain.
-          result.evicted.push(key)
-          return
         }
-        // 429 = PodDisruptionBudget chưa cho phép (đang chờ pod khác sẵn sàng) → thử lại.
-        if (
-          error instanceof KubeError &&
-          error.status === 429 &&
-          Date.now() + drainRetry.ms < deadline &&
-          !signal?.aborted
-        ) {
-          await sleep(drainRetry.ms, signal).catch(() => undefined)
-          continue
-        }
+      for (;;) {
+        drainSignal.throwIfAborted()
+        const live = await bounded(client.json<K8sObject>('GET', path, { signal: drainSignal }))
+        // StatefulSet có thể đã tạo pod cùng tên: chỉ chờ đúng UID ban đầu.
+        if (p.metadata.uid && live.metadata.uid !== p.metadata.uid) break
+        await sleep(drainRetry.pollMs, drainSignal)
+      }
+      result.evicted.push(key)
+    } catch (error) {
+      if (error instanceof KubeError && error.status === 404) result.evicted.push(key)
+      else
         result.failed.push(
           `${key}: ${
-            error instanceof KubeError && error.status === 429
-              ? `still blocked by a PodDisruptionBudget after ${options.timeoutSeconds ?? 300} s`
+            timeout.aborted
+              ? state.waitingForPdb
+                ? `still blocked by a PodDisruptionBudget after ${seconds} s`
+                : `pod did not finish terminating within ${seconds} s`
               : error instanceof Error
                 ? error.message
                 : String(error)
           }`
         )
-        return
-      }
     }
   })
   return result

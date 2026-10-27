@@ -29,6 +29,14 @@ const KIND_IDS: Record<string, string> = {
 }
 
 const GROUP_ORDER: ProblemGroup[] = ['nodes', 'failing', 'imagePull', 'pending', 'pvcs']
+const RESOURCE_TITLES = {
+  nodes: 'Nodes',
+  deployments: 'Deployments',
+  statefulsets: 'StatefulSets',
+  daemonsets: 'DaemonSets',
+  events: 'Events',
+  pvcs: 'Persistent volume claims'
+}
 
 function groupTitle(g: ProblemGroup): string {
   switch (g) {
@@ -81,11 +89,13 @@ function OpenRow({
 function Problems({
   problems,
   noPods,
+  partial,
   onOpen
 }: {
   problems: NonNullable<OverviewResult['problems']>
   /** Không có pod nào trong phạm vi đang xem (namespace rỗng) — "khoẻ" ở đây không có nghĩa gì. */
   noPods: boolean
+  partial: boolean
   onOpen: (kind: string, ns: string | undefined, name: string) => void
 }): React.JSX.Element {
   const groups = GROUP_ORDER.filter((g) => problems[g].total > 0)
@@ -95,14 +105,16 @@ function Problems({
         className="flex items-center gap-2 rounded-lg border border-line px-3 py-2.5 text-xs text-muted"
         data-testid="k8s-ov-problems"
       >
-        {noPods ? (
+        {noPods || partial ? (
           <Info size={14} className="text-faint" />
         ) : (
           <CheckCircle2 size={14} className="text-success" />
         )}
-        {noPods
-          ? t('No pods in view — pick All namespaces to check the whole cluster.')
-          : t('No problems found — pods, nodes and volume claims look healthy.')}
+        {partial
+          ? t('Some data could not be checked — cluster health is incomplete.')
+          : noPods
+            ? t('No pods in view — pick All namespaces to check the whole cluster.')
+            : t('No problems found — pods, nodes and volume claims look healthy.')}
       </div>
     )
   return (
@@ -230,6 +242,9 @@ export function ClusterOverview({
   const p = data.pods
   // Tài khoản không list được node: không có dung lượng → không vẽ "x of 0m" / thanh 0%.
   const nodesKnown = data.nodes.known !== false
+  const unavailable = data.unavailable ?? []
+  const nodeIssue = unavailable.find((u) => u.resource === 'nodes')
+  const eventsKnown = !unavailable.some((u) => u.resource === 'events')
   const capacityKnown = nodesKnown && data.capacity.cpu > 0
   return (
     <div className="min-h-0 flex-1 overflow-auto p-4" data-testid="k8s-overview">
@@ -246,6 +261,19 @@ export function ClusterOverview({
             {t(
               'This cluster is very large — the numbers below are counted on the first part of it only. Pick a namespace for exact numbers.'
             )}
+          </Notice>
+        </div>
+      )}
+      {unavailable.length > 0 && (
+        <div className="mb-3">
+          <Notice tone="warning" testId="k8s-ov-unavailable">
+            <p>{t('Some overview data is unavailable:')}</p>
+            {unavailable.map((issue) => (
+              <p key={issue.resource} title={issue.message}>
+                {t(RESOURCE_TITLES[issue.resource])}:{' '}
+                {issue.reason === 'forbidden' ? t('no access') : t('Could not load data')}
+              </p>
+            ))}
           </Notice>
         </div>
       )}
@@ -275,7 +303,9 @@ export function ClusterOverview({
           }
           sub={
             !nodesKnown
-              ? t('no access')
+              ? nodeIssue?.reason === 'error'
+                ? t('Could not load data')
+                : t('no access')
               : data.nodes.cordoned
                 ? t('{n} cordoned', { n: formatNumber(data.nodes.cordoned) })
                 : t('ready')
@@ -315,14 +345,24 @@ export function ClusterOverview({
         />
         {/* Loại không có đối tượng nào (0/0) → không chiếm thẻ; ghi gọn ở dòng dưới. */}
         {data.workloads
-          .filter((w) => w.total > 0)
+          .filter((w) => w.known === false || w.total > 0)
           .map((w) => (
             <StatCard
               key={w.kind}
               label={w.kind}
-              value={`${formatNumber(w.ready)}/${formatNumber(w.total)}`}
-              sub={t('ready')}
-              tone={w.total === 0 ? 'muted' : w.ready < w.total ? 'warn' : 'ok'}
+              value={w.known === false ? '—' : `${formatNumber(w.ready)}/${formatNumber(w.total)}`}
+              sub={
+                w.known === false
+                  ? unavailable.some(
+                      (u) => u.reason === 'forbidden' && RESOURCE_TITLES[u.resource] === w.kind
+                    )
+                    ? t('no access')
+                    : t('Could not load data')
+                  : t('ready')
+              }
+              tone={
+                w.known === false || w.total === 0 ? 'muted' : w.ready < w.total ? 'warn' : 'ok'
+              }
               onClick={() => {
                 onNavigate(
                   w.kind === 'Deployments'
@@ -335,11 +375,11 @@ export function ClusterOverview({
             />
           ))}
       </div>
-      {data.workloads.some((w) => w.total === 0) && (
+      {data.workloads.some((w) => w.known !== false && w.total === 0) && (
         <p className="mt-1.5 text-[11px] text-faint" data-testid="k8s-ov-empty-workloads">
           {t('None in view: {kinds}', {
             kinds: data.workloads
-              .filter((w) => w.total === 0)
+              .filter((w) => w.known !== false && w.total === 0)
               .map((w) => w.kind)
               .join(', ')
           })}
@@ -351,6 +391,7 @@ export function ClusterOverview({
           <Problems
             problems={data.problems}
             noPods={p.running + p.pending + p.failed + p.succeeded + p.restarting === 0}
+            partial={unavailable.length > 0 || data.truncated === true}
             onOpen={onOpen}
           />
         </div>
@@ -418,9 +459,7 @@ export function ClusterOverview({
       </div>
       {!capacityKnown && (
         <p className="mt-2 text-xs text-faint" data-testid="k8s-ov-no-capacity">
-          {t(
-            'Node capacity is hidden — this account cannot list nodes, so only requests are shown.'
-          )}
+          {t('Node capacity is unavailable — only requests are shown.')}
         </p>
       )}
       {!data.usage && (
@@ -432,10 +471,14 @@ export function ClusterOverview({
       <div className="mt-4 rounded-lg border border-line">
         <div className="border-b border-line px-3 py-2">
           <Heading>
-            {t('Recent warning events ({n})', { n: formatNumber(data.warnings.length) })}
+            {t('Recent warning events ({n})', {
+              n: eventsKnown ? formatNumber(data.warnings.length) : '—'
+            })}
           </Heading>
         </div>
-        {data.warnings.length === 0 ? (
+        {!eventsKnown ? (
+          <p className="p-3 text-xs text-faint">{t('Warning events could not be loaded.')}</p>
+        ) : data.warnings.length === 0 ? (
           <p className="p-3 text-xs text-faint">{t('No warning events.')}</p>
         ) : (
           <div

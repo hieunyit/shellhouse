@@ -54,7 +54,7 @@ test('tmux OSC 52 copies UTF-8 to the system clipboard without a local selection
   expect(await getClipboard(app)).toBe(value)
 })
 
-test('Shift-drag selects and auto-copies while an application captures the mouse', async ({
+test('Modifier-drag selects and auto-copies while an application captures the mouse', async ({
   app,
   page
 }) => {
@@ -69,12 +69,13 @@ test('Shift-drag selects and auto-copies while an application captures the mouse
   const box = await terminal(page, tab).boundingBox()
   const size = await page.evaluate((id) => window.__shellhouseTest.size(id), tab)
   if (!box || !size) throw new Error('terminal missing')
-  await page.keyboard.down('Shift')
+  const modifier = process.platform === 'darwin' ? 'Alt' : 'Shift'
+  await page.keyboard.down(modifier)
   await page.mouse.move(box.x + 1, box.y + 4)
   await page.mouse.down()
   await page.mouse.move(box.x + (box.width / size.cols) * 9, box.y + 4, { steps: 5 })
   await page.mouse.up()
-  await page.keyboard.up('Shift')
+  await page.keyboard.up(modifier)
   await expect.poll(() => getClipboard(app)).toBe('SELECT-ME')
   await sendLine(page, tab, "printf '\\033[?1000l\\033[?1006l'")
 })

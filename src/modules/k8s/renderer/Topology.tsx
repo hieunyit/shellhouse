@@ -37,6 +37,7 @@ import { cx } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { t, tn } from '../../registry/renderer-kit'
 import { KindIcon } from './icons'
+import { TrafficQualityNote } from './TrafficQualityNote'
 import { useTraffic } from './useTraffic'
 import { relabelLayout, topologyStructureKey } from '../shared/topologyView'
 import { formatRate } from '../shared/traffic'
@@ -457,6 +458,7 @@ export function TopologyOf({
   return (
     <TrafficUnitContext.Provider value={traffic.unit ?? 'bytes'}>
       <div className="flex h-full min-h-[420px] flex-col gap-2" data-testid="k8s-topology">
+        {!hidden.has('live') && <TrafficQualityNote traffic={traffic} />}
         <div className="flex flex-wrap items-center gap-1">
           {/* Loại đang ẩn vẫn giữ chip (gạch ngang) để bật lại: ẩn "live traffic" là ngừng đo traffic
             → không còn đường live nào để suy ra chip. */}

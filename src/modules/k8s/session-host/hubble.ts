@@ -2,7 +2,7 @@ import { connect as http2Connect, type ClientHttp2Session } from 'node:http2'
 import { Duplex } from 'node:stream'
 import type WebSocket from 'ws'
 import type { K8sObject } from '../shared/resources'
-import type { TrafficLink, TrafficPeer } from '../shared/traffic'
+import type { TrafficLink, TrafficPeer, TrafficQuality } from '../shared/traffic'
 import { KubeError, type KubeClient } from './client'
 import {
   GrpcFrameReader,
@@ -20,8 +20,8 @@ import {
 /**
  * Traffic từ Hubble (Cilium): giữ một luồng `observer.Observer/GetFlows` (follow) tới Hubble Relay
  * qua port-forward của API server (gRPC trên HTTP/2 không mã hoá — mặc định của Relay trong
- * cluster), đếm **kết nối mới** (TCP SYN, gói UDP) theo cặp nguồn → đích như bộ đếm tích luỹ của
- * Caretta. Hubble không có số byte — đơn vị là kết nối / giây. Tên miền của đích ngoài cluster lấy từ
+ * cluster), đếm bản ghi quan sát (TCP SYN, gói UDP) theo cặp nguồn → đích như bộ đếm tích luỹ của
+ * Caretta. Hubble không có số byte — đơn vị là bản ghi / giây; một gói có thể được quan sát ở nhiều điểm. Tên miền của đích ngoài cluster lấy từ
  * `destination_names` (Cilium DNS proxy, khi bật DNS visibility).
  *
  * Số trường theo flow.proto / observer.proto của Cilium (ổn định từ Cilium 1.10).
@@ -156,7 +156,7 @@ function peerOf(ep: Pb | null, ip: string, names: string[], node: string): Traff
 }
 
 /**
- * Một flow → kết nối mới cần đếm (nguồn, đích, cổng), hoặc null (gói trả lời, gói giữa chừng của
+ * Một flow → bản ghi TCP SYN / UDP cần đếm (nguồn, đích, cổng), hoặc null (gói trả lời, gói giữa chừng của
  * TCP, bị chặn, L7…).
  */
 export function flowLink(
@@ -192,7 +192,7 @@ const linkId = (l: { client: TrafficPeer; server: TrafficPeer; port: string }): 
 
 /**
  * Bộ đọc Hubble của một phiên cluster: mở luồng khi có người hỏi số liệu, đóng khi rảnh, dò lại
- * Relay định kỳ. `bytes` của link = số kết nối mới tích luỹ (renderer tính tốc độ như Caretta).
+ * Relay định kỳ. `bytes` của link = số bản ghi tích luỹ (renderer tính tốc độ như Caretta).
  */
 export class HubbleCollector {
   state: 'idle' | 'connecting' | 'ok' | 'unavailable' = 'idle'
@@ -202,6 +202,13 @@ export class HubbleCollector {
   present = false
   private readonly counters = new Map<string, TrafficLink>()
   private session: ClientHttp2Session | null = null
+  private disposed = false
+  private generation = 0
+  private lostEvents = 0
+  private limited = false
+  private interrupted = false
+  private readonly unavailableNodes = new Set<string>()
+  private readonly flowIds = new Set<string>()
   private lastUsed = 0
   private retryAt = 0
   private idleTimer: ReturnType<typeof setInterval> | null = null
@@ -213,21 +220,46 @@ export class HubbleCollector {
 
   /** Gọi mỗi lượt đọc số liệu: mở luồng nếu chưa có (không chờ kết nối xong). */
   async touch(signal?: AbortSignal): Promise<void> {
+    if (this.disposed) return
     this.lastUsed = Date.now()
     if (this.session || this.state === 'connecting') return
     if (Date.now() < this.retryAt) return
     this.state = 'connecting'
+    const generation = ++this.generation
     try {
       const relay = await findRelay(this.client, signal)
+      if (!this.isCurrent(generation)) return
       if (!relay) {
         this.present = false
         this.fail('Hubble Relay is not installed in this cluster')
         return
       }
       this.present = true
-      await this.open(relay)
+      await this.open(relay, generation)
     } catch (error) {
-      this.fail(error instanceof Error ? error.message : String(error))
+      if (this.isCurrent(generation))
+        this.fail(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  private isCurrent(generation: number): boolean {
+    return !this.disposed && generation === this.generation
+  }
+
+  quality(): TrafficQuality {
+    return {
+      partial:
+        this.lostEvents > 0 || this.limited || this.unavailableNodes.size > 0 || this.interrupted,
+      lostEvents: this.lostEvents,
+      unavailableNodes: [...this.unavailableNodes],
+      reasons: [
+        ...(this.lostEvents ? ['Hubble reported lost events'] : []),
+        ...(this.unavailableNodes.size ? ['Some Hubble nodes are unavailable'] : []),
+        ...(this.limited ? ['Hubble link limit reached'] : []),
+        ...(this.interrupted
+          ? ['Hubble stream was interrupted; part of the interval was not observed']
+          : [])
+      ]
     }
   }
 
@@ -236,12 +268,15 @@ export class HubbleCollector {
   }
 
   dispose(): void {
+    this.disposed = true
+    ++this.generation
     this.close()
     if (this.idleTimer) clearInterval(this.idleTimer)
     this.idleTimer = null
   }
 
   private fail(reason: string): void {
+    this.interrupted = true
     this.state = 'unavailable'
     this.reason = reason
     this.retryAt = Date.now() + RETRY_MS
@@ -254,23 +289,25 @@ export class HubbleCollector {
     s?.destroy()
   }
 
-  private async open(relay: RelayTarget): Promise<void> {
+  private async open(relay: RelayTarget, generation: number): Promise<void> {
     const ws = await this.client.websocket(
       `/api/v1/namespaces/${encodeURIComponent(relay.namespace)}/pods/${encodeURIComponent(relay.pod)}/portforward`,
       { ports: String(relay.port) },
       ['v4.channel.k8s.io']
     )
+    if (this.disposed || generation !== this.generation) {
+      ws.close()
+      return
+    }
     const stream = portForwardStream(ws)
     const session = http2Connect('http://hubble-relay', { createConnection: () => stream })
     this.session = session
+    const current = (): boolean => !this.disposed && this.session === session
     session.on('error', (e: Error) => {
       if (this.session === session) this.fail(`Could not talk to Hubble Relay (${e.message})`)
     })
     session.on('close', () => {
-      if (this.session === session) {
-        this.session = null
-        if (this.state === 'ok') this.state = 'idle'
-      }
+      if (current()) this.fail('Hubble Relay connection closed')
     })
     const req = session.request({
       ':method': 'POST',
@@ -282,6 +319,7 @@ export class HubbleCollector {
     req.end(grpcFrame(writeMessage([[3, true]])))
     const frames = new GrpcFrameReader()
     req.on('response', (headers) => {
+      if (!current()) return
       const status = Number(headers[':status'])
       if (status !== 200) {
         this.fail(`Hubble Relay answered HTTP ${String(status)}`)
@@ -291,6 +329,7 @@ export class HubbleCollector {
       this.reason = ''
     })
     req.on('data', (chunk: Buffer) => {
+      if (!current()) return
       try {
         frames.push(chunk, (message) => {
           this.onResponse(message)
@@ -300,6 +339,7 @@ export class HubbleCollector {
       }
     })
     req.on('trailers', (trailers: Record<string, string | string[] | undefined>) => {
+      if (!current()) return
       const code = Number(trailers['grpc-status'] ?? 0)
       if (code !== 0)
         this.fail(
@@ -309,6 +349,11 @@ export class HubbleCollector {
     req.on('error', (e: Error) => {
       if (this.session === session) this.fail(`Hubble Relay stream failed (${e.message})`)
     })
+    const ended = (): void => {
+      if (current()) this.fail('Hubble Relay flow stream ended')
+    }
+    req.on('end', ended)
+    req.on('close', ended)
     this.idleTimer ??= setInterval(() => {
       if (this.session && Date.now() - this.lastUsed > IDLE_MS) {
         this.log('hubble: idle — closing the flow stream')
@@ -322,13 +367,32 @@ export class HubbleCollector {
   private onResponse(message: Uint8Array): void {
     // GetFlowsResponse { flow = 1 }.
     const res = readMessage(message)
+    const lost = msg(res, 3)
+    if (lost) this.lostEvents += num(lost, 2)
+    const status = msg(res, 2)
+    if (status) {
+      const state = num(status, 1)
+      const names = strs(status, 2)
+      for (const name of names.length ? names : ['unknown']) {
+        if (state === 1 || state === 3) this.unavailableNodes.delete(name)
+        else this.unavailableNodes.add(name)
+      }
+    }
     const flow = msg(res, 1)
     if (!flow) return
+    // Relay can replay a UUID after reconnect. Bound deduplication memory.
+    const uuid = str(flow, 34)
+    if (uuid) {
+      if (this.flowIds.has(uuid)) return
+      if (this.flowIds.size >= MAX_LINKS * 5) this.flowIds.clear()
+      this.flowIds.add(uuid)
+    }
     const link = flowLink(flow)
     if (!link) return
     const id = linkId(link)
     const prev = this.counters.get(id)
     if (prev) prev.bytes += 1
     else if (this.counters.size < MAX_LINKS) this.counters.set(id, { ...link, bytes: 1 })
+    else this.limited = true
   }
 }

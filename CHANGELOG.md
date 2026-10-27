@@ -6,6 +6,46 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.36] - 2026-10-27
+
+### Added
+
+- Kubernetes Map can diagnose a URL, Ingress or Service through its routing rules, Service
+  ports, EndpointSlices and actual Pod selectors/readiness, with evidence links and explicit
+  unknown results where configuration alone cannot establish connectivity.
+- Kubernetes Map stores local topology baselines per cluster/namespace scope and compares
+  images, selectors, ports, NetworkPolicy rules and dependencies with a fresh read after deploy.
+  Snapshots exclude Secret values and keep at most eight baselines per cluster.
+
+### Fixed
+
+- Topology uses selected live Pods during a rollout and does not count ports on completed
+  init containers as serving ports. Gateway API backends retain their namespace and weight.
+- Snapshot comparison preserves ordered configuration, including container image swaps, and
+  applies its storage limit to encoded bytes. Failed traffic polls require a new measurement
+  baseline instead of averaging across the unobserved interval.
+- Restarting a local Windows shell preserves the previous screen and session separators before
+  ConPTY clears its viewport. macOS supports Option-drag selection while applications capture
+  the mouse, with the matching platform hint in terminal settings.
+- Kubernetes Map and Object Topology preserve denied, unavailable and truncated reads instead
+  of marking referenced Services, PVCs, Gateways or owners as missing.
+- Hubble detects a closed GetFlows stream, retries after backoff and ignores callbacks from
+  disposed connections. Live measurements count TCP SYN/UDP observations; Prometheus history
+  counts TCP SYN flags. Neither is labelled as successful connections.
+- Hubble lost events, unavailable nodes and Caretta agent coverage limits are shown throughout
+  traffic views. Incomplete measurements cannot label an unobserved destination as idle/not seen.
+- Caretta retains measured Service totals instead of assigning equal byte shares to workloads
+  selected by that Service.
+- Kubernetes drain waits for the original pod UIDs to disappear, including pods already
+  terminating, and applies its timeout to the entire operation.
+- Switching Kubernetes contexts closes the previous context's forwards, watches, log streams
+  and editor watchers, and cancels pending work before it can open another listener.
+- Kubernetes discovery, RBAC and traffic caches are cleared on context changes; late responses
+  cannot repopulate the new context's caches.
+- Creating several Kubernetes port-forwards rolls back the new listeners if any port fails.
+- Kubernetes Overview distinguishes unavailable or forbidden data from empty resource lists
+  and avoids reporting complete health when part of the overview could not be checked.
+
 ## [1.2.0-beta.35] - 2026-10-27
 
 ### Security

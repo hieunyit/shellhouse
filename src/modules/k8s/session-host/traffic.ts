@@ -1,16 +1,8 @@
-import { selectorMatches } from '../shared/map'
 import type { K8sObject } from '../shared/resources'
-import {
-  linkKey,
-  parseCaretta,
-  type TrafficLink,
-  type TrafficPeer,
-  type TrafficSample
-} from '../shared/traffic'
+import { linkKey, parseCaretta, type TrafficLink, type TrafficSample } from '../shared/traffic'
 import { KubeError, type KubeClient } from './client'
 import { HubbleCollector } from './hubble'
 import { pool } from './operations'
-import { podTemplate } from './related'
 
 /**
  * Đọc traffic live từ Caretta mà không cần Prometheus: tìm pod agent (DaemonSet) rồi đọc
@@ -32,9 +24,7 @@ const CACHE_MS = 60_000
 
 /** Bộ nhớ đệm theo client (mỗi cluster một client). */
 export interface TrafficCache {
-  agents?: { at: number; value: { pods: K8sObject[] } | { reason: string } }
-  /** Service → workload theo namespace (promise: nhiều lượt cùng lúc chỉ đọc một lần). */
-  services?: { at: number; byNs: Map<string, Promise<Map<string, TrafficPeer[]>>> }
+  agents?: { at: number; value: { pods: K8sObject[]; truncated?: boolean } | { reason: string } }
   /** Bộ đếm tích luỹ (xem `accumulate`). */
   counters?: TrafficCounters
   /** Bộ đọc Hubble (Cilium) của client đang dùng — đổi client (kết nối lại) thì tạo mới. */
@@ -133,108 +123,37 @@ function metricsPort(pod: K8sObject): number {
 async function findAgents(
   client: KubeClient,
   signal?: AbortSignal
-): Promise<{ pods: K8sObject[] } | { reason: string }> {
+): Promise<{ pods: K8sObject[]; truncated?: boolean } | { reason: string }> {
+  const pods = new Map<string, K8sObject>()
+  let truncated = false
   for (const sel of SELECTORS) {
     try {
-      const r = await client.json<{ items: K8sObject[] }>('GET', '/api/v1/pods', {
-        query: { labelSelector: sel, limit: 1000 },
-        ...(signal ? { signal } : {})
-      })
-      const running = r.items.filter((p) => o(p.status)['phase'] === 'Running')
-      if (running.length) return { pods: running }
+      const r = await client.json<{ items: K8sObject[] | null; metadata?: { continue?: string } }>(
+        'GET',
+        '/api/v1/pods',
+        {
+          query: { labelSelector: sel, limit: 1000 },
+          ...(signal ? { signal } : {})
+        }
+      )
+      truncated ||= Boolean(r.metadata?.continue)
+      for (const p of r.items ?? []) {
+        if (
+          p.metadata.deletionTimestamp ||
+          ['Succeeded', 'Failed'].includes(String(o(p.status)['phase']))
+        )
+          continue
+        pods.set(`${p.metadata.namespace ?? ''}/${p.metadata.name}`, p)
+      }
     } catch (error) {
       if (error instanceof KubeError && error.status === 403)
         return { reason: 'Not allowed to list pods in all namespaces to find Caretta' }
       throw error
     }
   }
-  return { reason: 'Caretta is not installed in this cluster' }
-}
-
-/** Service → workload phía sau (selector khớp pod template); chia đều nếu nhiều workload. */
-export async function resolveServices(
-  client: KubeClient,
-  links: TrafficLink[],
-  cache: TrafficCache,
-  signal?: AbortSignal
-): Promise<TrafficLink[]> {
-  const namespaces = [
-    ...new Set(
-      links
-        .flatMap((l) => [l.client, l.server])
-        .filter((p) => p.kind === 'Service')
-        .map((p) => p.ns)
-    )
-  ].filter(Boolean)
-  if (!namespaces.length) return links
-  const opts = signal ? { signal } : {}
-  if (!cache.services || Date.now() - cache.services.at > CACHE_MS)
-    cache.services = { at: Date.now(), byNs: new Map() }
-  const byNs = cache.services.byNs
-  const load = async (ns: string): Promise<Map<string, TrafficPeer[]>> => {
-    const found = new Map<string, TrafficPeer[]>()
-    const base = `/namespaces/${encodeURIComponent(ns)}`
-    const get = (path: string): Promise<K8sObject[]> =>
-      client.json<{ items: K8sObject[] }>('GET', path, opts).then((r) => r.items)
-    const [services, deps, sts, ds] = await Promise.all([
-      get(`/api/v1${base}/services`),
-      get(`/apis/apps/v1${base}/deployments`).catch(() => []),
-      get(`/apis/apps/v1${base}/statefulsets`).catch(() => []),
-      get(`/apis/apps/v1${base}/daemonsets`).catch(() => [])
-    ])
-    const workloads = [
-      ...deps.map((w) => ({ w, kind: 'Deployment', id: 'deployments.apps' })),
-      ...sts.map((w) => ({ w, kind: 'StatefulSet', id: 'statefulsets.apps' })),
-      ...ds.map((w) => ({ w, kind: 'DaemonSet', id: 'daemonsets.apps' }))
-    ].map((x) => ({ ...x, labels: podTemplate(x.id, x.w)?.labels }))
-    for (const svc of services) {
-      const selector = o(o(svc.spec)['selector'])
-      if (!Object.keys(selector).length) continue
-      const peers = workloads
-        .filter(({ labels }) => (labels ? selectorMatches(selector, labels) : false))
-        .map(({ w, kind }) => ({ ns, name: w.metadata.name, kind }))
-      if (peers.length) found.set(svc.metadata.name, peers)
-    }
-    return found
-  }
-  const behind = new Map<string, TrafficPeer[]>()
-  await Promise.all(
-    namespaces.map(async (ns) => {
-      let p = byNs.get(ns)
-      if (!p) {
-        // Lưu promise ngay (lượt khác cùng lúc dùng chung); lỗi → không nhớ, lượt sau đọc lại.
-        const loading = load(ns)
-        p = loading
-        byNs.set(ns, loading)
-        loading.catch(() => {
-          if (byNs.get(ns) === loading) byNs.delete(ns)
-        })
-      }
-      const found = await p.catch(() => new Map<string, TrafficPeer[]>())
-      for (const [svc, peers] of found) behind.set(`${ns}/${svc}`, peers)
-    })
-  )
-  const out: TrafficLink[] = []
-  for (const l of links) {
-    const servers =
-      l.server.kind === 'Service' ? behind.get(`${l.server.ns}/${l.server.name}`) : undefined
-    const clients =
-      l.client.kind === 'Service' ? behind.get(`${l.client.ns}/${l.client.name}`) : undefined
-    const ss = servers ?? [l.server]
-    const cs = clients ?? [l.client]
-    for (const server of ss)
-      for (const c of cs)
-        out.push({ client: c, server, port: l.port, bytes: l.bytes / (ss.length * cs.length) })
-  }
-  // Nhiều link Service gộp về cùng cặp workload → cộng.
-  const merged = new Map<string, TrafficLink>()
-  for (const l of out) {
-    const key = `${l.client.kind}|${l.client.ns}|${l.client.name}>${l.server.kind}|${l.server.ns}|${l.server.name}>${l.port}`
-    const prev = merged.get(key)
-    if (prev) prev.bytes += l.bytes
-    else merged.set(key, { ...l })
-  }
-  return [...merged.values()]
+  return pods.size
+    ? { pods: [...pods.values()], truncated }
+    : { reason: 'Caretta is not installed in this cluster' }
 }
 
 /** Một lượt đọc mọi agent Caretta. */
@@ -253,12 +172,13 @@ export async function trafficSample(
   await hubble.touch(signal)
   if (hubble.present && (hubble.state === 'ok' || hubble.state === 'connecting'))
     return {
-      status: 'ok',
+      status: hubble.state === 'connecting' ? 'connecting' : 'ok',
       source: 'hubble',
-      unit: 'connections',
+      unit: 'observations',
       at,
       agents: 1,
-      links: hubble.snapshot()
+      links: hubble.snapshot(),
+      quality: hubble.quality()
     }
   const caretta = await carettaSample(client, cache, at, signal)
   // Có Relay mà không đọc được, Caretta cũng không có → báo lỗi của Hubble (rõ hơn).
@@ -280,7 +200,7 @@ async function carettaSample(
   signal?: AbortSignal
 ): Promise<TrafficSample> {
   // Chỉ nhớ khi đã thấy agent — chưa cài / chưa được phép thì lần sau dò lại (vừa cài là thấy ngay).
-  let found: { pods: K8sObject[] } | { reason: string }
+  let found: { pods: K8sObject[]; truncated?: boolean } | { reason: string }
   if (cache.agents && at - cache.agents.at <= CACHE_MS) found = cache.agents.value
   else {
     found = await findAgents(client, signal)
@@ -325,6 +245,22 @@ async function carettaSample(
     }
   }
   cache.counters ??= { agents: new Map(), acc: new Map() }
-  const links = await resolveServices(client, accumulate(cache.counters, reads, at), cache, signal)
-  return { status: 'ok', source: 'caretta', unit: 'bytes', at, agents: seen.ok, links }
+  const links = accumulate(cache.counters, reads, at)
+  return {
+    status: 'ok',
+    source: 'caretta',
+    unit: 'bytes',
+    at,
+    agents: seen.ok,
+    links,
+    quality: {
+      partial: Boolean(found.truncated) || seen.ok < found.pods.length,
+      expectedAgents: found.pods.length,
+      reasons: [
+        ...(found.truncated ? ['Caretta agent discovery was truncated'] : []),
+        ...(found.pods.length > MAX_AGENTS ? ['Caretta agent read limit reached'] : []),
+        ...(seen.ok < pods.length ? ['Some Caretta agents did not answer'] : [])
+      ]
+    }
+  }
 }

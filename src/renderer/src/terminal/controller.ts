@@ -32,6 +32,7 @@ import { t, tn } from '@shared/i18n'
 import { isMultiline, joinPasteLines, pasteLines } from './paste'
 import { createElement } from 'react'
 import { decodeClipboardSequence } from './clipboard'
+import { sessionBoundary } from './session-boundary'
 
 export interface ActivePrompt {
   id: number
@@ -89,6 +90,7 @@ export function terminalOptions(settings: AppSettings, dark: boolean): ITerminal
     // TUI dùng ED2 để vẽ lại màn hình, đôi khi trong vùng cuộn giới hạn. Đẩy ED2 vào
     // scrollback làm dịch nội dung/status của vim, nano và tmux khi chúng vẽ lại.
     scrollOnEraseInDisplay: false,
+    macOptionClickForcesSelection: true,
     // Theme sáng: chương trình hay tô màu RGB chọn cho nền tối (TUI, vault, k9s…) — nâng tương phản
     // tối thiểu lên mức đọc được (WCAG AA) thay vì chữ xanh nhạt trên nền trắng. Theme tối giữ
     // nguyên màu gốc.
@@ -1043,8 +1045,14 @@ export class TerminalController {
       }
       if (this.hadSession) {
         // Con trỏ đang giữa dòng (sau prompt cũ) → xuống dòng trước, không dính vào prompt.
-        const nl = this.term.buffer.active.cursorX > 0 ? '\r\n' : ''
-        this.term.write(`${nl}${DIM}— ${t('new session')} —${RESET}\r\n`)
+        this.term.write(
+          sessionBoundary(
+            t('new session'),
+            this.term.rows,
+            this.term.buffer.active.cursorX,
+            this.target.kind === 'local' && windowsPty() !== undefined
+          )
+        )
       }
       this.hadSession = true
       this.sessionsOpened++

@@ -33,6 +33,7 @@ export interface MapWorkload {
   serviceAccount?: string
   /** Job đã thất bại (status.failed > 0 và không còn chạy). */
   failed?: boolean
+  images?: string[]
 }
 
 export interface MapContainerPort {
@@ -61,11 +62,11 @@ export interface MapPod {
   usage?: { cpu: number; memory: number }
   /** Đang chạy nhưng có container chưa Ready (readiness probe hỏng) — không nhận traffic. */
   notReady?: boolean
-  /**
-   * Nhãn pod — chỉ có với pod không thuộc workload nào trên bản đồ (pod lẻ, ReplicaSet không có
-   * Deployment…) để khớp selector của Service; pod của workload dùng nhãn pod template.
-   */
+  /** Nhãn và cổng của pod thực tế, kể cả khi khác template trong lúc rollout. */
   labels?: Record<string, string>
+  ports?: MapContainerPort[]
+  ready?: boolean
+  terminating?: boolean
 }
 
 /** Node (máy) của cluster — cho chế độ xem theo node. */
@@ -106,6 +107,7 @@ export interface MapService {
   external?: string[]
   /** Endpoint theo EndpointSlice (không đọc được → không có — không kết luận "0 endpoint"). */
   endpoints?: { ready: number; notReady: number }
+  endpointSlices?: string[]
 }
 
 export interface MapServicePort {
@@ -147,6 +149,9 @@ export interface MapRouteRule {
   port?: string
   /** defaultBackend của Ingress. */
   default?: boolean
+  pathType?: string
+  namespace?: string
+  weight?: number
 }
 
 export interface MapGateway {
@@ -189,6 +194,7 @@ export interface MapPolicy {
   /** Số luật ingress / egress (0 luật + có loại tương ứng = chặn hết chiều đó). */
   ingressRules?: number
   egressRules?: number
+  rules?: { ingress?: unknown; egress?: unknown }
 }
 
 export interface MapPdb {
@@ -216,11 +222,14 @@ export interface MapData {
   policies: MapPolicy[]
   /** Gateway API (không có CRD → rỗng / thiếu). */
   gateways?: MapGateway[]
-  nodes: { total: number; ready: number }
+  nodes: { total: number; ready: number; known?: boolean }
   /** Chi tiết từng node (thiếu ở dữ liệu cũ / không có quyền list node). */
   nodeList?: MapNodeInfo[]
   /** Cluster quá lớn — một số loại chỉ lấy phần đầu. */
   truncated: boolean
+  /** Incomplete reads, scoped to namespace; absent on older hosts. */
+  coverage?: MapCoverage[]
+  scope?: string[]
   /**
    * ConfigMap / Secret có thật trong số được workload / Ingress TLS tham chiếu ("ns/name"). Không
    * list được (thiếu quyền) → không có trường — không kết luận "thiếu".
@@ -233,6 +242,22 @@ export interface MapData {
   pdbs?: MapPdb[]
   /** Hạn chứng chỉ của Secret TLS mà Ingress dùng ("ns/name" → ISO notAfter). Không đọc được → thiếu. */
   tlsExpiry?: Record<string, string>
+}
+
+export interface MapCoverage {
+  kind: string
+  namespace?: string
+  reason: 'forbidden' | 'missing-api' | 'truncated' | 'error'
+}
+
+/** Only a complete list can prove that a referenced resource is absent. */
+export function mapKnown(data: MapData, kind: string, ns?: string): boolean {
+  if (ns && data.scope?.length && !data.scope.includes(ns)) return false
+  return (
+    !(data.coverage ?? []).some(
+      (c) => c.kind === kind && (!c.namespace || !ns || c.namespace === ns)
+    ) && !(data.coverage === undefined && data.truncated)
+  )
 }
 
 // ——— Vùng theo mục đích ———
@@ -460,7 +485,11 @@ export function filterMapData(data: MapData, selector: ParsedSelector): MapData 
     (s) => keepByNs.has(s.ns) && index(s.ns).match(s.selector).length > 0
   )
   const svcKey = new Set(services.map((s) => `${s.ns}/${s.name}`))
-  const routes = data.routes.filter((r) => r.backends.some((b) => svcKey.has(`${r.ns}/${b}`)))
+  const routes = data.routes.filter((r) =>
+    r.rules?.length
+      ? r.rules.some((rule) => svcKey.has(`${rule.namespace ?? r.ns}/${rule.service}`))
+      : r.backends.some((b) => svcKey.has(`${r.ns}/${b}`))
+  )
   const gwKey = new Set(routes.flatMap((r) => (r.parents ?? []).map((p) => `${p.ns}/${p.name}`)))
   const pvcKey = new Set(keep.flatMap((w) => w.pvcs.map((v) => `${w.ns}/${v}`)))
   const nsUsed = new Set([...keep.map((w) => w.ns), ...routes.map((r) => r.ns)])

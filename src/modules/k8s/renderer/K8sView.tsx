@@ -1256,6 +1256,7 @@ export function ClusterTab({
               ) : onMap ? (
                 namespaces === null ? null : (
                   <MapView
+                    clusterKey={`${params.bastionHostId ?? 'local'}|${refKey}`}
                     tabId={tabId}
                     request={request}
                     namespaces={namespaces}

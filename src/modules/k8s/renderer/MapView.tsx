@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { RefreshCw, Tag, X } from 'lucide-react'
+import { RefreshCw, Tag, X, Route, Camera } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
 import { cleanError } from '../../../renderer/src/lib/format'
 import { formatDateTime, formatTime, t } from '../../registry/renderer-kit'
@@ -26,11 +26,25 @@ import { panelOverlayStable, toolbarFitStable, type ToolbarFit } from '../shared
 import { TopologyMap } from './topology/TopologyMap'
 import { TrafficUnitContext } from './trafficUnit'
 
+import { MapTools } from './MapTools'
+import { TrafficQualityNote } from './TrafficQualityNote'
+
 const REFRESH_MS = 20_000
 /** Cấu hình ít đổi và mỗi lần đọc là nhiều request (kể cả đọc Secret → audit log): đọc thưa. */
 const EGRESS_REFRESH_MS = 5 * 60_000
 /** Chuyển Topology ↔ Outbound trong chừng này thì dùng lại kết quả vừa đọc. */
 const EGRESS_FRESH_MS = 60_000
+
+const requestIds = new WeakMap<Request, number>()
+let nextRequestId = 0
+function requestId(request: Request): number {
+  let id = requestIds.get(request)
+  if (id === undefined) {
+    id = ++nextRequestId
+    requestIds.set(request, id)
+  }
+  return id
+}
 
 const savedSelectors = new Map<string, string>()
 
@@ -42,6 +56,7 @@ const savedSelectors = new Map<string, string>()
  */
 export function MapView({
   tabId,
+  clusterKey = tabId,
   request,
   namespaces,
   active,
@@ -51,6 +66,7 @@ export function MapView({
   onPortForward
 }: {
   tabId: string
+  clusterKey?: string
   request: Request
   namespaces: readonly string[]
   active: boolean
@@ -67,6 +83,7 @@ export function MapView({
     ns: string
     data: MapData
   } | null>(null)
+  const [tool, setTool] = useState<'diagnose' | 'snapshots' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [updated, setUpdated] = useState(0)
@@ -277,7 +294,9 @@ export function MapView({
   }
 
   return (
-    <TrafficUnitContext.Provider value={traffic.unit ?? 'bytes'}>
+    <TrafficUnitContext.Provider
+      value={(view === 'traffic' ? past?.unit : undefined) ?? traffic.unit ?? 'bytes'}
+    >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="k8s-map">
         {/* Thanh công cụ của bản đồ: một hàng, luôn nằm trên canvas và bảng chi tiết (không bị che);
           hẹp dần → nút chỉ còn icon, rồi chọn chế độ xem thành menu. */}
@@ -396,6 +415,30 @@ export function MapView({
           )}
           <button
             type="button"
+            className="shrink-0 rounded p-1 text-faint hover:bg-hover hover:text-fg"
+            title={t('Diagnose request path')}
+            aria-label={t('Diagnose request path')}
+            data-testid="k8s-map-diagnose"
+            onClick={() => {
+              setTool((v) => (v === 'diagnose' ? null : 'diagnose'))
+            }}
+          >
+            <Route size={14} />
+          </button>
+          <button
+            type="button"
+            className="shrink-0 rounded p-1 text-faint hover:bg-hover hover:text-fg"
+            title={t('Topology snapshots')}
+            aria-label={t('Topology snapshots')}
+            data-testid="k8s-map-snapshots"
+            onClick={() => {
+              setTool((v) => (v === 'snapshots' ? null : 'snapshots'))
+            }}
+          >
+            <Camera size={14} />
+          </button>
+          <button
+            type="button"
             aria-label={t('Refresh')}
             title={updated ? t('Updated {time}', { time: formatTime(updated) }) : t('Refresh')}
             className="shrink-0 rounded p-1 text-faint hover:bg-hover hover:text-fg"
@@ -408,6 +451,37 @@ export function MapView({
           </button>
         </div>
         {error && <p className="border-b border-line px-3 py-1.5 text-xs text-danger">{error}</p>}
+        {data?.coverage?.some((c) => c.reason !== 'missing-api') && (
+          <p
+            className="border-b border-line px-3 py-1.5 text-xs text-warning"
+            data-testid="k8s-map-coverage"
+          >
+            {t('Incomplete map data; unreadable resources are unknown, not missing.')}{' '}
+            {data.coverage
+              .filter((c) => c.reason !== 'missing-api')
+              .map((c) => `${c.kind}${c.namespace ? ` (${c.namespace})` : ''}: ${t(c.reason)}`)
+              .join(' · ')}
+          </p>
+        )}
+        {(view === 'traffic' ||
+          view === 'connections' ||
+          (view === 'topology' && options.traffic)) && (
+          <TrafficQualityNote traffic={past ?? traffic} />
+        )}
+        {tool && (
+          <MapTools
+            key={`${clusterKey}|${nsKey}|${tool}|${String(requestId(request))}`}
+            mode={tool}
+            cluster={clusterKey}
+            namespaces={namespaces}
+            request={request}
+            data={data}
+            onOpen={onOpen}
+            onClose={() => {
+              setTool(null)
+            }}
+          />
+        )}
         {data?.truncated && (
           <p className="border-b border-line px-3 py-1.5 text-xs text-warning">
             {t(

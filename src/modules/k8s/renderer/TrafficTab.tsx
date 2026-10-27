@@ -1,3 +1,4 @@
+import { TrafficQualityNote } from './TrafficQualityNote'
 import { useMemo, useState } from 'react'
 import { ArrowDownLeft, ArrowUpRight } from 'lucide-react'
 import { cx } from '../../../renderer/src/components/ui'
@@ -131,17 +132,20 @@ export function TrafficOf({
                     end: formatTime(past.end),
                     via: past.via ?? ''
                   })
-                : tn(
-                    traffic.agents,
-                    'from {n} Caretta agent · average over the last minute',
-                    'from {n} Caretta agents · average over the last minute'
-                  ))}
+                : traffic.source === 'hubble'
+                  ? t('Hubble observations · average over the last minute')
+                  : tn(
+                      traffic.agents,
+                      'from {n} Caretta agent · average over the last minute',
+                      'from {n} Caretta agents · average over the last minute'
+                    ))}
             {status === 'connecting' && t('taking the first two samples to measure throughput')}
             {status === 'empty' &&
               t(
                 '{source} is running but saw no connections to or from this workload in the last interval.',
                 { source: sourceName(traffic.source) }
               )}
+            <TrafficQualityNote traffic={past ?? traffic} />
             {status === 'unavailable' && (traffic.reason ?? t('Caretta is not available'))}
           </span>
         </div>

@@ -30,8 +30,9 @@ export interface TrafficState {
   updated: number
   /** Nguồn đang dùng: Hubble (Cilium) hoặc Caretta; thiếu = chưa biết. */
   source?: TrafficSource
-  /** Đơn vị của `rates`: byte / giây (Caretta) hay kết nối mới / giây (Hubble). */
+  /** Đơn vị của `rates`: byte / giây (Caretta) hay bản ghi quan sát / giây (Hubble). */
   unit?: TrafficUnit
+  quality?: TrafficSample['quality']
   /** Trung bình một khoảng đã qua (Prometheus), không phải số liệu trực tiếp. */
   historic?: boolean
 }
@@ -87,31 +88,47 @@ function tick(hub: Hub, request: Request): void {
   hub.running = true
   request<TrafficSample>({ op: 'traffic' }).then(
     (s) => {
-      if (s.status === 'unavailable') {
+      if (s.status === 'unavailable' || s.status === 'connecting') {
         hub.samples = []
         publish(hub, {
           ...hub.state,
-          status: 'unavailable',
+          status: s.status,
           ...(s.reason ? { reason: s.reason } : {}),
           agents: s.agents,
+          source: s.source,
+          unit: s.unit,
+          quality: s.quality,
+          history: [],
           rates: [],
           updated: s.at
         })
         // Không có Caretta: hỏi lại thưa hơn (có thể vừa cài).
-        schedule(hub, request, INTERVAL_MS * 4)
+        schedule(hub, request, s.status === 'connecting' ? FIRST_GAP_MS : INTERVAL_MS * 4)
         return
       }
       // Đổi nguồn giữa chừng (vừa cài Hubble…) → đơn vị khác: bỏ mẫu cũ, không trộn byte với kết nối.
       if (
         hub.samples.length &&
-        (hub.samples.at(-1)?.source ?? 'caretta') !== (s.source ?? 'caretta')
-      )
+        ((hub.samples.at(-1)?.source ?? 'caretta') !== (s.source ?? 'caretta') ||
+          (hub.samples.at(-1)?.unit ?? 'bytes') !== (s.unit ?? 'bytes'))
+      ) {
         hub.samples = []
+        hub.state = OFF
+      }
       const prevLatest = hub.samples.at(-1)
       hub.samples = [...hub.samples.filter((x) => s.at - x.at <= WINDOW_MS), s]
       const origin = {
         source: s.source ?? 'caretta',
-        unit: s.unit ?? 'bytes'
+        unit: s.unit ?? 'bytes',
+        quality: hub.samples.some((x) => x.quality?.partial)
+          ? {
+              partial: true,
+              reasons: [...new Set(hub.samples.flatMap((x) => x.quality?.reasons ?? []))],
+              expectedAgents: s.quality?.expectedAgents,
+              lostEvents: s.quality?.lostEvents,
+              unavailableNodes: s.quality?.unavailableNodes
+            }
+          : s.quality
       } as const
       const oldest = hub.samples[0]
       if (!prevLatest || !oldest || oldest === s) {
@@ -119,6 +136,8 @@ function tick(hub: Hub, request: Request): void {
           ...hub.state,
           ...origin,
           status: 'connecting',
+          rates: [],
+          history: [],
           agents: s.agents,
           updated: s.at
         })
@@ -138,7 +157,14 @@ function tick(hub: Hub, request: Request): void {
       schedule(hub, request, INTERVAL_MS)
     },
     (e: unknown) => {
-      publish(hub, { ...hub.state, status: 'unavailable', reason: cleanError(e), rates: [] })
+      hub.samples = []
+      publish(hub, {
+        ...hub.state,
+        status: 'unavailable',
+        reason: cleanError(e),
+        rates: [],
+        history: []
+      })
       schedule(hub, request, INTERVAL_MS * 2)
     }
   )

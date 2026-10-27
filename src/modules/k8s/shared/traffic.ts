@@ -23,12 +23,12 @@ export interface TrafficLink {
 
 /** Nguồn số liệu traffic: Hubble (Cilium) hoặc Caretta. */
 export type TrafficSource = 'hubble' | 'caretta'
-/** Đơn vị của bộ đếm / tốc độ: byte (Caretta) hay số kết nối mới (Hubble không đếm byte). */
-export type TrafficUnit = 'bytes' | 'connections'
+/** Đơn vị của bộ đếm / tốc độ: byte (Caretta) hay số quan sát TCP SYN / UDP (Hubble không đếm byte). */
+export type TrafficUnit = 'bytes' | 'connections' | 'observations' | 'syns'
 
 export interface TrafficSample {
   /** unavailable = không có Caretta / Hubble hoặc không đọc được; ok = đã đọc. */
-  status: 'unavailable' | 'ok'
+  status: 'unavailable' | 'connecting' | 'ok'
   reason?: string
   /** Thiếu (bản cũ) = Caretta, byte. */
   source?: TrafficSource
@@ -37,6 +37,16 @@ export interface TrafficSample {
   at: number
   agents: number
   links: TrafficLink[]
+  quality?: TrafficQuality
+}
+
+/** Coverage of this measurement; positive observations remain useful when partial. */
+export interface TrafficQuality {
+  partial: boolean
+  expectedAgents?: number
+  lostEvents?: number
+  unavailableNodes?: string[]
+  reasons: string[]
 }
 
 export const METRIC = 'caretta_links_observed'
@@ -111,14 +121,14 @@ export interface TrafficRate {
   client: TrafficPeer
   server: TrafficPeer
   port: string
-  /** Byte / giây (Caretta) hoặc kết nối mới / giây (Hubble — xem `unit`). */
+  /** Byte / giây (Caretta) hoặc bản ghi quan sát / giây (Hubble — xem `unit`). */
   rate: number
   /** Thiếu = byte. */
   unit?: TrafficUnit
 }
 
 const unitOf = (s: TrafficSample): Pick<TrafficRate, 'unit'> =>
-  s.unit === 'connections' ? { unit: 'connections' } : {}
+  s.unit && s.unit !== 'bytes' ? { unit: s.unit } : {}
 
 /** Tốc độ giữa hai lần đọc; counter giảm (agent khởi động lại) → bỏ kết nối đó lần này. */
 export function trafficRates(prev: TrafficSample, cur: TrafficSample): TrafficRate[] {
@@ -191,7 +201,7 @@ export const BANDS = [
   { max: Number.POSITIVE_INFINITY, label: '> 10 MB/s', width: 9 }
 ] as const
 
-/** Băng theo số kết nối mới / giây (Hubble): cùng độ dày với băng byte tương ứng. */
+/** Băng theo số bản ghi quan sát / giây (Hubble): cùng độ dày với băng byte tương ứng. */
 export const CONNECTION_BANDS = [
   { max: 0.1, label: '< 0.1 conn/s', width: 1.5 },
   { max: 1, label: '0.1–1 conn/s', width: 2.5 },
@@ -204,7 +214,15 @@ export const CONNECTION_BANDS = [
 export function bandsFor(
   unit: TrafficUnit | undefined
 ): readonly { max: number; label: string; width: number }[] {
-  return unit === 'connections' ? CONNECTION_BANDS : BANDS
+  return unit && unit !== 'bytes'
+    ? CONNECTION_BANDS.map((b) => ({
+        ...b,
+        label: b.label.replace(
+          'conn/s',
+          unit === 'syns' ? 'SYN/s' : unit === 'observations' ? 'obs/s' : 'conn/s'
+        )
+      }))
+    : BANDS
 }
 
 export function bandOf(rate: number, unit?: TrafficUnit): number {
@@ -214,12 +232,14 @@ export function bandOf(rate: number, unit?: TrafficUnit): number {
 }
 
 /**
- * Tốc độ theo locale (1.2 MB/s · 1,2 MB/s); dưới 1 B/s là "idle". Hubble: kết nối mới / giây
+ * Tốc độ theo locale (1.2 MB/s · 1,2 MB/s); dưới 1 B/s là "idle". Hubble: số quan sát / giây
  * (0.4 conn/s); dưới 0.01 là "idle".
  */
 export function formatRate(rate: number, unit?: TrafficUnit): string {
-  if (unit === 'connections')
-    return rate < 0.01 ? t('idle') : t('{n} conn/s', { n: formatNumber(rate, rate < 10 ? 1 : 0) })
+  if (unit && unit !== 'bytes')
+    return rate < 0.01
+      ? t('idle')
+      : `${formatNumber(rate, rate < 10 ? 1 : 0)} ${unit === 'observations' ? 'obs/s' : unit === 'syns' ? 'SYN/s' : 'conn/s'}`
   return rate < 1 ? t('idle') : formatBytesRate(rate)
 }
 

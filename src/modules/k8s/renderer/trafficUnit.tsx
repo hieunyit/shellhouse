@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react'
 import { bandOf, formatRate, type TrafficSource, type TrafficUnit } from '../shared/traffic'
 
 /**
- * Đơn vị traffic của cluster đang xem: byte / giây (Caretta) hay kết nối mới / giây (Hubble). Map,
+ * Đơn vị traffic của cluster đang xem: byte / giây (Caretta) hay bản ghi quan sát / giây (Hubble). Map,
  * Topology, tab Traffic đặt theo nguồn của chính chúng — mỗi tab cluster đúng đơn vị của nó.
  */
 export const TrafficUnitContext = createContext<TrafficUnit>('bytes')
@@ -24,7 +24,7 @@ export const bandFor =
     bandOf(rate, unit)
 
 /** Dưới mức này là "idle" (không vẽ đậm / không ghi số): 1 B/s · 0.01 kết nối/s. */
-export const idleBelow = (unit: TrafficUnit): number => (unit === 'connections' ? 0.01 : 1)
+export const idleBelow = (unit: TrafficUnit): number => (unit !== 'bytes' ? 0.01 : 1)
 
 /** Tên nguồn traffic cho người dùng. */
 export const sourceName = (source: TrafficSource | undefined): string =>

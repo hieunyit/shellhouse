@@ -9,7 +9,6 @@ import {
 } from '../shared/traffic'
 import { KubeError, type KubeClient } from './client'
 import { escapeRe, promBase, type PromTarget } from './prometheus'
-import { resolveServices, type TrafficCache } from './traffic'
 
 /**
  * Lịch sử qua Prometheus: traffic Caretta / Hubble (trung bình theo khoảng, chuỗi thời gian của một
@@ -132,7 +131,6 @@ export async function trafficRange(
   client: KubeClient,
   t: PromTarget | null,
   probe: HistoryProbe,
-  cache: TrafficCache,
   start: number,
   end: number,
   signal?: AbortSignal
@@ -166,14 +164,13 @@ export async function trafficRange(
         bytes: Math.max(0, Number(r.value[1]) || 0)
       }))
     )
-    const resolved = await resolveServices(client, links, cache, signal)
     return {
       source: 'prometheus',
       via,
       unit: 'bytes',
       start,
       end,
-      rates: toRates(resolved, seconds, 'bytes')
+      rates: toRates(links, seconds, 'bytes')
     }
   }
   const rows = await instant(
@@ -207,10 +204,10 @@ export async function trafficRange(
   return {
     source: 'prometheus',
     via,
-    unit: 'connections',
+    unit: 'syns',
     start,
     end,
-    rates: toRates(links, seconds, 'connections')
+    rates: toRates(links, seconds, 'syns')
   }
 }
 
@@ -222,7 +219,7 @@ function toRates(links: readonly TrafficLink[], seconds: number, unit: TrafficUn
       server: l.server,
       port: l.port,
       rate: l.bytes / seconds,
-      ...(unit === 'connections' ? { unit } : {})
+      ...(unit === 'syns' ? { unit } : {})
     }))
 }
 
@@ -308,7 +305,7 @@ export async function trafficSeries(
   return {
     source: 'prometheus',
     via,
-    unit: 'connections',
+    unit: 'syns',
     step: step * 1000,
     inbound: maxByTime(inbound),
     outbound: maxByTime(outbound)

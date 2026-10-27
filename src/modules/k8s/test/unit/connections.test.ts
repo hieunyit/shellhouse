@@ -61,6 +61,16 @@ describe('buildConnections — ghép khai báo với quan sát', () => {
     expect(r.find((x) => x.label === '9.9.9.9:443')?.status).toBe('undeclared')
   })
 
+  it('partial coverage preserves observed matches but cannot label absent observations as not seen', () => {
+    const r = buildConnections({
+      declared: rows([item('A', '1.1.1.1', 443), item('B', '2.2.2.2', 443)]),
+      observed: [rate(ext('1.1.1.1'), '443', 10), rate(ext('2.2.2.2'), '443', 0)],
+      partial: true
+    })
+    expect(r.find((x) => x.label === '1.1.1.1:443')?.status).toBe('active')
+    expect(r.find((x) => x.label === '2.2.2.2:443')?.status).toBe('unmeasured')
+  })
+
   it('không có nguồn traffic → unmeasured, không bịa "idle"', () => {
     const r = buildConnections({
       declared: rows([item('A', 'a.example.com', 443)]),

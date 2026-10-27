@@ -636,6 +636,8 @@ export const core: Readonly<Record<string, string>> = {
   'Show menu': 'Hiện menu',
   'Copy / paste (PuTTY style)': 'Sao chép / dán (kiểu PuTTY)',
   'Copy on select': 'Sao chép khi bôi đen',
+  'In tmux or mouse-enabled programs, hold Option while dragging to select terminal text.':
+    'Trong tmux hoặc chương trình dùng chuột, giữ Option khi kéo để chọn chữ trong terminal.',
   'In tmux or mouse-enabled programs, hold Shift while dragging to select terminal text.':
     'Trong tmux hoặc chương trình bắt chuột, giữ Shift khi kéo để bôi đen chữ trong terminal.',
   'Warn before pasting multiple lines': 'Cảnh báo trước khi dán nhiều dòng',

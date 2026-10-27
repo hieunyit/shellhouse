@@ -1055,7 +1055,7 @@ test('Home › Needs attention: pod lỗi của cluster đang mở; bấm mở �
   }
 })
 
-test('Kubernetes: traffic từ Hubble (Cilium, không cần Caretta) — kết nối / giây, tên miền đích ngoài', async () => {
+test('Kubernetes: traffic từ Hubble (Cilium, không cần Caretta) — bản ghi quan sát / giây, tên miền đích ngoài', async () => {
   test.setTimeout(60_000)
   const server = await startApiTestServer()
   server.enableHubble()
@@ -1103,7 +1103,7 @@ test('Kubernetes: traffic từ Hubble (Cilium, không cần Caretta) — kết n
       '[data-testid="k8s-detail-conn-row"][data-label^="api.stripe.com"]'
     )
     await expect(stripe).toHaveCount(1)
-    await expect(stripe).toContainText('conn/s')
+    await expect(stripe).toContainText('obs/s')
     await expect(stripe).toHaveAttribute('data-status', 'undeclared')
   } finally {
     clearInterval(timer)
@@ -1159,7 +1159,7 @@ test('Kubernetes: Connections — khai báo (env) ghép với traffic quan sát:
     await expect(row('api.stripe.com')).toHaveAttribute('data-status', 'active', {
       timeout: 30_000
     })
-    await expect(row('api.stripe.com')).toContainText('conn/s')
+    await expect(row('api.stripe.com')).toContainText('obs/s')
     await expect(row('203.0.113.99')).toHaveAttribute('data-status', 'declared')
     await expect(row('198.51.100.7')).toHaveAttribute('data-status', 'undeclared')
     await expect(row('198.51.100.7')).toContainText('not declared anywhere')
@@ -1236,7 +1236,7 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await expect(panel.getByTestId('k8s-topo-traffic')).toContainText('db.example.com')
     await expect(panel.getByTestId('k8s-topo-traffic')).toContainText('MB/s')
 
-    // Tab Traffic của Deployment: vào (Internet → Service web, quy về Deployment), ra (DB, tool).
+    // Số đo ở Service không gán sang Deployment; workload chỉ thấy traffic trực tiếp của nó.
     await panel.getByTestId('k8s-topo-open').click()
     const detail = view.getByTestId('k8s-describe')
     await detail.getByTestId('k8s-detail-tab-traffic').click()
@@ -1244,15 +1244,15 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await expect(traffic).toHaveAttribute('data-status', 'live', { timeout: 15_000 })
     await expect(
       traffic.locator('[data-testid="k8s-traffic-peer"][data-name="203.0.113.7"]')
-    ).toHaveCount(1)
-    // Bản đồ nhỏ: bên gọi (Internet) trái, web giữa, bên được gọi (DB, tool) phải.
+    ).toHaveCount(0)
+    // Bản đồ nhỏ giữ DB/tool; không bịa cạnh Internet → Deployment từ số đo Service.
     const focusMap = traffic.getByTestId('k8s-traffic-focus-map')
     await expect(
       focusMap.locator('[data-testid="k8s-traffic-node"][data-name="db.example.com"]')
     ).toHaveCount(1)
     await expect(
       focusMap.locator('[data-testid="k8s-traffic-node"][data-name="203.0.113.7"]')
-    ).toHaveCount(1)
+    ).toHaveCount(0)
     // Đích đi ra (DB, tool) nằm ở tab Connections: quan sát được, chưa khai báo ở đâu → Undeclared.
     await traffic.getByTestId('k8s-traffic-open-connections').click()
     const conns = detail.getByTestId('k8s-detail-connections')
@@ -1289,13 +1289,15 @@ test('Kubernetes: traffic live từ Caretta — đường traffic trên bản đ
     await page.getByTestId('k8s-nav-map').click()
     await map.getByTestId('k8s-map-view-traffic').click()
     const tmap = view.getByTestId('k8s-traffic-map')
-    await expect(tmap.locator('[data-testid="k8s-traffic-node"][data-name="web"]')).toHaveCount(1)
+    await expect(
+      tmap.locator('[data-testid="k8s-traffic-node"][data-id="p:Deployment|shop|web"]')
+    ).toHaveCount(1)
     await expect(
       tmap.locator('[data-testid="k8s-traffic-node"][data-name="db.example.com"]')
     ).toHaveCount(1)
     // Phạm vi = namespace đang chọn ở bộ chọn namespace (shop, default).
     await expect(view.getByTestId('k8s-traffic-scope')).toHaveAttribute('data-scope', /shop/)
-    await tmap.locator('[data-testid="k8s-traffic-node"][data-name="web"]').click()
+    await tmap.locator('[data-testid="k8s-traffic-node"][data-id="p:Deployment|shop|web"]').click()
     const tpanel = view.getByTestId('k8s-traffic-panel')
     await expect(tpanel).toContainText('Calls')
     await expect(tpanel).toContainText('db.example.com')
@@ -1588,6 +1590,63 @@ test('Kubernetes trên Production: lưu YAML sửa và Apply phải gõ lại t�
     await page.getByTestId('k8s-confirm-ok').click()
     await expect(form).toHaveCount(0)
     expect(writes()).toBeGreaterThan(beforeCreate)
+  } finally {
+    await launched.close()
+    await server.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('Kubernetes: chẩn đoán URL và so sánh topology trước/sau deploy', async () => {
+  test.setTimeout(90_000)
+  const server = await startApiTestServer()
+  server.seedDemo()
+  const dir = mkdtempSync(join(tmpdir(), 'sh-kube-map-tools-'))
+  const file = join(dir, 'config')
+  writeFileSync(file, kubeconfig(server))
+  const launched = await launchApp({ KUBECONFIG: file })
+  const { page } = launched
+  try {
+    await setWindowSize(launched, 1366, 900)
+    await enableK8s(page)
+    await page.locator('[data-testid="k8s-context"][data-name="test"]').dblclick()
+    await page.getByTestId('k8s-nav-map').click()
+    const map = page.getByTestId('k8s-map')
+    await expect(map.getByTestId('k8s-map-diagnose')).toBeVisible()
+    await map.getByTestId('k8s-map-diagnose').click()
+    const panel = map.getByTestId('k8s-map-tools')
+    await panel.getByLabel('URL', { exact: true }).fill('https://shop.example.com/api')
+    await panel.getByRole('button', { name: 'Run diagnosis' }).click()
+    const diagnosis = panel.getByTestId('k8s-map-diagnosis')
+    await expect(diagnosis).toContainText('shop/api')
+    await expect(diagnosis).toContainText('3 ready endpoints')
+    await expect(diagnosis).toContainText('Network reachability · Unknown')
+    await panel.getByRole('button', { name: 'Close', exact: true }).click()
+    await map.getByTestId('k8s-map-snapshots').click()
+    await panel.getByLabel('Snapshot name').fill('before deployment')
+    await panel.getByRole('button', { name: 'Save baseline', exact: true }).click()
+    await expect(panel.getByLabel('Baseline', { exact: true })).not.toHaveValue('')
+    const deployment = server.get('deployments', 'shop', 'web')
+    if (!deployment?.spec) throw new Error('deployment fixture')
+    const spec = deployment.spec as { template: { spec: { containers: { image: string }[] } } }
+    const container = spec.template.spec.containers[0]
+    if (!container) throw new Error('container fixture')
+    container.image = 'nginx:1.28'
+    server.upsert('deployments', deployment)
+    await panel.getByRole('button', { name: 'Compare with current' }).click()
+    const diff = panel.getByTestId('k8s-map-comparison')
+    await expect(diff).toContainText('images')
+    await expect(diff).toContainText('nginx:1.27')
+    await expect(diff).toContainText('nginx:1.28')
+    await page.screenshot({ path: '/tmp/shellhouse-map-snapshots.png' })
+    await panel.getByRole('button', { name: 'Close', exact: true }).click()
+    await map.getByTestId('k8s-map-snapshots').click()
+    await expect(panel.getByRole('option', { name: /before deployment/ })).toHaveCount(1)
+    await panel.getByLabel('Baseline', { exact: true }).selectOption({
+      label: (await panel.getByRole('option', { name: /before deployment/ }).textContent()) ?? ''
+    })
+    await panel.getByRole('button', { name: 'Delete baseline' }).click()
+    await expect(panel.getByRole('option', { name: /before deployment/ })).toHaveCount(0)
   } finally {
     await launched.close()
     await server.close()

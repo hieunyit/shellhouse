@@ -6,6 +6,7 @@ import { forgetHistory } from '../../terminal/suggestions'
 import { useSettings } from '../../stores/settings'
 import { useShells } from '../../stores/shells'
 import { Button, Checkbox, Field, Input, Notice, SectionTitle, Segmented, Select } from '../ui'
+import { isMac } from '../../lib/keybindings'
 import { confirmAction } from '../../stores/confirm'
 
 export function TerminalSection(): React.JSX.Element {
@@ -202,9 +203,15 @@ export function TerminalSection(): React.JSX.Element {
         </Field>
         <Checkbox
           label={t('Copy on select')}
-          description={t(
-            'In tmux or mouse-enabled programs, hold Shift while dragging to select terminal text.'
-          )}
+          description={
+            isMac
+              ? t(
+                  'In tmux or mouse-enabled programs, hold Option while dragging to select terminal text.'
+                )
+              : t(
+                  'In tmux or mouse-enabled programs, hold Shift while dragging to select terminal text.'
+                )
+          }
           data-testid="setting-copy-on-select"
           checked={term.copyOnSelect}
           onChange={(e) => void update({ terminal: { copyOnSelect: e.target.checked } })}

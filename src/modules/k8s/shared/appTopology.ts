@@ -12,6 +12,7 @@ import { type EgressDest, type EgressRow } from './egress'
 import { formatRate, type TrafficUnit } from './traffic'
 import {
   LabelIndex,
+  mapKnown,
   regionOf,
   selectorMatches,
   workloadKindLabel,
@@ -340,6 +341,7 @@ function podProblems(pods: readonly MapPod[]): TopoProblem[] {
 interface Index {
   workloads: Map<string, MapWorkload[]>
   services: Map<string, MapService[]>
+  serviceByKey: Map<string, MapService>
   routes: Map<string, MapRoute[]>
   pods: Map<string, MapPod[]>
   gateways: Map<string, NonNullable<MapData['gateways']>>
@@ -389,6 +391,7 @@ function indexData(data: MapData, now: number): Index {
   return {
     workloads: groupBy(data.workloads, (w) => w.ns),
     services: groupBy(data.services, (s) => s.ns),
+    serviceByKey: new Map(data.services.map((s) => [`${s.ns}/${s.name}`, s])),
     routes: groupBy(data.routes, (r) => r.ns),
     // Pod của owner không có thẻ → nhóm pod lẻ của namespace.
     pods: groupBy(data.pods, (p) => {
@@ -514,6 +517,12 @@ function namespaceGraph(
   const pvcByName = new Map((ix.pvcs.get(ns) ?? []).map((v) => [v.name, v]))
   const svcByName = new Map(services.map((s) => [s.name, s]))
   const labelIndex = new LabelIndex(workloads)
+  const namespacePods = data.pods.filter((p) => p.ns === ns)
+  const actualPodsKnown =
+    mapKnown(data, 'pods', ns) && namespacePods.every((p) => p.labels !== undefined)
+  const podIndex = new LabelIndex(namespacePods.map((p) => ({ ...p, labels: p.labels ?? {} })))
+  const byOwner = new Map(workloads.map((w) => [`${workloadKindLabel(w.kind)}|${w.name}`, w]))
+  const actualHits = new Map<MapService, MapPod[]>()
   const policies = ix.policies.get(ns) ?? []
   const policyTargets = policies.map((p) => new Set(labelIndex.match(p.selector, true)))
   const nodeIds = new Set<string>()
@@ -533,7 +542,14 @@ function namespaceGraph(
   const standaloneHit = new Map<MapService, MapPod[]>()
   for (const s of services) {
     const hasSelector = Object.keys(s.selector).length > 0
-    targets.set(s, hasSelector ? labelIndex.match(s.selector) : [])
+    const selected = hasSelector ? podIndex.match(s.selector) : []
+    actualHits.set(s, selected)
+    const expected = hasSelector ? labelIndex.match(s.selector) : []
+    for (const p of selected) {
+      const owner = p.owner ? byOwner.get(`${p.owner.kind}|${p.owner.name}`) : undefined
+      if (owner && !expected.includes(owner)) expected.push(owner)
+    }
+    targets.set(s, expected)
     standaloneHit.set(
       s,
       hasSelector ? standalone.filter((p) => selectorMatches(s.selector, p.labels ?? {})) : []
@@ -662,13 +678,13 @@ function namespaceGraph(
       // PVC / ConfigMap / Secret không có → pod không khởi động được.
       for (const claim of w.pvcs) {
         const v = pvcByName.get(claim)
-        if (!v)
+        if (!v && mapKnown(data, 'persistentvolumeclaims', ns))
           problems.push({
             code: 'pvc-missing',
             severity: 'bad',
             text: t('PersistentVolumeClaim {name} not found', { name: claim })
           })
-        else if (v.tone !== 'ok')
+        else if (v && v.tone !== 'ok')
           problems.push({
             code: 'pvc-unbound',
             severity: v.tone === 'bad' ? 'bad' : 'warn',
@@ -816,7 +832,7 @@ function namespaceGraph(
                 : pvc
                   ? [pvc.status, pvc.capacity, pvc.storageClass].filter(Boolean).join(' · ')
                   : '',
-              tone: missing ? 'bad' : (pvc?.tone ?? 'ok'),
+              tone: missing ? 'bad' : exists === null ? 'muted' : (pvc?.tone ?? 'ok'),
               ...(missing
                 ? {}
                 : {
@@ -858,7 +874,12 @@ function namespaceGraph(
           dep('configmap', c, knownCm ? knownCm.has(`${ns}/${c}`) : null)
         for (const c of w.secrets ?? [])
           dep('secret', c, knownSecret ? knownSecret.has(`${ns}/${c}`) : null)
-        for (const c of w.pvcs) dep('pvc', c, pvcByName.has(c))
+        for (const c of w.pvcs)
+          dep(
+            'pvc',
+            c,
+            pvcByName.has(c) ? true : mapKnown(data, 'persistentvolumeclaims', ns) ? false : null
+          )
       }
     }
     // Kết nối ra ngoài (khai báo trong env / ConfigMap / Secret, ghép với traffic quan sát) → làn Outbound.
@@ -968,12 +989,26 @@ function namespaceGraph(
     const problems: TopoProblem[] = []
     const hasSelector = Object.keys(s.selector).length > 0
     const headless = s.clusterIP === 'None'
-    const matched = [...ws.flatMap(podsOf), ...loose]
-    const readyPods = matched.filter((p) => p.tone === 'ok' && !p.notReady).length
+    const matched = actualPodsKnown ? (actualHits.get(s) ?? []) : [...ws.flatMap(podsOf), ...loose]
+    const readyPods = matched.filter((p) =>
+      p.ready !== undefined ? p.ready && !p.terminating : p.tone === 'ok' && !p.notReady
+    ).length
     const ep = s.endpoints
     if (s.type === 'ExternalName') {
       // Không có endpoint — chỉ là tên DNS.
-    } else if (hasSelector && !ws.length && !loose.length) {
+    } else if (
+      hasSelector &&
+      (actualPodsKnown ? matched.length === 0 : !ws.length && !loose.length) &&
+      (!ep || ep.ready + ep.notReady === 0) &&
+      [
+        'pods',
+        'deployments.apps',
+        'statefulsets.apps',
+        'daemonsets.apps',
+        'jobs.batch',
+        'cronjobs.batch'
+      ].every((kind) => mapKnown(data, kind, ns))
+    ) {
       problems.push({
         code: 'svc-no-match',
         severity: 'warn',
@@ -983,7 +1018,7 @@ function namespaceGraph(
       })
     } else if (
       (ep ? ep.ready === 0 && (ep.notReady > 0 || matched.length > 0) : false) ||
-      (!ep && hasSelector && matched.length > 0 && readyPods === 0)
+      (!ep && mapKnown(data, 'pods', ns) && hasSelector && matched.length > 0 && readyPods === 0)
     ) {
       problems.push({
         code: 'svc-no-ready',
@@ -1002,9 +1037,15 @@ function namespaceGraph(
     for (const p of s.portList ?? []) {
       let tone: MapTone | undefined
       const named = !/^\d+$/.test(p.targetPort)
-      const declared = ws.filter((w) => (w.ports ?? []).length > 0)
-      if (named && ws.length) {
-        const without = ws.filter((w) => !(w.ports ?? []).some((c) => c.name === p.targetPort))
+      const portTargets =
+        actualPodsKnown && matched.length && matched.every((p) => p.ports !== undefined)
+          ? matched
+          : ws
+      const declared = portTargets.filter((w) => (w.ports ?? []).length > 0)
+      if (named && portTargets.length) {
+        const without = portTargets.filter(
+          (w) => !(w.ports ?? []).some((c) => c.name === p.targetPort)
+        )
         if (without.length) {
           tone = 'bad'
           problems.push({
@@ -1033,7 +1074,7 @@ function namespaceGraph(
       }
       // Tên cổng → số thật của container (dễ đọc: "http · 8080").
       const resolved = named
-        ? ws
+        ? portTargets
             .flatMap((w) => w.ports ?? [])
             .find((c) => c.name === p.targetPort)
             ?.port.toString()
@@ -1135,28 +1176,13 @@ function namespaceGraph(
     }
   }
   const ensureMissingService = (name: string, row: number): TopoNode => {
-    let n = missingSvc.get(name)
-    if (!n) {
-      n = {
-        id: serviceId(ns, name),
-        kind: 'service',
-        lane: 'service',
-        ns,
-        name,
-        title: 'Service',
-        sub: t('Not found'),
-        status: t('Referenced but does not exist'),
-        tone: 'bad',
-        problems: [
-          { code: 'svc-missing', severity: 'bad', text: t('This Service does not exist') }
-        ],
-        missing: true,
-        row
-      }
-      missingSvc.set(name, n)
-      addNode(n)
-    } else n.row = Math.min(n.row, row)
-    return n
+    let node = missingSvc.get(name)
+    if (!node) {
+      node = missingServiceNode(data, ns, name, row)
+      missingSvc.set(name, node)
+      addNode(node)
+    } else node.row = Math.min(node.row, row)
+    return node
   }
 
   // ——— Ingress / HTTPRoute / GRPCRoute ———
@@ -1170,13 +1196,17 @@ function namespaceGraph(
     const rules: MapRouteRule[] = r.rules?.length
       ? r.rules
       : r.backends.map((b) => ({ host: r.hosts[0] ?? '', path: '/', service: b }))
+    const backend = (rule: MapRouteRule): MapService | undefined =>
+      ix.serviceByKey.get(`${rule.namespace ?? ns}/${rule.service}`)
+    const backendName = (rule: MapRouteRule): string =>
+      rule.namespace && rule.namespace !== ns ? `${rule.namespace}/${rule.service}` : rule.service
     const backRows = rules.map((x) => svcRow.get(x.service) ?? LOOSE_ROW)
     const row = backRows.length ? Math.min(...backRows) : LOOSE_ROW
     routeRowOf.set(id, row)
     const shown = rules.slice(0, MAX_CARD_ROWS)
     const rows: TopoRow[] = shown.map((x) => {
-      const svc = svcByName.get(x.service)
-      const missing = !svc
+      const svc = backend(x)
+      const missing = !svc && mapKnown(data, 'services', x.namespace ?? ns)
       const portBad =
         svc && x.port
           ? !(svc.portList ?? []).some((p) => String(p.port) === x.port || p.name === x.port)
@@ -1185,7 +1215,7 @@ function namespaceGraph(
         text: x.default
           ? t('default backend')
           : `${x.host || '*'}${x.path && x.path !== '/' ? x.path : x.host ? '/' : x.path || '/'}`,
-        hint: `→ ${x.service}${x.port ? `:${x.port}` : ''}`,
+        hint: `→ ${backendName(x)}${x.port ? `:${x.port}` : ''}`,
         ...(missing ? { tone: 'bad' as const } : portBad ? { tone: 'warn' as const } : {})
       }
     })
@@ -1193,15 +1223,21 @@ function namespaceGraph(
       rows.push({
         text: tn(rules.length - MAX_CARD_ROWS, '+{n} more rule', '+{n} more rules')
       })
-    const missingNames = [...new Set(rules.map((x) => x.service))].filter((n) => !svcByName.has(n))
-    for (const n of missingNames)
+    const missingNames = [
+      ...new Set(
+        rules
+          .filter((x) => !backend(x) && mapKnown(data, 'services', x.namespace ?? ns))
+          .map(backendName)
+      )
+    ]
+    for (const name of missingNames)
       problems.push({
         code: ingress ? 'ing-missing-svc' : 'route-missing-svc',
         severity: 'bad',
-        text: t('Backend Service {name} does not exist — these requests fail', { name: n })
+        text: t('Backend Service {name} does not exist — these requests fail', { name })
       })
     for (const x of rules) {
-      const svc = svcByName.get(x.service)
+      const svc = backend(x)
       if (
         svc &&
         x.port &&
@@ -1211,7 +1247,7 @@ function namespaceGraph(
         problems.push({
           code: 'ing-bad-port',
           severity: 'warn',
-          text: t('Service {name} has no port {port}', { name: x.service, port: x.port })
+          text: t('Service {name} has no port {port}', { name: backendName(x), port: x.port })
         })
     }
     if (ingress && data.ingressClasses) {
@@ -1315,7 +1351,10 @@ function namespaceGraph(
     }
     if (!ingress && gatewayKnown)
       for (const p of r.parents ?? [])
-        if (!gatewayNames.has(`${p.ns}/${p.name}`))
+        if (
+          mapKnown(data, 'gateways.gateway.networking.k8s.io', p.ns) &&
+          !gatewayNames.has(`${p.ns}/${p.name}`)
+        )
           problems.push({
             code: 'route-missing-gw',
             severity: 'warn',
@@ -1343,6 +1382,7 @@ function namespaceGraph(
       row
     })
     rules.forEach((x, i) => {
+      if (x.namespace && x.namespace !== ns) return
       const sid = serviceId(ns, x.service)
       const missing = !svcByName.has(x.service)
       if (missing) ensureMissingService(x.service, row)
@@ -1353,7 +1393,7 @@ function namespaceGraph(
         to: sid,
         kind: 'route',
         fromRow,
-        ...(missing ? { broken: true } : {})
+        ...(missing && mapKnown(data, 'services', ns) ? { broken: true } : {})
       })
     })
   }
@@ -1547,6 +1587,26 @@ const FIXES: Partial<Record<string, () => string>> = {
     t('Check the readiness probe — path, port and how long the app takes to start.')
 }
 
+function missingServiceNode(data: MapData, ns: string, name: string, row: number): TopoNode {
+  const known = mapKnown(data, 'services', ns)
+  return {
+    id: serviceId(ns, name),
+    kind: 'service',
+    lane: 'service',
+    ns,
+    name,
+    title: 'Service',
+    sub: known ? t('Not found') : t('Unknown'),
+    status: known ? t('Referenced but does not exist') : t('Incomplete map data'),
+    tone: known ? 'bad' : 'muted',
+    problems: known
+      ? [{ code: 'svc-missing', severity: 'bad', text: t('This Service does not exist') }]
+      : [],
+    ...(known ? { missing: true } : {}),
+    row
+  }
+}
+
 export function buildTopology(data: MapData, options: TopoOptions): TopoGraph {
   const ix = indexData(data, options.now ?? Date.now())
   const nsNames = [
@@ -1555,6 +1615,11 @@ export function buildTopology(data: MapData, options: TopoOptions): TopoGraph {
       ...data.workloads.map((w) => w.ns),
       ...data.services.map((s) => s.ns),
       ...data.routes.map((r) => r.ns),
+      ...data.routes.flatMap((r) =>
+        (r.rules ?? []).flatMap((rule) =>
+          rule.namespace && mapKnown(data, 'services', rule.namespace) ? [rule.namespace] : []
+        )
+      ),
       ...data.pods.map((p) => p.ns)
     ])
   ]
@@ -1589,6 +1654,36 @@ export function buildTopology(data: MapData, options: TopoOptions): TopoGraph {
       const to = `rt:${r.kind}:${r.ns}/${r.name}`
       if (full.get(p.ns)?.nodes.some((n) => n.id === from) && full.has(r.ns))
         crossEdges.push({ id: `${from}>${to}`, from, to, kind: 'attach' })
+    }
+  }
+  // Gateway API backends may reference Services in another namespace. Never redirect
+  // that declaration to a same-named Service in the Route namespace.
+  const globalNodes = new Map(
+    [...full.values()].flatMap((g) => g.nodes.map((n) => [n.id, n] as const))
+  )
+  for (const r of data.routes) {
+    if (r.kind === 'ingresses.networking.k8s.io') continue
+    const from = `rt:${r.kind}:${r.ns}/${r.name}`
+    if (!globalNodes.has(from)) continue
+    for (const [i, rule] of (r.rules ?? []).entries()) {
+      if (!rule.namespace || rule.namespace === r.ns) continue
+      const target = full.get(rule.namespace)
+      if (!target) continue
+      const to = serviceId(rule.namespace, rule.service)
+      let node = globalNodes.get(to)
+      if (!node) {
+        node = missingServiceNode(data, rule.namespace, rule.service, LOOSE_ROW)
+        target.nodes.push(node)
+        globalNodes.set(to, node)
+      }
+      crossEdges.push({
+        id: `${from}#${String(i)}>${to}`,
+        from,
+        to,
+        kind: 'route',
+        fromRow: Math.min(i, MAX_CARD_ROWS),
+        ...(node.missing ? { broken: true } : {})
+      })
     }
   }
   // Gateway nằm cùng hàng với route đầu tiên gắn vào nó (cùng namespace).

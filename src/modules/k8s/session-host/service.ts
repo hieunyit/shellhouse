@@ -256,6 +256,7 @@ export class K8sService implements HostModuleSession {
   private refKey: string | null = null
   private connectionGeneration = 0
   private connectedGeneration = 0
+  private contextController = new AbortController()
   /** Đang ghi event của cluster về máy (theo dõi ở Home). */
   private recorder: AbortController | null = null
   /** Prometheus có metric gì (dò lại sau PROM_RETRY_MS). */
@@ -268,7 +269,7 @@ export class K8sService implements HostModuleSession {
   /** Prometheus đã dò (null = không có; dò lại sau PROM_RETRY_MS). */
   private prom: { target: PromTarget | null; at: number } | null = null
   /** Agent Caretta / Service → workload đã dò (dùng lại 60 s). */
-  private readonly trafficCache: TrafficCache = {}
+  private trafficCache: TrafficCache = {}
   private readonly edits = new Map<string, { name: string; stop: () => void }>()
   private disposed = false
   /** Dò kết nối (xem `linkProbe`): chạy khi có watch. `down` = đã báo "cũ" cho renderer. */
@@ -284,9 +285,15 @@ export class K8sService implements HostModuleSession {
     ref: ContextRef,
     signal?: AbortSignal
   ): Promise<{ client: KubeClient; generation: number }> {
+    if (this.disposed) throw new Error(t('The connection changed'))
     const generation = ++this.connectionGeneration
+    const key = contextKey(ref)
+    if (this.refKey !== key) {
+      this.stopContext()
+      this.refKey = key
+    }
     const cluster: ResolvedClusterConfig = ResolvedClusterSchema.parse(await this.deps.resolve(ref))
-    if (this.disposed || signal?.aborted || generation !== this.connectionGeneration)
+    if (!this.isCurrentConnection(generation) || signal?.aborted)
       throw new Error(t('The connection changed'))
     // Kết nối lại (đổi chế độ chỉ đọc…): đóng kết nối giữ lại của client cũ (watch / log / forward
     // đang chạy giữ kết nối riêng, không ảnh hưởng).
@@ -334,6 +341,10 @@ export class K8sService implements HostModuleSession {
     return this.client
   }
 
+  private isCurrentConnection(generation: number): boolean {
+    return !this.disposed && generation === this.connectionGeneration
+  }
+
   /**
    * Cột in của CRD đúng phiên bản đang dùng. Không phải CRD (API gộp như metrics.k8s.io), không đọc
    * được CRD (thiếu quyền) hay CRD không khai báo cột → [] (bảng chỉ có Name / Namespace / Age).
@@ -378,8 +389,6 @@ export class K8sService implements HostModuleSession {
     }
     if (op.op === 'connect') {
       this.readOnly = op.readOnly
-      // Đổi context: bộ ghi event của cluster cũ dừng (renderer bật lại nếu cần).
-      if (this.refKey !== contextKey(op.ref)) this.stopRecorder()
       const { client, generation } = await this.connect(op.ref, signal)
       const version = await client
         .json<{ gitVersion?: string }>('GET', '/version', { signal })
@@ -409,6 +418,8 @@ export class K8sService implements HostModuleSession {
     if (this.locked && isMutating(op))
       throw new Error(t('Read-only mode is on for this context — turn it off to make changes'))
     const client = this.require()
+    signal = AbortSignal.any([signal, this.contextController.signal])
+    const trafficCache = this.trafficCache
     switch (op.op) {
       case 'namespaces': {
         try {
@@ -503,7 +514,7 @@ export class K8sService implements HostModuleSession {
           return await podRange(client, target, op.namespace, op.pods, op.minutes, signal)
         } catch (error) {
           // Prometheus đã gỡ / đổi chỗ → lần sau dò lại.
-          if (error instanceof KubeError) this.prom = null
+          if (error instanceof KubeError && this.client === client) this.prom = null
           throw error
         }
       }
@@ -597,7 +608,7 @@ export class K8sService implements HostModuleSession {
       case 'traffic.range': {
         const target = await this.prometheus(client, signal)
         const probe = await this.historyProbe(client, signal)
-        return trafficRange(client, target, probe, this.trafficCache, op.start, op.end, signal)
+        return trafficRange(client, target, probe, op.start, op.end, signal)
       }
       case 'traffic.series': {
         const target = await this.prometheus(client, signal)
@@ -660,7 +671,7 @@ export class K8sService implements HostModuleSession {
         return topology(client, kind.id, obj, signal)
       }
       case 'traffic':
-        return trafficSample(client, this.trafficCache, signal)
+        return trafficSample(client, trafficCache, signal)
       case 'rbacReach':
         return rbacReach(client, op.namespace, op.serviceAccount, signal)
       case 'rolloutHistory':
@@ -734,7 +745,8 @@ export class K8sService implements HostModuleSession {
           const flush = (): void => {
             if (timer) clearTimeout(timer)
             timer = null
-            if (buffer) this.deps.emit('logs', { subscription: id, stream: 'stdout', text: buffer })
+            if (buffer && !s.aborted && !this.disposed)
+              this.deps.emit('logs', { subscription: id, stream: 'stdout', text: buffer })
             buffer = ''
           }
           const push = (text: string): void => {
@@ -822,7 +834,7 @@ export class K8sService implements HostModuleSession {
       }
       case 'portForward.resume': {
         const f = this.forwards.get(op.id)
-        if (f) await this.listenForward(f)
+        if (f) await this.listenForward(f, signal)
         return null
       }
       case 'portForwards':
@@ -848,7 +860,9 @@ export class K8sService implements HostModuleSession {
     apiVersion: string,
     kindName: string
   ): Promise<ResourceKind | undefined> {
-    const known = [...this.kinds.values()].find(
+    if (this.client !== client) throw new Error(t('The connection changed'))
+    const kinds = this.kinds
+    const known = [...kinds.values()].find(
       (k) => k.kind === kindName && (k.group ? `${k.group}/${k.version}` : k.version) === apiVersion
     )
     if (known) return known
@@ -871,7 +885,7 @@ export class K8sService implements HostModuleSession {
       title: r.kind,
       section: 'Custom resources'
     }
-    this.kinds.set(kind.id, kind)
+    kinds.set(kind.id, kind)
     return kind
   }
 
@@ -882,10 +896,12 @@ export class K8sService implements HostModuleSession {
   /** Danh mục loại (CRD + loại có sẵn mà cluster phục vụ) — đổi rất ít, nhớ 5 phút. */
   private catalog: { at: number; kinds: ResourceKind[] } | null = null
   /** Quyền list theo loại + namespace — nhớ 5 phút (đổi namespace không hỏi lại từ đầu). */
-  private readonly access = new Map<string, { at: number; allowed: boolean }>()
+  private access = new Map<string, { at: number; allowed: boolean }>()
 
   private async catalogOf(client: KubeClient, signal: AbortSignal): Promise<ResourceKind[]> {
-    if (this.catalog && Date.now() - this.catalog.at < DISCOVERY_TTL_MS) return this.catalog.kinds
+    const kindMap = this.kinds
+    if (this.client === client && this.catalog && Date.now() - this.catalog.at < DISCOVERY_TTL_MS)
+      return this.catalog.kinds
     const custom: ResourceKind[] = []
     try {
       const groups = await client.json<{
@@ -918,7 +934,7 @@ export class K8sService implements HostModuleSession {
         `discovery failed: ${error instanceof Error ? error.message : String(error)}`
       )
     }
-    for (const k of custom) this.kinds.set(k.id, k)
+    for (const k of custom) kindMap.set(k.id, k)
     // Loại có sẵn mà cluster không có (ValidatingAdmissionPolicy trước 1.30, HPA v2 trên cluster
     // rất cũ…) → ẩn khỏi điều hướng thay vì báo 404 khi bấm.
     const groupVersions = [
@@ -944,7 +960,8 @@ export class K8sService implements HostModuleSession {
       ...BUILTIN_KINDS.filter(exists),
       ...custom.sort((a, b) => a.id.localeCompare(b.id))
     ]
-    this.catalog = { at: Date.now(), kinds }
+    if (this.client === client && this.kinds === kindMap && !signal.aborted)
+      this.catalog = { at: Date.now(), kinds }
     return kinds
   }
 
@@ -957,11 +974,12 @@ export class K8sService implements HostModuleSession {
     namespace: string | undefined,
     signal: AbortSignal
   ): Promise<DiscoveredKind[]> {
+    const access = this.access
     const all = await this.catalogOf(client, signal)
     const now = Date.now()
     const keyOf = (k: ResourceKind): string => `${k.id}|${k.namespaced ? (namespace ?? '') : ''}`
     const allowed = await pool(all, 16, async (k) => {
-      const cached = this.access.get(keyOf(k))
+      const cached = access.get(keyOf(k))
       if (cached && now - cached.at < DISCOVERY_TTL_MS) return cached.allowed
       const ok = await client
         .json<{ status?: { allowed?: boolean } }>(
@@ -988,7 +1006,7 @@ export class K8sService implements HostModuleSession {
           // Không hỏi được quyền → cứ hiện (lỗi thật sẽ báo khi list); không nhớ.
           () => null
         )
-      if (ok !== null) this.access.set(keyOf(k), { at: now, allowed: ok })
+      if (ok !== null) access.set(keyOf(k), { at: now, allowed: ok })
       return ok ?? true
     })
     return all.map((k, i) => ({
@@ -1131,7 +1149,7 @@ export class K8sService implements HostModuleSession {
       clearTimeout(timer)
     }
     // dispose() xoá hết watch trong lúc chờ → không báo gì nữa.
-    if (this.watches.size === 0) return
+    if (this.client !== client || this.watches.size === 0) return
     if (reachable) {
       const wasDown = this.link.down
       this.link = { down: false, failures: 0 }
@@ -1300,6 +1318,7 @@ export class K8sService implements HostModuleSession {
    * ẩn (đánh dấu trong YAML) còn rỗng giữ nguyên giá trị trên cluster (xem keepHiddenSecretValues).
    */
   private async apply(client: KubeClient, text: string, signal?: AbortSignal): Promise<K8sObject> {
+    signal?.throwIfAborted()
     // Kiểm lại ở đây: lưu từ editor (edit) chạy ngoài run() — bật chỉ đọc giữa chừng cũng chặn.
     if (this.locked)
       throw new Error(t('Read-only mode is on for this context — turn it off to make changes'))
@@ -1359,9 +1378,11 @@ export class K8sService implements HostModuleSession {
       )
     )
     const writtenRv = o.metadata.resourceVersion ?? ''
+    signal?.throwIfAborted()
     let currentRv = writtenRv
     let last = toYaml(o)
     await writeNoFollow(localPath, last)
+    signal?.throwIfAborted()
     this.edits.get(localPath)?.stop()
     // Giới hạn số file đang theo dõi: bỏ file cũ nhất.
     while (this.edits.size >= MAX_EDITS) {
@@ -1373,6 +1394,7 @@ export class K8sService implements HostModuleSession {
     let changedAt = Date.now()
     let timer: NodeJS.Timeout | null = null
     let stopped = false
+    const isStopped = (): boolean => stopped
     const stop = (): void => {
       stopped = true
       if (timer) clearTimeout(timer)
@@ -1404,13 +1426,14 @@ export class K8sService implements HostModuleSession {
             return
           }
           if (text === last) return
+          if (isStopped() || signal?.aborted) return
           last = text
           changedAt = Date.now()
           const edited = parseYaml(text) as K8sObject
           // Người dùng không tự sửa resourceVersion → dùng bản mới nhất mình vừa ghi.
           if (edited.metadata.resourceVersion === writtenRv)
             edited.metadata.resourceVersion = currentRv
-          const saved = await this.apply(client, toYaml(edited))
+          const saved = await this.apply(client, toYaml(edited), signal)
           currentRv = saved.metadata.resourceVersion ?? currentRv
           this.deps.emit('edit', { path: localPath, name, ok: true })
         } catch (error) {
@@ -1490,38 +1513,48 @@ export class K8sService implements HostModuleSession {
     signal?: AbortSignal
   ): Promise<PortForwardInfo[]> {
     const out: PortForwardInfo[] = []
-    for (const [local, remote] of ports) {
-      const resolved = await this.resolveTarget(client, namespace, target, remote, signal)
-      const id = randomUUID()
-      const f: Forward = {
-        info: {
-          id,
-          namespace,
-          target,
-          localPort: local,
-          remotePort: remote,
-          connections: 0,
-          error: null,
-          state: 'active',
-          pod: resolved.pod,
-          latencyMs: null,
-          reconnects: 0
-        },
-        server: null,
-        sockets: new Set(),
-        client,
-        resolved
+    const created: Forward[] = []
+    try {
+      for (const [local, remote] of ports) {
+        signal?.throwIfAborted()
+        const resolved = await this.resolveTarget(client, namespace, target, remote, signal)
+        signal?.throwIfAborted()
+        const id = randomUUID()
+        const f: Forward = {
+          info: {
+            id,
+            namespace,
+            target,
+            localPort: local,
+            remotePort: remote,
+            connections: 0,
+            error: null,
+            state: 'active',
+            pod: resolved.pod,
+            latencyMs: null,
+            reconnects: 0
+          },
+          server: null,
+          sockets: new Set(),
+          client,
+          resolved
+        }
+        created.push(f)
+        await this.listenForward(f, signal)
+        this.forwards.set(id, f)
+        out.push(f.info)
       }
-      await this.listenForward(f)
-      this.forwards.set(id, f)
-      out.push(f.info)
+    } catch (error) {
+      for (const f of created) this.stopForward(f)
+      throw error
     }
     this.emitForwards()
     return out
   }
 
   /** Mở (lại) cổng trên máy của forward — bật lại dùng đúng cổng cũ. */
-  private async listenForward(f: Forward): Promise<void> {
+  private async listenForward(f: Forward, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted()
     if (f.server) return
     const server = createServer((socket) => {
       f.sockets.add(socket)
@@ -1534,13 +1567,21 @@ export class K8sService implements HostModuleSession {
       })
       void this.connectForward(f, socket)
     })
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(f.info.localPort, '127.0.0.1', () => {
-        server.removeListener('error', reject)
-        resolve()
+    f.server = server
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(f.info.localPort, '127.0.0.1', () => {
+          server.removeListener('error', reject)
+          resolve()
+        })
       })
-    })
+      signal?.throwIfAborted()
+    } catch (error) {
+      server.close()
+      if (f.server === server) f.server = null
+      throw error
+    }
     const address = server.address()
     if (address && typeof address === 'object') f.info.localPort = address.port
     f.server = server
@@ -1664,22 +1705,28 @@ export class K8sService implements HostModuleSession {
   }
 
   private async historyProbe(client: KubeClient, signal?: AbortSignal): Promise<HistoryProbe> {
-    if (this.probe && Date.now() - this.probe.at < PROM_RETRY_MS) return this.probe.value
+    if (this.client === client && this.probe && Date.now() - this.probe.at < PROM_RETRY_MS)
+      return this.probe.value
     const value = await probeHistory(client, await this.prometheus(client, signal), signal)
-    this.probe = { value, at: Date.now() }
+    if (this.client === client && !signal?.aborted) this.probe = { value, at: Date.now() }
     return value
   }
 
   private async prometheus(client: KubeClient, signal?: AbortSignal): Promise<PromTarget | null> {
-    if (this.prom && Date.now() - this.prom.at < (this.prom.target ? PROM_TTL_MS : PROM_RETRY_MS))
+    if (
+      this.client === client &&
+      this.prom &&
+      Date.now() - this.prom.at < (this.prom.target ? PROM_TTL_MS : PROM_RETRY_MS)
+    )
       return this.prom.target
     const target = await findPrometheus(client, signal)
-    this.prom = { target, at: Date.now() }
+    if (this.client === client && !signal?.aborted) this.prom = { target, at: Date.now() }
     return target
   }
 
   private stopForward(f: Forward): void {
     f.server?.close()
+    f.server = null
     for (const s of f.sockets) s.destroy()
     this.forwards.delete(f.info.id)
     this.emitForwards()
@@ -1747,20 +1794,42 @@ export class K8sService implements HostModuleSession {
     this.recorder = null
   }
 
-  dispose(): void {
-    this.disposed = true
-    this.connectionGeneration++
-    this.stopProbe()
-    this.stopRecorder()
+  private resetCaches(): void {
+    this.catalog = null
+    this.access = new Map()
+    this.kinds = new Map(BUILTIN_KINDS.map((k) => [k.id, k]))
+    this.prom = null
+    this.probe = null
     disposeTrafficCache(this.trafficCache)
+    // Tác vụ cũ có thể đang chờ HTTP: nó chỉ còn giữ object cache cũ.
+    this.trafficCache = {}
+  }
+
+  /** Đổi context: dừng cả công việc đang mở lẫn công việc đang chờ tạo tài nguyên. */
+  private stopContext(): void {
+    this.contextController.abort(new Error(t('The connection changed')))
+    this.contextController = new AbortController()
+    this.stopProbe()
+    this.link = { down: false, failures: 0 }
+    this.stopRecorder()
     for (const stop of this.subscriptions.values()) stop()
     this.subscriptions.clear()
     for (const w of this.watches.values()) w.controller.abort()
     this.watches.clear()
     for (const f of [...this.forwards.values()]) this.stopForward(f)
+    this.emitForwards()
     for (const e of [...this.edits.values()]) e.stop()
     this.edits.clear()
     this.client?.close()
+    this.client = null
+    this.cluster = null
+    this.resetCaches()
+  }
+
+  dispose(): void {
+    this.disposed = true
+    this.connectionGeneration++
+    this.stopContext()
   }
 }
 

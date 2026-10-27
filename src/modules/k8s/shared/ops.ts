@@ -615,7 +615,13 @@ export interface OverviewResult {
   /** Mức dùng thật (metrics-server), null nếu không có. */
   usage: Usage | null
   pods: { running: number; pending: number; failed: number; succeeded: number; restarting: number }
-  workloads: { kind: string; total: number; ready: number }[]
+  workloads: { kind: string; total: number; ready: number; known?: boolean }[]
+  /** Dữ liệu không đọc được: không đồng nghĩa danh sách rỗng / cluster khoẻ. */
+  unavailable?: {
+    resource: 'nodes' | 'deployments' | 'statefulsets' | 'daemonsets' | 'events' | 'pvcs'
+    reason: 'forbidden' | 'error'
+    message: string
+  }[]
   warnings: {
     namespace: string
     object: string
