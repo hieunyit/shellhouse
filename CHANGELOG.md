@@ -6,7 +6,11 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
-## [1.2.0-beta.34] - 2026-10-27
+## [1.2.0-beta.35] - 2026-10-27
+
+### Security
+
+- Update Electron, Zod, Vite and the supported Undici versions to their patched releases.
 
 ### Changed
 
@@ -19,6 +23,8 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ### Fixed
 
+- Release builds check dependency advisories and verify all 18 release files, installer hashes
+  and signed update metadata before creating the draft.
 - Vim, nano and tmux redraw without pushing the screen into scrollback or hiding the last row.
 - Resizing while SSH is connecting applies the latest terminal size as soon as the shell opens.
 - Container shells inherit the source host's environment label and top line, including in focus mode.

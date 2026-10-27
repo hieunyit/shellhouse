@@ -34,3 +34,7 @@ auditConfig:
 # - GHSA-68fv-2mgg-jv7q (source-map-js <1.2.2): DoS vòng lặp sự kiện qua offset của source map.
 overrides:
   source-map-js: '>=1.2.2'
+  # GHSA-xjj6-f33q-929c: keep each supported Undici major on its patched release.
+  'undici@^6.0.0': '^6.29.1'
+  'undici@^7.0.0': '^7.30.1'
+  'undici@^8.0.0': '^8.12.2'

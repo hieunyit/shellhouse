@@ -52,6 +52,10 @@ jobs:
           v=$(node -p "require('./package.json').version")
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != package.json $v"; exit 1; }
 
+      - name: Dependency audit
+        if: runner.os == 'Linux'
+        run: pnpm audit --audit-level high
+
       - run: pnpm lint && pnpm typecheck && pnpm test
 
       - run: sudo apt-get update && sudo apt-get install -y rpm
@@ -178,6 +182,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - uses: actions/download-artifact@v7
         with:
           path: artifacts
@@ -186,12 +193,15 @@ jobs:
         # Hai job macOS mỗi job ghi latest-mac.yml riêng (arm64 / x64); electron-updater cần một
         # file liệt kê cả hai.
         run: node scripts/merge-mac-channel.mjs artifacts
+      - name: Verify complete release files
+        run: |
+          cat artifacts/SHA256SUMS-*.txt > artifacts/SHA256SUMS.txt
+          rm artifacts/SHA256SUMS-*.txt
+          node scripts/verify-release-artifacts.mjs artifacts "${GITHUB_REF_NAME#v}"
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cat artifacts/SHA256SUMS-*.txt > artifacts/SHA256SUMS.txt
-          rm artifacts/SHA256SUMS-*.txt
           prerelease=""
           node scripts/release-notes.mjs "${GITHUB_REF_NAME#v}" > notes.md
           case "${GITHUB_REF_NAME}" in

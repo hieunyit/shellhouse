@@ -44,7 +44,11 @@
   git tag v0.2.0 && git push origin v0.2.0
   ```
 - [ ] Workflow `Release` chạy lint, typecheck, test, sau đó build và ký từng OS, ký file kênh Linux,
-      smoke test bản đóng gói, rồi tạo **GitHub Release nháp** kèm `SHA256SUMS.txt`.
+      smoke test bản đóng gói, rồi kiểm tra đủ **18 file** (Windows x64, Linux x64, macOS Intel và
+      Apple Silicon), checksum của 9 bộ cài, metadata và chữ ký cập nhật Linux trước khi tạo
+      **GitHub Release nháp** kèm `SHA256SUMS.txt`.
+      Có thể kiểm tra lại sau khi tải đủ file bằng:
+      `node scripts/verify-release-artifacts.mjs <thư-mục-file> <version>` (Node.js 24).
 - [ ] Tải bản nháp về cài thử trên ít nhất một máy mỗi OS:
   - [ ] Khởi động, mở vault, SSH, SFTP.
   - [ ] Windows: xem Properties → Digital Signatures; SmartScreen không chặn.
