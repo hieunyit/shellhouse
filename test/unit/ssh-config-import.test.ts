@@ -97,3 +97,10 @@ Host nokey
     expect(existsSync(marker)).toBe(false)
   })
 })
+
+it('Include accepts quoted paths with spaces and ignores trailing comments', () => {
+  const home = setupHome()
+  writeFileSync(join(home, '.ssh', 'with spaces.conf'), 'Host quoted\n HostName web.example.com')
+  const result = scan('Include="with spaces.conf" # comment', home)
+  expect(result[0]?.hostname).toBe('web.example.com')
+})

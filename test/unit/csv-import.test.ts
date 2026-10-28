@@ -85,3 +85,26 @@ describe('scanCsv', () => {
     expect(new Set(candidates.map((c) => c.alias)).size).toBe(3)
   })
 })
+
+it('quoted semicolons in a header do not change the CSV delimiter', () => {
+  expect(
+    scan('"unused;;;;",Hostname,Username\nx,web.example.com,deploy').candidates[0]?.hostname
+  ).toBe('web.example.com')
+})
+it('rejects unterminated CSV quotes instead of silently merging hosts', () => {
+  expect(() => scan('Hostname,Username\n"web.example.com,deploy\nother.example.com,root')).toThrow(
+    'unterminated'
+  )
+})
+it('candidate aliases remain unique even if a label matches a generated suffix', () => {
+  const rows = ['Label,Hostname', 'web,a', 'web (row 4, 2),b', 'web,c', 'web (row 4, 2),d']
+  const candidates = scan(rows.join('\n')).candidates
+  expect(new Set(candidates.map((c) => c.alias)).size).toBe(candidates.length)
+})
+
+it('a shared-account export asks for a user instead of guessing the local user', () => {
+  expect(scan('Hostname,Username,Account\nweb.example.com,,ops').candidates[0]).toMatchObject({
+    username: null,
+    problem: null
+  })
+})

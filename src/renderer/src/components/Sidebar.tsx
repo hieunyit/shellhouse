@@ -149,7 +149,7 @@ type Dialog =
       prefill?: HostPrefill
     }
   | { kind: 'group'; group: GroupSummary | null; parentId?: string | null; confirmDelete?: boolean }
-  | { kind: 'import' }
+  | { kind: 'import'; groupId?: string }
   | { kind: 'export'; groupId: string | null }
   | { kind: 'delete'; hosts: HostSummary[] }
   | { kind: 'move'; hosts: HostSummary[] }
@@ -585,6 +585,14 @@ export const Sidebar = memo(
           }
         },
         {
+          id: 'import',
+          label: t('Import hosts here…'),
+          icon: <FileInput size={14} />,
+          onSelect: () => {
+            setDialog({ kind: 'import', groupId: group.id })
+          }
+        },
+        {
           id: 'add-subgroup',
           label: t('New subgroup'),
           icon: <FolderPlus size={14} />,
@@ -883,7 +891,6 @@ export const Sidebar = memo(
       const children = tree.children(group.id)
       const members = hostsIn(group.id)
       const empty = children.length === 0 && members.length === 0
-      const canNest = groupMoveProblem(tree, null, group.id) === null
       const groupEnv = findEnvironment(environments, groupOwnEnvironment(group.defaults))
       const hint = drop?.key === group.id ? drop.pos : null
       const FolderIcon = open && !empty ? FolderOpen : Folder
@@ -896,7 +903,7 @@ export const Sidebar = memo(
           data-tree-item=""
           data-tree-key={`group:${group.id}`}
           data-group-id={group.id}
-          className="rounded-ds-md outline-none [&:focus-visible>div:first-child]:shadow-ds-focus"
+          className="rounded-ds-md outline-none [&:focus-visible>div:first-child]:shadow-ds-focus [&:focus-within>div:first-child_.group-actions]:flex [&:focus-within>div:first-child_.group-meta]:hidden"
           onKeyDown={(e) => {
             if (e.target !== e.currentTarget || e.key !== 'Enter') return
             e.preventDefault()
@@ -952,15 +959,25 @@ export const Sidebar = memo(
             <span className="min-w-0 flex-1 truncate">{group.name}</span>
             {/* Môi trường đặt ở nhóm (thiết kế v0.5): nhãn ô vuông — Prod magenta, còn lại trung
                 tính; nhóm con / host kế thừa, không lặp nhãn. */}
-            {groupEnv && <EnvLabel env={groupEnv} className="group-hover:hidden" />}
+            {groupEnv && (
+              <EnvLabel
+                env={groupEnv}
+                className="group-meta group-hover:hidden group-focus-within:hidden"
+              />
+            )}
             <span
-              className="min-w-4 text-right text-xs text-faint tabular-nums group-hover:hidden"
+              className="min-w-4 text-right text-xs text-faint tabular-nums group-meta group-hover:hidden group-focus-within:hidden"
               data-testid="group-count"
               title={tn(count, '{n} host including subgroups', '{n} hosts including subgroups')}
             >
               {count}
             </span>
-            <span className="hidden items-center group-hover:flex">
+            <span
+              className="group-actions hidden items-center group-hover:flex group-focus-within:flex"
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+              }}
+            >
               <IconButton
                 label={t('Add host to {name}', { name: group.name })}
                 size="sm"
@@ -971,27 +988,15 @@ export const Sidebar = memo(
               >
                 <Plus size={13} />
               </IconButton>
-              {canNest && (
-                <IconButton
-                  label={t('New subgroup in {name}', { name: group.name })}
-                  size="sm"
-                  data-testid="group-add-subgroup"
-                  onClick={() => {
-                    setDialog({ kind: 'group', group: null, parentId: group.id })
-                  }}
-                >
-                  <FolderPlus size={13} />
-                </IconButton>
-              )}
               <IconButton
-                label={t('Edit group {name}', { name: group.name })}
+                label={t('Import hosts into {name}', { name: group.name })}
                 size="sm"
-                data-testid="group-edit"
+                data-testid="group-import"
                 onClick={() => {
-                  setDialog({ kind: 'group', group })
+                  setDialog({ kind: 'import', groupId: group.id })
                 }}
               >
-                <Pencil size={12} />
+                <FileInput size={13} />
               </IconButton>
               <IconButton
                 label={t('More actions for {name}', { name: group.name })}
@@ -1223,7 +1228,7 @@ export const Sidebar = memo(
                 <FolderPlus size={14} />
               </IconButton>
               <IconButton
-                label={t('Import hosts from ~/.ssh/config, MobaXterm or CSV')}
+                label={t('Import hosts')}
                 size="sm"
                 data-testid="import-ssh-config"
                 onClick={() => {
@@ -1467,7 +1472,9 @@ export const Sidebar = memo(
             onClose={closeDialog}
           />
         )}
-        {dialog?.kind === 'import' && <ImportDialog onClose={closeDialog} />}
+        {dialog?.kind === 'import' && (
+          <ImportDialog initialGroupId={dialog.groupId ?? null} onClose={closeDialog} />
+        )}
         {dialog?.kind === 'export' && (
           <ExportDialog initialGroup={dialog.groupId} onClose={closeDialog} />
         )}

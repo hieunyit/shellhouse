@@ -323,7 +323,7 @@ export const ImportCandidate = z.object({
   alias: z.string(),
   /** Tên hiển thị khi nhập; không có = `alias`. */
   label: z.string().optional(),
-  /** Đường dẫn nhóm (MobaXterm: thư mục bookmark) — tạo nhóm lồng nhau khi nhập. */
+  /** Đường dẫn nhóm trong nguồn, chỉ để xem trước; không tự tạo nhóm khi nhập. */
   group: z.array(z.string()).optional(),
   /** Tag có sẵn trong nguồn (CSV). */
   tags: z.array(z.string()).optional(),
@@ -336,14 +336,14 @@ export const ImportCandidate = z.object({
   duplicate: z.boolean(),
   /** Lý do không nhập được (hostname không hợp lệ...). */
   problem: z.string().nullable(),
-  /** Lưu ý nhưng vẫn nhập được (IdentityFile không có trên máy này → chọn key khác / thêm sau). */
+  /** Lưu ý không chặn nhập (key thiếu; tài khoản chung / jump host cần chọn lại). */
   warning: z.string().nullable().optional()
 })
 export type ImportCandidate = z.infer<typeof ImportCandidate>
 
 /**
- * Tuỳ chọn khi nhập, áp cho mọi host đã chọn; thiếu trường = theo file. groupId: nhóm đích (nhóm
- * trong file tạo bên trong nó); keyId: SSH key trong vault; jumpHostId: host đã lưu làm jump host;
+ * Tuỳ chọn khi nhập, áp cho mọi host đã chọn. groupId: nhóm có sẵn nhận trực tiếp mọi host
+ * (không có = không nhóm); keyId: SSH key trong vault; jumpHostId: host đã lưu làm jump host;
  * username: user SSH.
  */
 export const ImportOptions = z.object({

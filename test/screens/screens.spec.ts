@@ -163,7 +163,7 @@ test('chụp màn hình giao diện', async () => {
       await shot('03d-workspaces')
       await page.keyboard.press('Escape')
       await page.getByTestId('import-ssh-config').click()
-      await page.getByTestId('import-source-csv').click()
+      await page.getByTestId('import-source').selectOption('csv')
       await shot('03e-import')
       await page.keyboard.press('Escape')
 
@@ -195,7 +195,8 @@ test('chụp màn hình giao diện', async () => {
       const dbRow = page.locator('[data-testid="group-row"][data-group-name="Database"]')
       await dbRow.hover()
       await shot('04b-group-hover')
-      await dbRow.getByTestId('group-edit').click()
+      await dbRow.getByTestId('group-more').click()
+      await page.getByTestId('menu-edit').click()
       await page.getByTestId('group-parent').focus()
       await shot('04c-group-form')
       await page.getByTestId('group-delete').click()

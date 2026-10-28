@@ -6,6 +6,31 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.37] - 2026-10-28
+
+### Changed
+
+- Group rows and their context menus provide direct host import with the destination preselected.
+  The import dialog keeps source/destination controls at the top, supports preview search and
+  pages of 100 hosts, retains selections across pages and preserves the destination when switching sources.
+- Host imports place every selected host directly in an existing destination group, or no group.
+  Source folders remain visible in previews but never create groups, including nested folders
+  from MobaXterm, CSV, Ansible and Shellhouse YAML. RDP imports also accept a destination group.
+
+### Fixed
+
+- Group action buttons remain visible while keyboard focus moves into them, allowing imports
+  to be opened with Tab and Enter. Preview pagination and search reset the preview scroll position.
+- Ignore stale import previews and file-picker results, prevent duplicate submissions, and import
+  the exact scanned values rather than rereading a file that may have changed.
+- Missing MobaXterm private keys warn without blocking a replacement key. Shellhouse YAML and CSV
+  no longer guess the local username for shared accounts; YAML missing users can be filled in.
+- Validate malformed/recursive YAML and invalid YAML/RDP ports, reject unterminated CSV fields, preserve
+  CSV delimiter detection with quoted headers, and guarantee unique CSV selection identifiers.
+- Bound nested Ansible range expansion, reject group cycles, apply group depth/priority/name
+  precedence, and recognize INI host:port addresses. Quoted SSH Include paths support spaces.
+- CSV exports retain inherited usernames/ports and separate tags for correct re-import.
+
 ## [1.2.0-beta.36] - 2026-10-27
 
 ### Added

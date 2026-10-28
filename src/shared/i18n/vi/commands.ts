@@ -44,8 +44,8 @@ export const commands: Readonly<Record<string, string>> = {
   'Uses the shared account “{name}” — set it after importing':
     'Dùng tài khoản chung “{name}” — đặt lại sau khi nhập',
   'No username': 'Chưa có tên đăng nhập',
-  'A file saved with Export hosts (Shellhouse YAML). Groups are recreated; passwords are never in it.':
-    'File lưu bằng Export hosts (YAML của Shellhouse). Nhóm được tạo lại; trong file không có mật khẩu.',
+  'A file saved with Export hosts (Shellhouse YAML). Hosts are imported into the selected group; passwords are never in it.':
+    'File lưu bằng Export hosts (YAML của Shellhouse). Host được nhập trực tiếp vào nhóm đã chọn; trong file không có mật khẩu.',
   'Choose a file saved with Export hosts.': 'Chọn file đã lưu bằng Export hosts.',
   'Type a label selector, like app=web': 'Gõ label selector, ví dụ app=web',
   'Unbalanced parentheses': 'Thiếu hoặc thừa dấu ngoặc',

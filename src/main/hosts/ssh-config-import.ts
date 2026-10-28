@@ -23,9 +23,13 @@ export function expandIncludes(text: string, home: string, depth = 0): string {
   return text
     .split(/\r?\n/)
     .map((line) => {
-      const match = /^\s*Include\s+(.+?)\s*$/i.exec(line)
+      const match = /^\s*Include(?:\s*=\s*|\s+)(.+?)\s*$/i.exec(line)
       if (!match?.[1]) return line
-      const parts = match[1].split(/\s+/)
+      const parts: string[] = []
+      for (const token of match[1].matchAll(/"([^"]*)"|'([^']*)'|([^\s]+)/g)) {
+        if (token[3]?.startsWith('#')) break
+        parts.push(token[1] ?? token[2] ?? token[3] ?? '')
+      }
       const contents: string[] = []
       for (const raw of parts) {
         const pattern = expandHome(raw.replace(/^"|"$/g, ''), home)
@@ -115,6 +119,7 @@ export function scanSshConfig(text: string, options: ScanOptions): ImportCandida
         problem: t('Could not read this entry')
       }
     }
+    const label = alias.trim().slice(0, 100)
     const hostname = first(computed['hostname']) ?? alias
     const portRaw = first(computed['port'])
     const port = portRaw ? Number(portRaw) : 22
@@ -136,12 +141,13 @@ export function scanSshConfig(text: string, options: ScanOptions): ImportCandida
 
     return {
       alias,
+      ...(label !== alias ? { label } : {}),
       hostname,
       port: Number.isInteger(port) ? port : 22,
       username,
       keyFile: missingKey ? null : keyFile,
       proxyJump: proxyJump && proxyJump.toLowerCase() !== 'none' ? proxyJump : null,
-      duplicate: existing.has(alias.toLowerCase()),
+      duplicate: existing.has(label.toLowerCase()),
       problem,
       warning: missingKey ? t('IdentityFile not found: {path}', { path: keyFile }) : null
     }

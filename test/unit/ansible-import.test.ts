@@ -138,3 +138,34 @@ all:
     expect(r.candidates[0]).toMatchObject({ hostname: '10.0.0.5', username: null, problem: null })
   })
 })
+
+it('bounds the total Cartesian expansion and rejects unsafe numeric ranges', () => {
+  expect(expandRange('n[1:2]-[a:b]')).toEqual(['n1-a', 'n1-b', 'n2-a', 'n2-b'])
+  for (const pattern of [
+    'n[1:10001]',
+    'n[1:101]-[1:101]',
+    'n[9007199254740992:9007199254740993]',
+    'n[1:3:0]'
+  ])
+    expect(() => expandRange(pattern)).toThrow('range is too large or invalid')
+})
+
+it('uses child group variables when a host is listed directly in both child and parent', () => {
+  const result = scan(
+    '[child]\nweb\n[child:vars]\nansible_user=childuser\n[parent]\nweb\n[parent:children]\nchild\n[parent:vars]\nansible_user=parentuser'
+  )
+  expect(result.candidates[0]?.username).toBe('childuser')
+})
+it('merges sibling groups alphabetically and honors ansible_group_priority', () => {
+  const body = '[z]\nweb\n[z:vars]\nansible_user=zuser\n[a]\nweb\n[a:vars]\nansible_user=auser'
+  expect(scan(body).candidates[0]?.username).toBe('zuser')
+  expect(scan(body + '\nansible_group_priority=10').candidates[0]?.username).toBe('auser')
+})
+it('parses INI host:port shorthand and rejects group cycles', () => {
+  expect(scan('[web]\nserver.example.com:2222 ansible_user=deploy').candidates[0]).toMatchObject({
+    label: 'server.example.com',
+    hostname: 'server.example.com',
+    port: 2222
+  })
+  expect(() => scan('[a:children]\nb\n[b:children]\na\n[a]\nweb')).toThrow('group cycle')
+})

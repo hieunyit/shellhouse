@@ -13,6 +13,7 @@ const COLUMNS = {
   hostname: ['hostname', 'hostname/ip', 'host', 'ip', 'address', 'server', 'hostip'],
   port: ['port', 'sshport'],
   username: ['username', 'user', 'login', 'sshusername'],
+  account: ['account', 'sharedaccount'],
   group: ['group', 'groups', 'folder', 'path'],
   tags: ['tags', 'tag', 'labels'],
   keyFile: ['keyfile', 'identityfile', 'privatekeypath', 'sshkeypath'],
@@ -31,9 +32,21 @@ const normalize = (s: string): string =>
 export function parseCsv(text: string): string[][] {
   // Bỏ BOM (Excel lưu "CSV UTF-8" có BOM).
   const body = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
-  const firstLine = body.split(/\r?\n/, 1)[0] ?? ''
-  const delimiter =
-    (firstLine.match(/;/g)?.length ?? 0) > (firstLine.match(/,/g)?.length ?? 0) ? ';' : ','
+  let headerQuoted = false
+  let commas = 0
+  let semicolons = 0
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i]
+    if (c === '"') {
+      if (headerQuoted && body[i + 1] === '"') i++
+      else headerQuoted = !headerQuoted
+    } else if (!headerQuoted) {
+      if (c === '\n' || c === '\r') break
+      if (c === ',') commas++
+      if (c === ';') semicolons++
+    }
+  }
+  const delimiter = semicolons > commas ? ';' : ','
   const rows: string[][] = []
   let row: string[] = []
   let field = ''
@@ -59,6 +72,7 @@ export function parseCsv(text: string): string[][] {
       row = []
     } else field += c
   }
+  if (quoted) throw new Error(t('The CSV file contains an unterminated quoted field.'))
   row.push(field)
   if (row.some((f) => f.trim() !== '')) rows.push(row)
   return rows
@@ -90,6 +104,7 @@ export function scanCsv(text: string, options: CsvScanOptions): CsvScan {
     hostname: find(COLUMNS.hostname),
     port: find(COLUMNS.port),
     username: find(COLUMNS.username),
+    account: find(COLUMNS.account),
     group: find(COLUMNS.group),
     tags: find(COLUMNS.tags),
     keyFile: find(COLUMNS.keyFile),
@@ -116,7 +131,7 @@ export function scanCsv(text: string, options: CsvScanOptions): CsvScan {
       continue
     }
     const hostname = cell(row, col.hostname)
-    const label = cell(row, col.label) || hostname
+    const label = (cell(row, col.label) || hostname).slice(0, 100)
     if (!hostname && !label) continue
     const group = cell(row, col.group)
       .split(/[\\/]|\s>\s/)
@@ -124,12 +139,14 @@ export function scanCsv(text: string, options: CsvScanOptions): CsvScan {
       .filter(Boolean)
     // Khoá duy nhất: nhóm + tên (+ số dòng nếu trùng).
     let alias = [...group, label].join('\\')
-    if (seen.has(alias.toLowerCase())) alias = `${alias} (row ${i + 2})`
+    for (let suffix = 2; seen.has(alias.toLowerCase()); suffix++)
+      alias = `${[...group, label].join('\\')} (row ${i + 2}, ${suffix})`
     seen.add(alias.toLowerCase())
 
     const portRaw = cell(row, col.port)
     const port = portRaw ? Number(portRaw) : 22
-    const username = cell(row, col.username) || options.defaultUser
+    const username =
+      cell(row, col.username) || (cell(row, col.account) ? null : options.defaultUser)
     const keyFile = cell(row, col.keyFile) || null
     const tags = cell(row, col.tags)
       .split(/[;,|]/)

@@ -8,8 +8,8 @@ import { t } from '@shared/i18n'
 /**
  * Nhập host từ inventory của Ansible — dạng INI (`[web]`, `[web:vars]`, `[prod:children]`, dải tên
  * `web[01:03]`) hoặc YAML (`all: { hosts, vars, children }`). Biến kết nối theo thứ tự ưu tiên của
- * Ansible: biến của host > nhóm con > nhóm cha > `all`. Nhóm lồng nhau theo `children` thành nhóm
- * lồng nhau trong Shellhouse; nhóm khác của cùng host thành tag. Mật khẩu / vault không bao giờ được
+ * Ansible: biến của host > nhóm con > nhóm cha > `all`. Đường dẫn `children` chỉ để xem trước;
+ * nhóm khác của cùng host thành tag. Mật khẩu / vault không bao giờ được
  * đọc — chỉ báo tên biến đã bỏ qua.
  */
 
@@ -27,6 +27,7 @@ interface Inventory {
   /** Thứ tự host xuất hiện lần đầu (giữ thứ tự của file). */
   order: string[]
   seen: Set<string>
+  hostValues: Map<string, Vars>
 }
 
 export interface AnsibleScanOptions {
@@ -60,6 +61,7 @@ function group(inv: Inventory, name: string): Group {
 
 function addHost(inv: Inventory, groupName: string, host: string, vars: Vars): void {
   const g = group(inv, groupName)
+  inv.hostValues.set(host, { ...(inv.hostValues.get(host) ?? {}), ...vars })
   g.hosts.set(host, { ...(g.hosts.get(host) ?? {}), ...vars })
   if (!inv.seen.has(host)) {
     inv.seen.add(host)
@@ -69,19 +71,38 @@ function addHost(inv: Inventory, groupName: string, host: string, vars: Vars): v
 
 /** `web[01:03].x` → web01.x, web02.x, web03.x; `[a:c]`; bước `[1:10:2]`. */
 export function expandRange(pattern: string): string[] {
-  const m = /^(.*?)\[([0-9a-z]+):([0-9a-z]+)(?::(\d+))?\](.*)$/i.exec(pattern)
-  if (!m) return [pattern]
-  const [, head = '', from = '', to = '', stepRaw, tail = ''] = m
-  const step = Math.max(1, Number(stepRaw ?? 1))
+  const pending = [pattern]
   const out: string[] = []
-  if (/^\d+$/.test(from) && /^\d+$/.test(to)) {
-    const width = from.length > 1 && from.startsWith('0') ? from.length : 0
-    for (let i = Number(from); i <= Number(to) && out.length < MAX_RANGE; i += step)
-      out.push(...expandRange(`${head}${String(i).padStart(width, '0')}${tail}`))
-  } else if (from.length === 1 && to.length === 1) {
-    for (let c = from.charCodeAt(0); c <= to.charCodeAt(0) && out.length < MAX_RANGE; c += step)
-      out.push(...expandRange(`${head}${String.fromCharCode(c)}${tail}`))
-  } else return [pattern]
+  while (pending.length) {
+    const current = pending.pop() ?? ''
+    const m = /^(.*?)\[([0-9a-z]+):([0-9a-z]+)(?::(\d+))?\](.*)$/i.exec(current)
+    if (!m) {
+      out.push(current)
+      continue
+    }
+    const [, head = '', from = '', to = '', stepRaw, tail = ''] = m
+    const numeric = /^\d+$/.test(from) && /^\d+$/.test(to)
+    if (!numeric && (from.length !== 1 || to.length !== 1)) {
+      out.push(current)
+      continue
+    }
+    const step = Number(stepRaw ?? 1)
+    const start = numeric ? Number(from) : from.charCodeAt(0)
+    const end = numeric ? Number(to) : to.charCodeAt(0)
+    const count = Math.max(0, Math.floor((end - start) / step) + 1)
+    if (
+      ![start, end, step].every(Number.isSafeInteger) ||
+      step < 1 ||
+      count + pending.length + out.length > MAX_RANGE
+    )
+      throw new Error(t('The inventory range is too large or invalid (maximum 10000 hosts).'))
+    const width = numeric && from.length > 1 && from.startsWith('0') ? from.length : 0
+    for (let index = count - 1; index >= 0; index--) {
+      const value = start + index * step
+      const part = numeric ? String(value).padStart(width, '0') : String.fromCharCode(value)
+      pending.push(`${head}${part}${tail}`)
+    }
+  }
   return out
 }
 
@@ -99,7 +120,7 @@ function parseVars(text: string): Vars {
 }
 
 function parseIni(text: string): Inventory {
-  const inv: Inventory = { groups: new Map(), order: [], seen: new Set() }
+  const inv: Inventory = { groups: new Map(), order: [], seen: new Set(), hostValues: new Map() }
   let section = 'ungrouped'
   let kind: 'hosts' | 'vars' | 'children' = 'hosts'
   for (const rawLine of text.split(/\r?\n/)) {
@@ -127,7 +148,15 @@ function parseIni(text: string): Inventory {
       const space = line.search(/\s/)
       const name = space < 0 ? line : line.slice(0, space)
       const vars = space < 0 ? {} : parseVars(line.slice(space + 1))
-      for (const host of expandRange(name)) addHost(inv, section, host, vars)
+      for (const host of expandRange(name)) {
+        const endpoint = /^(?:\[([^\]]+)\]|([^:]+)):(\d+)$/.exec(host)
+        addHost(
+          inv,
+          section,
+          endpoint ? (endpoint[1] ?? endpoint[2] ?? host) : host,
+          endpoint ? { ansible_port: endpoint[3] ?? '', ...vars } : vars
+        )
+      }
     }
   }
   return inv
@@ -153,9 +182,9 @@ function parseYaml(text: string): Inventory {
   })
   if (!doc || typeof doc !== 'object' || Array.isArray(doc))
     throw new Error(t('This is not an Ansible inventory.'))
-  const inv: Inventory = { groups: new Map(), order: [], seen: new Set() }
+  const inv: Inventory = { groups: new Map(), order: [], seen: new Set(), hostValues: new Map() }
   const walk = (name: string, node: unknown, depth: number): void => {
-    if (depth > 20) return
+    if (depth > 20) throw new Error(t('Could not read this entry'))
     const g = group(inv, name)
     if (!node || typeof node !== 'object') return
     const n = node as Record<string, unknown>
@@ -184,28 +213,57 @@ function looksYaml(text: string): boolean {
   return first !== undefined && (first === '---' || /^[\w.-]+:\s*(\{.*\})?$/.test(first))
 }
 
-/** Biến của host theo thứ tự ưu tiên của Ansible: all < nhóm cha < nhóm con < host. */
+/** Determine actual group depths once, rejecting cycles instead of guessing precedence. */
+function groupDepths(inv: Inventory, parents: Map<string, string[]>): Map<string, number> {
+  const depths = new Map<string, number>()
+  const pending = new Map(
+    [...inv.groups.keys()].map((name) => [name, parents.get(name)?.length ?? 0])
+  )
+  const queue = [...pending].filter(([, count]) => count === 0).map(([name]) => name)
+  for (let index = 0; index < queue.length; index++) {
+    const name = queue[index] ?? ''
+    const depth = depths.get(name) ?? (name === 'all' ? 0 : 1)
+    depths.set(name, depth)
+    for (const child of inv.groups.get(name)?.children ?? []) {
+      depths.set(child, Math.max(depths.get(child) ?? 0, depth + 1))
+      const count = (pending.get(child) ?? 0) - 1
+      pending.set(child, count)
+      if (count === 0) queue.push(child)
+    }
+  }
+  if (queue.length !== inv.groups.size) throw new Error(t('The inventory contains a group cycle.'))
+  return depths
+}
+
+/** Ansible merges groups by depth, priority and name, then applies host variables. */
 function hostVars(
   inv: Inventory,
   host: string,
-  parents: Map<string, string[]>
+  parents: Map<string, string[]>,
+  depths: Map<string, number>
 ): { vars: Vars; direct: string[] } {
   const direct = [...inv.groups.values()].filter((g) => g.hosts.has(host)).map((g) => g.name)
-  const depth = new Map<string, number>()
-  const visit = (name: string, d: number, seen: Set<string>): void => {
-    if (seen.has(name)) return
-    seen.add(name)
-    depth.set(name, Math.max(depth.get(name) ?? 0, d))
-    for (const p of parents.get(name) ?? []) visit(p, d - 1, seen)
+  const names = new Set<string>()
+  const pending = [...direct]
+  while (pending.length) {
+    const name = pending.pop() ?? ''
+    if (names.has(name)) continue
+    names.add(name)
+    pending.push(...(parents.get(name) ?? []))
   }
-  for (const g of direct) visit(g, 100, new Set())
-  // Cha (độ sâu nhỏ) trước, con sau → con ghi đè; `all` luôn trước nhất.
-  const chain = [...depth.entries()]
-    .sort((a, b) => (a[0] === 'all' ? -1 : b[0] === 'all' ? 1 : a[1] - b[1]))
-    .map(([name]) => name)
+  const priority = (name: string): number => {
+    const value = Number(inv.groups.get(name)?.vars['ansible_group_priority'] ?? 1)
+    return Number.isSafeInteger(value) ? value : 1
+  }
+  const chain = [...names].sort(
+    (a, b) =>
+      (depths.get(a) ?? 0) - (depths.get(b) ?? 0) ||
+      priority(a) - priority(b) ||
+      (a < b ? -1 : a > b ? 1 : 0)
+  )
   const vars: Vars = { ...(inv.groups.get('all')?.vars ?? {}) }
   for (const name of chain) Object.assign(vars, inv.groups.get(name)?.vars ?? {})
-  for (const g of direct) Object.assign(vars, inv.groups.get(g)?.hosts.get(host) ?? {})
+  Object.assign(vars, inv.hostValues.get(host) ?? {})
   return { vars, direct }
 }
 
@@ -243,13 +301,14 @@ export function scanAnsibleInventory(text: string, options: AnsibleScanOptions):
   for (const g of inv.groups.values())
     for (const c of g.children) parents.set(c, [...(parents.get(c) ?? []), g.name])
 
+  const depths = groupDepths(inv, parents)
   const existing = new Set(options.existingLabels.map((l) => l.toLowerCase()))
   const secrets = new Set<string>()
   const seen = new Set<string>()
   const candidates: ImportCandidate[] = []
   const ignored: Record<string, number> = {}
   for (const host of inv.order) {
-    const { vars, direct } = hostVars(inv, host, parents)
+    const { vars, direct } = hostVars(inv, host, parents, depths)
     for (const k of Object.keys(vars)) if (SECRET_VAR.test(k)) secrets.add(k)
     const connection = (vars['ansible_connection'] ?? 'ssh').toLowerCase()
     if (
@@ -298,7 +357,7 @@ export function scanAnsibleInventory(text: string, options: AnsibleScanOptions):
       username,
       keyFile: missingKey ? null : keyFile,
       proxyJump: proxyJumpOf(vars),
-      duplicate: existing.has(host.toLowerCase()),
+      duplicate: existing.has(host.slice(0, 100).toLowerCase()),
       problem,
       warning: missingKey ? t('Private key not found: {path}', { path: keyFile }) : null,
       ...(tags.length ? { tags } : {})

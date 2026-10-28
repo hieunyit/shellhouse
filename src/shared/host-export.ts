@@ -1,5 +1,7 @@
 import { stringify } from 'yaml'
 import type { HostTree } from './hosts'
+import { buildGroupTree } from './group-tree'
+import { effectiveHost, inheritedDefaults } from './inherit'
 import { sshAlias } from './ssh-alias'
 
 export { sshAlias }
@@ -64,17 +66,20 @@ export function exportHosts(
 
   if (format === 'csv') {
     const rows = [['Label', 'Group', 'Hostname', 'Port', 'Username', 'Protocol', 'Tags', 'Account']]
-    for (const h of hosts)
+    const groupTree = buildGroupTree(tree.groups)
+    for (const h of hosts) {
+      const effective = effectiveHost(h, inheritedDefaults(groupTree, h.groupId))
       rows.push([
         h.label,
         groupPath(tree, h.groupId).join(' / '),
         h.hostname,
-        h.port === null ? '' : String(h.port),
-        h.accountId ? '' : h.username,
+        String(effective.port),
+        h.accountId ? '' : (effective.username ?? ''),
         h.protocol,
-        h.tags.join(' '),
+        h.tags.join(';'),
         account(h.accountId) ?? ''
       ])
+    }
     return {
       text: rows.map((r) => r.map(csvCell).join(',')).join('\n') + '\n',
       hosts: hosts.length,

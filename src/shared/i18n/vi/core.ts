@@ -53,6 +53,22 @@ export const core: Readonly<Record<string, string>> = {
   'Save a server with its login — connect later in one click.':
     'Lưu server kèm thông tin đăng nhập — lần sau kết nối chỉ với một cú bấm.',
   'Import hosts': 'Import host',
+  'Import hosts here…': 'Import host vào đây…',
+  'Import hosts into {name}': 'Import host vào {name}',
+  'The selected group no longer exists. Choose another group.':
+    'Nhóm đã chọn không còn tồn tại. Hãy chọn nhóm khác.',
+  'No file selected': 'Chưa chọn file',
+  'Search import preview': 'Tìm trong danh sách import',
+  'Select all importable hosts': 'Chọn tất cả host có thể import',
+  '{n} host selected': 'Đã chọn {n} host',
+  '{n} hosts selected': 'Đã chọn {n} host',
+  '{n} duplicate': '{n} host trùng tên',
+  '{n} duplicates': '{n} host trùng tên',
+  '{n} invalid entry': '{n} mục không hợp lệ',
+  '{n} invalid entries': '{n} mục không hợp lệ',
+  'Showing {from}–{to} of {total} hosts': 'Hiển thị {from}–{to} trong {total} host',
+  'Previous page': 'Trang trước',
+  'Next page': 'Trang sau',
   'From ~/.ssh/config, MobaXterm, Termius or a CSV file.':
     'Từ ~/.ssh/config, MobaXterm, Termius hoặc file CSV.',
   'Local terminal': 'Terminal trên máy',
@@ -397,8 +413,8 @@ export const core: Readonly<Record<string, string>> = {
   'The snippet is removed for good.': 'Snippet sẽ bị xoá vĩnh viễn.',
   'Wildcard patterns are skipped. Nothing in the file is executed.':
     'Bỏ qua các mẫu wildcard. Không có gì trong file được thực thi.',
-  'SSH sessions and their folders are imported. Saved passwords are never read from MobaXterm.':
-    'Import các session SSH cùng thư mục của chúng. Không bao giờ đọc mật khẩu đã lưu trong MobaXterm.',
+  'SSH sessions are imported into the selected group. Saved passwords are never read from MobaXterm.':
+    'Import các session SSH trực tiếp vào nhóm đã chọn. Không bao giờ đọc mật khẩu đã lưu trong MobaXterm.',
   'Termius or spreadsheet export. Columns are matched by name; passwords are never imported.':
     'File export từ Termius hoặc bảng tính. Cột được khớp theo tên; không bao giờ import mật khẩu.',
   'Skipped: {names}.': 'Đã bỏ qua: {names}.',
@@ -907,14 +923,23 @@ export const core: Readonly<Record<string, string>> = {
   'Show only these lines': 'Chỉ hiện các dòng này',
   '{n} error': '{n} lỗi',
   '{n} errors': '{n} lỗi',
-  'An Ansible inventory (INI or YAML). Groups and children become nested groups; ansible_host, ansible_port, ansible_user and the key file are used. Passwords and vault values are never read.':
-    'Inventory Ansible (INI hoặc YAML). Nhóm và children thành nhóm lồng nhau; dùng ansible_host, ansible_port, ansible_user và file key. Mật khẩu và giá trị vault không bao giờ được đọc.',
+  'An Ansible inventory (INI or YAML). Hosts are imported into the selected group; ansible_host, ansible_port, ansible_user and the key file are used. Passwords and vault values are never read.':
+    'Inventory Ansible (INI hoặc YAML). Host được nhập trực tiếp vào nhóm đã chọn; dùng ansible_host, ansible_port, ansible_user và file key. Không bao giờ đọc mật khẩu và giá trị vault.',
   'Choose an Ansible inventory file — the hosts file (INI) or inventory.yml.':
     'Chọn file inventory Ansible — file hosts (INI) hoặc inventory.yml.',
   'Ignored variables with secrets: {names}. Add passwords or keys after importing.':
     'Đã bỏ qua biến chứa bí mật: {names}. Thêm mật khẩu hoặc key sau khi nhập.',
   'choose a key below or add one later': 'chọn key bên dưới hoặc thêm sau',
   'Into group': 'Vào nhóm',
+  'Choose a jump host below or configure it after importing: {names}.':
+    'Chọn jump host bên dưới hoặc cấu hình lại sau khi nhập: {names}.',
+  'A label is required': 'Cần nhập tên hiển thị',
+  'The inventory contains a group cycle.': 'Inventory có vòng lặp giữa các nhóm.',
+  'All selected hosts go directly into this group. Source folders are not created.':
+    'Mọi host đã chọn được nhập trực tiếp vào nhóm này. Không tạo các thư mục của file nguồn.',
+  'The CSV file contains an unterminated quoted field.': 'File CSV có ô chưa đóng dấu nháy kép.',
+  'The inventory range is too large or invalid (maximum 10000 hosts).':
+    'Dải host trong inventory quá lớn hoặc không hợp lệ (tối đa 10000 host).',
   'As in the file': 'Theo file',
   'Import SSH key': 'Nhập SSH key',
   'Import key': 'Nhập key',

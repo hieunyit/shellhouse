@@ -4,16 +4,13 @@ import { basename, join } from 'node:path'
 import { app, type BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
 import { t } from '@shared/i18n'
-import {
-  Username,
-  type ImportCandidate,
-  type ImportOptions,
-  type MutationResult
-} from '@shared/hosts'
+import { Username, type MutationResult } from '@shared/hosts'
 import { showOpenDialog, showSaveDialog } from '../dialogs'
 import { writePrivateFile } from '../private-file'
 import { handle } from '../ipc/router'
 import { scanCsv } from './csv-import'
+import { importCandidates } from './import'
+import type { ImportCandidate } from '@shared/hosts'
 import { scanAnsibleInventory } from './ansible-import'
 import { scanShellhouseYaml } from './yaml-import'
 import { decodeMobaIni, scanMobaXterm } from './mobaxterm-import'
@@ -56,89 +53,6 @@ function defaultMobaIni(): string | null {
 function readMobaIni(file: string): string {
   if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error(t('The file is too large'))
   return decodeMobaIni(readFileSync(file))
-}
-
-/**
- * Nhóm theo đường dẫn tên (tạo nếu chưa có, so tên không phân biệt hoa thường như service). Đọc
- * danh sách nhóm MỘT lần cho cả lượt nhập (trước đây mỗi cấp của mỗi host đọc lại cả cây → O(n²)).
- */
-function groupPathResolver(
-  service: HostService
-): (path: readonly string[], base?: string | null) => string | null {
-  const children = new Map<string | null, { id: string; name: string }[]>()
-  for (const g of service.groups()) {
-    const list = children.get(g.parentId) ?? []
-    list.push({ id: g.id, name: g.name })
-    children.set(g.parentId, list)
-  }
-  return (path, base = null) => {
-    let parentId: string | null = base
-    for (const name of path) {
-      const siblings: { id: string; name: string }[] = children.get(parentId) ?? []
-      const found = siblings.find(
-        (g) => g.name.localeCompare(name, undefined, { sensitivity: 'base' }) === 0
-      )
-      if (found) {
-        parentId = found.id
-        continue
-      }
-      const id = service.saveGroup({ parentId, name })
-      siblings.push({ id, name: name.trim() })
-      children.set(parentId, siblings)
-      parentId = id
-    }
-    return parentId
-  }
-}
-
-function importCandidates(
-  service: HostService,
-  candidates: readonly ImportCandidate[],
-  aliases: readonly string[],
-  tag: string,
-  options: ImportOptions = {}
-): { imported: number; skipped: string[] } {
-  const wanted = new Set(aliases)
-  let imported = 0
-  const skipped: string[] = []
-  // Một transaction cho cả lượt (mỗi host là một savepoint lồng bên trong: host lỗi chỉ bỏ host đó).
-  return service.batch(() => {
-    const ensureGroupPath = groupPathResolver(service)
-    for (const c of candidates) {
-      if (!wanted.has(c.alias)) continue
-      // User nhập lúc nhập thay user của file (và điền cho host file không ghi user).
-      const username = options.username ?? c.username
-      if (c.problem || !username) {
-        skipped.push(c.alias)
-        continue
-      }
-      try {
-        service.saveHost({
-          groupId: ensureGroupPath(c.group ?? [], options.groupId ?? null),
-          label: c.label ?? c.alias,
-          hostname: c.hostname,
-          port: c.port,
-          username,
-          // Key chọn lúc nhập (trong vault) thay IdentityFile của file.
-          ...(options.keyId
-            ? { auth: 'key' as const, keyId: options.keyId, keyFile: null }
-            : { auth: 'auto' as const, keyId: null, keyFile: c.keyFile }),
-          // Jump host chọn lúc nhập thay ProxyJump của file.
-          ...(options.jumpHostId
-            ? { proxyJump: null, jumpHostIds: [options.jumpHostId] }
-            : { proxyJump: c.proxyJump, jumpHostIds: [] }),
-          mode: 'builtin',
-          tags: [...new Set([tag, ...(c.tags ?? [])])],
-          color: null
-        })
-        imported++
-      } catch (error) {
-        log.warn(`Skipping ${c.alias}: ${errorMessage(error)}`)
-        skipped.push(c.alias)
-      }
-    }
-    return { imported, skipped }
-  })
 }
 
 /**
@@ -353,33 +267,36 @@ export function registerHostIpc(
     )
   )
 
-  handle('sshConfig:scan', isTrustedSender, () =>
-    scanSshConfig(readSshConfig(), {
+  let sshCandidates: ImportCandidate[] | null = null
+  handle('sshConfig:scan', isTrustedSender, () => {
+    sshCandidates = null
+    sshCandidates = scanSshConfig(readSshConfig(), {
       home: app.getPath('home'),
       existingLabels: service.tree().hosts.map((h) => h.label),
       defaultUser: currentUser()
     })
-  )
+    return sshCandidates
+  })
   handle('sshConfig:import', isTrustedSender, (aliases, options) => {
-    const candidates = scanSshConfig(readSshConfig(), {
-      home: app.getPath('home'),
-      existingLabels: service.tree().hosts.map((h) => h.label),
-      defaultUser: currentUser()
-    })
-    const result = importCandidates(service, candidates, aliases, 'ssh-config', options)
+    if (!sshCandidates) throw new Error(t('Choose a file first'))
+    const result = importCandidates(service, sshCandidates, aliases, 'ssh-config', options)
+    sshCandidates = null
     notifyChanged()
     return result
   })
 
-  // File MobaXterm vừa quét — lần nhập đọc lại chính file này (renderer không chọn đường dẫn).
-  let mobaFile: string | null = null
+  // Main giữ đúng dữ liệu đã xem trước; file sửa sau khi quét không đổi nội dung nhập.
+  let mobaCandidates: ImportCandidate[] | null = null
   const scanMoba = (file: string) =>
     scanMobaXterm(readMobaIni(file), {
       home: app.getPath('home'),
       existingLabels: service.tree().hosts.map((h) => h.label),
       defaultUser: currentUser()
     })
+  let mobaxtermScanId = 0
   handle('mobaxterm:scan', isTrustedSender, async (pick) => {
+    const scanId = ++mobaxtermScanId
+    mobaCandidates = null
     let file = pick ? null : defaultMobaIni()
     if (pick) {
       const window = getWindow()
@@ -395,27 +312,24 @@ export function registerHostIpc(
         properties: ['openFile'] as 'openFile'[]
       }
       const picked = await showOpenDialog(window, options)
+      if (scanId !== mobaxtermScanId) return { file: null, candidates: [], ignored: {} }
       file = picked.canceled ? null : (picked.filePaths[0] ?? null)
     }
-    mobaFile = file
     if (!file) return { file: null, candidates: [], ignored: {} }
-    return { file, ...scanMoba(file) }
+    const scan = scanMoba(file)
+    mobaCandidates = scan.candidates
+    return { file, ...scan }
   })
   handle('mobaxterm:import', isTrustedSender, (aliases, options) => {
-    if (!mobaFile) throw new Error(t('Choose a MobaXterm file first'))
-    const result = importCandidates(
-      service,
-      scanMoba(mobaFile).candidates,
-      aliases,
-      'mobaxterm',
-      options
-    )
+    if (!mobaCandidates) throw new Error(t('Choose a MobaXterm file first'))
+    const result = importCandidates(service, mobaCandidates, aliases, 'mobaxterm', options)
+    mobaCandidates = null
     notifyChanged()
     return result
   })
 
-  // CSV (Termius…): giống MobaXterm — main giữ đường dẫn file đã chọn.
-  let csvFile: string | null = null
+  // CSV (Termius…): main giữ kết quả đã quét.
+  let csvCandidates: ImportCandidate[] | null = null
   const scanCsvFile = (file: string) => {
     if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error(t('The file is too large'))
     return scanCsv(decodeMobaIni(readFileSync(file)), {
@@ -423,7 +337,10 @@ export function registerHostIpc(
       defaultUser: currentUser()
     })
   }
+  let csvScanId = 0
   handle('csv:scan', isTrustedSender, async () => {
+    const scanId = ++csvScanId
+    csvCandidates = null
     const window = getWindow()
     const options = {
       title: t('Choose a CSV file with hosts'),
@@ -434,24 +351,22 @@ export function registerHostIpc(
       properties: ['openFile'] as 'openFile'[]
     }
     const picked = await showOpenDialog(window, options)
-    csvFile = picked.canceled ? null : (picked.filePaths[0] ?? null)
-    if (!csvFile) return { file: null, candidates: [], ignored: {} }
-    return { file: csvFile, ...scanCsvFile(csvFile) }
+    if (scanId !== csvScanId) return { file: null, candidates: [], ignored: {} }
+    const file = picked.canceled ? null : (picked.filePaths[0] ?? null)
+    if (!file) return { file: null, candidates: [], ignored: {} }
+    const scan = scanCsvFile(file)
+    csvCandidates = scan.candidates
+    return { file, ...scan }
   })
   handle('csv:import', isTrustedSender, (aliases, options) => {
-    if (!csvFile) throw new Error(t('Choose a CSV file first'))
-    const result = importCandidates(
-      service,
-      scanCsvFile(csvFile).candidates,
-      aliases,
-      'csv',
-      options
-    )
+    if (!csvCandidates) throw new Error(t('Choose a CSV file first'))
+    const result = importCandidates(service, csvCandidates, aliases, 'csv', options)
+    csvCandidates = null
     notifyChanged()
     return result
   })
-  // Inventory Ansible (INI / YAML): main giữ đường dẫn file đã chọn, như CSV.
-  let ansibleFile: string | null = null
+  // Inventory Ansible (INI / YAML): main giữ kết quả đã quét.
+  let ansibleCandidates: ImportCandidate[] | null = null
   const scanAnsibleFile = (file: string) => {
     if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error(t('The file is too large'))
     return scanAnsibleInventory(readFileSync(file, 'utf8'), {
@@ -460,7 +375,10 @@ export function registerHostIpc(
       defaultUser: null
     })
   }
+  let ansibleScanId = 0
   handle('ansible:scan', isTrustedSender, async () => {
+    const scanId = ++ansibleScanId
+    ansibleCandidates = null
     const picked = await showOpenDialog(getWindow(), {
       title: t('Choose an Ansible inventory'),
       filters: [
@@ -469,24 +387,22 @@ export function registerHostIpc(
       ],
       properties: ['openFile']
     })
-    ansibleFile = picked.canceled ? null : (picked.filePaths[0] ?? null)
-    if (!ansibleFile) return { file: null, candidates: [], ignored: {} }
-    return { file: ansibleFile, ...scanAnsibleFile(ansibleFile) }
+    if (scanId !== ansibleScanId) return { file: null, candidates: [], ignored: {} }
+    const file = picked.canceled ? null : (picked.filePaths[0] ?? null)
+    if (!file) return { file: null, candidates: [], ignored: {} }
+    const scan = scanAnsibleFile(file)
+    ansibleCandidates = scan.candidates
+    return { file, ...scan }
   })
   handle('ansible:import', isTrustedSender, (aliases, options) => {
-    if (!ansibleFile) throw new Error(t('Choose an Ansible inventory first'))
-    const result = importCandidates(
-      service,
-      scanAnsibleFile(ansibleFile).candidates,
-      aliases,
-      'ansible',
-      options
-    )
+    if (!ansibleCandidates) throw new Error(t('Choose an Ansible inventory first'))
+    const result = importCandidates(service, ansibleCandidates, aliases, 'ansible', options)
+    ansibleCandidates = null
     notifyChanged()
     return result
   })
-  // Shellhouse YAML (Export hosts) — main giữ đường dẫn, renderer chỉ gửi danh sách đã chọn.
-  let yamlFile: string | null = null
+  // Shellhouse YAML (Export hosts): renderer chỉ gửi danh sách đã chọn.
+  let yamlCandidates: ImportCandidate[] | null = null
   const scanYamlFile = (file: string) => {
     if (statSync(file).size > MAX_MOBA_INI_BYTES) throw new Error(t('The file is too large'))
     return scanShellhouseYaml(readFileSync(file, 'utf8'), {
@@ -494,7 +410,10 @@ export function registerHostIpc(
       defaultUser: currentUser()
     })
   }
+  let yamlScanId = 0
   handle('yaml:scan', isTrustedSender, async () => {
+    const scanId = ++yamlScanId
+    yamlCandidates = null
     const picked = await showOpenDialog(getWindow(), {
       title: t('Choose a Shellhouse hosts file'),
       filters: [
@@ -503,19 +422,17 @@ export function registerHostIpc(
       ],
       properties: ['openFile']
     })
-    yamlFile = picked.canceled ? null : (picked.filePaths[0] ?? null)
-    if (!yamlFile) return { file: null, candidates: [], ignored: {} }
-    return { file: yamlFile, ...scanYamlFile(yamlFile) }
+    if (scanId !== yamlScanId) return { file: null, candidates: [], ignored: {} }
+    const file = picked.canceled ? null : (picked.filePaths[0] ?? null)
+    if (!file) return { file: null, candidates: [], ignored: {} }
+    const scan = scanYamlFile(file)
+    yamlCandidates = scan.candidates
+    return { file, ...scan }
   })
   handle('yaml:import', isTrustedSender, (aliases, options) => {
-    if (!yamlFile) throw new Error(t('Choose a file first'))
-    const result = importCandidates(
-      service,
-      scanYamlFile(yamlFile).candidates,
-      aliases,
-      'imported',
-      options
-    )
+    if (!yamlCandidates) throw new Error(t('Choose a file first'))
+    const result = importCandidates(service, yamlCandidates, aliases, 'imported', options)
+    yamlCandidates = null
     notifyChanged()
     return result
   })

@@ -130,7 +130,7 @@ test('form từ chối hostname chèn tham số', async ({ page }) => {
   await expect(page.getByTestId('host-form')).toBeVisible()
 })
 
-base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, nhập mục được chọn', async () => {
+base('host import: all six sources preserve previews and never create groups', async () => {
   const home = mkdtempSync(join(tmpdir(), 'shellhouse-home-'))
   mkdirSync(join(home, '.ssh'))
   writeFileSync(join(home, '.ssh', 'id_test'), 'dummy')
@@ -211,9 +211,9 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     const row = page.locator('[data-testid="host-row"][data-host-label="web"]')
     await expectHostAddress(row, 'deploy@web.example.com')
 
-    // MobaXterm: nhóm lồng nhau theo thư mục bookmark.
+    // MobaXterm: source folders are shown in the preview but never created.
     await page.getByTestId('import-ssh-config').click()
-    await dialog.getByTestId('import-source-mobaxterm').click()
+    await dialog.getByTestId('import-source').selectOption('mobaxterm')
     await baseExpect(dialog.getByTestId('import-file')).toContainText('MobaXterm.ini')
     await baseExpect(dialog.getByTestId('import-ignored')).toContainText('1 RDP')
     await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toHaveCount(1)
@@ -223,9 +223,9 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     await dialog.getByTestId('import-run').click()
     await baseExpect(dialog.getByTestId('import-result')).toContainText('Imported 1 host')
     await dialog.getByRole('button', { name: 'Done' }).click()
-    await baseExpect(
-      page.locator('[data-testid="group-row"][data-group-name="Database"]')
-    ).toBeVisible()
+    baseExpect(
+      await page.evaluate(async () => (await window.shellhouse.hostTree()).groups)
+    ).toEqual([])
     await expectHostAddress(
       page.locator('[data-testid="host-row"][data-host-label="pg-main"]'),
       'postgres@db.example.com'
@@ -242,7 +242,7 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
       dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [f] })
     }, csv)
     await page.getByTestId('import-ssh-config').click()
-    await dialog.getByTestId('import-source-csv').click()
+    await dialog.getByTestId('import-source').selectOption('csv')
     await dialog.getByTestId('import-choose-file').click()
     await baseExpect(dialog.getByTestId('import-secrets-skipped')).toContainText('Password')
     await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toContainText(
@@ -266,9 +266,12 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
       dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [f] })
     }, inventory)
     await page.getByTestId('import-ssh-config').click()
-    await dialog.getByTestId('import-source-ansible').click()
+    await dialog.getByTestId('import-source').selectOption('ansible')
     await dialog.getByTestId('import-choose-file').click()
-    // Tuỳ chọn áp cho mọi host đã chọn: vào nhóm Staging (nhóm của file tạo bên trong), jump qua web.
+    // Import directly into an existing group, even when the source has nested groups.
+    await page.evaluate(async () =>
+      window.shellhouse.saveGroup({ parentId: null, name: 'Staging' })
+    )
     const staging = await page.evaluate(
       async () => (await window.shellhouse.hostTree()).groups.find((g) => g.name === 'Staging')?.id
     )
@@ -296,9 +299,11 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
     await dialog.getByTestId('import-run').click()
     await baseExpect(dialog.getByTestId('import-result')).toContainText('Imported 2 hosts')
     await dialog.getByRole('button', { name: 'Done' }).click()
-    await baseExpect(
-      page.locator('[data-testid="group-row"][data-group-name="shop"]')
-    ).toBeVisible()
+    baseExpect(
+      await page.evaluate(async () =>
+        (await window.shellhouse.hostTree()).groups.map((g) => g.name)
+      )
+    ).toEqual(['Staging'])
     await expectHostAddress(
       page.locator('[data-testid="host-row"][data-host-label="web2.example.com"]'),
       'deploy@web2.example.com'
@@ -314,7 +319,48 @@ base('nhập từ ~/.ssh/config và MobaXterm: xem trước, bỏ mục lỗi, n
       }
       return { path, jumps: h?.jumpHostIds.length ?? 0 }
     })
-    baseExpect(imported).toEqual({ path: ['Staging', 'shop', 'web'], jumps: 1 })
+    baseExpect(imported).toEqual({ path: ['Staging'], jumps: 1 })
+
+    // YAML and RDP use the same existing destination; neither creates source folders.
+    const yaml = join(home, 'hosts.yaml')
+    writeFileSync(
+      yaml,
+      'shellhouse: 1\ngroups:\n  - name: Original\n    defaults: {username: yamluser, port: 2222}\n    hosts:\n      - {label: yaml-host, hostname: yaml.example.com}'
+    )
+    const rdp = join(home, 'desktop.rdp')
+    writeFileSync(rdp, 'full address:s:desktop.example.com:3390\nusername:s:admin\n')
+    for (const item of [
+      { source: 'yaml', file: yaml, label: 'yaml-host' },
+      { source: 'rdp', file: rdp, label: 'desktop' }
+    ]) {
+      await app.evaluate(({ dialog }, f) => {
+        dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [f] })
+      }, item.file)
+      await page.getByTestId('import-ssh-config').click()
+      await dialog.getByTestId('import-source').selectOption(item.source)
+      await dialog.getByTestId('import-choose-file').click()
+      await baseExpect(dialog.locator('[data-testid^="import-row-"]')).toHaveCount(1)
+      await dialog.getByTestId('import-option-group').selectOption(staging ?? '')
+      await dialog.getByTestId('import-run').click()
+      await baseExpect(dialog.getByTestId('import-result')).toContainText('Imported 1 host')
+      await dialog.getByRole('button', { name: 'Done' }).click()
+      const state = await page.evaluate(async (label) => {
+        const tree = await window.shellhouse.hostTree()
+        const host = tree.hosts.find((h) => h.label === label)
+        return {
+          groups: tree.groups.map((g) => g.name),
+          groupId: host?.groupId,
+          port: host?.port,
+          user: host?.username
+        }
+      }, item.label)
+      baseExpect(state).toEqual({
+        groups: ['Staging'],
+        groupId: staging,
+        port: item.source === 'yaml' ? 2222 : 3390,
+        user: item.source === 'yaml' ? 'yamluser' : 'admin'
+      })
+    }
   } finally {
     await app.close()
     rmSync(home, { recursive: true, force: true })

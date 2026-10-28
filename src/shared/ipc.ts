@@ -200,7 +200,7 @@ export const invokeContract = {
   },
   'sshConfig:scan': { args: z.tuple([]), result: z.array(ImportCandidate) },
   'sshConfig:import': {
-    args: z.tuple([z.array(z.string().max(255)).max(1000), ImportOptions]),
+    args: z.tuple([z.array(z.string().max(255)).max(10000), ImportOptions]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   /** true = cho người dùng chọn file; false = vị trí mặc định (%APPDATA%\MobaXterm). */
@@ -209,22 +209,22 @@ export const invokeContract = {
   /** CSV (Termius…): luôn cho người dùng chọn file. */
   'csv:scan': { args: z.tuple([]), result: FileImportScan },
   'csv:import': {
-    args: z.tuple([z.array(z.string().max(1024)).max(5000), ImportOptions]),
+    args: z.tuple([z.array(z.string().max(1024)).max(10000), ImportOptions]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   /** File "Shellhouse YAML" (Export hosts): luôn cho người dùng chọn file. */
   'ansible:scan': { args: z.tuple([]), result: FileImportScan },
   'ansible:import': {
-    args: z.tuple([z.array(z.string().max(1024)).max(5000), ImportOptions]),
+    args: z.tuple([z.array(z.string().max(1024)).max(10000), ImportOptions]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   'yaml:scan': { args: z.tuple([]), result: FileImportScan },
   'yaml:import': {
-    args: z.tuple([z.array(z.string().max(1024)).max(5000), ImportOptions]),
+    args: z.tuple([z.array(z.string().max(1024)).max(10000), ImportOptions]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   'mobaxterm:import': {
-    args: z.tuple([z.array(z.string().max(1024)).max(5000), ImportOptions]),
+    args: z.tuple([z.array(z.string().max(1024)).max(10000), ImportOptions]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   'forwards:list': { args: z.tuple([z.string().max(64)]), result: z.array(SavedForward) },
@@ -355,7 +355,10 @@ export const invokeContract = {
   /** Import: chọn file .rdp (hộp thoại của main) và quét. */
   'rdp:scan': { args: z.tuple([]), result: FileImportScan },
   'rdp:import': {
-    args: z.tuple([z.array(z.string().max(1024)).max(5000)]),
+    args: z.tuple([
+      z.array(z.string().max(1024)).max(10000),
+      ImportOptions.pick({ groupId: true }).optional()
+    ]),
     result: z.object({ imported: z.number().int(), skipped: z.array(z.string()) })
   },
   /** Remote Desktop trong tab: thông tin host để vẽ màn kết nối (không có mật khẩu). */
@@ -541,7 +544,10 @@ export interface ShellhouseApi {
   rdpStop(launchId: string): Promise<void>
   onRdpStatus(listener: (event: RdpStatusEvent) => void): () => void
   scanRdpFiles(): Promise<FileImportScan>
-  importRdpFiles(aliases: string[]): Promise<{ imported: number; skipped: string[] }>
+  importRdpFiles(
+    aliases: string[],
+    options?: Pick<ImportOptions, 'groupId'>
+  ): Promise<{ imported: number; skipped: string[] }>
   rdpViewPrepare(hostId: string): Promise<RdpViewPrepare>
   rdpViewProbe(request: RdpViewProbeRequest): Promise<RdpViewProbeResult>
   rdpViewTrust(hostId: string, fingerprint: string): Promise<void>

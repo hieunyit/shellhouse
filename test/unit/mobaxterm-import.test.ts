@@ -90,7 +90,8 @@ describe('scanMobaXterm', () => {
         keyFile: null,
         proxyJump: null,
         duplicate: false,
-        problem: null
+        problem: null,
+        warning: null
       },
       {
         alias: 'Prod\\Database\\db',
@@ -102,13 +103,14 @@ describe('scanMobaXterm', () => {
         keyFile: null,
         proxyJump: 'jump@bastion.example.com:2200',
         duplicate: false,
-        problem: null
+        problem: null,
+        warning: null
       }
     ])
     expect(JSON.stringify(candidates)).not.toContain('SHOULD-NEVER-BE-READ')
   })
 
-  it('private key: thay _ProfileDir_; key không tồn tại → báo lỗi, không chọn được', () => {
+  it('private key: thay _ProfileDir_; key không tồn tại → cảnh báo, vẫn chọn key khác được', () => {
     const home = setupHome()
     const ini = [
       '[Bookmarks]',
@@ -119,7 +121,9 @@ describe('scanMobaXterm', () => {
     const [ok, missing] = scan(ini, home).candidates
     expect(ok?.keyFile).toBe(join(home, '.ssh', 'id_moba'))
     expect(ok?.problem).toBeNull()
-    expect(missing?.problem).toMatch(/Private key not found/)
+    expect(missing?.problem).toBeNull()
+    expect(missing?.keyFile).toBeNull()
+    expect(missing?.warning).toMatch(/Private key not found/)
   })
 
   it('nhiều jump host (__PIPE__), user trống → user mặc định, trùng tên → duplicate', () => {

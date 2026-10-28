@@ -1,6 +1,6 @@
 import { basename, extname } from 'node:path'
 import { t } from '@shared/i18n'
-import { Hostname, type HostInput, type ImportCandidate } from '@shared/hosts'
+import { Hostname, Port, type HostInput, type ImportCandidate } from '@shared/hosts'
 import {
   RdpUsername,
   type RdpSettings,
@@ -211,13 +211,15 @@ export function scanRdpFiles(
           ? t('No computer address in the file')
           : !Hostname.safeParse(result.hostname).success
             ? t('Invalid hostname')
-            : null
+            : !Port.safeParse(result.port).success
+              ? t('The port must be between 1 and 65535')
+              : null
     if (result && !problem) parsed.set(alias, { ...result, label })
     candidates.push({
       alias,
       label,
       hostname: result?.hostname ?? '',
-      port: result?.port ?? 3389,
+      port: result && Number.isInteger(result.port) ? result.port : 3389,
       username: result?.username || null,
       keyFile: null,
       proxyJump: null,

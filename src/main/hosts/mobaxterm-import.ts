@@ -159,20 +159,20 @@ export function scanMobaXterm(text: string, options: MobaScanOptions): MobaScan 
     else if (username !== null && !Username.safeParse(username).success)
       problem = t('Invalid username: {value}', { value: username })
     else if (jump.problem) problem = jump.problem
-    else if (keyFile && !existsSync(keyFile))
-      problem = t('Private key not found: {path}', { path: keyFile })
+    const missingKey = keyFile !== null && !existsSync(keyFile)
 
     candidates.push({
       alias,
-      label: name,
+      label: name.slice(0, 100),
       group,
       hostname,
       port: Number.isInteger(port) ? port : 22,
       username,
-      keyFile,
+      keyFile: missingKey ? null : keyFile,
       proxyJump: jump.value,
-      duplicate: existing.has(name.toLowerCase()),
-      problem
+      duplicate: existing.has(name.slice(0, 100).toLowerCase()),
+      problem,
+      warning: missingKey ? t('Private key not found: {path}', { path: keyFile }) : null
     })
   }
   return { candidates, ignored }

@@ -118,7 +118,7 @@ describe('xuất danh sách host', () => {
       { ...tree, hosts: [host({ id: 'x', groupId: 'w', label: 'a,b' })] },
       'csv'
     )
-    expect(out.text.split('\n')[1]).toBe('"a,b",Production / Web,web.example.com,,deploy,ssh,,')
+    expect(out.text.split('\n')[1]).toBe('"a,b",Production / Web,web.example.com,2222,deploy,ssh,,')
   })
 })
 
@@ -139,7 +139,31 @@ describe('nhập lại file YAML đã xuất', () => {
     expect(scan.candidates.find((c) => c.label === 'bastion')?.duplicate).toBe(true)
     expect(scan.ignored).toEqual({ RDP: 1 })
     // Host dùng tài khoản chung: không có username trong file → báo rõ, không nhập nhầm.
-    expect(scan.candidates.find((c) => c.label === 'stg')?.problem).toContain('ops')
+    expect(scan.candidates.find((c) => c.label === 'stg')).toMatchObject({
+      username: null,
+      problem: null
+    })
+    expect(scan.candidates.find((c) => c.label === 'stg')?.warning).toContain('ops')
     expect(() => scanShellhouseYaml('a: 1', { existingLabels: [], defaultUser: null })).toThrow()
+  })
+})
+
+it('CSV export/import keeps inherited connection settings and tags containing spaces', async () => {
+  const { scanCsv } = await import('../../src/main/hosts/csv-import')
+  const out = exportHosts(
+    {
+      ...tree,
+      groups: tree.groups.map((g) =>
+        g.id === 'p' ? { ...g, defaults: { ...g.defaults, username: 'ubuntu' } } : g
+      ),
+      hosts: [host({ id: 'inherited', groupId: 'w', username: '', tags: ['web', 'team blue'] })]
+    },
+    'csv'
+  )
+  const scan = scanCsv(out.text, { existingLabels: [], defaultUser: null })
+  expect(scan.candidates[0]).toMatchObject({
+    port: 2222,
+    username: 'ubuntu',
+    tags: ['web', 'team blue']
   })
 })

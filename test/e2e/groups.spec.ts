@@ -1,12 +1,15 @@
 import type { Locator, Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { expect, setWindowSize, test } from './fixtures'
 
 const row = (page: Page, name: string): Locator =>
   page.locator(`[data-testid="group-row"][data-group-name="${name}"]`)
 
 async function addSubgroup(page: Page, parent: string, name: string): Promise<void> {
   await row(page, parent).hover()
-  await row(page, parent).getByTestId('group-add-subgroup').click()
+  await row(page, parent).getByTestId('group-more').click()
+  await page.getByTestId('menu-add-subgroup').click()
   const form = page.getByTestId('group-form')
   await expect(form).toContainText('New subgroup')
   await form.getByTestId('group-name').fill(name)
@@ -43,7 +46,8 @@ test('nhóm lồng nhóm: tạo, đếm đệ quy, kéo thả, thu gọn đượ
 
   // Ô chọn nhóm cha: không chọn được chính nó / nhóm con cháu.
   await row(page, 'Company').hover()
-  await row(page, 'Company').getByTestId('group-edit').click()
+  await row(page, 'Company').getByTestId('group-more').click()
+  await page.getByTestId('menu-edit').click()
   const parent = page.getByTestId('group-parent')
   await expect(parent.locator('option', { hasText: 'Company' })).toHaveAttribute('disabled', '')
   await expect(parent.locator('option', { hasText: 'Prod' })).toHaveAttribute('disabled', '')
@@ -73,7 +77,8 @@ test('nhóm lồng nhóm: tạo, đếm đệ quy, kéo thả, thu gọn đượ
 
   // Xoá Company: nhóm con + host dời ra cấp cao nhất, không mất gì.
   await row(page, 'Company').hover()
-  await row(page, 'Company').getByTestId('group-edit').click()
+  await row(page, 'Company').getByTestId('group-more').click()
+  await page.getByTestId('menu-edit').click()
   await page.getByTestId('group-delete').click()
   await expect(page.getByTestId('group-delete-notice')).toContainText(
     '1 host and 2 subgroups move to the top level'
@@ -102,4 +107,73 @@ test('sidebar kéo đổi độ rộng, được nhớ; nhấp đúp về mặc 
   await expect.poll(width).toBe(widened)
   await handle.dblclick()
   await expect.poll(width).toBe(before)
+})
+
+test('import directly into root and nested groups keeps the destination and creates no source folders', async ({
+  launched,
+  page,
+  app
+}, testInfo) => {
+  const ids = await page.evaluate(async () => {
+    const parent = await window.shellhouse.saveGroup({ parentId: null, name: 'Import target' })
+    if (!parent.ok) throw new Error(parent.message)
+    const child = await window.shellhouse.saveGroup({ parentId: parent.id, name: 'Child target' })
+    if (!child.ok) throw new Error(child.message)
+    return { parent: parent.id, child: child.id }
+  })
+  const file = join(launched.userData, 'group-import.csv')
+  await app.evaluate(({ dialog }, path) => {
+    dialog.showOpenDialog = () => Promise.resolve({ canceled: false, filePaths: [path] })
+  }, file)
+  for (const item of [
+    { name: 'Import target', id: ids.parent, label: 'parent-host', direct: true },
+    { name: 'Child target', id: ids.child, label: 'child-host', direct: false }
+  ]) {
+    writeFileSync(
+      file,
+      `Group,Label,Hostname,Username\nOriginal/Nested,${item.label},${item.label}.example.com,deploy\n`
+    )
+    await row(page, item.name).hover()
+    if (item.direct) {
+      await page.mouse.move(700, 400)
+      await page.keyboard.press('Tab')
+      await row(page, item.name).locator('..').focus()
+      await expect(row(page, item.name).getByTestId('group-import')).toBeVisible()
+      await page.keyboard.press('Tab')
+      await page.keyboard.press('Tab')
+      await expect(row(page, item.name).getByTestId('group-import')).toBeFocused()
+      await page.keyboard.press('Enter')
+    } else {
+      await row(page, item.name).getByTestId('group-more').click()
+      await page.getByTestId('menu-import').click()
+    }
+    const dialog = page.getByTestId('import-dialog')
+    await expect(dialog.getByTestId('import-option-group')).toHaveValue(item.id)
+    await dialog.getByTestId('import-source').selectOption('csv')
+    await expect(dialog.getByTestId('import-option-group')).toHaveValue(item.id)
+    await dialog.getByTestId('import-choose-file').click()
+    await expect(dialog.getByTestId(`import-row-Original\\Nested\\${item.label}`)).toBeVisible()
+    await expect(dialog.getByTestId('import-summary')).toContainText('1 host selected')
+    // Check the full dialog at a compact window size, including the destination and footer.
+    if (!item.direct) await setWindowSize(launched, 720, 600)
+    await expect(dialog.getByTestId('import-run')).toBeInViewport()
+    const overflows = await dialog.evaluate((el) => el.scrollWidth > el.clientWidth)
+    expect(overflows).toBe(false)
+    await page.screenshot({
+      path: testInfo.outputPath(
+        item.direct ? 'group-import-desktop.png' : 'group-import-compact.png'
+      )
+    })
+    await dialog.getByTestId('import-run').click()
+    await expect(dialog.getByTestId('import-result')).toContainText('Imported 1 host')
+    await dialog.getByRole('button', { name: 'Done' }).click()
+    const saved = await page.evaluate(async (label) => {
+      const tree = await window.shellhouse.hostTree()
+      return {
+        groupId: tree.hosts.find((host) => host.label === label)?.groupId,
+        names: tree.groups.map((group) => group.name).sort()
+      }
+    }, item.label)
+    expect(saved).toEqual({ groupId: item.id, names: ['Child target', 'Import target'] })
+  }
 })

@@ -363,3 +363,21 @@ describe('RDP: dò client', () => {
     expect(parseFreeRdpMajor(null, 3)).toBe(3)
   })
 })
+
+it('RDP imports reject invalid ports before offering a host for import', () => {
+  const scan = scanRdpFiles(
+    [
+      { path: '/zero.rdp', text: 'full address:s:desktop.example.com:0' },
+      { path: '/huge.rdp', text: 'full address:s:desktop.example.com:65536' },
+      { path: '/server-port.rdp', text: 'full address:s:desktop.example.com\nserver port:i:99999' },
+      { path: '/overflow.rdp', text: `full address:s:desktop.example.com:${'9'.repeat(400)}` },
+      { path: '/ok.rdp', text: 'full address:s:desktop.example.com:3390' }
+    ],
+    []
+  )
+  expect(
+    scan.candidates.slice(0, 4).every((candidate) => candidate.problem?.includes('port'))
+  ).toBe(true)
+  expect([...scan.parsed.keys()]).toEqual(['ok.rdp'])
+  expect(scan.candidates[4]?.problem).toBeNull()
+})

@@ -14,6 +14,7 @@ import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import log from 'electron-log/main'
 import { t } from '@shared/i18n'
 import type { RdpStatusEvent } from '@shared/rdp'
+import { HostInput } from '@shared/hosts'
 import { showOpenDialog } from '../dialogs'
 import { handle } from '../ipc/router'
 import type { HostService } from '../hosts/service'
@@ -135,7 +136,10 @@ export function registerRdpIpc(options: RdpIpcOptions): RdpLauncher {
 
   // Import file .rdp: main giữ kết quả quét (renderer chỉ gửi lại tên đã chọn).
   let lastScan: RdpFileScan | null = null
+  let rdpScanId = 0
   handle('rdp:scan', options.isTrustedSender, async () => {
+    const scanId = ++rdpScanId
+    lastScan = null
     const picked = await showOpenDialog(options.getWindow(), {
       title: t('Choose Remote Desktop (.rdp) files'),
       filters: [
@@ -144,6 +148,7 @@ export function registerRdpIpc(options: RdpIpcOptions): RdpLauncher {
       ],
       properties: ['openFile', 'multiSelections']
     })
+    if (scanId !== rdpScanId) return { file: null, candidates: [], ignored: {} }
     const paths = picked.canceled ? [] : picked.filePaths.slice(0, 500)
     if (paths.length === 0) {
       lastScan = null
@@ -170,21 +175,24 @@ export function registerRdpIpc(options: RdpIpcOptions): RdpLauncher {
       ignored: {}
     }
   })
-  handle('rdp:import', options.isTrustedSender, (aliases) => {
+  handle('rdp:import', options.isTrustedSender, (aliases, importOptions) => {
     const scan = lastScan
     if (!scan) throw new Error(t('Choose .rdp files first'))
     const service = options.hosts()
+    const groupId = importOptions?.groupId || null
+    if (groupId && !service.groups().some((g) => g.id === groupId))
+      throw new Error(t('The group no longer exists'))
     let imported = 0
     const skipped: string[] = []
     service.batch(() => {
-      for (const alias of aliases) {
+      for (const alias of new Set(aliases)) {
         const file = scan.parsed.get(alias)
         if (!file) {
           skipped.push(alias)
           continue
         }
         try {
-          service.saveHost(rdpHostInput(file))
+          service.saveHost(HostInput.parse({ ...rdpHostInput(file), groupId }))
           imported++
         } catch (error) {
           log.warn(`RDP import: skipping ${alias}: ${String(error)}`)
@@ -192,6 +200,7 @@ export function registerRdpIpc(options: RdpIpcOptions): RdpLauncher {
         }
       }
     })
+    lastScan = null
     options.notifyChanged()
     return { imported, skipped }
   })
