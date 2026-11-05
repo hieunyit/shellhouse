@@ -17,6 +17,70 @@ test.afterEach(async () => {
   server = null
 })
 
+test('S3 internal TLS: add a CA and reconnect an existing failed tab with verification enabled', async ({
+  page
+}) => {
+  const { createServer } = await import('node:https')
+  const fixtures = join(process.cwd(), 'src/modules/docker/test/fixtures')
+  const ca = readFileSync(join(fixtures, 'ca.pem'), 'utf8')
+  const endpoint = createServer(
+    {
+      key: readFileSync(join(fixtures, 'server-key.pem')),
+      cert: readFileSync(join(fixtures, 'server.pem'))
+    },
+    (_request, response) => {
+      response.setHeader('content-type', 'application/xml')
+      response.end(
+        '<ListAllMyBucketsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Buckets><Bucket><Name>private-minio</Name></Bucket></Buckets></ListAllMyBucketsResult>'
+      )
+    }
+  )
+  await new Promise<void>((resolve) => {
+    endpoint.listen(0, '127.0.0.1', resolve)
+  })
+  try {
+    await openArea(page, 's3')
+    await page.getByTestId('s3-add-account').click()
+    const form = page.getByTestId('s3-account-form')
+    await form.getByTestId('s3-account-name').fill('Internal MinIO')
+    await form
+      .getByTestId('s3-account-endpoint')
+      .fill(`https://127.0.0.1:${(endpoint.address() as { port: number }).port}`)
+    await form.getByTestId('s3-account-key').fill('test')
+    await form.getByTestId('s3-account-secret').fill('test')
+    await form.getByTestId('s3-account-save').click()
+    const account = page.locator('[data-testid="s3-account"][data-name="Internal MinIO"]')
+    await account.dblclick()
+    const view = page.getByTestId('s3-view')
+    await expect(view.getByTestId('s3-error')).toContainText('CA certificate (PEM)')
+
+    await account.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Edit…', exact: true }).click()
+    await form.getByText('Network', { exact: true }).click()
+    await form.getByTestId('s3-account-ca').fill(ca)
+    await expect(form.getByTestId('s3-account-insecure')).not.toBeChecked()
+    await form.getByTestId('s3-account-test').click()
+    await expect(form.getByTestId('s3-account-test-result')).toContainText('Connected')
+    await form.getByTestId('s3-account-save').click()
+    await expect(form).toHaveCount(0)
+
+    await view.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(view.locator('[data-testid="s3-bucket"][data-name="private-minio"]')).toBeVisible()
+    await expect(view.getByTestId('s3-error')).toHaveCount(0)
+    await account.click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Edit…', exact: true }).click()
+    await expect(form.getByTestId('s3-account-ca')).toHaveValue(ca.trim())
+    await expect(form.getByTestId('s3-account-insecure')).not.toBeChecked()
+  } finally {
+    endpoint.closeAllConnections()
+    await new Promise<void>((resolve) => {
+      endpoint.close(() => {
+        resolve()
+      })
+    })
+  }
+})
+
 test('S3: multiple background syncs allow browsing and stopping one task without stopping another', async ({
   page
 }) => {
@@ -150,6 +214,7 @@ test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tả
     // Renderer chỉ biết "đã có secret", không bao giờ nhận secret.
     expect(Object.keys(accounts[0] ?? {}).sort()).toEqual([
       'accessKeyId',
+      'caPem',
       'direct',
       'endpoint',
       'forcePathStyle',

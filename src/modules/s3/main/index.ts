@@ -6,6 +6,7 @@ import { S3Settings } from '../shared/settings'
 import m0001 from '../migrations/0001_accounts.sql?raw'
 import m0002 from '../migrations/0002_pins.sql?raw'
 import m0003 from '../migrations/0003_network.sql?raw'
+import m0004 from '../migrations/0004_ca_certificate.sql?raw'
 import { S3Accounts } from './accounts'
 
 /**
@@ -19,7 +20,8 @@ export const s3Main: MainModule = {
   migrations: [
     { version: 1, name: 'accounts', sql: m0001 },
     { version: 2, name: 'pins', sql: m0002 },
-    { version: 3, name: 'network', sql: m0003 }
+    { version: 3, name: 'network', sql: m0003 },
+    { version: 4, name: 'ca_certificate', sql: m0004 }
   ],
   settings: S3Settings,
   activate(ctx) {
@@ -52,7 +54,8 @@ export const s3Main: MainModule = {
           secretAccessKey,
           forcePathStyle: input.forcePathStyle,
           proxy: proxyOf(input.endpoint, input.region, input.direct),
-          insecureTls: input.insecureTls
+          insecureTls: input.insecureTls,
+          caPem: input.caPem ?? (input.id ? accounts.resolve(input.id).caPem : '')
         })
       } catch (error) {
         return { ok: false, message: error instanceof Error ? error.message : String(error) }
@@ -83,7 +86,8 @@ export const s3Main: MainModule = {
         secretAccessKey: account.secretAccessKey,
         forcePathStyle: account.forcePathStyle,
         proxy: proxyOf(account.endpoint, account.region, account.direct),
-        insecureTls: account.insecureTls
+        insecureTls: account.insecureTls,
+        caPem: account.caPem
       }
     }
     return {

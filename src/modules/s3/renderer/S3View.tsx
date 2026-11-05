@@ -50,6 +50,7 @@ import {
   type S3UploadConflict
 } from '../shared/ops'
 import type { TransferStatus } from '@shared/sftp'
+import { isCertificateError } from '@shared/proxy'
 import { Button, cx, IconButton, Notice } from '../../../renderer/src/components/ui'
 import { useContextMenu, type MenuEntry } from '../../../renderer/src/components/ContextMenu'
 import { S3StatsDialog, type StatsTarget } from './S3Stats'
@@ -517,7 +518,9 @@ export function S3View({
   }, [run, accountId])
 
   const refresh = (): void => {
-    if (!clientRef.current) {
+    // A failed TLS connection must reload account trust settings after the CA is edited.
+    if (!clientRef.current || (error && isCertificateError(error))) {
+      loadSeq.current++
       setError(null)
       setConnectionAttempt((attempt) => attempt + 1)
       return

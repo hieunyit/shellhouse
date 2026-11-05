@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { MAX_S3_PINS } from '../../shared/ops'
 import { Secret } from '../../../../node-shared/secret'
 import { S3Accounts } from '../../main/accounts'
@@ -9,12 +12,14 @@ import { TEST_KDF } from '../../../../main/vault/crypto'
 import { Vault } from '../../../../main/vault/vault'
 import { createModuleDb } from '../../../registry/main-db'
 import m0003 from '../../migrations/0003_network.sql?raw'
+import m0004 from '../../migrations/0004_ca_certificate.sql?raw'
 
 async function setup() {
   const db = openDatabase(':memory:')
   await migrate(db, MIGRATIONS)
   // Bảng từ migration lõi 0006 / 0007; migration riêng của module (v3+) chạy tay ở đây.
   db.exec(m0003)
+  db.exec(m0004)
   const vault = new Vault(db, TEST_KDF)
   await vault.create(Secret.fromString('master-password'))
   let clock = 1_000
@@ -43,6 +48,89 @@ async function setup() {
 }
 
 describe('S3Accounts', () => {
+  it('migrates existing accounts without changing credentials or network settings', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 's3-upgrade-'))
+    const path = join(directory, 'vault.db')
+    let db = openDatabase(path)
+    try {
+      await migrate(db, MIGRATIONS)
+      db.exec(m0003)
+      const vault = new Vault(db, TEST_KDF)
+      await vault.create(Secret.fromString('master-password'))
+      const binding = { table: 's3_accounts', id: 'legacy', field: 'secret_enc' }
+      const encrypted = vault.encryptString(binding, 'existing secret')
+      db.prepare(
+        `INSERT INTO s3_accounts
+        (id, name, endpoint, access_key_id, secret_enc, updated_at, insecure_tls, direct, pins)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        'legacy',
+        'MinIO',
+        'https://minio.internal',
+        'key',
+        encrypted,
+        123,
+        0,
+        1,
+        '[{"bucket":"data","prefix":""}]'
+      )
+      const before = db.prepare('SELECT * FROM s3_accounts WHERE id = ?').get('legacy') as Record<
+        string,
+        unknown
+      >
+      vault.lock()
+      db.close()
+      // Reopen a persisted database from schema v3, as an application upgrade does.
+      db = openDatabase(path)
+      db.exec(m0004)
+      expect(db.prepare('SELECT * FROM s3_accounts WHERE id = ?').get('legacy')).toEqual({
+        ...before,
+        ca_pem: ''
+      })
+      const upgradedVault = new Vault(db, TEST_KDF)
+      await upgradedVault.unlock(Secret.fromString('master-password'))
+      const row = db.prepare('SELECT secret_enc FROM s3_accounts WHERE id = ?').get('legacy') as {
+        secret_enc: Buffer
+      }
+      const secret = upgradedVault.decrypt(binding, row.secret_enc)
+      try {
+        expect(secret.revealString()).toBe('existing secret')
+      } finally {
+        secret.dispose()
+        upgradedVault.lock()
+      }
+    } finally {
+      db.close()
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('saves CA certificates and preserves them when older callers omit the field', async () => {
+    const { accounts, id } = await setup()
+    const ca = readFileSync(
+      join(import.meta.dirname, '../../../docker/test/fixtures/ca.pem'),
+      'utf8'
+    )
+    const edit = {
+      id,
+      name: 'MinIO',
+      endpoint: 'https://minio.internal',
+      region: 'us-east-1',
+      accessKeyId: 'AKIA',
+      forcePathStyle: true
+    }
+    expect(accounts.resolve(id).caPem).toBe('')
+    accounts.save({ ...edit, caPem: ca })
+    expect(accounts.resolve(id).caPem).toBe(ca)
+    expect(accounts.list()[0]?.caPem).toBe(ca)
+    accounts.save(edit)
+    expect(accounts.resolve(id).caPem).toBe(ca)
+    expect(() => accounts.save({ ...edit, caPem: 'not a certificate' })).toThrow(/PEM/)
+    expect(accounts.resolve(id).caPem).toBe(ca)
+    accounts.save({ ...edit, caPem: '' })
+    expect(accounts.resolve(id).caPem).toBe('')
+  })
+
   it('ghim / bỏ ghim bucket và thư mục; không trùng; giữ thứ tự thêm', async () => {
     const { accounts, id } = await setup()
     expect(accounts.list()[0]?.pins).toEqual([])

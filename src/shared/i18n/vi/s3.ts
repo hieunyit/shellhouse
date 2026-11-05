@@ -1,6 +1,15 @@
 /** Bản dịch tiếng Việt — Module S3. Khoá = chuỗi tiếng Anh trong code (xem src/shared/i18n/index.ts). */
 export const s3: Readonly<Record<string, string>> = {
   // Chung
+  'CA certificate (PEM)': 'Chứng chỉ CA (PEM)',
+  'System trusted CAs are included automatically. For internal MinIO, paste the issuing CA or self-signed certificate here. Keep certificate verification enabled.':
+    'Tự dùng CA tin cậy của hệ điều hành. Với MinIO nội bộ, dán chứng chỉ CA cấp phát hoặc chứng chỉ tự ký tại đây. Giữ bật kiểm tra chứng chỉ.',
+  'Enter PEM certificates only, without private keys':
+    'Chỉ nhập chứng chỉ PEM, không nhập private key',
+  'The CA certificate is not a valid X.509 certificate':
+    'Chứng chỉ CA không phải chứng chỉ X.509 hợp lệ',
+  'Check the server certificate chain, or add its internal CA in Edit account → Network → CA certificate (PEM).':
+    'Kiểm tra chuỗi chứng chỉ trên server, hoặc thêm CA nội bộ tại Sửa tài khoản → Mạng → Chứng chỉ CA (PEM).',
   'The object listing did not advance — no sync changes were made':
     'Danh sách object không chuyển sang trang tiếp theo — chưa thay đổi dữ liệu đồng bộ',
   'Run in background': 'Chạy nền',

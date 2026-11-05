@@ -6,6 +6,18 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.39] - 2026-11-05
+
+### Fixed
+
+- S3 HTTPS connections include operating system trusted CAs automatically, resolving failures
+  with internal MinIO certificates whose CA is installed locally.
+- Add an account-specific CA certificate (PEM) field under Network for private certificate
+  authorities and self-signed endpoints. Keep certificate and hostname verification enabled,
+  including through proxies, and preserve existing account credentials during upgrade.
+- Certificate errors explain how to configure the account CA. Refresh reconnects a failed TLS
+  session with the saved account settings, without requiring the tab to be closed.
+
 ## [1.2.0-beta.38] - 2026-11-05
 
 ### Added

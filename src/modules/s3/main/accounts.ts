@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { t } from '@shared/i18n'
 import { uuidv7 } from '../../../node-shared/uuid'
+import { parseCaCertificates } from '../../../node-shared/tls-ca'
 import type { ModuleDb, ModuleSecrets } from '../../registry/main-types'
 import { MAX_S3_PINS, S3Pin, type S3AccountInput, type S3AccountSummary } from '../shared/ops'
 
@@ -15,6 +16,7 @@ interface Row {
   pins: string
   insecure_tls: number
   direct: number
+  ca_pem: string
 }
 
 function parsePins(json: string): S3Pin[] {
@@ -38,7 +40,7 @@ export class S3Accounts {
     const rows = this.db
       .prepare(
         `SELECT id, name, endpoint, region, access_key_id, secret_enc, path_style, pins,
-                insecure_tls, direct
+                insecure_tls, direct, ca_pem
          FROM s3_accounts WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE`
       )
       .all() as Row[]
@@ -51,6 +53,7 @@ export class S3Accounts {
       forcePathStyle: r.path_style === 1,
       insecureTls: r.insecure_tls === 1,
       direct: r.direct === 1,
+      caPem: r.ca_pem,
       hasSecret: r.secret_enc !== null,
       pins: parsePins(r.pins)
     }))
@@ -75,6 +78,7 @@ export class S3Accounts {
   }
 
   save(input: S3AccountInput): string {
+    if (input.caPem !== undefined) parseCaCertificates(input.caPem)
     const now = this.now()
     const id = input.id ?? uuidv7(now)
     const secret =
@@ -91,13 +95,14 @@ export class S3Accounts {
       input.forcePathStyle ? 1 : 0,
       input.insecureTls ? 1 : 0,
       input.direct ? 1 : 0,
+      input.caPem ?? null,
       now
     ]
     if (input.id) {
       const result = this.db
         .prepare(
           `UPDATE s3_accounts SET name = ?, endpoint = ?, region = ?, access_key_id = ?,
-             path_style = ?, insecure_tls = ?, direct = ?, updated_at = ?${secret === undefined ? '' : ', secret_enc = ?'}
+             path_style = ?, insecure_tls = ?, direct = ?, ca_pem = COALESCE(?, ca_pem), updated_at = ?${secret === undefined ? '' : ', secret_enc = ?'}
            WHERE id = ? AND deleted_at IS NULL`
         )
         .run(...values, ...(secret === undefined ? [] : [secret]), id)
@@ -108,7 +113,7 @@ export class S3Accounts {
     this.db
       .prepare(
         `INSERT INTO s3_accounts (name, endpoint, region, access_key_id, path_style, insecure_tls,
-           direct, updated_at, secret_enc, id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           direct, ca_pem, updated_at, secret_enc, id) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, ''), ?, ?, ?)`
       )
       .run(...values, secret, id)
     return id
@@ -133,11 +138,12 @@ export class S3Accounts {
     forcePathStyle: boolean
     insecureTls: boolean
     direct: boolean
+    caPem: string
   } {
     const row = this.db
       .prepare(
         `SELECT id, name, endpoint, region, access_key_id, secret_enc, path_style, insecure_tls,
-                direct FROM s3_accounts WHERE id = ? AND deleted_at IS NULL`
+                direct, ca_pem FROM s3_accounts WHERE id = ? AND deleted_at IS NULL`
       )
       .get(id) as Row | undefined
     if (!row) throw new Error(t('The S3 account no longer exists'))
@@ -151,7 +157,8 @@ export class S3Accounts {
       secretAccessKey: this.secrets.open('s3_accounts', id, 'secret_enc', row.secret_enc),
       forcePathStyle: row.path_style === 1,
       insecureTls: row.insecure_tls === 1,
-      direct: row.direct === 1
+      direct: row.direct === 1,
+      caPem: row.ca_pem
     }
   }
 }

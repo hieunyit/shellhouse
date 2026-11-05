@@ -60,6 +60,10 @@ export type S3Pin = z.infer<typeof S3Pin>
 
 /** Tối đa số mục ghim mỗi tài khoản. */
 export const MAX_S3_PINS = 50
+export const S3CaPem = z
+  .string()
+  .trim()
+  .max(256 * 1024)
 
 export const S3AccountSummary = z.object({
   id: z.string(),
@@ -73,6 +77,8 @@ export const S3AccountSummary = z.object({
   insecureTls: z.boolean(),
   /** Luôn kết nối thẳng, không qua proxy của app. */
   direct: z.boolean(),
+  /** Public CA bundle; optional for older callers. No private keys. */
+  caPem: S3CaPem.optional(),
   hasSecret: z.boolean(),
   pins: z.array(S3Pin)
 })
@@ -92,7 +98,8 @@ export const S3AccountInput = z.object({
   secretAccessKey: z.string().max(1024).optional(),
   forcePathStyle: z.boolean(),
   insecureTls: z.boolean().default(false),
-  direct: z.boolean().default(false)
+  direct: z.boolean().default(false),
+  caPem: S3CaPem.optional()
 })
 /** Dạng nhận vào (trường mạng có mặc định — tài khoản cũ / test không cần ghi). */
 export type S3AccountInput = z.input<typeof S3AccountInput>

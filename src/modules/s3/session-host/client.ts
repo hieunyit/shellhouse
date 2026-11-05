@@ -18,6 +18,7 @@ import { t, tn } from '@shared/i18n'
 import { runQueue } from '../../../node-shared/pool'
 import { proxiedAgents } from '../../../node-shared/proxy-tunnel'
 import { isCertificateError } from '@shared/proxy'
+import { trustedCaCertificates } from '../../../node-shared/tls-ca'
 
 /** Thông tin kết nối một tài khoản S3 (đã giải mã secret — chỉ có ở main / Session Host). */
 export interface S3Connection {
@@ -30,6 +31,7 @@ export interface S3Connection {
   proxy?: string | null
   /** Bỏ qua kiểm tra chứng chỉ TLS. */
   insecureTls?: boolean
+  caPem?: string
 }
 
 /** Hai cấp đầu liệt kê theo "thư mục" để chia việc; sâu hơn liệt kê phẳng (ít request nhất). */
@@ -64,11 +66,10 @@ export function createS3Client(
   const client = new S3Client({
     maxAttempts: 5,
     retryMode: 'adaptive',
-    requestHandler: proxiedAgents(
-      connection.proxy ?? null,
-      agent,
-      connection.insecureTls ? { rejectUnauthorized: false } : {}
-    ),
+    requestHandler: proxiedAgents(connection.proxy ?? null, agent, {
+      ca: trustedCaCertificates(connection.caPem),
+      rejectUnauthorized: !connection.insecureTls
+    }),
     region,
     followRegionRedirects: true,
     ...(custom
@@ -272,12 +273,16 @@ export function errorText(error: unknown): string {
   if (code === 'InvalidObjectState')
     return t('The object is archived (Glacier) — restore it before reading or copying it')
   if (isUnsupported(error)) return t('Not supported by this provider')
-  const message = e?.message ?? String(error)
-  if (isCertificateError(message))
-    return t(
-      '{error} — if you trust this server, turn on “Skip certificate verification” in the account settings',
-      { error: message }
+  const message = (e?.message ?? String(error)).replace(
+    /; if the root CA is installed locally, try running Node\.js with --use-system-ca/g,
+    ''
+  )
+  if (isCertificateError(message)) {
+    const hint = t(
+      'Check the server certificate chain, or add its internal CA in Edit account → Network → CA certificate (PEM).'
     )
+    return message.endsWith(hint) ? message : `${message} — ${hint}`
+  }
   return message
 }
 

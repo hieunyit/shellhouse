@@ -137,9 +137,9 @@ export function proxyFor(
   return bypassProxy(host, port, noProxy) ? null : chosen.url
 }
 
-/** Lỗi chứng chỉ TLS (tự ký, CA nội bộ, proxy chặn TLS…) — để gợi ý tuỳ chọn bỏ qua. */
+/** Lỗi chứng chỉ TLS (tự ký, CA nội bộ, proxy chặn TLS…). */
 export function isCertificateError(message: string): boolean {
-  return /self[- ]signed|UNABLE_TO_(GET_ISSUER_CERT|VERIFY_LEAF_SIGNATURE)|CERT_(HAS_EXPIRED|UNTRUSTED|NOT_YET_VALID)|certificate (has expired|is not trusted|verify failed)|unable to verify the first certificate|ERR_CERT_|Hostname\/IP does not match certificate/i.test(
+  return /self[- ]signed|UNABLE_TO_(GET_ISSUER_CERT|VERIFY_LEAF_SIGNATURE)|CERT_(HAS_EXPIRED|UNTRUSTED|NOT_YET_VALID)|certificate (has expired|is not trusted|verify failed)|unable to (verify the first certificate|get (?:local )?issuer certificate)|ERR_CERT_|Hostname\/IP does not match certificate/i.test(
     message
   )
 }

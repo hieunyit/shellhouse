@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { S3AccountInput, S3Pin } from './ops'
+import { S3AccountInput, S3Pin, S3CaPem } from './ops'
 
 /** Tham số IPC `module:s3:*` (main validate trước khi gọi handler). */
 export const S3Ipc = {
@@ -29,7 +29,8 @@ export const S3SessionConfig = z.object({
     forcePathStyle: z.boolean(),
     /** Proxy đã chọn cho endpoint (null = thẳng). */
     proxy: z.string().max(500).nullable(),
-    insecureTls: z.boolean()
+    insecureTls: z.boolean(),
+    caPem: S3CaPem.optional()
   }),
   limits: z.object({
     requests: z.number().int().min(1).max(64),

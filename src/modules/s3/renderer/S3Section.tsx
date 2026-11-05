@@ -9,7 +9,8 @@ import {
   IconButton,
   Input,
   Modal,
-  Notice
+  Notice,
+  TextArea
 } from '../../../renderer/src/components/ui'
 import { useContextMenu } from '../../../renderer/src/components/ContextMenu'
 import { useS3, type BucketList } from './store'
@@ -301,6 +302,7 @@ function S3AccountForm({
   const [pathStyle, setPathStyle] = useState(account?.forcePathStyle ?? false)
   const [insecureTls, setInsecureTls] = useState(account?.insecureTls ?? false)
   const [direct, setDirect] = useState(account?.direct ?? false)
+  const [caPem, setCaPem] = useState(account?.caPem ?? '')
   const [error, setError] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [tested, setTested] = useState<{ ok: boolean; message: string } | null>(null)
@@ -319,7 +321,8 @@ function S3AccountForm({
       ...(secret || !account ? { secretAccessKey: secret } : {}),
       forcePathStyle: pathStyle,
       insecureTls,
-      direct
+      direct,
+      caPem
     })
 
   const save = async (): Promise<void> => {
@@ -460,11 +463,29 @@ function S3AccountForm({
             setPathStyle(e.target.checked)
           }}
         />
-        <details className="group text-[13px]" open={insecureTls || direct}>
+        <details className="group text-[13px]" open={insecureTls || direct || !!caPem}>
           <summary className="cursor-pointer text-xs text-muted select-none hover:text-fg">
             {t('Network')}
           </summary>
           <div className="mt-2 flex flex-col gap-3">
+            <Field
+              label={t('CA certificate (PEM)')}
+              hint={t(
+                'System trusted CAs are included automatically. For internal MinIO, paste the issuing CA or self-signed certificate here. Keep certificate verification enabled.'
+              )}
+            >
+              <TextArea
+                rows={5}
+                spellCheck={false}
+                maxLength={256 * 1024}
+                placeholder="-----BEGIN CERTIFICATE-----"
+                value={caPem}
+                data-testid="s3-account-ca"
+                onChange={(event) => {
+                  setCaPem(event.target.value)
+                }}
+              />
+            </Field>
             <Checkbox
               label={t('Skip certificate verification')}
               description={t(

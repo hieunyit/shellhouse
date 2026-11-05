@@ -4,6 +4,7 @@ import { connect as netConnect, isIP } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { connect as tlsConnect, type ConnectionOptions } from 'node:tls'
 import { parseProxy, type ParsedProxy } from '@shared/proxy'
+import { trustedCaCertificates } from './tls-ca'
 
 /** Mở kết nối TCP thô tới (host, port) — mặc định net.connect; Kubernetes qua bastion dùng kênh SSH. */
 export type RawConnect = (host: string, port: number) => Promise<Duplex>
@@ -177,7 +178,12 @@ export async function openTunnel(
   }, TIMEOUT_MS)
   try {
     if (p.protocol === 'https') {
-      const tls = tlsConnect({ socket, servername: isIP(p.host) ? undefined : p.host })
+      const tls = tlsConnect({
+        socket,
+        host: p.host,
+        servername: isIP(p.host) ? undefined : p.host,
+        ca: trustedCaCertificates()
+      })
       await new Promise<void>((resolve, reject) => {
         tls.once('secureConnect', resolve)
         tls.once('error', reject)
@@ -204,10 +210,11 @@ export function proxiedAgents(
   options: AgentOptions,
   tls: ConnectionOptions = {}
 ): { httpAgent: HttpAgent; httpsAgent: HttpsAgent } {
+  const targetTls = { ...tls, ca: tls.ca ?? trustedCaCertificates() }
   if (!proxyUrl)
     return {
       httpAgent: new HttpAgent(options),
-      httpsAgent: new HttpsAgent({ ...options, ...tls })
+      httpsAgent: new HttpsAgent({ ...options, ...targetTls })
     }
   type Callback = (error: Error | null, socket?: Duplex) => void
   class TunnelHttpAgent extends HttpAgent {
@@ -235,8 +242,9 @@ export function proxiedAgents(
       openTunnel(proxyUrl as string, host, Number(opts.port) || 443).then(
         (raw) => {
           const socket = tlsConnect({
-            ...tls,
+            ...targetTls,
             socket: raw,
+            host,
             servername: opts.servername ?? (isIP(host) ? undefined : host)
           })
           // Lỗi trước khi bắt tay xong → báo cho agent; sau đó lỗi thuộc về request đang dùng socket.
@@ -258,6 +266,6 @@ export function proxiedAgents(
   }
   return {
     httpAgent: new TunnelHttpAgent(options),
-    httpsAgent: new TunnelHttpsAgent({ ...options, ...tls })
+    httpsAgent: new TunnelHttpsAgent({ ...options, ...targetTls })
   }
 }

@@ -72,6 +72,7 @@ describe('proxy: cấu hình', () => {
   it('nhận ra lỗi chứng chỉ', () => {
     expect(isCertificateError('self-signed certificate in certificate chain')).toBe(true)
     expect(isCertificateError('unable to verify the first certificate')).toBe(true)
+    expect(isCertificateError('unable to get local issuer certificate')).toBe(true)
     expect(isCertificateError('net::ERR_CERT_AUTHORITY_INVALID')).toBe(true)
     expect(isCertificateError('connect ECONNREFUSED')).toBe(false)
   })
