@@ -6,10 +6,19 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
-## [1.2.0-beta.39] - 2026-11-05
+## [1.2.0-beta.40] - 2026-11-05
 
 ### Fixed
 
+- Large explicit S3 copy/move selections use bounded, paged metadata lookups instead of serial
+  HEAD requests, with parallel HEAD fallback when listings are unavailable or too large.
+  Copy selected files concurrently and batch source deletions for move. Show preflight progress
+  and allow cancellation before any copy; retain source objects whose copy fails.
+- Sync, copy and move background operations appear in Transfers with object counts, routes,
+  timestamps and stop controls. Save the latest 1,000 finished operations across tab closes and
+  app restarts, including failures and stopped tasks; allow clearing individual or finished tasks.
+- A completed background operation refreshes the current S3 location without navigating back
+  to a folder that was open before the user changed location.
 - S3 HTTPS connections include operating system trusted CAs automatically, resolving failures
   with internal MinIO certificates whose CA is installed locally.
 - Add an account-specific CA certificate (PEM) field under Network for private certificate

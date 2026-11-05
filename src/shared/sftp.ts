@@ -162,6 +162,20 @@ export interface TransferStatus {
   resumable?: boolean
   /** Cùng một lần tải thư mục: Transfers gộp thành một dòng (hàng trăm file nhỏ không ngập danh sách). */
   batch?: TransferBatch
+  /** A server-side operation uses object counts rather than byte transfer counters. */
+  operation?: {
+    accountName?: string
+    kind: 'copy' | 'move' | 'sync' | 'delete' | 'rename'
+    label: string
+    source: string
+    destination: string
+    completed: number
+    total: number | null
+    failed: number
+    checking?: { done: number; total: number }
+    startedAt: number
+    finishedAt: number | null
+  }
 }
 
 /** Nhóm lượt truyền của một lần tải thư mục. */

@@ -7,7 +7,9 @@ import m0001 from '../migrations/0001_accounts.sql?raw'
 import m0002 from '../migrations/0002_pins.sql?raw'
 import m0003 from '../migrations/0003_network.sql?raw'
 import m0004 from '../migrations/0004_ca_certificate.sql?raw'
+import m0005 from '../migrations/0005_task_history.sql?raw'
 import { S3Accounts } from './accounts'
+import { S3TaskHistory } from './task-history'
 
 /**
  * Phần main của S3: tài khoản (secret trong vault), IPC `module:s3:*`, phân giải phiên — secret
@@ -21,11 +23,20 @@ export const s3Main: MainModule = {
     { version: 1, name: 'accounts', sql: m0001 },
     { version: 2, name: 'pins', sql: m0002 },
     { version: 3, name: 'network', sql: m0003 },
-    { version: 4, name: 'ca_certificate', sql: m0004 }
+    { version: 4, name: 'ca_certificate', sql: m0004 },
+    { version: 5, name: 'task_history', sql: m0005 }
   ],
   settings: S3Settings,
   activate(ctx) {
     const accounts = new S3Accounts(ctx.db, ctx.secrets)
+    const history = new S3TaskHistory(ctx.db)
+    ctx.ipc.handle('taskHistory', S3Ipc.taskHistory, () => history.list())
+    ctx.ipc.handle('saveTask', S3Ipc.saveTask, (record) => {
+      history.save(record)
+    })
+    ctx.ipc.handle('removeTasks', S3Ipc.removeTasks, (ids) => {
+      history.remove(ids)
+    })
     const changed = (): void => {
       ctx.events.emit('changed', null)
     }

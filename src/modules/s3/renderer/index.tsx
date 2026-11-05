@@ -5,10 +5,12 @@ import { s3Manifest } from '../manifest'
 import { S3BrowserParams } from '../shared/ipc'
 import { s3LocationTitle } from './api'
 import { useS3 } from './store'
+import { taskHistory } from './task-history'
 
 /** Phần renderer của S3: mục thanh bên, tab trình quản lý, trang cài đặt. */
 export const s3Renderer: RendererModule = {
   manifest: s3Manifest,
+  background: () => taskHistory.start(),
   SidebarSection: lazyModuleComponent(() => import('./S3Section').then((m) => m.S3Section)),
   tabs: {
     browser: defineTab({

@@ -1,9 +1,13 @@
 import { z } from 'zod'
 import { S3AccountInput, S3Pin, S3CaPem } from './ops'
+import { S3FinishedTask, MAX_S3_TASK_HISTORY } from './task-history'
 
 /** Tham số IPC `module:s3:*` (main validate trước khi gọi handler). */
 export const S3Ipc = {
   accounts: z.tuple([]),
+  taskHistory: z.tuple([]),
+  saveTask: z.tuple([S3FinishedTask]),
+  removeTasks: z.tuple([z.array(z.string().min(1).max(128)).max(MAX_S3_TASK_HISTORY)]),
   save: z.tuple([S3AccountInput]),
   /** Thử kết nối bằng thông tin đang nhập (secret trống + có id = dùng secret đã lưu). */
   test: z.tuple([S3AccountInput]),

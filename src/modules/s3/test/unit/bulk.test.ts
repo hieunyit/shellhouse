@@ -5,7 +5,7 @@ import {
   ListObjectsV2Command,
   type S3Client
 } from '@aws-sdk/client-s3'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { S3BulkJob, S3Op, type S3JobProgress } from '../../shared/ops'
 import { BulkJob, countObjects, type BulkEnv } from '../../session-host/bulk'
 
@@ -14,7 +14,7 @@ import { BulkJob, countObjects, type BulkEnv } from '../../session-host/bulk'
  * DeleteObjects (key chứa "locked" thì lỗi), HeadObject, CopyObject. s3rver không cắt trang được
  * (token dùng DES) nên phân trang kiểm tra ở đây.
  */
-function fakeS3(keys: string[]) {
+function fakeS3(keys: string[], delay = 0, listing: 'normal' | 'denied' | 'no-size' = 'normal') {
   const objects = new Map(keys.map((k) => [k, 1]))
   const buckets = new Map<string, Map<string, number>>([['b', objects]])
   const bucketObjects = (bucket: string | undefined): Map<string, number> => {
@@ -26,18 +26,25 @@ function fakeS3(keys: string[]) {
     }
     return found
   }
-  const calls = { list: 0, delete: 0, maxDeleteBatch: 0 }
-  const send = (command: unknown): Promise<unknown> => {
+  const calls = { list: 0, delete: 0, head: 0, copy: 0, maxHead: 0, maxCopy: 0, maxDeleteBatch: 0 }
+  const active = { head: 0, copy: 0 }
+  const execute = (command: unknown): Promise<unknown> => {
     if (command instanceof ListObjectsV2Command) {
       calls.list++
-      const { Prefix = '', StartAfter = '', MaxKeys = 1000 } = command.input
+      if (listing === 'denied') return Promise.reject(new Error('AccessDenied'))
+      const { Prefix = '', StartAfter, ContinuationToken, MaxKeys = 1000 } = command.input
+      const cursor = StartAfter ?? ContinuationToken ?? ''
       const objects = bucketObjects(command.input.Bucket)
-      const all = [...objects.keys()].filter((k) => k.startsWith(Prefix) && k > StartAfter).sort()
+      const all = [...objects.keys()].filter((k) => k.startsWith(Prefix) && k > cursor).sort()
       const page = all.slice(0, MaxKeys)
       return Promise.resolve({
-        Contents: page.map((Key) => ({ Key, Size: objects.get(Key) })),
+        Contents: page.map((Key) => ({
+          Key,
+          Size: listing === 'no-size' ? undefined : objects.get(Key)
+        })),
         KeyCount: page.length,
-        IsTruncated: all.length > page.length
+        IsTruncated: all.length > page.length,
+        NextContinuationToken: all.length > page.length ? page.at(-1) : undefined
       })
     }
     if (command instanceof DeleteObjectsCommand) {
@@ -52,20 +59,46 @@ function fakeS3(keys: string[]) {
       return Promise.resolve({ Errors })
     }
     if (command instanceof HeadObjectCommand) {
+      calls.head++
       const size = bucketObjects(command.input.Bucket).get(command.input.Key ?? '')
       return size === undefined
         ? Promise.reject(Object.assign(new Error('NotFound'), { name: 'NotFound' }))
         : Promise.resolve({ ContentLength: size })
     }
     if (command instanceof CopyObjectCommand) {
+      calls.copy++
       const from = decodeURIComponent((command.input.CopySource ?? '').replace(/^[^/]+\//, ''))
       const sourceBucket = (command.input.CopySource ?? '').split('/')[0]
       const source = bucketObjects(sourceBucket)
       if (!source.has(from)) return Promise.reject(new Error(`no ${from}`))
+      if (from.includes('copy-error')) return Promise.reject(new Error('Copy rejected'))
       bucketObjects(command.input.Bucket).set(command.input.Key ?? '', source.get(from) ?? 0)
       return Promise.resolve({})
     }
     return Promise.reject(new Error('unexpected command'))
+  }
+  const send = async (
+    command: unknown,
+    options?: { abortSignal?: AbortSignal }
+  ): Promise<unknown> => {
+    const kind =
+      command instanceof HeadObjectCommand
+        ? 'head'
+        : command instanceof CopyObjectCommand
+          ? 'copy'
+          : null
+    if (kind) {
+      active[kind]++
+      if (kind === 'head') calls.maxHead = Math.max(calls.maxHead, active.head)
+      else calls.maxCopy = Math.max(calls.maxCopy, active.copy)
+    }
+    try {
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+      if (options?.abortSignal?.aborted) throw new Error('Aborted')
+      return await execute(command)
+    } finally {
+      if (kind) active[kind]--
+    }
   }
   const client = { send } as unknown as S3Client
   const env: BulkEnv = { clientFor: () => Promise.resolve(client), requests: 8, deleteParallel: 3 }
@@ -82,6 +115,156 @@ async function finish(env: BulkEnv, spec: S3BulkJob): Promise<S3JobProgress> {
 }
 
 describe('S3: việc nền theo trang', () => {
+  it('falls back to HEAD when LIST is denied and retains existing destination data', async () => {
+    const keys = range(128, (i) => `f${i}`)
+    const s3 = fakeS3(keys, 0, 'denied')
+    const p = await finish(s3.env, {
+      kind: 'copy',
+      bucket: 'b',
+      keys,
+      destBucket: 'd',
+      destPrefix: '',
+      move: false,
+      overwrite: false
+    })
+    expect(p).toMatchObject({ phase: 'done', done: 128, failed: 0 })
+    expect(s3.calls.head).toBe(256)
+    expect(s3.buckets.get('d')?.size).toBe(128)
+  })
+
+  it('still detects existing destinations when LIST omits object sizes', async () => {
+    const keys = range(128, (i) => `f${i}`)
+    const s3 = fakeS3(keys, 0, 'no-size')
+    s3.buckets.set('d', new Map([['f127', 2]]))
+    const p = await finish(s3.env, {
+      kind: 'copy',
+      bucket: 'b',
+      keys,
+      destBucket: 'd',
+      destPrefix: '',
+      move: true,
+      overwrite: false
+    })
+    expect(p.phase).toBe('error')
+    expect(s3.calls.copy).toBe(0)
+    expect(s3.objects.size).toBe(128)
+    expect(s3.buckets.get('d')?.get('f127')).toBe(2)
+  })
+
+  it('moves successful copies in batches while retaining sources whose copy failed', async () => {
+    const keys = [...range(2000, (i) => `f${i}`), 'copy-error']
+    const s3 = fakeS3(keys)
+    const p = await finish(s3.env, {
+      kind: 'copy',
+      bucket: 'b',
+      keys,
+      destBucket: 'd',
+      destPrefix: '',
+      move: true,
+      overwrite: false
+    })
+    expect(p).toMatchObject({ phase: 'done', done: 2000, failed: 1 })
+    expect([...s3.objects.keys()]).toEqual(['copy-error'])
+    expect(s3.buckets.get('d')?.size).toBe(2000)
+    expect(s3.calls.maxDeleteBatch).toBeLessThanOrEqual(1000)
+  })
+  it.each([false, true])(
+    'processes 5,000 explicit file selections concurrently with paged checks (move=%s)',
+    async (move) => {
+      const keys = range(5000, (i) => `f${String(i).padStart(5, '0')}`)
+      const s3 = fakeS3(keys, 1)
+      const p = await finish(s3.env, {
+        kind: 'copy',
+        bucket: 'b',
+        keys,
+        destBucket: 'd',
+        destPrefix: '',
+        move,
+        overwrite: false
+      })
+      expect(p).toMatchObject({
+        phase: 'done',
+        found: 5000,
+        done: 5000,
+        failed: 0,
+        scanning: false
+      })
+      expect(s3.buckets.get('d')?.size).toBe(5000)
+      expect(s3.objects.size).toBe(move ? 0 : 5000)
+      expect(s3.calls.head).toBe(0)
+      expect(s3.calls.list).toBe(6)
+      expect(s3.calls.copy).toBe(5000)
+      expect(s3.calls.maxCopy).toBe(s3.env.requests)
+      expect(s3.calls.delete).toBe(move ? 5 : 0)
+      expect(s3.calls.maxDeleteBatch).toBeLessThanOrEqual(1000)
+    }
+  )
+
+  it('bounds discovery in a large unrelated prefix and falls back to parallel HEAD checks', async () => {
+    const keys = range(256, (i) => `z${i}`)
+    const s3 = fakeS3([...range(2500, (i) => `a${i}`), ...keys], 1)
+    const p = await finish(s3.env, {
+      kind: 'copy',
+      bucket: 'b',
+      keys,
+      destBucket: 'd',
+      destPrefix: '',
+      move: false,
+      overwrite: false
+    })
+    expect(p).toMatchObject({ phase: 'done', done: 256, failed: 0 })
+    expect(s3.calls.list).toBe(3)
+    expect(s3.calls.head).toBe(256)
+    expect(s3.calls.maxHead).toBe(s3.env.requests)
+    expect(s3.calls.maxCopy).toBe(s3.env.requests)
+    expect(s3.buckets.get('d')?.size).toBe(256)
+  })
+
+  it('detects a destination collision from the listing before copying any selected file', async () => {
+    const keys = range(256, (i) => `f${i}`)
+    const s3 = fakeS3(keys)
+    s3.buckets.set('d', new Map([['f255', 2]]))
+    const p = await finish(s3.env, {
+      kind: 'copy',
+      bucket: 'b',
+      keys,
+      destBucket: 'd',
+      destPrefix: '',
+      move: true,
+      overwrite: false
+    })
+    expect(p.phase).toBe('error')
+    expect(p.error).toMatch(/already exists/)
+    expect(s3.calls.copy).toBe(0)
+    expect(s3.calls.delete).toBe(0)
+    expect(s3.objects.size).toBe(256)
+  })
+
+  it('reports checking progress and can stop before any source is copied or deleted', async () => {
+    const keys = range(64, (i) => `f${i}`)
+    const s3 = fakeS3(keys, 30)
+    const job = new BulkJob(s3.env, {
+      kind: 'copy',
+      bucket: 'b',
+      keys,
+      destBucket: 'd',
+      destPrefix: '',
+      move: true,
+      overwrite: false
+    })
+    await vi.waitFor(() => {
+      expect(s3.calls.maxHead).toBe(s3.env.requests)
+    })
+    expect(job.snapshot().checking).toMatchObject({ total: 64 })
+    job.stop()
+    await job.finished
+    expect(job.snapshot()).toMatchObject({ phase: 'stopped', error: null })
+    expect(job.snapshot().checking).toBeUndefined()
+    expect(s3.calls.copy).toBe(0)
+    expect(s3.calls.delete).toBe(0)
+    expect(s3.objects.size).toBe(64)
+  })
+
   it('accepts explicit selections beyond 1000 and streams an entire bucket to another bucket', async () => {
     const keys = range(2501, (i) => `f${String(i).padStart(5, '0')}`)
     const spec = {

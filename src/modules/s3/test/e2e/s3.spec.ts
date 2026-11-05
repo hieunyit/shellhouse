@@ -81,6 +81,115 @@ test('S3 internal TLS: add a CA and reconnect an existing failed tab with verifi
   }
 })
 
+test('S3: copy checks show progress and can be stopped while browsing', async ({ page }) => {
+  const { createServer, request } = await import('node:http')
+  const { S3Client, PutObjectCommand, ListObjectsV2Command } = await import('@aws-sdk/client-s3')
+  server = await startS3TestServer(['demo'])
+  const upstream = server.endpoint
+  let release: (() => void) | undefined
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const proxy = createServer((incoming, response) => {
+    const forward = (): void => {
+      if (response.destroyed) return
+      const target = request(
+        new URL(incoming.url ?? '/', upstream),
+        { method: incoming.method, headers: incoming.headers },
+        (out) => {
+          response.writeHead(out.statusCode ?? 502, out.headers)
+          out.pipe(response)
+        }
+      )
+      target.on('error', () => {
+        if (!response.destroyed) response.writeHead(502).end()
+      })
+      incoming.pipe(target)
+    }
+    if (incoming.method === 'HEAD') void gate.then(forward)
+    else forward()
+  })
+  await new Promise<void>((resolve) => {
+    proxy.listen(0, '127.0.0.1', resolve)
+  })
+  const client = new S3Client({
+    endpoint: upstream,
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: server.accessKeyId, secretAccessKey: server.secretAccessKey }
+  })
+  try {
+    for (const Key of ['a.txt', 'b.txt'])
+      await client.send(new PutObjectCommand({ Bucket: 'demo', Key, Body: 'keep source' }))
+    await page.evaluate((input) => window.shellhouse.invokeModule('s3', 'save', [input]), {
+      name: 'Copy checks',
+      endpoint: `http://127.0.0.1:${(proxy.address() as { port: number }).port}`,
+      region: 'us-east-1',
+      accessKeyId: server.accessKeyId,
+      secretAccessKey: server.secretAccessKey,
+      forcePathStyle: true
+    })
+    await openArea(page, 's3')
+    await page.locator('[data-testid="s3-account"][data-name="Copy checks"]').dblclick()
+    const view = page.getByTestId('s3-view')
+    await view.locator('[data-testid="s3-bucket"][data-name="demo"]').dblclick()
+    await view.locator('[data-testid="s3-entry"][data-name="a.txt"]').click()
+    await view
+      .locator('[data-testid="s3-entry"][data-name="b.txt"]')
+      .click({ modifiers: ['ControlOrMeta'] })
+    await view.getByTestId('s3-copy').click()
+    await page.getByTestId('s3-copy-prefix').fill('target/')
+    await page.getByTestId('s3-dialog-submit').click()
+    await expect(view.getByTestId('s3-job')).toContainText('Checking files: 0 of 2')
+    await view.getByTestId('s3-mkdir').click()
+    await page.getByTestId('s3-dialog-input').fill('while-checking')
+    await page.getByTestId('s3-dialog-submit').click()
+    await expect(view.locator('[data-testid="s3-entry"][data-name="while-checking"]')).toBeVisible()
+    await view.getByTestId('s3-job-stop').click()
+    await expect(view.getByTestId('s3-job')).toHaveCount(0)
+    await openArea(page, 'transfers')
+    const stopped = page.locator('[data-testid="transfers-center-row"][data-operation="copy"]')
+    await expect(stopped).toHaveAttribute('data-state', 'cancelled')
+    await expect(stopped).toContainText('0 of 2 objects')
+    await openArea(page, 's3')
+    await page
+      .locator('[data-testid="tab"]')
+      .filter({ hasText: 'demo' })
+      .getByTestId('tab-close')
+      .click()
+    await openArea(page, 'transfers')
+    await expect(stopped).toHaveCount(1)
+    await page.reload()
+    await openArea(page, 'transfers')
+    await expect(stopped).toHaveCount(1)
+    await expect(stopped).toHaveAttribute('data-state', 'cancelled')
+    await page.getByTestId('transfers-clear-finished').click()
+    await expect(stopped).toHaveCount(0)
+    await expect
+      .poll(
+        async () =>
+          await page.evaluate(() => window.shellhouse.invokeModule('s3', 'taskHistory', []))
+      )
+      .toEqual([])
+    expect(
+      (await client.send(new ListObjectsV2Command({ Bucket: 'demo', Prefix: 'target/' })))
+        .Contents ?? []
+    ).toHaveLength(0)
+    expect(
+      (await client.send(new ListObjectsV2Command({ Bucket: 'demo' }))).Contents?.map((o) => o.Key)
+    ).toEqual(['a.txt', 'b.txt', 'while-checking/'])
+  } finally {
+    release?.()
+    client.destroy()
+    proxy.closeAllConnections()
+    await new Promise<void>((resolve) => {
+      proxy.close(() => {
+        resolve()
+      })
+    })
+  }
+})
+
 test('S3: multiple background syncs allow browsing and stopping one task without stopping another', async ({
   page
 }) => {
@@ -172,6 +281,12 @@ test('S3: multiple background syncs allow browsing and stopping one task without
       new GetObjectCommand({ Bucket: 'dst', Key: 'second/data.txt' })
     )
     expect(await result.Body?.transformToString()).toBe('background')
+    await page.getByTestId('s3-sync-dialog').getByText('Close', { exact: true }).click()
+    await openArea(page, 'transfers')
+    const history = page.locator('[data-testid="transfers-center-row"][data-operation="sync"]')
+    await expect(history).toHaveCount(2)
+    await expect(history.filter({ hasText: 'Stopped' })).toHaveAttribute('data-state', 'cancelled')
+    await expect(history.filter({ hasText: 'Completed' })).toHaveAttribute('data-state', 'done')
     await expect(
       client.send(new GetObjectCommand({ Bucket: 'dst', Key: 'first/data.txt' }))
     ).rejects.toThrow()

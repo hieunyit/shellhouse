@@ -156,6 +156,8 @@ export interface S3JobProgress {
   failed: number
   /** Còn đang liệt kê (chưa biết tổng). */
   scanning: boolean
+  /** Destination/source checks before the first copy; absent while transferring. */
+  checking?: { done: number; total: number }
   /** Lỗi từng object (tối đa 20). */
   errors: { key: string; message: string }[]
   /** Lỗi làm dừng cả việc (trùng tên, copy vào chính nó…). */

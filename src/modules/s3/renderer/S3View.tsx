@@ -108,6 +108,8 @@ import { S3SessionClient } from './s3-client'
 import { eachLimit, runStatsJob } from './stats-job'
 import { ExportBucketsDialog, SyncDialog, type SyncSource } from './S3Sync'
 import { JobsPanel, jobErrorText, useBulkJobs, type RunningJob } from './S3Jobs'
+import { taskHistory } from './task-history'
+import { bulkTask, syncTask } from './task-records'
 import { ObjectRow, type RowHandlers } from './ObjectRow'
 
 /** Số bucket đếm cùng lúc khi "Calculate all sizes". */
@@ -310,6 +312,7 @@ export function S3View({
   const load = useCallback(
     async (b: string, p: string, options: { refresh?: boolean } = {}) => {
       const seq = ++loadSeq.current
+      firstLocation.current = { bucket: b, prefix: p }
       setLoading(true)
       if (!options.refresh) setError(null)
       try {
@@ -550,9 +553,10 @@ export function S3View({
   const refreshHere = useRef<() => void>(() => undefined)
   useEffect(() => {
     refreshHere.current = () => {
-      if (bucket !== null) void load(bucket, prefix, { refresh: true })
+      const target = firstLocation.current
+      if (target) void load(target.bucket, target.prefix, { refresh: true })
     }
-  })
+  }, [load])
   useEffect(() => {
     const grew = doneHere > lastDone.current
     lastDone.current = doneHere
@@ -579,7 +583,31 @@ export function S3View({
     if (problem) setError(problem)
     if (p.done > 0 || p.phase === 'done') refreshHere.current()
   }
-  const bulk = useBulkJobs(run, onJobFinished, connectionAttempt)
+  const bulk = useBulkJobs(run, onJobFinished, connectionAttempt, (job, progress) => {
+    taskHistory.update(
+      bulkTask(
+        { id: job.id, accountId, accountName, startedAt: job.startedAt },
+        job.spec,
+        job.label,
+        progress
+      ),
+      {
+        tabId,
+        cancel: () => {
+          void run({ op: 'jobStop', id: job.id }).catch(() => undefined)
+        },
+        reveal: () => {
+          activateTab(tabId)
+        }
+      }
+    )
+  })
+  useEffect(
+    () => () => {
+      taskHistory.detach(tabId)
+    },
+    [tabId, connectionAttempt]
+  )
   const startJob = (job: S3BulkJob, label: string, verb: string): void => {
     void bulk.start(job, label, verb).catch((e: unknown) => {
       setError(cleanError(e))
@@ -2174,10 +2202,29 @@ export function S3View({
               all.map((item) => (item.id === task.id ? { ...item, hidden: true } : item))
             )
           }}
-          onProgress={(progress, destination) => {
+          onProgress={(progress, destination, operation) => {
             setSyncTasks((all) =>
               all.map((item) => (item.id === task.id ? { ...item, progress, destination } : item))
             )
+            if (!progress.dryRun)
+              taskHistory.update(
+                syncTask(
+                  { id: operation.id, accountId, accountName, startedAt: operation.startedAt },
+                  `s3://${task.source.bucket}/${task.source.prefix}`,
+                  destination,
+                  progress
+                ),
+                {
+                  tabId,
+                  cancel: operation.stop,
+                  reveal: () => {
+                    activateTab(tabId)
+                    setSyncTasks((all) =>
+                      all.map((item) => ({ ...item, hidden: item.id !== task.id }))
+                    )
+                  }
+                }
+              )
           }}
           run={task.run}
           onClose={() => {
@@ -2186,7 +2233,7 @@ export function S3View({
           onFinished={(dest) => {
             if (dest !== accountId) return
             void loadBuckets()
-            if (bucket !== null) void load(bucket, prefix, { refresh: true })
+            refreshHere.current()
           }}
         />
       ))}

@@ -14,6 +14,8 @@ export interface RunningJob {
   /** Loại việc cho số đã xong: "deleted", "copied", "moved". */
   verb: string
   progress: S3JobProgress | null
+  spec: S3BulkJob
+  startedAt: number
 }
 
 /** Câu tóm tắt lỗi của một việc nền (lỗi chặn, hoặc số object lỗi + vài key đầu). */
@@ -52,7 +54,8 @@ function doneText(verb: string, done: number, total: number | null): string {
 export function useBulkJobs(
   run: (op: S3Op) => Promise<unknown>,
   onFinished: (job: RunningJob, progress: S3JobProgress) => void,
-  connection = 0
+  connection = 0,
+  onUpdate?: (job: RunningJob, progress: S3JobProgress | null) => void
 ): {
   jobs: RunningJob[]
   start: (job: S3BulkJob, label: string, verb: string) => Promise<void>
@@ -66,6 +69,10 @@ export function useBulkJobs(
   }, [connection])
   const isAlive = (): boolean => alive.current
   const finished = useRef(onFinished)
+  const updated = useRef(onUpdate)
+  useLayoutEffect(() => {
+    updated.current = onUpdate
+  })
   useEffect(() => {
     finished.current = onFinished
   })
@@ -80,10 +87,14 @@ export function useBulkJobs(
   const start = useCallback(
     async (spec: S3BulkJob, label: string, verb: string): Promise<void> => {
       const started = epoch.current
+      const startedAt = Date.now()
+      const observer = updated.current
       const current = (): boolean => isAlive() && epoch.current === started
       const id = (await run({ op: 'jobStart', job: spec })) as string
       if (!current()) return
-      const entry: RunningJob = { id, label, verb, progress: null }
+      const entry: RunningJob = { id, label, verb, progress: null, spec, startedAt }
+      let last: S3JobProgress | null = null
+      observer?.(entry, null)
       setJobs((all) => [...all, entry])
       try {
         for (let wait = 100; ; wait = Math.min(400, wait * 2)) {
@@ -91,6 +102,8 @@ export function useBulkJobs(
           if (!current()) return
           const p = (await run({ op: 'jobPoll', id })) as S3JobProgress
           if (!current()) return
+          last = p
+          observer?.(entry, p)
           setJobs((all) => all.map((j) => (j.id === id ? { ...j, progress: p } : j)))
           if (p.phase !== 'running') {
             finished.current(entry, p)
@@ -98,17 +111,31 @@ export function useBulkJobs(
           }
         }
       } catch (e) {
-        if (current())
-          finished.current(entry, {
+        if (current()) {
+          last = {
+            ...last,
             phase: 'error',
-            found: 0,
-            done: 0,
-            failed: 0,
+            found: last?.found ?? 0,
+            done: last?.done ?? 0,
+            failed: last?.failed ?? 0,
             scanning: false,
-            errors: [],
+            errors: last?.errors ?? [],
             error: cleanError(e)
-          })
+          }
+          observer?.(entry, last)
+          finished.current(entry, last)
+        }
       } finally {
+        if (!last || last.phase === 'running')
+          observer?.(entry, {
+            phase: 'stopped',
+            found: last?.found ?? 0,
+            done: last?.done ?? 0,
+            failed: last?.failed ?? 0,
+            scanning: false,
+            errors: last?.errors ?? [],
+            error: null
+          })
         if (isAlive()) setJobs((all) => all.filter((j) => j.id !== id))
       }
     },
@@ -150,15 +177,20 @@ export function JobsPanel({
             <RefreshCw size={12} className="shrink-0 animate-spin text-faint" />
             <span className="min-w-0 flex-1 truncate text-fg">{j.label}</span>
             <span className={cx('shrink-0 tabular-nums', p?.failed ? 'text-danger' : 'text-muted')}>
-              {p
-                ? [
-                    doneText(j.verb, p.done, total),
-                    total === null && p.found ? t('{n} found', { n: formatNumber(p.found) }) : '',
-                    p.failed ? t('{n} failed', { n: formatNumber(p.failed) }) : ''
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')
-                : t('Starting…')}
+              {p?.checking
+                ? t('Checking files: {n} of {total}', {
+                    n: formatNumber(p.checking.done),
+                    total: formatNumber(p.checking.total)
+                  })
+                : p
+                  ? [
+                      doneText(j.verb, p.done, total),
+                      total === null && p.found ? t('{n} found', { n: formatNumber(p.found) }) : '',
+                      p.failed ? t('{n} failed', { n: formatNumber(p.failed) }) : ''
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')
+                  : t('Starting…')}
             </span>
             {pct !== null && (
               <span className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-subtle">

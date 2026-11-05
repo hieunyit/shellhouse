@@ -2,10 +2,14 @@ import type { MutationResult } from '@shared/hosts'
 import { invokeModule, onModuleEvent, openModuleTab } from '../../registry/renderer-kit'
 import type { S3BrowserParams } from '../shared/ipc'
 import type { S3AccountInput, S3AccountSummary, S3Pin } from '../shared/ops'
+import type { S3TaskRecord } from '../shared/task-history'
 
 /** IPC `module:s3:*` — secret key không bao giờ quay về renderer. */
 export const s3Api = {
   accounts: () => invokeModule<S3AccountSummary[]>('s3', 'accounts'),
+  taskHistory: () => invokeModule<S3TaskRecord[]>('s3', 'taskHistory'),
+  saveTask: (record: S3TaskRecord) => invokeModule<undefined>('s3', 'saveTask', record),
+  removeTasks: (ids: string[]) => invokeModule<undefined>('s3', 'removeTasks', ids),
   save: (input: S3AccountInput) => invokeModule<MutationResult>('s3', 'save', input),
   /** Thử kết nối bằng thông tin trong form (chưa cần lưu). */
   test: (input: S3AccountInput) =>

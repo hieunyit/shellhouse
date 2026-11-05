@@ -15,6 +15,7 @@ import {
 import type { ZodType } from 'zod'
 import type { ConnectionPhase, ExitReason, PromptRequest } from '@shared/stream-protocol'
 import type { TransferStatus } from '@shared/sftp'
+import { useTransfers, type TransferSource } from '../../renderer/src/stores/transfers'
 import { openSession } from '../../renderer/src/lib/sessions'
 import { useTabs, type ModuleTerminalTarget } from '../../renderer/src/stores/tabs'
 import { useTabStatus } from '../../renderer/src/stores/tab-status'
@@ -75,6 +76,13 @@ export function whenHostRunning(timeoutMs = 15_000): Promise<void> {
 export { toast, type ToastAction } from '../../renderer/src/stores/toasts'
 export { HostGroups } from '../../renderer/src/components/HostGroups'
 export { usePublishTransfers } from '../../renderer/src/stores/transfers'
+/** Publish a module-owned operation source, including history without an open tab. */
+export function publishTransfers(source: TransferSource): void {
+  useTransfers.getState().publish(source)
+}
+export function removeTransferSource(id: string): void {
+  useTransfers.getState().remove(id)
+}
 export { usePublishAttention, type AttentionItem } from '../../renderer/src/stores/attention'
 export {
   isMonitored,

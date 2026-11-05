@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { newTaskRun } from './task-records'
 import { ArrowRight, FileDown, RefreshCw } from 'lucide-react'
 import {
   Button,
@@ -312,7 +313,11 @@ export function SyncDialog({
   onClose: () => void
   hidden?: boolean
   onBackground: () => void
-  onProgress: (progress: S3SyncProgress, destination: string) => void
+  onProgress: (
+    progress: S3SyncProgress,
+    destination: string,
+    operation: { id: string; startedAt: number; stop: () => void }
+  ) => void
   /** Đã ghi vào đích (để làm mới danh sách nếu đích là tài khoản này). */
   onFinished: (destAccountId: string) => void
 }): React.JSX.Element {
@@ -377,11 +382,20 @@ export function SyncDialog({
     progress?.phase === 'copying' ||
     progress?.phase === 'deleting'
 
+  const stop = (): void => {
+    stopRequested.current = true
+    if (jobId.current) void run({ op: 'syncStop', id: jobId.current }).catch(() => undefined)
+  }
+
   /** `maxDelete`: chạy thật sau khi xem trước — không cho xoá nhiều hơn số đã thấy. */
   const start = async (dryRun: boolean, maxDelete?: number): Promise<void> => {
     setError(null)
     stopRequested.current = false
-    setProgress(startingProgress(dryRun, sameAccount))
+    const initial = startingProgress(dryRun, sameAccount)
+    let last = initial
+    const operation = { ...newTaskRun(), stop }
+    setProgress(initial)
+    onProgress(initial, destLabel, operation)
     try {
       const id = (await run({
         op: 'syncStart',
@@ -411,8 +425,9 @@ export function SyncDialog({
         if (!isAlive() || jobId.current !== id) return
         const p = (await run({ op: 'syncPoll', id })) as S3SyncProgress
         if (!isAlive()) return
+        last = p
         setProgress(p)
-        onProgress(p, destLabel)
+        onProgress(p, destLabel, operation)
         if (p.phase !== 'scanning' && p.phase !== 'copying' && p.phase !== 'deleting') {
           jobId.current = null
           if (!dryRun && (p.done.copied || p.done.deleted)) onFinished(destAccount)
@@ -423,20 +438,15 @@ export function SyncDialog({
       jobId.current = null
       if (alive.current) {
         const failed = {
-          ...startingProgress(dryRun, sameAccount),
+          ...last,
           phase: 'error' as const,
           error: cleanError(e)
         }
         setProgress(failed)
-        onProgress(failed, destLabel)
+        onProgress(failed, destLabel, operation)
         setError(cleanError(e))
       }
     }
-  }
-
-  const stop = (): void => {
-    stopRequested.current = true
-    if (jobId.current) void run({ op: 'syncStop', id: jobId.current }).catch(() => undefined)
   }
 
   const close = (): void => {

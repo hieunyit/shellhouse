@@ -23,6 +23,7 @@ import { AreaHeader } from '../components/AreaHeader'
 import { useTransfers, type TransferSource } from '../stores/transfers'
 import { TRANSFER_FILTERS, matchesFilter, useTransfersFilter } from './transfers-filter'
 import { collapseBatches, sectionOf, type TransferEntry } from './transfer-batches'
+import { OperationRow } from './OperationRow'
 
 interface Item {
   src: TransferSource
@@ -72,7 +73,9 @@ export function TransfersPage(): React.JSX.Element {
   const filter = useTransfersFilter((s) => s.filter)
   const [query, setQuery] = useState('')
   const [kind, setKind] = useState<'any' | TransferSource['kind']>('any')
-  const [direction, setDirection] = useState<'any' | TransferStatus['direction']>('any')
+  const [direction, setDirection] = useState<'any' | 'operation' | TransferStatus['direction']>(
+    'any'
+  )
   const all = useMemo(
     () => Object.values(sources).flatMap((src) => src.transfers.map((x) => ({ src, x }))),
     [sources]
@@ -82,11 +85,14 @@ export function TransfersPage(): React.JSX.Element {
     ({ src, x }) =>
       matchesFilter(x, filter) &&
       (kind === 'any' || src.kind === kind) &&
-      (direction === 'any' || x.direction === direction) &&
+      (direction === 'any' ||
+        (direction === 'operation' ? !!x.operation : !x.operation && x.direction === direction)) &&
       (!q ||
         x.remotePath.toLowerCase().includes(q) ||
         x.localPath.toLowerCase().includes(q) ||
-        src.label.toLowerCase().includes(q))
+        src.label.toLowerCase().includes(q) ||
+        x.operation?.label.toLowerCase().includes(q) ||
+        x.operation?.accountName?.toLowerCase().includes(q))
   )
   // Lần tải thư mục gộp thành một dòng (mở ra mới thấy từng file).
   const entries = useMemo(() => collapseBatches(visible), [visible])
@@ -108,6 +114,13 @@ export function TransfersPage(): React.JSX.Element {
       <AreaHeader icon={<ArrowLeftRight {...ICON_SM} />} title={t('Transfers')}>
         {filter !== 'all' && <span className="text-ds-base text-ds-fg-3">/ {filterTitle}</span>}
       </AreaHeader>
+      {Object.values(sources)
+        .filter((src) => src.warning)
+        .map((src) => (
+          <div key={src.id} role="alert" className="px-4 py-2 text-ds-sm text-ds-danger">
+            {src.warning}
+          </div>
+        ))}
       {all.length > 0 && (
         <div className="flex h-11 shrink-0 items-center gap-2 border-b border-ds-border-subtle px-3">
           <label className="flex h-ds-ctl w-60 items-center gap-2 rounded-ds-md border border-ds-border-control bg-ds-surface-1 px-2 text-ds-sm focus-within:border-ds-accent">
@@ -146,7 +159,8 @@ export function TransfersPage(): React.JSX.Element {
             options={[
               { value: 'any', label: `${t('Direction')}: ${t('Any')}` },
               { value: 'upload', label: `${t('Direction')}: ${t('Upload')}` },
-              { value: 'download', label: `${t('Direction')}: ${t('Download')}` }
+              { value: 'download', label: `${t('Direction')}: ${t('Download')}` },
+              { value: 'operation', label: t('S3 operations') }
             ]}
           />
           <div className="flex-1" />
@@ -204,7 +218,7 @@ export function TransfersPage(): React.JSX.Element {
             icon={<ArrowLeftRight {...ICON} />}
             title={all.length === 0 ? t('No transfers') : t('Nothing here')}
             description={t(
-              'Uploads and downloads from SFTP and S3 show up here while their tab is open.'
+              'Uploads, downloads and S3 operations appear here. The latest 1,000 finished S3 operations are saved.'
             )}
           />
         ) : (
@@ -399,6 +413,7 @@ function BatchRow({
 
 function Row({ item }: { item: Item }): React.JSX.Element {
   const { src, x } = item
+  if (x.operation) return <OperationRow src={src} x={x} />
   const ratio = x.size > 0 ? Math.min(1, x.transferred / x.size) : x.state === 'done' ? 1 : 0
   const name = baseName(x.direction === 'upload' ? x.localPath : x.remotePath)
   const partial = (x.state === 'error' || x.state === 'cancelled') && x.resumable === true

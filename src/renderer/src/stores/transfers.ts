@@ -19,6 +19,9 @@ export interface TransferSource {
   discard?: (id: string) => void
   /** Chuyển tới nơi đang truyền (tab của nguồn). */
   reveal?: () => void
+  revealTransfer?: (id: string) => void
+  canRevealTransfer?: (id: string) => boolean
+  warning?: string
 }
 
 interface TransfersState {
@@ -34,7 +37,7 @@ const isActive = (x: TransferStatus): boolean => x.state === 'running' || x.stat
 export const useTransfers = create<TransfersState>((set, get) => ({
   sources: {},
   publish: (source) => {
-    if (source.transfers.length === 0) {
+    if (source.transfers.length === 0 && !source.warning) {
       get().remove(source.id)
       return
     }
@@ -65,6 +68,7 @@ export function transferSummary(sources: Record<string, TransferSource>): {
       if (x.state === 'error') failed++
       if (!isActive(x)) continue
       active++
+      if (x.operation) continue
       total += x.size
       moved += x.transferred
     }

@@ -1,6 +1,16 @@
 /** Bản dịch tiếng Việt — Module S3. Khoá = chuỗi tiếng Anh trong code (xem src/shared/i18n/index.ts). */
 export const s3: Readonly<Record<string, string>> = {
   // Chung
+  'S3 operations': 'Tác vụ S3',
+  '{n} objects processed': 'Đã xử lý {n} object',
+  '{n} of {total} objects': '{n} / {total} object',
+  'Could not save S3 task history: {error}': 'Không lưu được lịch sử tác vụ S3: {error}',
+  'Could not load S3 task history: {error}': 'Không tải được lịch sử tác vụ S3: {error}',
+  'The S3 connection closed before the operation finished':
+    'Kết nối S3 đã đóng trước khi tác vụ hoàn tất',
+  'Uploads, downloads and S3 operations appear here. The latest 1,000 finished S3 operations are saved.':
+    'Các lượt tải lên, tải về và tác vụ S3 hiển thị tại đây. Lưu 1.000 tác vụ S3 đã kết thúc gần nhất.',
+  'Checking files: {n} of {total}': 'Đang kiểm tra file: {n} / {total}',
   'CA certificate (PEM)': 'Chứng chỉ CA (PEM)',
   'System trusted CAs are included automatically. For internal MinIO, paste the issuing CA or self-signed certificate here. Keep certificate verification enabled.':
     'Tự dùng CA tin cậy của hệ điều hành. Với MinIO nội bộ, dán chứng chỉ CA cấp phát hoặc chứng chỉ tự ký tại đây. Giữ bật kiểm tra chứng chỉ.',

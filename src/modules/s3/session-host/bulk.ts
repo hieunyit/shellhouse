@@ -151,7 +151,11 @@ export class BulkJob {
 
   snapshot(): S3JobProgress {
     this.touched = Date.now()
-    return { ...this.progress, errors: [...this.progress.errors] }
+    return {
+      ...this.progress,
+      ...(this.progress.checking ? { checking: { ...this.progress.checking } } : {}),
+      errors: [...this.progress.errors]
+    }
   }
 
   stop(): void {
@@ -197,6 +201,7 @@ export class BulkJob {
       this.progress.phase = this.stopped() ? 'stopped' : 'error'
       if (!this.stopped()) this.progress.error = errorText(error)
     } finally {
+      delete this.progress.checking
       this.progress.scanning = false
       this.touched = Date.now()
     }
@@ -272,6 +277,49 @@ export class BulkJob {
 
   // ---------- Copy / move ----------
 
+  /** Bound discovery work: a large selection must not scan an unrelated huge bucket. */
+  private async lookupFiles(
+    client: S3Client,
+    bucket: string,
+    keys: readonly string[]
+  ): Promise<{ objects: Map<string, number | undefined>; complete: boolean } | null> {
+    if (keys.length < 128) return null
+    const prefix = parentPrefix(keys[0] ?? '')
+    if (!keys.every((key) => parentPrefix(key) === prefix)) return null
+    const wanted = new Set(keys)
+    const objects = new Map<string, number | undefined>()
+    let token: string | undefined
+    const pages = Math.ceil(keys.length / BATCH) + 1
+    try {
+      for (let page = 0; page < pages; page++) {
+        const out = await client.send(
+          new ListObjectsV2Command({
+            Bucket: bucket,
+            Prefix: prefix,
+            MaxKeys: BATCH,
+            ContinuationToken: token
+          }),
+          { abortSignal: this.abort.signal }
+        )
+        for (const object of out.Contents ?? [])
+          if (object.Key && wanted.has(object.Key)) objects.set(object.Key, object.Size)
+        if (!out.IsTruncated) return { objects, complete: true }
+        if (
+          objects.size === wanted.size ||
+          !out.NextContinuationToken ||
+          out.NextContinuationToken === token
+        )
+          return { objects, complete: false }
+        token = out.NextContinuationToken
+      }
+      return { objects, complete: false }
+    } catch (error) {
+      if (this.stopped()) throw error
+      // Object-only IAM permissions may allow HEAD but not LIST. Preserve that path.
+      return null
+    }
+  }
+
   private async exists(client: S3Client, bucket: string, key: string): Promise<boolean> {
     const signal = this.abort.signal
     if (isPrefix(key)) {
@@ -315,16 +363,52 @@ export class BulkJob {
         (destKey.startsWith(key) || key.startsWith(destKey))
       )
         throw new Error(t('A folder cannot be copied into itself (“{name}”)', { name }))
-      if (!overwrite && (await this.exists(dest, destBucket, destKey)))
+    }
+    const checking = { done: 0, total: items.length }
+    this.progress.checking = checking
+    const filesOnly = items.every(({ key }) => !isPrefix(key))
+    const sourceListing = filesOnly
+      ? await this.lookupFiles(
+          source,
+          bucket,
+          items.map(({ key }) => key)
+        )
+      : null
+    const destListing =
+      filesOnly && !overwrite
+        ? await this.lookupFiles(
+            dest,
+            destBucket,
+            items.map(({ destKey }) => destKey)
+          )
+        : null
+    await mapLimit(items, this.env.requests, async ({ key, destKey }) => {
+      if (this.stopped()) return
+      if (
+        !overwrite &&
+        (destListing?.objects.has(destKey) ||
+          (!destListing?.complete && (await this.exists(dest, destBucket, destKey))))
+      )
         throw new Error(
           t('“{name}” already exists at the destination', { name: lastName(destKey) })
         )
       if (!isPrefix(key)) {
-        const head = await source.send(new HeadObjectCommand({ Bucket: bucket, Key: key }), {
-          abortSignal: signal
-        })
-        sizes.set(key, head.ContentLength ?? 0)
+        const listedSize = sourceListing?.objects.get(key)
+        if (listedSize !== undefined) sizes.set(key, listedSize)
+        else {
+          const head = await source.send(new HeadObjectCommand({ Bucket: bucket, Key: key }), {
+            abortSignal: signal
+          })
+          sizes.set(key, head.ContentLength ?? 0)
+        }
       }
+      checking.done++
+    })
+    delete this.progress.checking
+    if (this.stopped()) return
+    if (filesOnly) {
+      this.progress.found = items.length
+      this.progress.scanning = false
     }
     const copyPage = async (pairs: { from: string; to: string; size: number }[]): Promise<void> => {
       const copied: string[] = []
@@ -348,13 +432,21 @@ export class BulkJob {
       // deleteBatch cộng `done` cho object xoá được (= move xong).
       if (move && copied.length && !this.stopped()) await this.deleteBatch(source, bucket, copied)
     }
+    let files: { from: string; to: string; size: number }[] = []
+    const flushFiles = async (): Promise<void> => {
+      if (!files.length) return
+      if (!filesOnly) this.progress.found += files.length
+      await copyPage(files)
+      files = []
+    }
     for (const { key, destKey } of items) {
       if (this.stopped()) return
       if (!isPrefix(key)) {
-        this.progress.found++
-        await copyPage([{ from: key, to: destKey, size: sizes.get(key) ?? 0 }])
+        files.push({ from: key, to: destKey, size: sizes.get(key) ?? 0 })
+        if (files.length === BATCH) await flushFiles()
         continue
       }
+      await flushFiles()
       await forEachPage(
         source,
         bucket,
@@ -372,5 +464,6 @@ export class BulkJob {
         signal
       )
     }
+    await flushFiles()
   }
 }
