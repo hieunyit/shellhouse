@@ -151,7 +151,9 @@ test('S3: copy checks show progress and can be stopped while browsing', async ({
     const stopped = page.locator('[data-testid="transfers-center-row"][data-operation="copy"]')
     await expect(stopped).toHaveAttribute('data-state', 'cancelled')
     await expect(stopped).toContainText('0 of 2 objects')
-    await openArea(page, 's3')
+    await stopped.getByRole('button', { name: 'Open', exact: true }).click()
+    await expect(page.getByTestId('explorer')).toHaveAttribute('data-area', 'm:s3')
+    await expect(view).toBeVisible()
     await page
       .locator('[data-testid="tab"]')
       .filter({ hasText: 'demo' })

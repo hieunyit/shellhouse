@@ -16,6 +16,7 @@ import type { ZodType } from 'zod'
 import type { ConnectionPhase, ExitReason, PromptRequest } from '@shared/stream-protocol'
 import type { TransferStatus } from '@shared/sftp'
 import { useTransfers, type TransferSource } from '../../renderer/src/stores/transfers'
+import { useShell, tabArea } from '../../renderer/src/shell/store'
 import { openSession } from '../../renderer/src/lib/sessions'
 import { useTabs, type ModuleTerminalTarget } from '../../renderer/src/stores/tabs'
 import { useTabStatus } from '../../renderer/src/stores/tab-status'
@@ -517,7 +518,12 @@ export function monitorMenuItem(
 
 /** Chuyển tới tab (vd. từ trung tâm Transfers về đúng tab đang truyền). */
 export function activateTab(tabId: string): void {
-  useTabs.getState().activate(tabId)
+  const tabs = useTabs.getState()
+  const tab = tabs.tabs.find((item) => item.id === tabId)
+  if (!tab) return
+  tabs.activate(tabId)
+  // Transfers/Settings keep the active tab ID: explicitly reveal its area even for the same ID.
+  useShell.getState().go(tabArea(tab))
 }
 
 export function setModuleTabParams(tabId: string, params: unknown): void {

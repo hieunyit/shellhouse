@@ -6,7 +6,7 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
-## [1.2.0-beta.41] - 2026-11-05
+## [1.2.0-beta.42] - 2026-11-05
 
 ### Fixed
 
@@ -17,6 +17,7 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 - Sync, copy and move background operations appear in Transfers with object counts, routes,
   timestamps and stop controls. Save the latest 1,000 finished operations across tab closes and
   app restarts, including failures and stopped tasks; allow clearing individual or finished tasks.
+  Open returns to the operation's tab even when it was already selected before entering Transfers.
 - A completed background operation refreshes the current S3 location without navigating back
   to a folder that was open before the user changed location.
 - S3 HTTPS connections include operating system trusted CAs automatically, resolving failures
