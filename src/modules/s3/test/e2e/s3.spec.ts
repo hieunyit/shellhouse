@@ -849,3 +849,110 @@ test('S3 continuous sync: new changes arrive across background rounds in one Tra
     client.destroy()
   }
 })
+
+test('S3 sync copies before the source finishes listing, never enumerates the destination and stops while listing', async ({
+  page
+}) => {
+  const { createServer, request } = await import('node:http')
+  const { S3Client, PutObjectCommand, GetObjectCommand } = await import('@aws-sdk/client-s3')
+  server = await startS3TestServer(['src', 'dst'])
+  const upstream = server.endpoint
+  let release: (() => void) | undefined
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let destinationListings = 0
+  let waitingForSource = false
+  const listing = (body: string) =>
+    `<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">${body}</ListBucketResult>`
+  const proxy = createServer((incoming, response) => {
+    const url = new URL(incoming.url ?? '/', upstream)
+    const bucket = url.pathname.replace(/\/+$/, '')
+    if (
+      incoming.method === 'GET' &&
+      url.searchParams.has('list-type') &&
+      !url.searchParams.has('delimiter')
+    ) {
+      if (bucket === '/dst') {
+        destinationListings++
+        response.writeHead(403).end('<Error><Code>AccessDenied</Code></Error>')
+        return
+      }
+      if (bucket === '/src') {
+        response.setHeader('content-type', 'application/xml')
+        if (url.searchParams.has('continuation-token')) {
+          waitingForSource = true
+          void gate.then(() => {
+            if (!response.destroyed) response.end(listing('<IsTruncated>false</IsTruncated>'))
+          })
+        } else
+          response.end(
+            listing(
+              '<Contents><Key>data.txt</Key><Size>3</Size></Contents><IsTruncated>true</IsTruncated><NextContinuationToken>next</NextContinuationToken>'
+            )
+          )
+        return
+      }
+    }
+    const target = request(url, { method: incoming.method, headers: incoming.headers }, (out) => {
+      response.writeHead(out.statusCode ?? 502, out.headers)
+      out.pipe(response)
+    })
+    target.on('error', () => {
+      if (!response.destroyed) response.writeHead(502).end()
+    })
+    incoming.pipe(target)
+  })
+  await new Promise<void>((resolve) => {
+    proxy.listen(0, '127.0.0.1', resolve)
+  })
+  const client = new S3Client({
+    endpoint: upstream,
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: server.accessKeyId, secretAccessKey: server.secretAccessKey }
+  })
+  try {
+    await client.send(new PutObjectCommand({ Bucket: 'src', Key: 'data.txt', Body: 'now' }))
+    await page.evaluate((input) => window.shellhouse.invokeModule('s3', 'save', [input]), {
+      name: 'Streaming sync',
+      endpoint: `http://127.0.0.1:${(proxy.address() as { port: number }).port}`,
+      region: 'us-east-1',
+      accessKeyId: server.accessKeyId,
+      secretAccessKey: server.secretAccessKey,
+      forcePathStyle: true
+    })
+    await openArea(page, 's3')
+    await page.locator('[data-testid="s3-account"][data-name="Streaming sync"]').dblclick()
+    const view = page.getByTestId('s3-view')
+    await view.locator('[data-testid="s3-bucket"][data-name="src"]').click()
+    await view.getByTestId('s3-sync-bucket').click()
+    const dialog = page.getByTestId('s3-sync-dialog')
+    await dialog.getByTestId('s3-sync-bucket').fill('dst')
+    await expect(dialog.getByTestId('s3-sync-strategy')).toHaveValue('lookup')
+    await dialog.getByTestId('s3-sync-start').click()
+    await expect.poll(() => waitingForSource).toBe(true)
+    await expect(dialog.getByTestId('s3-sync-done')).toContainText('1 copied')
+    await expect(dialog.getByTestId('s3-sync-growing-plan')).toBeVisible()
+    expect(destinationListings).toBe(0)
+    const copied = await client.send(new GetObjectCommand({ Bucket: 'dst', Key: 'data.txt' }))
+    expect(await copied.Body?.transformToString()).toBe('now')
+    await dialog.getByTestId('s3-sync-background').click()
+    await openArea(page, 'transfers')
+    const task = page.locator('[data-testid="transfers-center-row"][data-operation="sync"]')
+    await expect(task).toHaveAttribute('data-state', 'running')
+    await expect(task).toContainText('1 objects processed')
+    await task.getByRole('button', { name: 'Stop', exact: true }).click()
+    await expect(task).toHaveAttribute('data-state', 'cancelled')
+    expect(destinationListings).toBe(0)
+  } finally {
+    release?.()
+    client.destroy()
+    proxy.closeAllConnections()
+    await new Promise<void>((resolve) => {
+      proxy.close(() => {
+        resolve()
+      })
+    })
+  }
+})

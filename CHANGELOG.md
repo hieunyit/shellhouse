@@ -6,6 +6,24 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.44] - 2026-11-05
+
+### Fixed
+
+- S3 Copy new & changed starts copying as source objects are discovered instead of waiting
+  for a full inventory of both sides. Read bounded source pages and check only matching
+  destination keys with parallel HEAD requests; skip unchanged objects and retain comparison
+  errors instead of treating inaccessible destinations as missing. No destination-wide listing
+  or temporary inventory is needed in this mode.
+- Add a destination comparison option: exact-key lookups by default, or full inventories for
+  workloads where enumerating both sides uses fewer requests. Preview uses the selected strategy
+  without writing; Mirror retains full inventories and its approved deletion limit before changes.
+- Show growing sync totals while listing and comparing, preserving unknown totals and completed
+  copies when stopped or a later listing fails. Continuous rounds use the selected comparison
+  strategy and retain cumulative Transfers history.
+- Reject overlapping prefixes through separate account entries sharing an endpoint, preventing
+  newly copied objects from feeding back into a source-driven sync.
+
 ## [1.2.0-beta.43] - 2026-11-05
 
 ### Added

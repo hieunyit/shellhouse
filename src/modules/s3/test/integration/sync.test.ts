@@ -75,6 +75,30 @@ async function sync(
 }
 
 describe('S3: đồng bộ', () => {
+  it('rejects overlapping prefixes through two accounts pointing at the same endpoint', async () => {
+    const { server: a, client } = await server(['src'])
+    await put(client, 'src', 'data/a.txt', 'keep source')
+    const s = service(a, { alias: a })
+    for (const strategy of ['lookup', 'inventory'] as const) {
+      const result = await sync(s, {
+        bucket: 'src',
+        prefix: 'data/',
+        dest: { accountId: 'alias', bucket: 'src', prefix: 'data/backup/' },
+        mirror: false,
+        compare: 'etag',
+        createBucket: false,
+        dryRun: false,
+        strategy
+      })
+      expect(result.error).toContain('overlap')
+      expect(result.done.copied).toBe(0)
+    }
+    expect((await get(client, 'src', 'data/a.txt')).text).toBe('keep source')
+    expect(await s.run({ op: 'list', bucket: 'src', prefix: 'data/backup/' })).toMatchObject({
+      entries: []
+    })
+  })
+
   it(
     'cùng tài khoản: xem trước → copy trên server; lần hai không còn gì; mirror xoá thừa, cập nhật thay đổi',
     { timeout: 60_000 },

@@ -93,6 +93,21 @@ describe('S3 operation history records', () => {
     expect(
       syncTask(identity, 's3://source/', 's3://destination/', { ...p, phase: 'scanning' }).total
     ).toBeNull()
+    expect(
+      syncTask(identity, 's3://source/', 's3://destination/', {
+        ...p,
+        strategy: 'lookup',
+        listing: true
+      })
+    ).toMatchObject({ state: 'running', completed: 3, total: null })
+    expect(
+      syncTask(identity, 's3://source/', 's3://destination/', {
+        ...p,
+        strategy: 'lookup',
+        listing: true,
+        phase: 'stopped'
+      })
+    ).toMatchObject({ state: 'cancelled', completed: 3, total: null })
     const continuous: S3SyncProgress = {
       ...p,
       phase: 'waiting',

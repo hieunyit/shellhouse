@@ -1,15 +1,30 @@
 /** Bản dịch tiếng Việt — Module S3. Khoá = chuỗi tiếng Anh trong code (xem src/shared/i18n/index.ts). */
 export const s3: Readonly<Record<string, string>> = {
   // Chung
+  'Destination comparison': 'Cách kiểm tra đích',
+  'Check source keys and copy immediately': 'Kiểm tra key nguồn và sao chép ngay',
+  'List both sides first': 'Quét đầy đủ hai bên trước',
+  'Checks only keys found in the source and starts copying immediately. Best when the destination has many unrelated objects.':
+    'Chỉ kiểm tra các key có ở nguồn và bắt đầu sao chép ngay. Phù hợp khi đích có nhiều object khác không liên quan.',
+  'Lists both sides before copying. Can use fewer requests when both sides contain many of the same keys.':
+    'Quét đầy đủ hai bên trước khi sao chép. Có thể giảm request khi cả hai bên có nhiều key giống nhau.',
+  'Checking and copying…': 'Đang kiểm tra và sao chép…',
+  'Listed {source} source objects · checked {dest} matching destination keys.':
+    'Đã đọc {source} object nguồn · kiểm tra {dest} key tương ứng ở đích.',
+  'Totals are discovered as the source is read.': 'Tổng số được cập nhật dần khi đọc nguồn.',
+  'The source listing did not advance — sync stopped; completed copies are kept':
+    'Danh sách nguồn không chuyển trang — đã dừng đồng bộ; giữ lại các object đã sao chép xong',
+  'Could not compare every source object — resolve the errors and preview again':
+    'Chưa so sánh được tất cả object nguồn — khắc phục các lỗi rồi xem trước lại',
   'Continuous sync': 'Đồng bộ liên tục',
   'Continuous sync · waiting': 'Đồng bộ liên tục · đang chờ',
   'Start continuous sync': 'Bắt đầu đồng bộ liên tục',
   'Waiting for the next sync': 'Đang chờ lượt đồng bộ tiếp theo',
-  'Repeat until Stop while this tab and the app stay open. Each round lists both sides and copies only new or changed objects.':
-    'Lặp lại cho đến khi bấm Dừng, trong lúc tab này và ứng dụng vẫn mở. Mỗi lượt quét danh sách hai bên và chỉ sao chép object mới hoặc thay đổi.',
+  'Repeat until Stop while this tab and the app stay open. Each round uses the selected comparison and copies only new or changed objects.':
+    'Lặp lại cho đến khi bấm Dừng, trong lúc tab này và ứng dụng vẫn mở. Mỗi lượt dùng cách so sánh đã chọn và chỉ sao chép object mới hoặc thay đổi.',
   'Pause between sync rounds': 'Khoảng nghỉ giữa các lượt đồng bộ',
-  'The pause starts after a round finishes. Large buckets use many listing requests; choose a longer pause to reduce load.':
-    'Bắt đầu nghỉ sau khi một lượt hoàn tất. Bucket lớn cần nhiều request liệt kê; chọn khoảng nghỉ dài hơn để giảm tải.',
+  'The pause starts after a round finishes. Choose a longer pause to reduce comparison requests.':
+    'Bắt đầu nghỉ sau khi một lượt hoàn tất. Chọn khoảng nghỉ dài hơn để giảm request so sánh.',
   'Round {round} · {copied} copied, {deleted} deleted in total.':
     'Lượt {round} · Tổng cộng đã sao chép {copied}, xoá {deleted}.',
   'Next check at {time}. Stop cancels future rounds.':

@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs'
 import {
   CopyObjectCommand,
   DeleteObjectsCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
   type S3Client
 } from '@aws-sdk/client-s3'
@@ -60,6 +60,12 @@ function setup(overrides: Partial<Extract<S3Op, { op: 'syncStart' }>> = {}) {
         Contents: [...items].map(([Key, body]) => ({ Key, Size: body.length, ETag: body }))
       })
     }
+    if (command instanceof HeadObjectCommand) {
+      const body = dest.get(command.input.Key ?? '')
+      return body === undefined
+        ? Promise.reject(Object.assign(new Error('Missing'), { name: 'NotFound' }))
+        : Promise.resolve({ ContentLength: body.length, ETag: body })
+    }
     if (command instanceof CopyObjectCommand) {
       const key = command.input.Key ?? ''
       dest.set(key, source.get(key) ?? '')
@@ -93,7 +99,7 @@ async function waiting(job: SyncJob, round: number): Promise<void> {
 }
 
 describe('continuous S3 sync in the Session Host', () => {
-  it('repeats without polling, copies new/changed objects only, totals across rounds and releases each index before resting', async () => {
+  it('repeats without polling, copies new/changed objects only, totals across rounds and avoids destination inventories while resting', async () => {
     const close = vi.spyOn(SyncIndex.prototype, 'close')
     const { job, source, dest, send } = setup()
     const finished = start(job)
@@ -108,8 +114,7 @@ describe('continuous S3 sync in the Session Host', () => {
     const requests = send.mock.calls.length
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(send).toHaveBeenCalledTimes(requests)
-    expect(close).toHaveBeenCalledOnce()
-    expect(existsSync((close.mock.instances[0] as SyncIndex).directory)).toBe(false)
+    expect(close).not.toHaveBeenCalled()
     source.set('a', 'v2')
     source.set('b', 'new')
     pauses[0]?.resume()
@@ -128,7 +133,7 @@ describe('continuous S3 sync in the Session Host', () => {
       continuous: { totals: { copied: 3 } }
     })
     expect(send.mock.calls.filter(([op]) => op instanceof CopyObjectCommand)).toHaveLength(3)
-    expect(close).toHaveBeenCalledTimes(3)
+    expect(close).not.toHaveBeenCalled()
     job.stop()
     expect(job.snapshot()).toMatchObject({ phase: 'stopped', continuous: { nextRunAt: null } })
     await finished

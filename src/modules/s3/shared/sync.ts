@@ -24,6 +24,22 @@ function comparableEtag(etag: string | null): string | null {
   return etag.replace(/"/g, '').toLowerCase()
 }
 
+/** Shared comparison for inventory plans and exact-key destination lookups. */
+export function compareSyncObject(
+  source: SyncObject,
+  dest: SyncObject | undefined,
+  compare: 'size' | 'etag'
+): 'new' | 'update' | 'same' {
+  if (!dest) return 'new'
+  if (source.size !== dest.size) return 'update'
+  if (compare === 'etag') {
+    const a = comparableEtag(source.etag)
+    const b = comparableEtag(dest.etag)
+    if (a !== null && b !== null && a !== b) return 'update'
+  }
+  return 'same'
+}
+
 /**
  * Kế hoạch đồng bộ: object chỉ có ở nguồn → new; khác dung lượng (hoặc khác ETag khi so được) →
  * update; `mirror` thì object chỉ có ở đích → delete. Sắp theo key để xem trước dễ đọc.
@@ -36,18 +52,8 @@ export function planSync(
   const items: SyncItem[] = []
   let same = 0
   for (const [rel, src] of source) {
-    const dst = dest.get(rel)
-    if (!dst) {
-      items.push({ rel, action: 'new', size: src.size })
-      continue
-    }
-    let changed = src.size !== dst.size
-    if (!changed && options.compare === 'etag') {
-      const a = comparableEtag(src.etag)
-      const b = comparableEtag(dst.etag)
-      changed = a !== null && b !== null && a !== b
-    }
-    if (changed) items.push({ rel, action: 'update', size: src.size })
+    const action = compareSyncObject(src, dest.get(rel), options.compare)
+    if (action !== 'same') items.push({ rel, action, size: src.size })
     else same++
   }
   if (options.mirror)

@@ -96,7 +96,10 @@ export function syncTask(
     state: status,
     completed: done.copied + done.deleted,
     total:
-      progress.continuous || progress.phase === 'scanning'
+      progress.continuous ||
+      progress.listing ||
+      progress.phase === 'scanning' ||
+      (progress.strategy === 'lookup' && progress.done.failed > 0)
         ? null
         : progress.plan.new + progress.plan.update + progress.plan.delete,
     failed: done.failed,

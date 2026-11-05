@@ -611,6 +611,14 @@ export class S3Service {
 
   private async startSync(op: Extract<S3Op, { op: 'syncStart' }>): Promise<string> {
     const destConnection = op.dest.accountId ? await this.resolveAccount(op.dest.accountId) : null
+    const sameStorage =
+      !destConnection ||
+      (this.connection.endpoint && destConnection.endpoint
+        ? new URL(this.connection.endpoint).href.replace(/\/+$/, '') ===
+          new URL(destConnection.endpoint).href.replace(/\/+$/, '')
+        : !this.connection.endpoint &&
+          !destConnection.endpoint &&
+          accountRegion(this.connection) === accountRegion(destConnection))
     const destClient = destConnection ? createS3Client(destConnection, this.requests + 8) : null
     const id = randomUUID()
     const job = new SyncJob(
@@ -619,6 +627,7 @@ export class S3Service {
         dest: destClient ?? (await this.clientFor(op.dest.bucket)),
         destRegion: destConnection ? accountRegion(destConnection) : this.region,
         serverSide: destClient === null,
+        sameStorage,
         concurrency: destClient ? Math.max(4, this.maxTransfers) : this.requests
       },
       op

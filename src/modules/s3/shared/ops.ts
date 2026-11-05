@@ -326,6 +326,8 @@ export const S3Op = z.discriminatedUnion('op', [
     compare: z.enum(['size', 'etag']),
     createBucket: z.boolean(),
     dryRun: z.boolean(),
+    /** Copy: exact-key checks start copying immediately. Mirror always uses inventory. */
+    strategy: z.enum(['lookup', 'inventory']).optional(),
     /** Chạy lặp lại trong Session Host; nghỉ sau mỗi lượt. Preview vẫn chỉ chạy một lượt. */
     intervalSeconds: z.number().int().min(30).max(86400).optional(),
     /** Số object chép cùng lúc; không có = theo cài đặt (Settings → Modules → S3). */
@@ -434,6 +436,10 @@ export interface S3SyncProgress {
   /** Copy phía server (cùng tài khoản) hay truyền qua máy này. */
   serverSide: boolean
   scanned: { source: number; dest: number }
+  /** Copy can compare only the keys found in the source, without enumerating the destination. */
+  strategy?: 'lookup' | 'inventory'
+  /** More source objects/comparisons remain; plan totals are counts discovered so far. */
+  listing?: boolean
   plan: { new: number; update: number; delete: number; same: number; bytes: number }
   done: { copied: number; deleted: number; bytes: number; failed: number }
   /** Tốc độ đã làm mượt (trung bình trượt), 0 khi không có byte nào vài giây. */

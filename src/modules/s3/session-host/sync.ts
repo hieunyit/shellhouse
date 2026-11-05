@@ -6,6 +6,7 @@ import {
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
   type S3Client
 } from '@aws-sdk/client-s3'
@@ -15,12 +16,13 @@ import { formatNumber } from '@shared/i18n/format'
 import type { S3Op, S3SyncProgress } from '../shared/ops'
 import {
   normalizePrefix,
+  compareSyncObject,
   planSync,
   syncOverlap,
   type SyncItem,
   type SyncObject
 } from '../shared/sync'
-import { SyncIndex, SYNC_PAGE_SIZE } from './sync-index'
+import { MAX_SYNC_OBJECTS, SyncIndex, SYNC_PAGE_SIZE } from './sync-index'
 export { MAX_SYNC_OBJECTS } from './sync-index'
 import { mapLimit } from '../../../node-shared/pool'
 import { createBucketInput, errorText, isNotFound, serverCopy } from './client'
@@ -35,7 +37,8 @@ type SyncOp = Extract<S3Op, { op: 'syncStart' }>
 
 /**
  * Một lượt đồng bộ `bucket/prefix` → đích, chạy nền trong Session Host:
- * 1. quét hai bên song song (như thống kê), 2. so sánh (planSync), 3. copy mới / thay đổi —
+ * Copy mặc định đọc từng trang nguồn, HEAD đúng key ở đích rồi copy ngay. Inventory / Mirror
+ * quét đầy đủ hai bên và lập kế hoạch trước khi ghi. Copy mới / thay đổi —
  * cùng tài khoản thì copy trên server, khác tài khoản thì tải từ nguồn và đẩy lên đích theo luồng
  * (không ghi đĩa), 4. `mirror` thì xoá ở đích object không còn ở nguồn (lô 1000).
  * Lỗi từng object được ghi lại, lượt chạy tiếp; dừng bất cứ lúc nào bằng `stop()`.
@@ -65,6 +68,8 @@ export class SyncJob {
       destRegion: string
       /** Cùng tài khoản: CopyObject trên server. */
       serverSide: boolean
+      /** Different account entries may point at the same bucket namespace. */
+      sameStorage?: boolean
       concurrency: number
     },
     private readonly op: SyncOp
@@ -77,6 +82,8 @@ export class SyncJob {
       dryRun: op.dryRun,
       serverSide: env.serverSide,
       scanned: { source: 0, dest: 0 },
+      strategy: op.mirror ? 'inventory' : (op.strategy ?? 'lookup'),
+      listing: !op.mirror && op.strategy !== 'inventory',
       plan: { new: 0, update: 0, delete: 0, same: 0, bytes: 0 },
       done: { copied: 0, deleted: 0, bytes: 0, failed: 0 },
       bytesPerSecond: 0,
@@ -141,7 +148,7 @@ export class SyncJob {
         this.completedRounds++
         this.progress.phase = 'waiting'
         this.nextRunAt = Date.now() + this.intervalSeconds * 1000
-        // The previous index is closed before waiting. No scans or overlapping rounds while idle.
+        // No inventory or pending copies remain while resting; rounds never overlap.
         await delay(this.intervalSeconds * 1000, undefined, { signal: this.abort.signal })
         this.abort.signal.throwIfAborted()
         this.nextRunAt = null
@@ -153,6 +160,7 @@ export class SyncJob {
         this.round++
         p.phase = 'scanning'
         p.scanned = { source: 0, dest: 0 }
+        p.listing = p.strategy === 'lookup'
         p.plan = { new: 0, update: 0, delete: 0, same: 0, bytes: 0 }
         p.done = { copied: 0, deleted: 0, bytes: 0, failed: 0 }
         p.bytesPerSecond = 0
@@ -178,13 +186,17 @@ export class SyncJob {
     try {
       if (
         syncOverlap(
-          this.env.serverSide,
+          this.env.sameStorage ?? this.env.serverSide,
           { bucket: this.op.bucket, prefix: this.sourcePrefix },
           { bucket: this.op.dest.bucket, prefix: this.destPrefix }
         )
       )
         throw new Error(t('The source and destination overlap — pick a different folder or bucket'))
       const destExists = await this.ensureDestBucket()
+      if (this.progress.strategy === 'lookup') {
+        await this.copyAsListed(destExists)
+        return
+      }
       const disk = new SyncIndex()
       index = disk
       const scanAbort = new AbortController()
@@ -238,17 +250,10 @@ export class SyncJob {
           page.filter((it) => it.action !== 'delete'),
           p.concurrency,
           async (it) => {
-            if (signal.aborted) return
-            const entry = { size: it.size, done: 0 }
-            this.active.set(it.rel, entry)
             try {
-              await this.copyOne(it.rel, it.size, entry)
-              p.done.copied++
-              if (this.env.serverSide) this.count(it.size)
+              await this.copyItem(it)
             } catch (error) {
               if (!this.stopped()) this.fail(it.rel, error)
-            } finally {
-              this.active.delete(it.rel)
             }
           }
         )
@@ -272,6 +277,98 @@ export class SyncJob {
     }
   }
 
+  /** Source-driven copy: one bounded page, exact-key HEAD checks, then immediate copies. */
+  private async copyAsListed(destExists: boolean): Promise<void> {
+    const signal = this.abort.signal
+    const p = this.progress
+    p.phase = this.op.dryRun ? 'scanning' : 'copying'
+    this.sampleAt = Date.now()
+    let token: string | undefined
+    for (;;) {
+      signal.throwIfAborted()
+      const page = await this.env.source.send(
+        new ListObjectsV2Command({
+          Bucket: this.op.bucket,
+          Prefix: this.sourcePrefix,
+          MaxKeys: SYNC_PAGE_SIZE,
+          ContinuationToken: token
+        }),
+        { abortSignal: signal }
+      )
+      signal.throwIfAborted()
+      if (page.IsTruncated && (!page.NextContinuationToken || page.NextContinuationToken === token))
+        throw new Error(
+          t('The source listing did not advance — sync stopped; completed copies are kept')
+        )
+      const objects = [
+        ...new Map((page.Contents ?? []).filter((o) => o.Key).map((o) => [o.Key, o])).values()
+      ]
+      p.scanned.source += objects.length
+      if (p.scanned.source > MAX_SYNC_OBJECTS)
+        throw new Error(
+          t('More than {n} objects on one side — sync a smaller folder', {
+            n: formatNumber(MAX_SYNC_OBJECTS)
+          })
+        )
+      await mapLimit(objects, p.concurrency, async (object) => {
+        if (signal.aborted || !object.Key) return
+        const rel = object.Key.slice(this.sourcePrefix.length)
+        const source = { size: object.Size ?? 0, etag: object.ETag ?? null }
+        try {
+          let dest: SyncObject | undefined
+          if (destExists) {
+            try {
+              const head = await this.env.dest.send(
+                new HeadObjectCommand({ Bucket: this.op.dest.bucket, Key: this.destPrefix + rel }),
+                { abortSignal: signal }
+              )
+              dest = { size: head.ContentLength ?? 0, etag: head.ETag ?? null }
+            } catch (error) {
+              if (!isNotFound(error)) throw error
+            }
+          }
+          signal.throwIfAborted()
+          p.scanned.dest++
+          const action = compareSyncObject(source, dest, this.op.compare)
+          if (action === 'same') {
+            p.plan.same++
+            return
+          }
+          p.plan[action]++
+          p.plan.bytes += source.size
+          if (p.sample.length < SAMPLE) p.sample.push({ key: rel, action, size: source.size })
+          if (!this.op.dryRun) await this.copyItem({ rel, action, size: source.size })
+        } catch (error) {
+          if (!this.stopped()) this.fail(rel, error)
+        }
+      })
+      signal.throwIfAborted()
+      if (!page.IsTruncated) break
+      token = page.NextContinuationToken
+      await setImmediate()
+    }
+    p.listing = false
+    p.sample.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+    if (this.op.dryRun && p.done.failed > 0)
+      throw new Error(
+        t('Could not compare every source object — resolve the errors and preview again')
+      )
+    p.phase = this.op.dryRun ? 'planned' : 'done'
+  }
+
+  private async copyItem(it: SyncItem): Promise<void> {
+    if (this.stopped()) return
+    const entry = { size: it.size, done: 0 }
+    this.active.set(it.rel, entry)
+    try {
+      await this.copyOne(it.rel, it.size, entry)
+      this.progress.done.copied++
+      if (this.env.serverSide) this.count(it.size)
+    } finally {
+      this.active.delete(it.rel)
+    }
+  }
+
   /** Bucket đích có chưa; chưa có + `createBucket` thì tạo (trừ khi chỉ xem trước). */
   private async ensureDestBucket(): Promise<boolean> {
     try {
@@ -290,7 +387,8 @@ export class SyncJob {
         )
       if (this.op.dryRun) return false
       await this.env.dest.send(
-        new CreateBucketCommand(createBucketInput(this.op.dest.bucket, this.env.destRegion))
+        new CreateBucketCommand(createBucketInput(this.op.dest.bucket, this.env.destRegion)),
+        { abortSignal: this.abort.signal }
       )
       return true
     }

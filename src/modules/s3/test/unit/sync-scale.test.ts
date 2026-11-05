@@ -129,6 +129,7 @@ describe('S3 disk-backed sync', () => {
             dest: { bucket: 'dest', prefix: '' },
             mirror: false,
             compare: 'etag',
+            strategy: 'inventory',
             createBucket: false,
             dryRun: true
           }

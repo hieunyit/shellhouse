@@ -265,13 +265,16 @@ function phaseLabel(phase: S3SyncProgress['phase']): string {
 function startingProgress(
   dryRun: boolean,
   serverSide: boolean,
-  intervalSeconds?: number
+  intervalSeconds?: number,
+  strategy: 'lookup' | 'inventory' = 'lookup'
 ): S3SyncProgress {
   return {
     phase: 'scanning',
     dryRun,
     serverSide,
     scanned: { source: 0, dest: 0 },
+    strategy,
+    listing: strategy === 'lookup',
     plan: { new: 0, update: 0, delete: 0, same: 0, bytes: 0 },
     done: { copied: 0, deleted: 0, bytes: 0, failed: 0 },
     bytesPerSecond: 0,
@@ -345,6 +348,7 @@ export function SyncDialog({
   const [destPrefix, setDestPrefix] = useState(source.prefix)
   const [mode, setMode] = useState<'copy' | 'mirror'>('copy')
   const [compare, setCompare] = useState<'etag' | 'size'>('etag')
+  const [strategy, setStrategy] = useState<'lookup' | 'inventory'>('lookup')
   /** 0 = theo cài đặt (Settings → Modules → S3 storage). */
   const [threads, setThreads] = useState(0)
   const [continuous, setContinuous] = useState(false)
@@ -415,7 +419,8 @@ export function SyncDialog({
     const initial = startingProgress(
       dryRun,
       sameAccount,
-      continuous && !dryRun ? intervalSeconds : undefined
+      continuous && !dryRun ? intervalSeconds : undefined,
+      mode === 'mirror' ? 'inventory' : strategy
     )
     let last = initial
     let refreshed = 0
@@ -437,6 +442,7 @@ export function SyncDialog({
         ...(threads ? { concurrency: threads } : {}),
         createBucket: willCreate,
         dryRun,
+        strategy: mode === 'mirror' ? 'inventory' : strategy,
         ...(continuous && !dryRun ? { intervalSeconds } : {}),
         ...(maxDelete !== undefined ? { maxDelete } : {})
       })) as string
@@ -706,6 +712,31 @@ export function SyncDialog({
               />
             </div>
           </Field>
+          {mode === 'copy' && (
+            <Field
+              label={t('Destination comparison')}
+              hint={
+                strategy === 'lookup'
+                  ? t(
+                      'Checks only keys found in the source and starts copying immediately. Best when the destination has many unrelated objects.'
+                    )
+                  : t(
+                      'Lists both sides before copying. Can use fewer requests when both sides contain many of the same keys.'
+                    )
+              }
+            >
+              <Select
+                data-testid="s3-sync-strategy"
+                value={strategy}
+                onChange={(e) => {
+                  setStrategy(e.target.value as 'lookup' | 'inventory')
+                }}
+              >
+                <option value="lookup">{t('Check source keys and copy immediately')}</option>
+                <option value="inventory">{t('List both sides first')}</option>
+              </Select>
+            </Field>
+          )}
           <div className="grid grid-cols-[2fr_1fr] gap-3">
             <Field label={t('Changed means')}>
               <Select
@@ -748,14 +779,14 @@ export function SyncDialog({
               setContinuous(e.target.checked)
             }}
             description={t(
-              'Repeat until Stop while this tab and the app stay open. Each round lists both sides and copies only new or changed objects.'
+              'Repeat until Stop while this tab and the app stay open. Each round uses the selected comparison and copies only new or changed objects.'
             )}
           />
           {continuous && (
             <Field
               label={t('Pause between sync rounds')}
               hint={t(
-                'The pause starts after a round finishes. Large buckets use many listing requests; choose a longer pause to reduce load.'
+                'The pause starts after a round finishes. Choose a longer pause to reduce comparison requests.'
               )}
             >
               <Select
@@ -792,7 +823,11 @@ export function SyncDialog({
           data-phase={p?.phase ?? 'scanning'}
         >
           <div className="flex items-center gap-2 text-[13px]">
-            <span className="font-medium text-fg">{phaseLabel(p?.phase ?? 'scanning')}</span>
+            <span className="font-medium text-fg">
+              {p?.listing && running && !p.dryRun
+                ? t('Checking and copying…')
+                : phaseLabel(p?.phase ?? 'scanning')}
+            </span>
             <ArrowRight size={13} className="text-faint" />
             <span className="truncate font-mono text-xs text-muted" title={destLabel}>
               {destLabel}
@@ -835,12 +870,22 @@ export function SyncDialog({
               )}
             </Notice>
           )}
-          {(p === null || p.phase === 'scanning') && (
+          {(p === null || p.phase === 'scanning' || p.strategy === 'lookup') && (
             <p className="text-xs text-muted">
-              {t('Listed {source} objects at the source and {dest} at the destination…', {
-                source: formatNumber(p?.scanned.source ?? 0),
-                dest: formatNumber(p?.scanned.dest ?? 0)
-              })}
+              {p?.strategy === 'lookup'
+                ? t('Listed {source} source objects · checked {dest} matching destination keys.', {
+                    source: formatNumber(p.scanned.source),
+                    dest: formatNumber(p.scanned.dest)
+                  })
+                : t('Listed {source} objects at the source and {dest} at the destination…', {
+                    source: formatNumber(p?.scanned.source ?? 0),
+                    dest: formatNumber(p?.scanned.dest ?? 0)
+                  })}
+            </p>
+          )}
+          {p?.listing && running && (
+            <p className="text-xs text-muted" data-testid="s3-sync-growing-plan">
+              {t('Totals are discovered as the source is read.')}
             </p>
           )}
           {p && p.phase !== 'scanning' && p.phase !== 'error' && (
@@ -863,21 +908,25 @@ export function SyncDialog({
               finished) &&
             !p.dryRun && (
               <div className="flex flex-col gap-1">
-                <div className="h-1.5 overflow-hidden rounded-full bg-subtle">
-                  <div
-                    className="h-full rounded-full bg-info transition-[width]"
-                    style={{ width: `${Math.round(fraction * 100)}%` }}
-                  />
-                </div>
+                {!p.listing && (
+                  <div className="h-1.5 overflow-hidden rounded-full bg-subtle">
+                    <div
+                      className="h-full rounded-full bg-info transition-[width]"
+                      style={{ width: `${Math.round(fraction * 100)}%` }}
+                    />
+                  </div>
+                )}
                 <div
                   className="flex justify-between text-xs text-muted tabular-nums"
                   data-testid="s3-sync-done"
                 >
                   <span>
-                    {t('{done} / {total} copied', {
-                      done: formatNumber(p.done.copied),
-                      total: formatNumber(toCopy)
-                    })}
+                    {p.listing
+                      ? t('{n} copied', { n: formatNumber(p.done.copied) })
+                      : t('{done} / {total} copied', {
+                          done: formatNumber(p.done.copied),
+                          total: formatNumber(toCopy)
+                        })}
                     {p.plan.delete
                       ? ` · ${t('{n} deleted', { n: formatNumber(p.done.deleted) })}`
                       : ''}
@@ -888,7 +937,7 @@ export function SyncDialog({
                   <span>
                     {formatSize(p.done.bytes)} / {formatSize(p.plan.bytes)}
                     {p.bytesPerSecond ? ` · ${formatRate(p.bytesPerSecond)}` : ''}
-                    {p.phase === 'copying' && eta(p)
+                    {p.phase === 'copying' && !p.listing && eta(p)
                       ? ` · ${t('{time} left', { time: eta(p) ?? '' })}`
                       : ''}
                   </span>
