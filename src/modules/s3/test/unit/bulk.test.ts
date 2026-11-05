@@ -6,7 +6,7 @@ import {
   type S3Client
 } from '@aws-sdk/client-s3'
 import { describe, expect, it } from 'vitest'
-import type { S3BulkJob, S3JobProgress } from '../../shared/ops'
+import { S3BulkJob, S3Op, type S3JobProgress } from '../../shared/ops'
 import { BulkJob, countObjects, type BulkEnv } from '../../session-host/bulk'
 
 /**
@@ -16,11 +16,22 @@ import { BulkJob, countObjects, type BulkEnv } from '../../session-host/bulk'
  */
 function fakeS3(keys: string[]) {
   const objects = new Map(keys.map((k) => [k, 1]))
+  const buckets = new Map<string, Map<string, number>>([['b', objects]])
+  const bucketObjects = (bucket: string | undefined): Map<string, number> => {
+    const name = bucket ?? 'b'
+    let found = buckets.get(name)
+    if (!found) {
+      found = new Map()
+      buckets.set(name, found)
+    }
+    return found
+  }
   const calls = { list: 0, delete: 0, maxDeleteBatch: 0 }
   const send = (command: unknown): Promise<unknown> => {
     if (command instanceof ListObjectsV2Command) {
       calls.list++
       const { Prefix = '', StartAfter = '', MaxKeys = 1000 } = command.input
+      const objects = bucketObjects(command.input.Bucket)
       const all = [...objects.keys()].filter((k) => k.startsWith(Prefix) && k > StartAfter).sort()
       const page = all.slice(0, MaxKeys)
       return Promise.resolve({
@@ -31,6 +42,7 @@ function fakeS3(keys: string[]) {
     }
     if (command instanceof DeleteObjectsCommand) {
       calls.delete++
+      const objects = bucketObjects(command.input.Bucket)
       const batch = command.input.Delete?.Objects ?? []
       calls.maxDeleteBatch = Math.max(calls.maxDeleteBatch, batch.length)
       const Errors: { Key: string; Code: string; Message: string }[] = []
@@ -40,22 +52,24 @@ function fakeS3(keys: string[]) {
       return Promise.resolve({ Errors })
     }
     if (command instanceof HeadObjectCommand) {
-      const size = objects.get(command.input.Key ?? '')
+      const size = bucketObjects(command.input.Bucket).get(command.input.Key ?? '')
       return size === undefined
         ? Promise.reject(Object.assign(new Error('NotFound'), { name: 'NotFound' }))
         : Promise.resolve({ ContentLength: size })
     }
     if (command instanceof CopyObjectCommand) {
       const from = decodeURIComponent((command.input.CopySource ?? '').replace(/^[^/]+\//, ''))
-      if (!objects.has(from)) return Promise.reject(new Error(`no ${from}`))
-      objects.set(command.input.Key ?? '', objects.get(from) ?? 0)
+      const sourceBucket = (command.input.CopySource ?? '').split('/')[0]
+      const source = bucketObjects(sourceBucket)
+      if (!source.has(from)) return Promise.reject(new Error(`no ${from}`))
+      bucketObjects(command.input.Bucket).set(command.input.Key ?? '', source.get(from) ?? 0)
       return Promise.resolve({})
     }
     return Promise.reject(new Error('unexpected command'))
   }
   const client = { send } as unknown as S3Client
   const env: BulkEnv = { clientFor: () => Promise.resolve(client), requests: 8, deleteParallel: 3 }
-  return { objects, calls, env }
+  return { objects, calls, env, buckets }
 }
 
 const range = (n: number, f: (i: number) => string): string[] =>
@@ -68,6 +82,28 @@ async function finish(env: BulkEnv, spec: S3BulkJob): Promise<S3JobProgress> {
 }
 
 describe('S3: việc nền theo trang', () => {
+  it('accepts explicit selections beyond 1000 and streams an entire bucket to another bucket', async () => {
+    const keys = range(2501, (i) => `f${String(i).padStart(5, '0')}`)
+    const spec = {
+      kind: 'copy',
+      bucket: 'b',
+      keys,
+      destBucket: 'd',
+      destPrefix: '',
+      move: true,
+      overwrite: false
+    } as const
+    expect(S3BulkJob.safeParse(spec).success).toBe(true)
+    expect(S3Op.safeParse({ ...spec, op: 'copy' }).success).toBe(true)
+    const s3 = fakeS3(keys)
+    const result = await finish(s3.env, { ...spec, keys: [''] })
+    expect(result).toMatchObject({ phase: 'done', found: 2501, done: 2501, failed: 0 })
+    expect(s3.objects.size).toBe(0)
+    expect(s3.buckets.get('d')?.size).toBe(2501)
+    expect(s3.buckets.get('d')?.has('f00000')).toBe(true)
+    expect(s3.calls.maxDeleteBatch).toBeLessThanOrEqual(1000)
+  })
+
   it('xoá thư mục 2 500 object: lô ≤ 1000, xoá trong lúc liệt kê, không sót object nào', async () => {
     const s3 = fakeS3([...range(2500, (i) => `logs/${String(i).padStart(5, '0')}.txt`), 'keep.txt'])
     const p = await finish(s3.env, { kind: 'delete', bucket: 'b', keys: ['logs/'] })

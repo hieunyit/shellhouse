@@ -87,6 +87,7 @@ import { BULK_KEYS, BulkBar, bulkKinds, copyYaml, type BulkKind } from './Bulk'
 import { EventsView } from './Events'
 import { RefreshContext, useRefreshClock } from './refresh'
 import { useClusterAttention } from './attention'
+import { Certificates } from './Certificates'
 
 /** Đang xem loại nào → mở form của loại đó khi bấm Create. */
 const FORM_FOR_KIND: Record<string, FormKind> = {
@@ -1219,6 +1220,13 @@ export function ClusterTab({
                   }}
                 />
               )}
+              <Certificates
+                ready={ready}
+                request={request}
+                tabId={tabId}
+                contextKey={refKey}
+                cluster={params.label}
+              />
               {list.error && (
                 <div className="border-b border-line p-2">
                   <Notice tone="danger" testId="k8s-notice">

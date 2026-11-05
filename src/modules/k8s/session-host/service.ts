@@ -48,6 +48,7 @@ import {
   health,
   problems,
   fleet,
+  certificates,
   helmRelease,
   helmReleases,
   logTargets,
@@ -394,6 +395,20 @@ export class K8sService implements HostModuleSession {
         .json<{ gitVersion?: string }>('GET', '/version', { signal })
         .catch((error: unknown) => {
           const message = error instanceof Error ? error.message : String(error)
+          const expired = [
+            client.clientCertExpiry,
+            client.serverCertExpiry,
+            client.caCertExpiry
+          ].some((expiry) => expiry && Date.parse(expiry) <= Date.now())
+          if (
+            expired ||
+            /CERT_HAS_EXPIRED|certificate has expired|certificate expired/i.test(message)
+          )
+            throw new Error(
+              t('A TLS certificate has expired. Renew the certificate and reconnect. {error}', {
+                error: message
+              })
+            )
           // Chứng chỉ tự ký / proxy công ty chặn TLS: chỉ chỗ bật bỏ qua kiểm tra.
           if (isCertificateError(message))
             throw new Error(
@@ -577,6 +592,8 @@ export class K8sService implements HostModuleSession {
         return problems(client, signal)
       case 'fleet':
         return fleet(client, this.cluster?.auth.cert, signal)
+      case 'certificates':
+        return certificates(client, signal)
       case 'events.record':
         if (op.on) this.startRecorder(client)
         else this.stopRecorder()

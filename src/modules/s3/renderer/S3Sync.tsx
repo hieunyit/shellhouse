@@ -299,6 +299,9 @@ export function SyncDialog({
   source,
   run,
   onClose,
+  hidden = false,
+  onBackground,
+  onProgress,
   onFinished
 }: {
   accountId: string
@@ -307,6 +310,9 @@ export function SyncDialog({
   source: SyncSource
   run: Run
   onClose: () => void
+  hidden?: boolean
+  onBackground: () => void
+  onProgress: (progress: S3SyncProgress, destination: string) => void
   /** Đã ghi vào đích (để làm mới danh sách nếu đích là tài khoản này). */
   onFinished: (destAccountId: string) => void
 }): React.JSX.Element {
@@ -321,6 +327,8 @@ export function SyncDialog({
   const [progress, setProgress] = useState<S3SyncProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const jobId = useRef<string | null>(null)
+  const stopRequested = useRef(false)
+  const shouldStop = (): boolean => stopRequested.current
   const alive = useRef(true)
   /** Hàm (không đọc thẳng): TS không thu hẹp kiểu ref qua các lần await. */
   const isAlive = (): boolean => alive.current
@@ -372,6 +380,8 @@ export function SyncDialog({
   /** `maxDelete`: chạy thật sau khi xem trước — không cho xoá nhiều hơn số đã thấy. */
   const start = async (dryRun: boolean, maxDelete?: number): Promise<void> => {
     setError(null)
+    stopRequested.current = false
+    setProgress(startingProgress(dryRun, sameAccount))
     try {
       const id = (await run({
         op: 'syncStart',
@@ -389,14 +399,20 @@ export function SyncDialog({
         dryRun,
         ...(maxDelete !== undefined ? { maxDelete } : {})
       })) as string
+      if (!isAlive()) {
+        void run({ op: 'syncStop', id }).catch(() => undefined)
+        return
+      }
       jobId.current = id
-      setProgress(startingProgress(dryRun, sameAccount))
+      if (shouldStop()) void run({ op: 'syncStop', id }).catch(() => undefined)
       // Hỏi sớm (bucket nhỏ xong ngay), rồi đều đặn ~3 lần / giây cho thanh tiến độ mượt.
       for (let wait = 100; alive.current && jobId.current === id; wait = Math.min(300, wait * 2)) {
         await sleep(wait)
+        if (!isAlive() || jobId.current !== id) return
         const p = (await run({ op: 'syncPoll', id })) as S3SyncProgress
         if (!isAlive()) return
         setProgress(p)
+        onProgress(p, destLabel)
         if (p.phase !== 'scanning' && p.phase !== 'copying' && p.phase !== 'deleting') {
           jobId.current = null
           if (!dryRun && (p.done.copied || p.done.deleted)) onFinished(destAccount)
@@ -405,26 +421,27 @@ export function SyncDialog({
       }
     } catch (e) {
       jobId.current = null
-      if (alive.current) setError(cleanError(e))
+      if (alive.current) {
+        const failed = {
+          ...startingProgress(dryRun, sameAccount),
+          phase: 'error' as const,
+          error: cleanError(e)
+        }
+        setProgress(failed)
+        onProgress(failed, destLabel)
+        setError(cleanError(e))
+      }
     }
   }
 
   const stop = (): void => {
+    stopRequested.current = true
     if (jobId.current) void run({ op: 'syncStop', id: jobId.current }).catch(() => undefined)
   }
 
-  const close = async (): Promise<void> => {
-    if (
-      running &&
-      !(await confirmAction({
-        title: t('Stop the sync?'),
-        message: t('Objects copied so far stay at the destination.'),
-        confirmLabel: t('Stop sync'),
-        danger: true
-      }))
-    )
-      return
-    onClose()
+  const close = (): void => {
+    if (running) onBackground()
+    else onClose()
   }
 
   const p = progress
@@ -440,6 +457,7 @@ export function SyncDialog({
   const finished = p?.phase === 'done' || p?.phase === 'stopped' || p?.phase === 'error'
   const destLabel = `${sameAccount ? '' : `${accounts.find((a) => a.id === destAccount)?.name ?? ''}: `}s3://${bucketName}/${destPrefix.trim()}`
 
+  if (hidden) return <></>
   return (
     <Modal
       title={t('Sync')}
@@ -451,13 +469,13 @@ export function SyncDialog({
           {t('in {account}', { account: sourceName })}
         </>
       }
-      onClose={() => void close()}
+      onClose={close}
       width="max-w-2xl"
       testId="s3-sync-dialog"
       footer={
         p === null && !running ? (
           <>
-            <Button onClick={() => void close()}>{t('Cancel')}</Button>
+            <Button onClick={close}>{t('Cancel')}</Button>
             <Button
               disabled={!!problem || destBuckets === null}
               data-testid="s3-sync-preview"
@@ -477,9 +495,14 @@ export function SyncDialog({
             )}
           </>
         ) : running ? (
-          <Button data-testid="s3-sync-stop" onClick={stop}>
-            {t('Stop')}
-          </Button>
+          <>
+            <Button data-testid="s3-sync-background" onClick={onBackground}>
+              {t('Run in background')}
+            </Button>
+            <Button data-testid="s3-sync-stop" onClick={stop}>
+              {t('Stop')}
+            </Button>
+          </>
         ) : planned ? (
           <>
             <Button

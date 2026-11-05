@@ -67,6 +67,11 @@ test('Kubernetes: context từ KUBECONFIG, pod sống (watch), mô tả, log, sh
     await setWindowSize(launched, 1366, 820)
     const rows = view.getByTestId('k8s-row')
     await expect(rows).toHaveCount(2)
+    await view.getByTestId('k8s-certificates-open').click()
+    const certificates = page.getByTestId('k8s-certificates-dialog')
+    await expect(certificates).toContainText('API server certificate')
+    await expect(certificates).toContainText('Cluster CA certificate')
+    await certificates.getByText('Close', { exact: true }).click()
     await expect(view.locator('[data-testid="k8s-row"][data-name="shop/web-2"]')).toContainText(
       'CrashLoopBackOff'
     )

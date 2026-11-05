@@ -11,6 +11,7 @@ import type {
   OverviewProblem,
   OverviewResult,
   FleetResult,
+  CertificatesResult,
   HealthResult,
   RolloutRevision,
   Usage
@@ -968,15 +969,69 @@ export async function fleet(
     read('pvcs', '/api/v1/persistentvolumeclaims')
   ])
   const found = findProblems(nodes.items, pods.items, pvcs.items)
-  const clientCertExpiry = clientCert ? certExpiry(clientCert) : null
+  const clientCertExpiry = client.clientCertExpiry ?? (clientCert ? certExpiry(clientCert) : null)
+  const certs = await certificates(client, signal)
   return {
     version: version.gitVersion ?? '',
     nodes: { total: nodes.items.length, ready: nodes.items.length - found.nodes.total },
     problems: found,
+    certificates: certs,
     ...(limited.length ? { limited } : {}),
     ...(client.serverCertExpiry ? { serverCertExpiry: client.serverCertExpiry } : {}),
     ...(clientCertExpiry ? { clientCertExpiry } : {})
   }
+}
+
+/** Read one page of TLS Secrets at a time; never send certificate/key material to the UI. */
+export async function certificates(
+  client: KubeClient,
+  signal?: AbortSignal
+): Promise<CertificatesResult> {
+  const result: CertificatesResult = { items: [] }
+  let cont: string | undefined
+  let read = 0
+  try {
+    do {
+      signal?.throwIfAborted()
+      const page = await client.json<{
+        items: (K8sObject & { data?: Record<string, string> })[] | null
+        metadata?: { continue?: string }
+      }>('GET', '/api/v1/secrets', {
+        ...sig(signal),
+        query: { fieldSelector: 'type=kubernetes.io/tls', limit: 500, continue: cont }
+      })
+      for (const secret of page.items ?? []) {
+        // Some API proxies do not apply fieldSelector; do not inspect unrelated Secret data.
+        if (secret['type'] !== 'kubernetes.io/tls') continue
+        const crt = secret.data?.['tls.crt']
+        result.items.push({
+          id: `secret/${secret.metadata.namespace ?? ''}/${secret.metadata.name}`,
+          source: 'secret',
+          name: secret.metadata.name,
+          ...(secret.metadata.namespace ? { namespace: secret.metadata.namespace } : {}),
+          expiresAt: crt ? certExpiry(Buffer.from(crt, 'base64')) : null
+        })
+      }
+      read += page.items?.length ?? 0
+      cont = page.metadata?.continue || undefined
+      if (cont && read >= 10_000) {
+        result.truncated = true
+        break
+      }
+    } while (cont)
+  } catch (error) {
+    if (signal?.aborted) throw error
+    result.secretsError = error instanceof Error ? error.message : String(error)
+  }
+  // The request may refresh an exec credential or establish a new TLS connection.
+  for (const [source, expiresAt] of [
+    ['ca', client.caCertExpiry],
+    ['client', client.clientCertExpiry],
+    ['server', client.serverCertExpiry]
+  ] as const) {
+    if (expiresAt) result.items.unshift({ id: source, source, name: source, expiresAt })
+  }
+  return result
 }
 
 /**

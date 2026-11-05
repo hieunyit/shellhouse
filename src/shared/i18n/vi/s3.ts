@@ -1,6 +1,11 @@
 /** Bản dịch tiếng Việt — Module S3. Khoá = chuỗi tiếng Anh trong code (xem src/shared/i18n/index.ts). */
 export const s3: Readonly<Record<string, string>> = {
   // Chung
+  'The object listing did not advance — no sync changes were made':
+    'Danh sách object không chuyển sang trang tiếp theo — chưa thay đổi dữ liệu đồng bộ',
+  'Run in background': 'Chạy nền',
+  'Copy all objects…': 'Sao chép toàn bộ object…',
+  'Move all objects…': 'Di chuyển toàn bộ object…',
   ', and {n} more': ', và {n} mục khác',
   '…and {n} more': '…và {n} mục khác',
   '1 day': '1 ngày',

@@ -201,6 +201,7 @@ const K8sAction = z.discriminatedUnion('op', [
   z.object({ op: z.literal('problems') }),
   /** Tóm tắt cho bảng theo dõi ở Home: phiên bản, node, vấn đề, hạn chứng chỉ. */
   z.object({ op: z.literal('fleet') }),
+  z.object({ op: z.literal('certificates') }),
   /** Ghi event của cả cluster về máy (7 ngày, cho tab Timeline) — bật / tắt. */
   z.object({ op: z.literal('events.record'), on: z.boolean() }),
   /** Lịch sử qua Prometheus: Prometheus có metric traffic / event nào. */
@@ -647,6 +648,22 @@ export interface FleetResult {
   /** Hạn chứng chỉ (ISO): của API server và của client-certificate trong kubeconfig. */
   serverCertExpiry?: string
   clientCertExpiry?: string
+  certificates?: CertificatesResult
+}
+
+export interface CertificateInfo {
+  id: string
+  source: 'server' | 'client' | 'ca' | 'secret'
+  name: string
+  namespace?: string
+  expiresAt: string | null
+}
+
+export interface CertificatesResult {
+  items: CertificateInfo[]
+  /** Secret values stay in the Session Host; only expiry metadata crosses IPC. */
+  secretsError?: string
+  truncated?: boolean
 }
 
 /** Kết quả `health`: namespace → số pod lỗi (crash / kéo image hỏng / Failed), deployment chưa đủ. */

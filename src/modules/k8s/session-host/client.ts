@@ -8,6 +8,7 @@ import {
 import { connect as tlsConnect, type TLSSocket } from 'node:tls'
 import type { Duplex } from 'node:stream'
 import WebSocket from 'ws'
+import { certExpiry } from './certs'
 
 /**
  * Client Kubernetes API tối giản (ADR-014 mục 7.2): HTTPS dựng trên một kết nối thô do người gọi
@@ -210,6 +211,11 @@ export class KubeClient {
   private closed = false
   /** Hạn chứng chỉ của API server (ISO), đọc ở lần bắt tay TLS gần nhất — null nếu chưa / không TLS. */
   serverCertExpiry: string | null = null
+  clientCertExpiry: string | null = null
+
+  get caCertExpiry(): string | null {
+    return this.endpoint.ca ? certExpiry(this.endpoint.ca) : null
+  }
 
   constructor(
     private readonly endpoint: ClusterEndpoint,
@@ -295,6 +301,10 @@ export class KubeClient {
       }, handshake.ms)
       const onError = (e: unknown): void => {
         clearTimeout(timer)
+        const validTo = (socket.getPeerCertificate() as { valid_to?: string } | null)?.valid_to
+        const expiry = validTo ? new Date(validTo) : null
+        if (expiry && Number.isFinite(expiry.getTime()))
+          this.serverCertExpiry = expiry.toISOString()
         raw.destroy()
         const err = e instanceof Error ? e : new Error(String(e))
         // Lỗi chứng chỉ không thử lại; kết nối bị cắt giữa chừng thì có.
@@ -328,6 +338,7 @@ export class KubeClient {
   ): Promise<IncomingMessage> {
     if (this.closed && pooled) pooled = false
     const creds = await this.credentials(refresh)
+    this.clientCertExpiry = creds.cert ? certExpiry(creds.cert) : null
     const body =
       options.body === undefined
         ? undefined

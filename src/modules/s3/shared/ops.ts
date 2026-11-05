@@ -113,12 +113,16 @@ export const S3_OBJECT_CHANGED = 'The object was changed in the bucket since you
 
 /** Việc nền: xoá / copy / move / đổi tên (op `jobStart`). */
 export const S3BulkJob = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('delete'), bucket: Bucket, keys: z.array(Key).min(1).max(1000) }),
+  z.object({
+    kind: z.literal('delete'),
+    bucket: Bucket,
+    keys: z.array(Key).min(1).max(100_000_000)
+  }),
   /** Copy (hoặc move) object / "thư mục" (key kết thúc "/") vào `destPrefix` của `destBucket`. */
   z.object({
     kind: z.literal('copy'),
     bucket: Bucket,
-    keys: z.array(Key).min(1).max(1000),
+    keys: z.array(Key).min(1).max(100_000_000),
     destBucket: Bucket,
     destPrefix: Key,
     move: z.boolean(),
@@ -183,7 +187,7 @@ export const S3Op = z.discriminatedUnion('op', [
   /** Tạo "thư mục" = object rỗng tên kết thúc bằng "/". */
   z.object({ op: z.literal('mkdir'), bucket: Bucket, key: Key }),
   /** Xoá object; key kết thúc "/" = xoá mọi thứ dưới prefix đó (chạy rồi chờ xong — xem jobStart). */
-  z.object({ op: z.literal('delete'), bucket: Bucket, keys: z.array(Key).min(1).max(1000) }),
+  z.object({ op: z.literal('delete'), bucket: Bucket, keys: z.array(Key).min(1).max(100_000_000) }),
   /**
    * Xoá / copy / move / đổi tên chạy nền (thư mục có thể rất lớn): trả về id, hỏi tiến độ bằng
    * `jobPoll`, dừng bằng `jobStop`.
@@ -195,8 +199,8 @@ export const S3Op = z.discriminatedUnion('op', [
   z.object({
     op: z.literal('countObjects'),
     bucket: Bucket,
-    keys: z.array(Key).min(1).max(1000),
-    limit: z.number().int().min(1).max(1_000_000)
+    keys: z.array(Key).min(1).max(100_000_000),
+    limit: z.number().int().min(1).max(100_000_000)
   }),
   /** Trạng thái versioning của bucket (nhớ trong phiên; lỗi / không hỗ trợ → null). */
   z.object({ op: z.literal('versioning'), bucket: Bucket }),
@@ -255,7 +259,7 @@ export const S3Op = z.discriminatedUnion('op', [
   z.object({
     op: z.literal('copy'),
     bucket: Bucket,
-    keys: z.array(Key).min(1).max(1000),
+    keys: z.array(Key).min(1).max(100_000_000),
     destBucket: Bucket,
     destPrefix: Key,
     move: z.boolean(),

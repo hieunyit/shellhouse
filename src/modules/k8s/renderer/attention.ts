@@ -86,14 +86,15 @@ export function useClusterAttention({
   // Cluster đang được theo dõi nền: nó đã báo vấn đề lên Home — tab không báo trùng.
   const monitored = useFleetMonitored(`k8s:${contextKey}`)
   const enabled = setting && !monitored
-  const [problems, setProblems] = useState<Problems | null>(null)
+  const [state, setProblems] = useState<{ request: Request; problems: Problems } | null>(null)
+  const problems = ready && state?.request === request ? state.problems : null
   useEffect(() => {
     if (!ready || !enabled) return
     let cancelled = false
     const load = (): void => {
       request<Problems>({ op: 'problems' }).then(
         (p) => {
-          if (!cancelled) setProblems(p)
+          if (!cancelled) setProblems({ request, problems: p })
         },
         () => undefined
       )

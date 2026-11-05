@@ -157,16 +157,13 @@ export function S3Dialog({
           name: value,
           overwrite: false
         } as const
-        if (dialog.entry.isFolder) {
-          onJob(
-            job,
-            t('Renaming “{name}” to “{to}”', { name: dialog.entry.name, to: value }),
-            'moved'
-          )
-          onClose()
-          return
-        }
-        await run({ ...job, op: 'rename' })
+        onJob(
+          job,
+          t('Renaming “{name}” to “{to}”', { name: dialog.entry.name, to: value }),
+          'moved'
+        )
+        onClose()
+        return
       }
       if (dialog.kind === 'copy' && bucket !== null) {
         const job = {
@@ -178,22 +175,17 @@ export function S3Dialog({
           move: dialog.move,
           overwrite
         } as const
-        if (dialog.entries.some((e) => e.isFolder)) {
-          const params = {
-            items: itemsLabel(dialog.entries),
-            to: `${destBucket}/${job.destPrefix}`
-          }
-          onJob(
-            job,
-            dialog.move
-              ? t('Moving {items} to {to}', params)
-              : t('Copying {items} to {to}', params),
-            dialog.move ? 'moved' : 'copied'
-          )
-          onClose()
-          return
+        const params = {
+          items: itemsLabel(dialog.entries),
+          to: `${destBucket}/${job.destPrefix}`
         }
-        await run({ ...job, op: 'copy' })
+        onJob(
+          job,
+          dialog.move ? t('Moving {items} to {to}', params) : t('Copying {items} to {to}', params),
+          dialog.move ? 'moved' : 'copied'
+        )
+        onClose()
+        return
       }
       if (dialog.kind === 'deleteVersions' && bucket !== null) {
         await run({

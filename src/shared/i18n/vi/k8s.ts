@@ -1,5 +1,24 @@
 /** Bản dịch tiếng Việt — Module Kubernetes (trừ Map / Topology / Traffic). Khoá = chuỗi tiếng Anh trong code (xem src/shared/i18n/index.ts). */
 export const k8s: Readonly<Record<string, string>> = {
+  Certificates: 'Chứng chỉ',
+  'A TLS certificate has expired. Renew the certificate and reconnect. {error}':
+    'Chứng chỉ TLS đã hết hạn. Hãy gia hạn chứng chỉ rồi kết nối lại. {error}',
+  'Certificate expiry': 'Hạn chứng chỉ',
+  'API server certificate': 'Chứng chỉ API server',
+  'Client certificate': 'Chứng chỉ client',
+  'Cluster CA certificate': 'Chứng chỉ CA của cluster',
+  'Could not read the expiry of {name}': 'Không đọc được hạn của {name}',
+  '{name} expired on {date}': '{name} đã hết hạn lúc {date}',
+  '{name} expires in {n} day ({date})': '{name} hết hạn sau {n} ngày ({date})',
+  '{name} expires in {n} days ({date})': '{name} hết hạn sau {n} ngày ({date})',
+  'Some certificates could not be checked': 'Một số chứng chỉ chưa kiểm tra được',
+  'Warnings appear when a certificate expires within 30 days. Checks run every minute while this cluster tab is open.':
+    'Cảnh báo khi chứng chỉ còn tối đa 30 ngày. Kiểm tra mỗi phút khi tab cluster còn mở.',
+  'Checking certificates…': 'Đang kiểm tra chứng chỉ…',
+  'Could not check TLS Secrets across the cluster':
+    'Không kiểm tra được TLS Secret trên toàn cluster',
+  'Only the first 10,000 TLS Secrets were checked': 'Chỉ kiểm tra được 10.000 TLS Secret đầu tiên',
+  'Certificate expiry is unknown': 'Chưa xác định hạn chứng chỉ',
   '{age} old': 'tạo {age} trước',
   'Restore panel': 'Thu nhỏ bảng',
   'Expand to full width': 'Mở rộng toàn trang',

@@ -6,6 +6,24 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.38] - 2026-11-05
+
+### Added
+
+- S3 sync previews support up to 100 million objects per side using a temporary disk index.
+  Sync tasks can be minimized, reopened and run together while browsing; copy/move always run
+  in the background, with actions for the entire current folder or bucket.
+- Kubernetes certificate expiry details and warnings for API server, client/exec credentials,
+  cluster CA and TLS Secrets, including Home attention and explicit partial-check messages.
+
+### Fixed
+
+- Remove the 1,000-item selection limit for S3 bulk operations and keep running jobs alive
+  when progress polling is delayed. Reject overlapping folder copies and incomplete sync listings.
+- Refresh exec credentials before their client certificate expires; discard stale Kubernetes
+  catalog, permissions, health and attention data when the connection changes. Expired TLS
+  connections direct users to renew their certificate.
+
 ## [1.2.0-beta.37] - 2026-10-28
 
 ### Changed

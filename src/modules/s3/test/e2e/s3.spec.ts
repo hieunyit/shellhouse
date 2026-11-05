@@ -17,6 +17,112 @@ test.afterEach(async () => {
   server = null
 })
 
+test('S3: multiple background syncs allow browsing and stopping one task without stopping another', async ({
+  page
+}) => {
+  test.setTimeout(60_000)
+  const { createServer, request } = await import('node:http')
+  const { S3Client, PutObjectCommand, GetObjectCommand } = await import('@aws-sdk/client-s3')
+  server = await startS3TestServer(['src', 'dst'])
+  const upstream = server.endpoint
+  let release: (() => void) | undefined
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let pendingCopies = 0
+  const proxy = createServer((incoming, response) => {
+    const forward = (): void => {
+      if (response.destroyed) return
+      const target = request(
+        new URL(incoming.url ?? '/', upstream),
+        { method: incoming.method, headers: incoming.headers },
+        (out) => {
+          response.writeHead(out.statusCode ?? 502, out.headers)
+          out.pipe(response)
+        }
+      )
+      target.on('error', () => {
+        if (!response.destroyed) response.writeHead(502).end()
+      })
+      incoming.pipe(target)
+    }
+    if (incoming.headers['x-amz-copy-source']) {
+      pendingCopies++
+      void gate.then(forward)
+    } else forward()
+  })
+  await new Promise<void>((resolve) => {
+    proxy.listen(0, '127.0.0.1', resolve)
+  })
+  const address = proxy.address() as { port: number }
+  const client = new S3Client({
+    endpoint: upstream,
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: server.accessKeyId, secretAccessKey: server.secretAccessKey }
+  })
+  try {
+    await client.send(new PutObjectCommand({ Bucket: 'src', Key: 'data.txt', Body: 'background' }))
+    const saved = await page.evaluate(
+      (input) => window.shellhouse.invokeModule('s3', 'save', [input]),
+      {
+        name: 'Background',
+        endpoint: `http://127.0.0.1:${address.port}`,
+        region: 'us-east-1',
+        accessKeyId: server.accessKeyId,
+        secretAccessKey: server.secretAccessKey,
+        forcePathStyle: true
+      }
+    )
+    expect(saved).toMatchObject({ ok: true })
+    await openArea(page, 's3')
+    await page.locator('[data-testid="s3-account"][data-name="Background"]').dblclick()
+    const view = page.getByTestId('s3-view')
+    await view.locator('[data-testid="s3-bucket"][data-name="src"]').click()
+    for (const prefix of ['first/', 'second/']) {
+      await view.getByTestId('s3-sync-bucket').click()
+      const dialog = page.getByTestId('s3-sync-dialog')
+      await dialog.getByTestId('s3-sync-bucket').fill('dst')
+      await dialog.getByTestId('s3-sync-prefix').fill(prefix)
+      await dialog.getByTestId('s3-sync-start').click()
+      await expect.poll(() => pendingCopies).toBe(prefix === 'first/' ? 1 : 2)
+      await dialog.getByTestId('s3-sync-background').click()
+      await expect(dialog).toHaveCount(0)
+    }
+    await expect(view.getByTestId('s3-sync-task')).toHaveCount(2)
+    // An unrelated write succeeds while both copies are held by the proxy.
+    await view.locator('[data-testid="s3-bucket"][data-name="src"]').dblclick()
+    await view.getByTestId('s3-mkdir').click()
+    await page.getByTestId('s3-dialog-input').fill('while-syncing')
+    await page.getByTestId('s3-dialog-submit').click()
+    await expect(view.locator('[data-testid="s3-entry"][data-name="while-syncing"]')).toBeVisible()
+    await view.getByTestId('s3-sync-task').first().click()
+    const first = page.getByTestId('s3-sync-dialog')
+    await first.getByTestId('s3-sync-stop').click()
+    await expect(first.getByTestId('s3-sync-progress')).toHaveAttribute('data-phase', 'stopped')
+    await first.getByText('Close', { exact: true }).click()
+    release?.()
+    await view.getByTestId('s3-sync-task').click()
+    await expect(page.getByTestId('s3-sync-result')).toContainText('In sync: 1 copied')
+    const result = await client.send(
+      new GetObjectCommand({ Bucket: 'dst', Key: 'second/data.txt' })
+    )
+    expect(await result.Body?.transformToString()).toBe('background')
+    await expect(
+      client.send(new GetObjectCommand({ Bucket: 'dst', Key: 'first/data.txt' }))
+    ).rejects.toThrow()
+  } finally {
+    release?.()
+    client.destroy()
+    proxy.closeAllConnections()
+    await new Promise<void>((resolve) => {
+      proxy.close(() => {
+        resolve()
+      })
+    })
+  }
+})
+
 test('trình quản lý S3: thêm tài khoản, duyệt bucket, thư mục, tải lên / về, link chia sẻ, đổi tên, copy, thống kê, xoá', async ({
   app,
   page

@@ -2,6 +2,7 @@ import { request as httpsRequest, type RequestOptions as HttpsOptions } from 'no
 import type { LimitedSpawn } from '../../registry/host-types'
 import type { ModuleBinary } from '../../registry/types'
 import type { Credentials } from './client'
+import { certExpiry } from './certs'
 
 /** Thông tin xác thực đã phân giải bởi main (xem main/kubeconfig.ts). */
 export interface AuthConfig {
@@ -300,9 +301,16 @@ export function credentialProvider(
     ).status
     if (!status?.token && !status?.clientCertificateData)
       throw new Error(`${binary} did not return a credential`)
-    const expires = status.expirationTimestamp
+    const advertisedExpiry = status.expirationTimestamp
       ? Date.parse(status.expirationTimestamp)
       : now() + 10 * 60_000
+    if (!Number.isFinite(advertisedExpiry))
+      throw new Error(`${binary} returned an invalid expirationTimestamp`)
+    const certificate = status.clientCertificateData ?? auth.cert
+    const certificateExpiry = certificate ? certExpiry(certificate) : null
+    const expires = certificateExpiry
+      ? Math.min(advertisedExpiry, Date.parse(certificateExpiry))
+      : advertisedExpiry
     return {
       creds: {
         headers: status.token ? { Authorization: `Bearer ${status.token}` } : {},

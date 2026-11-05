@@ -78,7 +78,7 @@ describe('Tóm tắt cluster', () => {
     expect(notes.map((n) => n.severity)).toEqual(['warning', 'warning', 'danger'])
     expect(notes[0]?.text).toContain('support ends in 21 days')
     expect(notes[0]?.text).toContain('EKS may support it longer')
-    expect(notes[1]?.text).toContain('API server certificate expires in 9 days')
+    expect(notes[1]?.text).toContain('API server certificate expires in 10 days')
     expect(notes[2]?.text).toContain('client certificate in the kubeconfig expired')
     // Chứng chỉ còn lâu → không nhắc.
     expect(fleetNotes(result({ serverCertExpiry: '2027-10-01T00:00:00Z' }), NOW)).toEqual([])

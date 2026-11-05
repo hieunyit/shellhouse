@@ -1,22 +1,30 @@
 import type { Readable } from 'node:stream'
+import { setImmediate } from 'node:timers/promises'
 import {
   AbortMultipartUploadCommand,
   CreateBucketCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  ListObjectsV2Command,
   type S3Client
 } from '@aws-sdk/client-s3'
 import { Upload } from '@aws-sdk/lib-storage'
 import { t } from '@shared/i18n'
 import { formatNumber } from '@shared/i18n/format'
 import type { S3Op, S3SyncProgress } from '../shared/ops'
-import { normalizePrefix, planSync, syncOverlap, type SyncObject } from '../shared/sync'
+import {
+  normalizePrefix,
+  planSync,
+  syncOverlap,
+  type SyncItem,
+  type SyncObject
+} from '../shared/sync'
+import { SyncIndex, SYNC_PAGE_SIZE } from './sync-index'
+export { MAX_SYNC_OBJECTS } from './sync-index'
 import { mapLimit } from '../../../node-shared/pool'
-import { createBucketInput, errorText, isNotFound, scanObjects, serverCopy } from './client'
+import { createBucketInput, errorText, isNotFound, serverCopy } from './client'
 
-/** Mỗi bên tối đa chừng này object (map key → size/etag ~100 byte/object trong bộ nhớ). */
-export const MAX_SYNC_OBJECTS = 1_000_000
 const SAMPLE = 300
 const MAX_ERRORS = 50
 /** Truyền qua máy: mỗi object tối đa 2 phần × 8 MiB trong bộ nhớ cùng lúc. */
@@ -53,7 +61,6 @@ export class SyncJob {
       /** Cùng tài khoản: CopyObject trên server. */
       serverSide: boolean
       concurrency: number
-      scanConcurrency: number
     },
     private readonly op: SyncOp
   ) {
@@ -102,6 +109,7 @@ export class SyncJob {
 
   async run(): Promise<void> {
     const signal = this.abort.signal
+    let index: SyncIndex | undefined
     try {
       if (
         syncOverlap(
@@ -112,22 +120,31 @@ export class SyncJob {
       )
         throw new Error(t('The source and destination overlap — pick a different folder or bucket'))
       const destExists = await this.ensureDestBucket()
-      const [source, dest] = await Promise.all([
-        this.scan(this.env.source, this.op.bucket, this.sourcePrefix, 'source'),
+      const disk = new SyncIndex()
+      index = disk
+      const scanAbort = new AbortController()
+      const scanSignal = AbortSignal.any([signal, scanAbort.signal])
+      const scan = (
+        client: S3Client,
+        bucket: string,
+        prefix: string,
+        side: 'source' | 'dest'
+      ): Promise<void> =>
+        this.scan(disk, client, bucket, prefix, side, scanSignal).catch((error: unknown) => {
+          scanAbort.abort(error)
+          throw error
+        })
+      // Wait for both scans to settle before closing their shared index on failure.
+      const scans = await Promise.allSettled([
+        scan(this.env.source, this.op.bucket, this.sourcePrefix, 'source'),
         destExists
-          ? this.scan(this.env.dest, this.op.dest.bucket, this.destPrefix, 'dest')
-          : new Map<string, SyncObject>()
+          ? scan(this.env.dest, this.op.dest.bucket, this.destPrefix, 'dest')
+          : Promise.resolve()
       ])
-      const { items, same } = planSync(source, dest, {
-        mirror: this.op.mirror,
-        compare: this.op.compare
-      })
+      for (const scan of scans) if (scan.status === 'rejected') throw scan.reason
+      signal.throwIfAborted()
+      await this.plan(index)
       const p = this.progress
-      for (const it of items) {
-        p.plan[it.action]++
-        if (it.action !== 'delete') p.plan.bytes += it.size
-      }
-      p.plan.same = same
       // Kế hoạch lúc chạy thật xoá nhiều hơn bản đã xem trước (nguồn vừa bị xoá bớt / đổi chỗ…) →
       // dừng hẳn, không chép cũng không xoá gì.
       if (!this.op.dryRun && this.op.maxDelete !== undefined && p.plan.delete > this.op.maxDelete)
@@ -137,43 +154,58 @@ export class SyncJob {
             { n: formatNumber(p.plan.delete), max: formatNumber(this.op.maxDelete) }
           )
         )
-      p.sample = items.slice(0, SAMPLE).map((it) => ({
-        key: it.rel,
-        action: it.action,
-        size: it.size
-      }))
+      p.sample = index
+        .plan(null)
+        .slice(0, SAMPLE)
+        .map((it) => ({
+          key: it.rel,
+          action: it.action,
+          size: it.size
+        }))
       if (this.op.dryRun) {
         p.phase = 'planned'
         return
       }
       p.phase = 'copying'
       this.sampleAt = Date.now()
-      const copies = items.filter((it) => it.action !== 'delete')
-      await mapLimit(copies, p.concurrency, async (it) => {
-        if (signal.aborted) return
-        const entry = { size: it.size, done: 0 }
-        this.active.set(it.rel, entry)
-        try {
-          await this.copyOne(it.rel, it.size, entry)
-          p.done.copied++
-          if (this.env.serverSide) this.count(it.size)
-        } catch (error) {
-          if (!this.stopped()) this.fail(it.rel, error)
-        } finally {
-          this.active.delete(it.rel)
-        }
-      })
-      const deletes = items.filter((it) => it.action === 'delete').map((it) => it.rel)
-      if (deletes.length && !signal.aborted) {
+      for await (const page of this.pages(index)) {
+        await mapLimit(
+          page.filter((it) => it.action !== 'delete'),
+          p.concurrency,
+          async (it) => {
+            if (signal.aborted) return
+            const entry = { size: it.size, done: 0 }
+            this.active.set(it.rel, entry)
+            try {
+              await this.copyOne(it.rel, it.size, entry)
+              p.done.copied++
+              if (this.env.serverSide) this.count(it.size)
+            } catch (error) {
+              if (!this.stopped()) this.fail(it.rel, error)
+            } finally {
+              this.active.delete(it.rel)
+            }
+          }
+        )
+      }
+      if (p.plan.delete && !signal.aborted) {
         p.phase = 'deleting'
-        await this.deleteAll(deletes)
+        for await (const page of this.pages(index))
+          await this.deleteAll(page.filter((it) => it.action === 'delete').map((it) => it.rel))
       }
       p.phase = signal.aborted ? 'stopped' : 'done'
     } catch (error) {
       this.progress.phase = signal.aborted ? 'stopped' : 'error'
       if (!signal.aborted) this.progress.error = errorText(error)
     } finally {
-      this.finished = true
+      try {
+        index?.close()
+      } catch (error) {
+        this.progress.phase = 'error'
+        this.progress.error = errorText(error)
+      } finally {
+        this.finished = true
+      }
     }
   }
 
@@ -202,45 +234,80 @@ export class SyncJob {
   }
 
   private async scan(
+    index: SyncIndex,
     client: S3Client,
     bucket: string,
     prefix: string,
-    side: 'source' | 'dest'
-  ): Promise<Map<string, SyncObject>> {
-    const out = new Map<string, SyncObject>()
-    const abort = new AbortController()
-    const stop = (): void => {
-      abort.abort()
-    }
-    this.abort.signal.addEventListener('abort', stop)
-    try {
-      await scanObjects(
-        client,
-        bucket,
-        prefix,
-        this.env.scanConcurrency,
-        (objects) => {
-          for (const o of objects) {
-            if (!o.Key) continue
-            out.set(o.Key.slice(prefix.length), { size: o.Size ?? 0, etag: o.ETag ?? null })
-          }
-          this.progress.scanned[side] = out.size
-          if (out.size > MAX_SYNC_OBJECTS)
-            abort.abort(
-              new Error(
-                t('More than {n} objects on one side — sync a smaller folder', {
-                  n: formatNumber(MAX_SYNC_OBJECTS)
-                })
-              )
-            )
-        },
-        abort.signal
+    side: 'source' | 'dest',
+    signal: AbortSignal
+  ): Promise<void> {
+    // Flat listing bounds memory even when there are millions of distinct folders.
+    let token: string | undefined
+    for (;;) {
+      signal.throwIfAborted()
+      const page = await client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefix,
+          MaxKeys: SYNC_PAGE_SIZE,
+          ContinuationToken: token
+        }),
+        { abortSignal: signal }
       )
-    } finally {
-      this.abort.signal.removeEventListener('abort', stop)
+      signal.throwIfAborted()
+      index.add(side, prefix, page.Contents ?? [])
+      this.progress.scanned[side] = index.counts[side]
+      if (!page.IsTruncated) return
+      if (!page.NextContinuationToken || page.NextContinuationToken === token)
+        throw new Error(t('The object listing did not advance — no sync changes were made'))
+      token = page.NextContinuationToken
     }
-    if (abort.signal.aborted && !this.abort.signal.aborted) throw abort.signal.reason
-    return out
+  }
+
+  private async plan(index: SyncIndex): Promise<void> {
+    for (const side of ['source', ...(this.op.mirror ? (['dest'] as const) : [])] as const) {
+      let after: string | null = null
+      for (;;) {
+        this.abort.signal.throwIfAborted()
+        const rows = index.objects(side, after)
+        const last = rows.at(-1)
+        if (!last) break
+        let items: SyncItem[]
+        if (side === 'source') {
+          const source = new Map<string, SyncObject>(rows.map((r) => [r.rel, r]))
+          const dest = new Map<string, SyncObject>(
+            rows
+              .filter((r) => r.present !== null)
+              .map((r) => [r.rel, { size: r.destSize, etag: r.destEtag }])
+          )
+          const result = planSync(source, dest, { mirror: false, compare: this.op.compare })
+          items = result.items
+          this.progress.plan.same += result.same
+        } else
+          items = rows
+            .filter((r) => r.present === null)
+            .map((r) => ({ rel: r.rel, size: r.size, action: 'delete' as const }))
+        index.addPlan(items)
+        for (const item of items) {
+          this.progress.plan[item.action]++
+          if (item.action !== 'delete') this.progress.plan.bytes += item.size
+        }
+        after = last.rel
+        await setImmediate()
+      }
+    }
+  }
+
+  private async *pages(index: SyncIndex): AsyncGenerator<SyncItem[]> {
+    let after: string | null = null
+    while (!this.stopped()) {
+      const page = index.plan(after)
+      const last = page.at(-1)
+      if (!last) return
+      yield page
+      after = last.rel
+      await setImmediate()
+    }
   }
 
   private async copyOne(rel: string, size: number, entry: { done: number }): Promise<void> {

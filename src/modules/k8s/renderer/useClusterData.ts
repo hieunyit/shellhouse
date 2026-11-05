@@ -51,13 +51,14 @@ export function useClusterCatalog({
   /** reloadKey của lần discover gần nhất (khác → người dùng vừa bấm Reload). */
   const discoveredAt = useRef(0)
 
-  const [shownRef, setShownRef] = useState(refKey)
-  if (shownRef !== refKey) {
-    setShownRef(refKey)
+  const [shown, setShown] = useState({ refKey, request })
+  if (shown.refKey !== refKey || shown.request !== request) {
+    setShown({ refKey, request })
     setKinds(null)
     setAllNamespaces([])
     setNamespaces(initialNamespace ? [initialNamespace] : null)
     setCounts({})
+    setHealth(null)
   }
   const nsForAccess = namespaces?.length === 1 ? namespaces[0] : undefined
 

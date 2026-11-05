@@ -228,9 +228,32 @@ export function S3View({
   const stopCalc = useRef(false)
   const [opening, setOpening] = useState<string | null>(null)
   /** Hộp thoại export / đồng bộ (ngoài S3Dialog). */
-  const [tool, setTool] = useState<
-    { kind: 'export' } | { kind: 'sync'; source: SyncSource } | null
-  >(null)
+  const [tool, setTool] = useState<{ kind: 'export' } | null>(null)
+  const [syncTasks, setSyncTasks] = useState<
+    {
+      id: string
+      source: SyncSource
+      hidden: boolean
+      progress: import('../shared/ops').S3SyncProgress | null
+      destination: string
+      run: (op: S3Op) => Promise<unknown>
+    }[]
+  >([])
+  const openSync = (source: SyncSource): void => {
+    const client = clientRef.current
+    if (!client) return
+    setSyncTasks((all) => [
+      ...all.map((task) => ({ ...task, hidden: true })),
+      {
+        id: crypto.randomUUID(),
+        source,
+        hidden: false,
+        progress: null,
+        destination: '',
+        run: (op: S3Op) => client.request(op)
+      }
+    ])
+  }
   const accounts = useS3((s) => s.accounts)
   const [sort, setSort] = usePersistentSort<SortKey>('s3-objects', OBJECT_SORT_KEYS, {
     key: 'name',
@@ -945,7 +968,7 @@ export function S3View({
         label: t('Sync to…'),
         icon: <ArrowLeftRight size={14} />,
         onSelect: () => {
-          setTool({ kind: 'sync', source: { bucket, prefix: onlyFolder.key } })
+          openSync({ bucket, prefix: onlyFolder.key })
         }
       })
     if (list.some((e) => e.isFolder))
@@ -997,7 +1020,7 @@ export function S3View({
       label: t('Sync to…'),
       icon: <ArrowLeftRight size={14} />,
       onSelect: () => {
-        setTool({ kind: 'sync', source: { bucket: name, prefix: '' } })
+        openSync({ bucket: name, prefix: '' })
       }
     },
     'separator',
@@ -1484,7 +1507,7 @@ export function S3View({
                   labelAt="xl"
                   testId="s3-sync-bucket"
                   onClick={() => {
-                    setTool({ kind: 'sync', source: { bucket: selectedBucket, prefix: '' } })
+                    openSync({ bucket: selectedBucket, prefix: '' })
                   }}
                 />
                 <ToolButton
@@ -1545,7 +1568,51 @@ export function S3View({
               onClick={() => {
                 // Một thư mục đang chọn → đồng bộ thư mục đó; không thì cả chỗ đang xem.
                 const folder = one?.isFolder ? one.key : prefix
-                setTool({ kind: 'sync', source: { bucket, prefix: folder } })
+                openSync({ bucket, prefix: folder })
+              }}
+            />
+            <ToolButton
+              icon={<Copy size={14} />}
+              label={t('Copy all objects…')}
+              labelAt="5xl"
+              testId="s3-copy-all"
+              onClick={() => {
+                setDialog({
+                  kind: 'copy',
+                  move: false,
+                  entries: [
+                    {
+                      key: prefix,
+                      name: `s3://${bucket}/${prefix}`,
+                      isFolder: true,
+                      size: 0,
+                      modified: null,
+                      storageClass: null
+                    }
+                  ]
+                })
+              }}
+            />
+            <ToolButton
+              icon={<ArrowLeftRight size={14} />}
+              label={t('Move all objects…')}
+              labelAt="5xl"
+              testId="s3-move-all"
+              onClick={() => {
+                setDialog({
+                  kind: 'copy',
+                  move: true,
+                  entries: [
+                    {
+                      key: prefix,
+                      name: `s3://${bucket}/${prefix}`,
+                      isFolder: true,
+                      size: 0,
+                      modified: null,
+                      storageClass: null
+                    }
+                  ]
+                })
               }}
             />
             <span className="mx-1 h-4 w-px shrink-0 bg-line" />
@@ -1990,6 +2057,50 @@ export function S3View({
       )}
 
       <JobsPanel jobs={bulk.jobs} onStop={bulk.stop} />
+      {syncTasks.length > 0 && (
+        <div
+          className="max-h-40 shrink-0 overflow-auto border-t border-line bg-surface"
+          data-testid="s3-sync-tasks"
+        >
+          {syncTasks.map((task) => (
+            <button
+              key={task.id}
+              type="button"
+              className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-hover"
+              data-testid="s3-sync-task"
+              onClick={() => {
+                setSyncTasks((all) => all.map((item) => ({ ...item, hidden: item.id !== task.id })))
+              }}
+            >
+              <ArrowLeftRight size={12} />
+              <span className="min-w-0 flex-1 truncate">
+                {t('Sync')}: s3://{task.source.bucket}/{task.source.prefix}{' '}
+                {task.destination && `→ ${task.destination}`}
+              </span>
+              <span className="shrink-0 text-muted">
+                {task.progress
+                  ? t('{n} copied', { n: formatNumber(task.progress.done.copied) })
+                  : t('Starting…')}
+              </span>
+              <span className="shrink-0 text-muted">
+                {task.progress
+                  ? t(
+                      task.progress.phase === 'planned'
+                        ? 'Preview'
+                        : task.progress.phase === 'done'
+                          ? 'Finished'
+                          : task.progress.phase === 'error'
+                            ? 'Failed'
+                            : task.progress.phase === 'stopped'
+                              ? 'Stopped'
+                              : 'Working…'
+                    )
+                  : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
       <TransferList
         transfers={transfers}
         testId="s3-transfers"
@@ -2047,15 +2158,27 @@ export function S3View({
           }}
         />
       )}
-      {tool?.kind === 'sync' && (
+      {syncTasks.map((task) => (
         <SyncDialog
+          key={task.id}
           accountId={accountId}
           accounts={accounts}
           buckets={buckets ?? []}
-          source={tool.source}
-          run={run}
+          source={task.source}
+          hidden={task.hidden}
+          onBackground={() => {
+            setSyncTasks((all) =>
+              all.map((item) => (item.id === task.id ? { ...item, hidden: true } : item))
+            )
+          }}
+          onProgress={(progress, destination) => {
+            setSyncTasks((all) =>
+              all.map((item) => (item.id === task.id ? { ...item, progress, destination } : item))
+            )
+          }}
+          run={task.run}
           onClose={() => {
-            setTool(null)
+            setSyncTasks((all) => all.filter((item) => item.id !== task.id))
           }}
           onFinished={(dest) => {
             if (dest !== accountId) return
@@ -2063,7 +2186,7 @@ export function S3View({
             if (bucket !== null) void load(bucket, prefix, { refresh: true })
           }}
         />
-      )}
+      ))}
       {dialog && (
         <S3Dialog
           dialog={dialog}

@@ -22,6 +22,7 @@ import type { FleetResult } from '../shared/ops'
 import { k8sSupport } from '../shared/support'
 import { k8sApi, openCluster } from './api'
 import { attentionOf, clusterTabs } from './attention'
+import { CERT_WARN_DAYS, certificateNotes } from '../shared/certificates'
 
 /**
  * Theo dõi nền cho Home › Infrastructure: mở app là kết nối (chỉ đọc) tới các cluster đang theo
@@ -33,8 +34,6 @@ import { attentionOf, clusterTabs } from './attention'
 export const FLEET_EVERY_MS = 3 * 60_000
 /** Một lần đọc tối đa (cluster chậm / mạng treo). */
 const TIMEOUT_MS = 60_000
-/** Chứng chỉ còn ít hơn chừng này ngày → nhắc. */
-const CERT_WARN_DAYS = 30
 const DAY_MS = 86_400_000
 
 const sourceKeyOf = (c: ContextEntry): string => `k8s:${c.key}`
@@ -77,11 +76,11 @@ export function fleetNotes(r: FleetResult, now = Date.now()): FleetNote[] {
   const cert = (at: string | undefined, expired: string, soon: [string, string]): void => {
     if (!at) return
     const left = (Date.parse(at) - now) / DAY_MS
-    if (left < 0) notes.push({ severity: 'danger', text: t(expired, { date: formatDate(at) }) })
-    else if (left < CERT_WARN_DAYS)
+    if (left <= 0) notes.push({ severity: 'danger', text: t(expired, { date: formatDate(at) }) })
+    else if (left <= CERT_WARN_DAYS)
       notes.push({
         severity: 'warning',
-        text: tn(Math.max(1, Math.floor(left)), soon[0], soon[1], { date: formatDate(at) })
+        text: tn(Math.max(1, Math.ceil(left)), soon[0], soon[1], { date: formatDate(at) })
       })
   }
   cert(r.serverCertExpiry, 'The API server certificate expired on {date}.', [
@@ -92,6 +91,18 @@ export function fleetNotes(r: FleetResult, now = Date.now()): FleetNote[] {
     'Your client certificate in the kubeconfig expires in {n} day ({date}).',
     'Your client certificate in the kubeconfig expires in {n} days ({date}).'
   ])
+  if (r.certificates)
+    notes.push(
+      ...certificateNotes(
+        {
+          ...r.certificates,
+          items: r.certificates.items.filter(
+            (cert) => cert.source === 'ca' || cert.source === 'secret'
+          )
+        },
+        now
+      )
+    )
   return notes
 }
 
@@ -253,9 +264,26 @@ class ClusterMonitor {
       publishAttention(
         this.attentionId,
         monitorConfig().attention
-          ? attentionOf(r.problems, this.entry.name, (kind, ns, name) => {
-              this.reveal(kind, ns, name)
-            })
+          ? [
+              ...(r.certificates
+                ? certificateNotes(r.certificates).map((note) => ({
+                    id: `certificate/${note.id}`,
+                    severity: note.severity,
+                    title: t('Certificate expiry'),
+                    description: note.text,
+                    source: this.entry.name,
+                    open: () => {
+                      const cert = r.certificates?.items.find((cert) => cert.id === note.id)
+                      if (cert?.source === 'secret')
+                        this.reveal('secrets', cert.namespace, cert.name)
+                      else openCluster(this.entry)
+                    }
+                  }))
+                : []),
+              ...attentionOf(r.problems, this.entry.name, (kind, ns, name) => {
+                this.reveal(kind, ns, name)
+              })
+            ]
           : null
       )
     } catch (e) {

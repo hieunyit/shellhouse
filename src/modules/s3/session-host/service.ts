@@ -522,19 +522,18 @@ export class S3Service {
   /** Dọn việc nền không ai hỏi tiến độ nữa (renderer đóng hộp thoại / bị reload giữa chừng). */
   private sweepJobs(): void {
     const old = Date.now() - JOB_TTL_MS
+    const completedBefore = Date.now() - 24 * 60 * 60 * 1000
     for (const [id, job] of this.statsJobs)
       if (job.touched < old) {
         job.abort.abort()
         this.statsJobs.delete(id)
       }
     for (const [id, entry] of this.syncJobs)
-      if (entry.touched < old) {
-        entry.job.stop()
+      if (entry.job.finished && entry.touched < completedBefore) {
         this.syncJobs.delete(id)
       }
     for (const [id, job] of this.bulkJobs)
-      if (job.touched < old) {
-        job.stop()
+      if (job.done && job.touched < completedBefore) {
         this.bulkJobs.delete(id)
       }
   }
@@ -620,13 +619,14 @@ export class S3Service {
         dest: destClient ?? (await this.clientFor(op.dest.bucket)),
         destRegion: destConnection ? accountRegion(destConnection) : this.region,
         serverSide: destClient === null,
-        concurrency: destClient ? Math.max(4, this.maxTransfers) : this.requests,
-        scanConcurrency: this.requests
+        concurrency: destClient ? Math.max(4, this.maxTransfers) : this.requests
       },
       op
     )
     const finished = job.run().finally(() => {
       destClient?.destroy()
+      const entry = this.syncJobs.get(id)
+      if (entry) entry.touched = Date.now()
     })
     this.syncJobs.set(id, { job, touched: Date.now(), finished })
     return id

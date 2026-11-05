@@ -13,6 +13,7 @@ import { errorText, isNotFound, serverCopy } from './client'
 const MAX_ERRORS = 20
 /** DeleteObjects nhận tối đa 1000 key mỗi lần; ListObjectsV2 trả tối đa 1000 key mỗi trang. */
 const BATCH = 1000
+const isPrefix = (key: string): boolean => key === '' || key.endsWith('/')
 
 export interface BulkEnv {
   /** Client đúng region của bucket. */
@@ -172,7 +173,7 @@ export class BulkJob {
           job.bucket,
           job.keys.map((key) => ({
             key,
-            destKey: base + lastName(key) + (key.endsWith('/') ? '/' : '')
+            destKey: key === '' ? base : base + lastName(key) + (key.endsWith('/') ? '/' : '')
           })),
           job.destBucket,
           job.move,
@@ -197,6 +198,7 @@ export class BulkJob {
       if (!this.stopped()) this.progress.error = errorText(error)
     } finally {
       this.progress.scanning = false
+      this.touched = Date.now()
     }
   }
 
@@ -272,7 +274,7 @@ export class BulkJob {
 
   private async exists(client: S3Client, bucket: string, key: string): Promise<boolean> {
     const signal = this.abort.signal
-    if (key.endsWith('/')) {
+    if (isPrefix(key)) {
       const out = await client.send(
         new ListObjectsV2Command({ Bucket: bucket, Prefix: key, MaxKeys: 1 }),
         { abortSignal: signal }
@@ -307,13 +309,17 @@ export class BulkJob {
       const name = lastName(key)
       if (bucket === destBucket && key === destKey)
         throw new Error(t('“{name}” is already in this folder', { name }))
-      if (key.endsWith('/') && bucket === destBucket && destKey.startsWith(key))
+      if (
+        isPrefix(key) &&
+        bucket === destBucket &&
+        (destKey.startsWith(key) || key.startsWith(destKey))
+      )
         throw new Error(t('A folder cannot be copied into itself (“{name}”)', { name }))
       if (!overwrite && (await this.exists(dest, destBucket, destKey)))
         throw new Error(
           t('“{name}” already exists at the destination', { name: lastName(destKey) })
         )
-      if (!key.endsWith('/')) {
+      if (!isPrefix(key)) {
         const head = await source.send(new HeadObjectCommand({ Bucket: bucket, Key: key }), {
           abortSignal: signal
         })
@@ -344,7 +350,7 @@ export class BulkJob {
     }
     for (const { key, destKey } of items) {
       if (this.stopped()) return
-      if (!key.endsWith('/')) {
+      if (!isPrefix(key)) {
         this.progress.found++
         await copyPage([{ from: key, to: destKey, size: sizes.get(key) ?? 0 }])
         continue
