@@ -6,7 +6,7 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
-## [1.2.0-beta.40] - 2026-11-05
+## [1.2.0-beta.41] - 2026-11-05
 
 ### Fixed
 

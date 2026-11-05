@@ -31,7 +31,7 @@ it('keeps polling while minimized, reopens with progress and stops only when exp
   try {
     const run = vi.fn((op: S3Op) => Promise.resolve(op.op === 'syncStart' ? 'sync-1' : copying()))
     const onBackground = vi.fn()
-    const onProgress = vi.fn()
+    const onProgress = vi.fn<Parameters<typeof SyncDialog>[0]['onProgress']>()
     const props = {
       accountId: 'a',
       accounts: [],
@@ -58,7 +58,16 @@ it('keeps polling while minimized, reopens with progress and stops only when exp
     expect(view.queryByTestId('s3-sync-dialog')).toBeNull()
     expect(run).toHaveBeenCalledWith({ op: 'syncPoll', id: 'sync-1' })
     expect(run).not.toHaveBeenCalledWith({ op: 'syncStop', id: 'sync-1' })
-    expect(onProgress).toHaveBeenCalledWith(copying(), 's3://dst/')
+    const operation = onProgress.mock.calls[0]?.[2]
+    expect(operation?.id).toMatch(/^[\da-f-]{36}$/)
+    expect(operation?.startedAt).toBeGreaterThan(0)
+    expect(operation?.stop).toBeTypeOf('function')
+    expect(onProgress).toHaveBeenCalledWith(copying(), 's3://dst/', operation)
+    expect(onProgress.mock.lastCall?.[2]).toBe(operation)
+    act(() => {
+      operation?.stop()
+    })
+    expect(run).toHaveBeenCalledWith({ op: 'syncStop', id: 'sync-1' })
     view.rerender(<SyncDialog {...props} />)
     expect(view.getByTestId('s3-sync-done').textContent).toContain('1,001')
     fireEvent.click(view.getByTestId('s3-sync-stop'))
