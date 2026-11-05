@@ -82,3 +82,151 @@ it('keeps polling while minimized, reopens with progress and stops only when exp
     vi.useRealTimers()
   }
 })
+
+const waiting = (round = 1): S3SyncProgress => ({
+  ...copying(),
+  phase: 'waiting',
+  continuous: {
+    intervalSeconds: 300,
+    round,
+    completedRounds: round,
+    nextRunAt: Date.now() + 300000,
+    totals: { copied: round * 1001, deleted: 0, bytes: round * 1001, failed: 0 }
+  }
+})
+
+it('keeps one continuous operation active across hidden waiting rounds and stops from Transfers', async () => {
+  vi.useFakeTimers()
+  let view: ReturnType<typeof render> | undefined
+  try {
+    let progress = waiting()
+    const run = vi.fn((op: S3Op) => {
+      if (op.op === 'syncStart') return Promise.resolve('continuous-1')
+      if (op.op === 'syncStop') progress = { ...progress, phase: 'stopped' }
+      return Promise.resolve(progress)
+    })
+    const onProgress = vi.fn<Parameters<typeof SyncDialog>[0]['onProgress']>()
+    const props = {
+      accountId: 'a',
+      accounts: [],
+      buckets: [{ name: 'dst', region: null, createdAt: null }],
+      source: { bucket: 'src', prefix: '' },
+      run,
+      onClose: vi.fn(),
+      onFinished: vi.fn(),
+      onBackground: vi.fn(),
+      onProgress
+    }
+    view = render(<SyncDialog {...props} />)
+    fireEvent.change(view.getByTestId('s3-sync-bucket'), { target: { value: 'dst' } })
+    fireEvent.click(view.getByTestId('s3-sync-continuous'))
+    expect(view.getByTestId('s3-sync-interval')).toHaveProperty('value', '300')
+    await act(async () => {
+      fireEvent.click(view?.getByTestId('s3-sync-start') as HTMLElement)
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ op: 'syncStart', intervalSeconds: 300 })
+    )
+    expect(view.getByTestId('s3-sync-progress').dataset.phase).toBe('waiting')
+    expect(view.getByTestId('s3-sync-continuous-status').textContent).toContain('Next check at')
+    expect(props.onFinished).toHaveBeenCalledOnce()
+    fireEvent.click(view.getByTestId('s3-sync-background'))
+    view.rerender(<SyncDialog {...props} hidden />)
+    progress = waiting(2)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    const operation = onProgress.mock.calls[0]?.[2]
+    expect(onProgress.mock.lastCall?.[2]).toBe(operation)
+    expect(onProgress.mock.lastCall?.[0].phase).toBe('waiting')
+    expect(props.onFinished).toHaveBeenCalledTimes(2)
+    expect(run.mock.calls.filter(([op]) => op.op === 'syncStart')).toHaveLength(1)
+    await act(async () => {
+      operation?.stop()
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    expect(run).toHaveBeenCalledWith({ op: 'syncStop', id: 'continuous-1' })
+    expect(onProgress.mock.lastCall?.[0].phase).toBe('stopped')
+    const polls = run.mock.calls.length
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300000)
+    })
+    expect(run).toHaveBeenCalledTimes(polls)
+    view.rerender(<SyncDialog {...props} />)
+    expect(view.getByTestId('s3-sync-progress').dataset.phase).toBe('stopped')
+  } finally {
+    view?.unmount()
+    vi.useRealTimers()
+  }
+})
+
+it('can start continuous mirror sync after an unchanged preview and stops on unmount while waiting', async () => {
+  vi.useFakeTimers()
+  let view: ReturnType<typeof render> | undefined
+  try {
+    let dryRun = true
+    const run = vi.fn((op: S3Op) => {
+      if (op.op === 'syncStart') {
+        dryRun = op.dryRun
+        return Promise.resolve('sync-1')
+      }
+      return Promise.resolve(
+        dryRun
+          ? {
+              ...copying(),
+              dryRun: true,
+              phase: 'planned',
+              plan: { new: 0, update: 0, delete: 0, same: 1, bytes: 0 }
+            }
+          : { ...waiting(), error: 'Connection refused' }
+      )
+    })
+    view = render(
+      <SyncDialog
+        accountId="a"
+        accounts={[]}
+        buckets={[{ name: 'dst', region: null, createdAt: null }]}
+        source={{ bucket: 'src', prefix: '' }}
+        run={run}
+        onClose={vi.fn()}
+        onFinished={vi.fn()}
+        onBackground={vi.fn()}
+        onProgress={vi.fn()}
+      />
+    )
+    fireEvent.change(view.getByTestId('s3-sync-bucket'), { target: { value: 'dst' } })
+    fireEvent.click(view.getByTestId('s3-sync-continuous'))
+    fireEvent.change(view.getByTestId('s3-sync-interval'), { target: { value: '30' } })
+    fireEvent.click(view.getByTestId('s3-sync-mode-mirror'))
+    await act(async () => {
+      fireEvent.click(view?.getByTestId('s3-sync-preview') as HTMLElement)
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    const preview = run.mock.calls.find(([op]) => op.op === 'syncStart')?.[0]
+    expect(preview).toHaveProperty('dryRun', true)
+    expect(preview).not.toHaveProperty('intervalSeconds')
+    expect(view.getByTestId('s3-sync-run')).toHaveProperty('disabled', false)
+    expect(view.getByTestId('s3-sync-run').textContent).toContain('Start continuous sync')
+    await act(async () => {
+      fireEvent.click(view?.getByTestId('s3-sync-run') as HTMLElement)
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        op: 'syncStart',
+        dryRun: false,
+        mirror: true,
+        maxDelete: 0,
+        intervalSeconds: 30
+      })
+    )
+    expect(view.getByText('Connection refused')).toBeDefined()
+    expect(view.getByText(/It will retry after the pause/)).toBeDefined()
+    view.unmount()
+    expect(run).toHaveBeenCalledWith({ op: 'syncStop', id: 'sync-1' })
+  } finally {
+    view?.unmount()
+    vi.useRealTimers()
+  }
+})

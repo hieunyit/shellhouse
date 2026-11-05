@@ -27,6 +27,7 @@ import { cleanError, formatSize } from './format'
 import { eachLimit } from './stats-job'
 import {
   confirmAction,
+  formatDateTimeSeconds,
   formatDuration,
   formatNumber,
   formatRate,
@@ -249,6 +250,8 @@ function phaseLabel(phase: S3SyncProgress['phase']): string {
       return t('Copying…')
     case 'deleting':
       return t('Deleting extra objects…')
+    case 'waiting':
+      return t('Waiting for the next sync')
     case 'done':
       return t('Finished')
     case 'stopped':
@@ -259,7 +262,11 @@ function phaseLabel(phase: S3SyncProgress['phase']): string {
 }
 
 /** Hiện ngay khi bấm (trước lần hỏi tiến độ đầu) — không nháy lại form. */
-function startingProgress(dryRun: boolean, serverSide: boolean): S3SyncProgress {
+function startingProgress(
+  dryRun: boolean,
+  serverSide: boolean,
+  intervalSeconds?: number
+): S3SyncProgress {
   return {
     phase: 'scanning',
     dryRun,
@@ -272,7 +279,18 @@ function startingProgress(dryRun: boolean, serverSide: boolean): S3SyncProgress 
     active: [],
     sample: [],
     errors: [],
-    error: null
+    error: null,
+    ...(intervalSeconds === undefined
+      ? {}
+      : {
+          continuous: {
+            intervalSeconds,
+            round: 1,
+            completedRounds: 0,
+            nextRunAt: null,
+            totals: { copied: 0, deleted: 0, bytes: 0, failed: 0 }
+          }
+        })
   }
 }
 
@@ -329,6 +347,8 @@ export function SyncDialog({
   const [compare, setCompare] = useState<'etag' | 'size'>('etag')
   /** 0 = theo cài đặt (Settings → Modules → S3 storage). */
   const [threads, setThreads] = useState(0)
+  const [continuous, setContinuous] = useState(false)
+  const [intervalSeconds, setIntervalSeconds] = useState(300)
   const [progress, setProgress] = useState<S3SyncProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
   const jobId = useRef<string | null>(null)
@@ -380,7 +400,8 @@ export function SyncDialog({
   const running =
     progress?.phase === 'scanning' ||
     progress?.phase === 'copying' ||
-    progress?.phase === 'deleting'
+    progress?.phase === 'deleting' ||
+    progress?.phase === 'waiting'
 
   const stop = (): void => {
     stopRequested.current = true
@@ -391,8 +412,13 @@ export function SyncDialog({
   const start = async (dryRun: boolean, maxDelete?: number): Promise<void> => {
     setError(null)
     stopRequested.current = false
-    const initial = startingProgress(dryRun, sameAccount)
+    const initial = startingProgress(
+      dryRun,
+      sameAccount,
+      continuous && !dryRun ? intervalSeconds : undefined
+    )
     let last = initial
+    let refreshed = 0
     const operation = { ...newTaskRun(), stop }
     setProgress(initial)
     onProgress(initial, destLabel, operation)
@@ -411,6 +437,7 @@ export function SyncDialog({
         ...(threads ? { concurrency: threads } : {}),
         createBucket: willCreate,
         dryRun,
+        ...(continuous && !dryRun ? { intervalSeconds } : {}),
         ...(maxDelete !== undefined ? { maxDelete } : {})
       })) as string
       if (!isAlive()) {
@@ -420,7 +447,11 @@ export function SyncDialog({
       jobId.current = id
       if (shouldStop()) void run({ op: 'syncStop', id }).catch(() => undefined)
       // Hỏi sớm (bucket nhỏ xong ngay), rồi đều đặn ~3 lần / giây cho thanh tiến độ mượt.
-      for (let wait = 100; alive.current && jobId.current === id; wait = Math.min(300, wait * 2)) {
+      for (
+        let wait = 100;
+        alive.current && jobId.current === id;
+        wait = last.phase === 'waiting' ? 1000 : Math.min(300, wait * 2)
+      ) {
         await sleep(wait)
         if (!isAlive() || jobId.current !== id) return
         const p = (await run({ op: 'syncPoll', id })) as S3SyncProgress
@@ -428,13 +459,30 @@ export function SyncDialog({
         last = p
         setProgress(p)
         onProgress(p, destLabel, operation)
-        if (p.phase !== 'scanning' && p.phase !== 'copying' && p.phase !== 'deleting') {
+        const changed = p.continuous
+          ? p.continuous.totals.copied + p.continuous.totals.deleted
+          : p.done.copied + p.done.deleted
+        const roundFinished =
+          p.phase === 'waiting' ||
+          p.phase === 'done' ||
+          p.phase === 'stopped' ||
+          p.phase === 'error'
+        if (!dryRun && roundFinished && changed > refreshed) {
+          refreshed = changed
+          onFinished(destAccount)
+        }
+        if (
+          p.phase !== 'scanning' &&
+          p.phase !== 'copying' &&
+          p.phase !== 'deleting' &&
+          p.phase !== 'waiting'
+        ) {
           jobId.current = null
-          if (!dryRun && (p.done.copied || p.done.deleted)) onFinished(destAccount)
           return
         }
       }
     } catch (e) {
+      if (jobId.current) void run({ op: 'syncStop', id: jobId.current }).catch(() => undefined)
       jobId.current = null
       if (alive.current) {
         const failed = {
@@ -524,7 +572,7 @@ export function SyncDialog({
             </Button>
             <Button
               variant={p.plan.delete ? 'danger' : 'primary'}
-              disabled={toCopy === 0 && p.plan.delete === 0}
+              disabled={!continuous && toCopy === 0 && p.plan.delete === 0}
               data-testid="s3-sync-run"
               onClick={() =>
                 void (async () => {
@@ -548,11 +596,13 @@ export function SyncDialog({
                 })()
               }
             >
-              {toCopy === 0 && p.plan.delete === 0
-                ? t('Already in sync')
-                : p.plan.delete
-                  ? t('Sync and delete {n}', { n: formatNumber(p.plan.delete) })
-                  : tn(toCopy, 'Sync {n} object', 'Sync {n} objects')}
+              {continuous
+                ? t('Start continuous sync')
+                : toCopy === 0 && p.plan.delete === 0
+                  ? t('Already in sync')
+                  : p.plan.delete
+                    ? t('Sync and delete {n}', { n: formatNumber(p.plan.delete) })
+                    : tn(toCopy, 'Sync {n} object', 'Sync {n} objects')}
             </Button>
           </>
         ) : (
@@ -690,6 +740,39 @@ export function SyncDialog({
               </Select>
             </Field>
           </div>
+          <Checkbox
+            label={t('Continuous sync')}
+            data-testid="s3-sync-continuous"
+            checked={continuous}
+            onChange={(e) => {
+              setContinuous(e.target.checked)
+            }}
+            description={t(
+              'Repeat until Stop while this tab and the app stay open. Each round lists both sides and copies only new or changed objects.'
+            )}
+          />
+          {continuous && (
+            <Field
+              label={t('Pause between sync rounds')}
+              hint={t(
+                'The pause starts after a round finishes. Large buckets use many listing requests; choose a longer pause to reduce load.'
+              )}
+            >
+              <Select
+                data-testid="s3-sync-interval"
+                value={String(intervalSeconds)}
+                onChange={(e) => {
+                  setIntervalSeconds(Number(e.target.value))
+                }}
+              >
+                {[30, 60, 300, 900, 3600].map((seconds) => (
+                  <option key={seconds} value={seconds}>
+                    {formatDuration(seconds * 1000)}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <p className="text-xs text-faint">
             {sameAccount
               ? t(
@@ -715,6 +798,35 @@ export function SyncDialog({
               {destLabel}
             </span>
           </div>
+          {p?.continuous && (
+            <Notice tone="info" testId="s3-sync-continuous-status">
+              {t('Round {round} · {copied} copied, {deleted} deleted in total.', {
+                round: formatNumber(p.continuous.round),
+                copied: formatNumber(p.continuous.totals.copied),
+                deleted: formatNumber(p.continuous.totals.deleted)
+              })}{' '}
+              {p.phase === 'waiting' && p.continuous.nextRunAt !== null
+                ? t('Next check at {time}. Stop cancels future rounds.', {
+                    time: formatDateTimeSeconds(p.continuous.nextRunAt)
+                  })
+                : running
+                  ? t('Continues in the background until Stop.')
+                  : ''}
+              {mode === 'mirror' && (
+                <p>{t('Every round keeps the deletion limit approved in the preview.')}</p>
+              )}
+            </Notice>
+          )}
+          {planned && continuous && mode === 'mirror' && (
+            <Notice tone="info">
+              {t('Every round keeps the deletion limit approved in the preview.')}
+            </Notice>
+          )}
+          {p?.phase === 'waiting' && (p.error || p.done.failed > 0) && (
+            <Notice tone="warning">
+              {t('The last round had errors. It will retry after the pause; Stop cancels retries.')}
+            </Notice>
+          )}
           {planned && p.plan.delete > 0 && p.scanned.source === 0 && (
             <Notice tone="danger" testId="s3-sync-empty-source">
               {t(
@@ -744,66 +856,76 @@ export function SyncDialog({
               </span>
             </div>
           )}
-          {p && (p.phase === 'copying' || p.phase === 'deleting' || finished) && !p.dryRun && (
-            <div className="flex flex-col gap-1">
-              <div className="h-1.5 overflow-hidden rounded-full bg-subtle">
-                <div
-                  className="h-full rounded-full bg-info transition-[width]"
-                  style={{ width: `${Math.round(fraction * 100)}%` }}
-                />
-              </div>
-              <div
-                className="flex justify-between text-xs text-muted tabular-nums"
-                data-testid="s3-sync-done"
-              >
-                <span>
-                  {t('{done} / {total} copied', {
-                    done: formatNumber(p.done.copied),
-                    total: formatNumber(toCopy)
-                  })}
-                  {p.plan.delete
-                    ? ` · ${t('{n} deleted', { n: formatNumber(p.done.deleted) })}`
-                    : ''}
-                  {p.done.failed ? ` · ${t('{n} failed', { n: formatNumber(p.done.failed) })}` : ''}
-                </span>
-                <span>
-                  {formatSize(p.done.bytes)} / {formatSize(p.plan.bytes)}
-                  {p.bytesPerSecond ? ` · ${formatRate(p.bytesPerSecond)}` : ''}
-                  {p.phase === 'copying' && eta(p)
-                    ? ` · ${t('{time} left', { time: eta(p) ?? '' })}`
-                    : ''}
-                </span>
-              </div>
-              {p.phase === 'copying' && p.active.length > 0 && (
-                <div className="mt-1 flex flex-col gap-1" data-testid="s3-sync-active">
-                  <span className="text-[11px] text-faint">
-                    {t('{n} at a time', { n: p.concurrency })}
-                    {p.serverSide ? ` · ${t('copied on the server')}` : ''}
-                  </span>
-                  {p.active.map((a) => (
-                    <div key={a.key} className="flex items-center gap-2 text-xs">
-                      <span className="min-w-0 flex-1 truncate font-mono text-muted" title={a.key}>
-                        {a.key}
-                      </span>
-                      {!p.serverSide && a.size > 0 && (
-                        <span className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-subtle">
-                          <span
-                            className="block h-full bg-info"
-                            style={{
-                              width: `${Math.min(100, Math.round((a.done / a.size) * 100))}%`
-                            }}
-                          />
-                        </span>
-                      )}
-                      <span className="w-16 shrink-0 text-right text-faint tabular-nums">
-                        {formatSize(a.size)}
-                      </span>
-                    </div>
-                  ))}
+          {p &&
+            (p.phase === 'copying' ||
+              p.phase === 'deleting' ||
+              p.phase === 'waiting' ||
+              finished) &&
+            !p.dryRun && (
+              <div className="flex flex-col gap-1">
+                <div className="h-1.5 overflow-hidden rounded-full bg-subtle">
+                  <div
+                    className="h-full rounded-full bg-info transition-[width]"
+                    style={{ width: `${Math.round(fraction * 100)}%` }}
+                  />
                 </div>
-              )}
-            </div>
-          )}
+                <div
+                  className="flex justify-between text-xs text-muted tabular-nums"
+                  data-testid="s3-sync-done"
+                >
+                  <span>
+                    {t('{done} / {total} copied', {
+                      done: formatNumber(p.done.copied),
+                      total: formatNumber(toCopy)
+                    })}
+                    {p.plan.delete
+                      ? ` · ${t('{n} deleted', { n: formatNumber(p.done.deleted) })}`
+                      : ''}
+                    {p.done.failed
+                      ? ` · ${t('{n} failed', { n: formatNumber(p.done.failed) })}`
+                      : ''}
+                  </span>
+                  <span>
+                    {formatSize(p.done.bytes)} / {formatSize(p.plan.bytes)}
+                    {p.bytesPerSecond ? ` · ${formatRate(p.bytesPerSecond)}` : ''}
+                    {p.phase === 'copying' && eta(p)
+                      ? ` · ${t('{time} left', { time: eta(p) ?? '' })}`
+                      : ''}
+                  </span>
+                </div>
+                {p.phase === 'copying' && p.active.length > 0 && (
+                  <div className="mt-1 flex flex-col gap-1" data-testid="s3-sync-active">
+                    <span className="text-[11px] text-faint">
+                      {t('{n} at a time', { n: p.concurrency })}
+                      {p.serverSide ? ` · ${t('copied on the server')}` : ''}
+                    </span>
+                    {p.active.map((a) => (
+                      <div key={a.key} className="flex items-center gap-2 text-xs">
+                        <span
+                          className="min-w-0 flex-1 truncate font-mono text-muted"
+                          title={a.key}
+                        >
+                          {a.key}
+                        </span>
+                        {!p.serverSide && a.size > 0 && (
+                          <span className="h-1 w-16 shrink-0 overflow-hidden rounded-full bg-subtle">
+                            <span
+                              className="block h-full bg-info"
+                              style={{
+                                width: `${Math.min(100, Math.round((a.done / a.size) * 100))}%`
+                              }}
+                            />
+                          </span>
+                        )}
+                        <span className="w-16 shrink-0 text-right text-faint tabular-nums">
+                          {formatSize(a.size)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           {p?.error && <Notice tone="danger">{p.error}</Notice>}
           {error && <Notice tone="danger">{error}</Notice>}
           {p && p.errors.length > 0 && (

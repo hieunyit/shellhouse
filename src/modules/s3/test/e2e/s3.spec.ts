@@ -784,3 +784,68 @@ test('S3 tự kết nối lại sau khi Session Host chết, giữ vị trí đa
   await expect(view.locator('[data-testid="s3-entry"][data-name="after-restart"]')).toBeVisible()
   await expect(view.getByText('The tab is closed', { exact: true })).toHaveCount(0)
 })
+
+test('S3 continuous sync: new changes arrive across background rounds in one Transfers task, Stop ends the schedule', async ({
+  page
+}) => {
+  test.setTimeout(90000)
+  const { S3Client, PutObjectCommand, GetObjectCommand } = await import('@aws-sdk/client-s3')
+  server = await startS3TestServer(['src', 'dst'])
+  const client = new S3Client({
+    endpoint: server.endpoint,
+    region: 'us-east-1',
+    forcePathStyle: true,
+    credentials: { accessKeyId: server.accessKeyId, secretAccessKey: server.secretAccessKey }
+  })
+  try {
+    await client.send(new PutObjectCommand({ Bucket: 'src', Key: 'a.txt', Body: 'one' }))
+    await page.evaluate((input) => window.shellhouse.invokeModule('s3', 'save', [input]), {
+      name: 'Continuous',
+      endpoint: server.endpoint,
+      region: 'us-east-1',
+      accessKeyId: server.accessKeyId,
+      secretAccessKey: server.secretAccessKey,
+      forcePathStyle: true
+    })
+    await openArea(page, 's3')
+    await page.locator('[data-testid="s3-account"][data-name="Continuous"]').dblclick()
+    const view = page.getByTestId('s3-view')
+    await view.locator('[data-testid="s3-bucket"][data-name="src"]').click()
+    await view.getByTestId('s3-sync-bucket').click()
+    const dialog = page.getByTestId('s3-sync-dialog')
+    await dialog.getByTestId('s3-sync-bucket').fill('dst')
+    await dialog.getByTestId('s3-sync-continuous').check()
+    await expect(dialog.getByTestId('s3-sync-interval')).toHaveValue('300')
+    await dialog.getByTestId('s3-sync-interval').selectOption('30')
+    await dialog.getByTestId('s3-sync-start').click()
+    await expect(dialog.getByTestId('s3-sync-progress')).toHaveAttribute('data-phase', 'waiting')
+    await expect(dialog.getByTestId('s3-sync-continuous-status')).toContainText('1 copied')
+    await dialog.getByTestId('s3-sync-background').click()
+    await openArea(page, 'transfers')
+    const task = page.locator('[data-testid="transfers-center-row"][data-operation="sync"]')
+    await expect(task).toHaveCount(1)
+    await expect(task).toHaveAttribute('data-state', 'running')
+    await expect(task).toContainText('Continuous sync · waiting')
+    await expect(task).toContainText('1 objects processed')
+
+    // Same-size changes must also sync, without reopening the dialog or starting another task.
+    await client.send(new PutObjectCommand({ Bucket: 'src', Key: 'a.txt', Body: 'two' }))
+    await client.send(new PutObjectCommand({ Bucket: 'src', Key: 'b.txt', Body: 'new' }))
+    await expect(task).toContainText('3 objects processed', { timeout: 45000 })
+    await expect(task).toContainText('Continuous sync · waiting')
+    await expect(task).toHaveCount(1)
+    const changed = await client.send(new GetObjectCommand({ Bucket: 'dst', Key: 'a.txt' }))
+    const added = await client.send(new GetObjectCommand({ Bucket: 'dst', Key: 'b.txt' }))
+    expect(await changed.Body?.transformToString()).toBe('two')
+    expect(await added.Body?.transformToString()).toBe('new')
+
+    await task.getByRole('button', { name: 'Stop', exact: true }).click()
+    await expect(task).toHaveAttribute('data-state', 'cancelled')
+    await expect(task).toContainText('3 objects processed')
+    await task.getByRole('button', { name: 'Open', exact: true }).click()
+    await expect(dialog.getByTestId('s3-sync-progress')).toHaveAttribute('data-phase', 'stopped')
+    await expect(dialog.getByTestId('s3-sync-continuous-status')).toContainText('Round 2')
+  } finally {
+    client.destroy()
+  }
+})

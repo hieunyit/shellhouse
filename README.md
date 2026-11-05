@@ -47,7 +47,10 @@ like a staging one.
   Service → Workload → Pod) and a live **Traffic** service map.
 - **Docker** — local or over SSH; containers, images, volumes, networks, Compose projects, bulk
   actions. Engine API with a CLI fallback.
-- **S3** — AWS S3, MinIO, Wasabi, Cloudflare R2: buckets, objects, folder sync.
+- **S3** — AWS S3, MinIO, Wasabi, Cloudflare R2: buckets, objects, folder sync. Optional continuous
+  sync repeats in the background until Stop while its tab and the app stay open. Each round
+  lists both sides, copies new or changed objects, then pauses (5 minutes by default). Increase
+  the pause for large buckets to reduce listing load; this is polling, not an event subscription.
 - **Remote Desktop** — RDP inside a tab (IronRDP), optionally
   tunnelled through an SSH host, or handed to the system client.
 

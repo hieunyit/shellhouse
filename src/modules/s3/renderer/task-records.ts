@@ -82,19 +82,24 @@ export function syncTask(
   progress: S3SyncProgress
 ): S3TaskRecord {
   const status = state(progress.phase, progress.done.failed)
+  const done = progress.continuous?.totals ?? progress.done
   return {
     ...identity,
     kind: 'sync',
-    label: t('Sync'),
+    label: progress.continuous
+      ? progress.phase === 'waiting'
+        ? t('Continuous sync · waiting')
+        : t('Continuous sync')
+      : t('Sync'),
     source,
     destination,
     state: status,
-    completed: progress.done.copied + progress.done.deleted,
+    completed: done.copied + done.deleted,
     total:
-      progress.phase === 'scanning'
+      progress.continuous || progress.phase === 'scanning'
         ? null
         : progress.plan.new + progress.plan.update + progress.plan.delete,
-    failed: progress.done.failed,
+    failed: done.failed,
     error:
       progress.error ||
       progress.errors

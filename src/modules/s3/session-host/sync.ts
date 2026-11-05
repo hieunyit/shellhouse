@@ -1,5 +1,5 @@
 import type { Readable } from 'node:stream'
-import { setImmediate } from 'node:timers/promises'
+import { setImmediate, setTimeout as delay } from 'node:timers/promises'
 import {
   AbortMultipartUploadCommand,
   CreateBucketCommand,
@@ -50,6 +50,11 @@ export class SyncJob {
   private sampleBytes = 0
   private lastByteAt = 0
   private readonly active = new Map<string, { size: number; done: number }>()
+  private readonly intervalSeconds: number | undefined
+  private round = 1
+  private completedRounds = 0
+  private nextRunAt: number | null = null
+  private readonly totals = { copied: 0, deleted: 0, bytes: 0, failed: 0 }
   finished = false
 
   constructor(
@@ -66,6 +71,7 @@ export class SyncJob {
   ) {
     this.sourcePrefix = normalizePrefix(op.prefix)
     this.destPrefix = normalizePrefix(op.dest.prefix)
+    this.intervalSeconds = op.dryRun ? undefined : op.intervalSeconds
     this.progress = {
       phase: 'scanning',
       dryRun: op.dryRun,
@@ -94,12 +100,32 @@ export class SyncJob {
       plan: { ...p.plan },
       done: { ...p.done },
       sample: [...p.sample],
-      errors: [...p.errors]
+      errors: [...p.errors],
+      ...(this.intervalSeconds === undefined
+        ? {}
+        : {
+            continuous: {
+              intervalSeconds: this.intervalSeconds,
+              round: this.round,
+              completedRounds: this.completedRounds,
+              nextRunAt: this.nextRunAt,
+              totals: {
+                copied: this.totals.copied + p.done.copied,
+                deleted: this.totals.deleted + p.done.deleted,
+                bytes: this.totals.bytes + p.done.bytes,
+                failed: this.totals.failed + p.done.failed
+              }
+            }
+          })
     }
   }
 
   stop(): void {
     this.abort.abort()
+    if (this.progress.phase === 'waiting') {
+      this.progress.phase = 'stopped'
+      this.nextRunAt = null
+    }
   }
 
   /** Đọc lại cờ sau await (TS tưởng giá trị không đổi kể từ lần kiểm tra trước). */
@@ -108,6 +134,45 @@ export class SyncJob {
   }
 
   async run(): Promise<void> {
+    try {
+      for (;;) {
+        await this.runOnce()
+        if (this.intervalSeconds === undefined || this.stopped()) return
+        this.completedRounds++
+        this.progress.phase = 'waiting'
+        this.nextRunAt = Date.now() + this.intervalSeconds * 1000
+        // The previous index is closed before waiting. No scans or overlapping rounds while idle.
+        await delay(this.intervalSeconds * 1000, undefined, { signal: this.abort.signal })
+        this.abort.signal.throwIfAborted()
+        this.nextRunAt = null
+        const p = this.progress
+        this.totals.copied += p.done.copied
+        this.totals.deleted += p.done.deleted
+        this.totals.bytes += p.done.bytes
+        this.totals.failed += p.done.failed
+        this.round++
+        p.phase = 'scanning'
+        p.scanned = { source: 0, dest: 0 }
+        p.plan = { new: 0, update: 0, delete: 0, same: 0, bytes: 0 }
+        p.done = { copied: 0, deleted: 0, bytes: 0, failed: 0 }
+        p.bytesPerSecond = 0
+        p.active = []
+        p.sample = []
+        p.errors = []
+        p.error = null
+        this.sampleBytes = 0
+        this.lastByteAt = 0
+      }
+    } catch (error) {
+      this.progress.phase = this.stopped() ? 'stopped' : 'error'
+      if (!this.stopped()) this.progress.error = errorText(error)
+    } finally {
+      this.nextRunAt = null
+      this.finished = true
+    }
+  }
+
+  private async runOnce(): Promise<void> {
     const signal = this.abort.signal
     let index: SyncIndex | undefined
     try {
@@ -203,8 +268,6 @@ export class SyncJob {
       } catch (error) {
         this.progress.phase = 'error'
         this.progress.error = errorText(error)
-      } finally {
-        this.finished = true
       }
     }
   }

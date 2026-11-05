@@ -1,6 +1,24 @@
 /** Bản dịch tiếng Việt — Module S3. Khoá = chuỗi tiếng Anh trong code (xem src/shared/i18n/index.ts). */
 export const s3: Readonly<Record<string, string>> = {
   // Chung
+  'Continuous sync': 'Đồng bộ liên tục',
+  'Continuous sync · waiting': 'Đồng bộ liên tục · đang chờ',
+  'Start continuous sync': 'Bắt đầu đồng bộ liên tục',
+  'Waiting for the next sync': 'Đang chờ lượt đồng bộ tiếp theo',
+  'Repeat until Stop while this tab and the app stay open. Each round lists both sides and copies only new or changed objects.':
+    'Lặp lại cho đến khi bấm Dừng, trong lúc tab này và ứng dụng vẫn mở. Mỗi lượt quét danh sách hai bên và chỉ sao chép object mới hoặc thay đổi.',
+  'Pause between sync rounds': 'Khoảng nghỉ giữa các lượt đồng bộ',
+  'The pause starts after a round finishes. Large buckets use many listing requests; choose a longer pause to reduce load.':
+    'Bắt đầu nghỉ sau khi một lượt hoàn tất. Bucket lớn cần nhiều request liệt kê; chọn khoảng nghỉ dài hơn để giảm tải.',
+  'Round {round} · {copied} copied, {deleted} deleted in total.':
+    'Lượt {round} · Tổng cộng đã sao chép {copied}, xoá {deleted}.',
+  'Next check at {time}. Stop cancels future rounds.':
+    'Kiểm tra tiếp lúc {time}. Bấm Dừng để huỷ các lượt tiếp theo.',
+  'Continues in the background until Stop.': 'Tiếp tục chạy nền cho đến khi bấm Dừng.',
+  'Every round keeps the deletion limit approved in the preview.':
+    'Mỗi lượt giữ nguyên giới hạn số object được xoá đã duyệt trong bản xem trước.',
+  'The last round had errors. It will retry after the pause; Stop cancels retries.':
+    'Lượt vừa rồi có lỗi. Sẽ thử lại sau khoảng nghỉ; bấm Dừng để huỷ thử lại.',
   'S3 operations': 'Tác vụ S3',
   '{n} objects processed': 'Đã xử lý {n} object',
   '{n} of {total} objects': '{n} / {total} object',

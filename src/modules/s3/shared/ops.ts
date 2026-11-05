@@ -326,6 +326,8 @@ export const S3Op = z.discriminatedUnion('op', [
     compare: z.enum(['size', 'etag']),
     createBucket: z.boolean(),
     dryRun: z.boolean(),
+    /** Chạy lặp lại trong Session Host; nghỉ sau mỗi lượt. Preview vẫn chỉ chạy một lượt. */
+    intervalSeconds: z.number().int().min(30).max(86400).optional(),
     /** Số object chép cùng lúc; không có = theo cài đặt (Settings → Modules → S3). */
     concurrency: z.number().int().min(1).max(64).optional(),
     /**
@@ -427,7 +429,7 @@ export type SyncAction = 'new' | 'update' | 'delete'
 
 /** Tiến độ một lượt đồng bộ (op `syncPoll`). */
 export interface S3SyncProgress {
-  phase: 'scanning' | 'planned' | 'copying' | 'deleting' | 'done' | 'stopped' | 'error'
+  phase: 'scanning' | 'planned' | 'copying' | 'deleting' | 'waiting' | 'done' | 'stopped' | 'error'
   dryRun: boolean
   /** Copy phía server (cùng tài khoản) hay truyền qua máy này. */
   serverSide: boolean
@@ -446,6 +448,14 @@ export interface S3SyncProgress {
   errors: { key: string; message: string }[]
   /** Lỗi làm dừng cả lượt. */
   error: string | null
+  /** Một task qua nhiều lượt; các trường phía trên luôn mô tả lượt hiện tại/gần nhất. */
+  continuous?: {
+    intervalSeconds: number
+    round: number
+    completedRounds: number
+    nextRunAt: number | null
+    totals: { copied: number; deleted: number; bytes: number; failed: number }
+  }
 }
 
 export interface S3Bucket {

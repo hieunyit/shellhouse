@@ -6,6 +6,21 @@ này làm ghi chú phát hành (scripts/release-notes.mjs).
 
 ## [Unreleased]
 
+## [1.2.0-beta.43] - 2026-11-05
+
+### Added
+
+- Optional continuous S3 sync runs in the background until Stop while its tab and the app stay
+  open. Choose a pause between rounds (30 seconds to 1 hour; default 5 minutes), measured from
+  the end of each round, with no overlapping scans. Each round lists both sides and copies only
+  new or changed objects; temporary indexes are closed before resting.
+- Keep one active task in Transfers across all rounds, with cumulative object counts, a waiting
+  status and Stop controls. Show the next check time in the sync dialog. Errors remain visible
+  and retry after the selected pause; Stop cancels both active work and the next scheduled round.
+- Continuous Mirror sync retains the deletion cap approved in its preview on every round.
+  An unchanged preview can start continuous monitoring. Explain listing load and app/tab lifetime
+  in the sync options.
+
 ## [1.2.0-beta.42] - 2026-11-05
 
 ### Fixed

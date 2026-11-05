@@ -2110,7 +2110,11 @@ export function S3View({
               </span>
               <span className="shrink-0 text-muted">
                 {task.progress
-                  ? t('{n} copied', { n: formatNumber(task.progress.done.copied) })
+                  ? t('{n} copied', {
+                      n: formatNumber(
+                        task.progress.continuous?.totals.copied ?? task.progress.done.copied
+                      )
+                    })
                   : t('Starting…')}
               </span>
               <span className="shrink-0 text-muted">
@@ -2124,7 +2128,9 @@ export function S3View({
                             ? 'Failed'
                             : task.progress.phase === 'stopped'
                               ? 'Stopped'
-                              : 'Working…'
+                              : task.progress.phase === 'waiting'
+                                ? 'Waiting for the next sync'
+                                : 'Working…'
                     )
                   : ''}
               </span>
